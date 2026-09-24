@@ -1,6 +1,7 @@
 import { createModels, InMemoryCredentialStore, type OAuthAuth } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { AccessTokenRequest, AuthRequest, makeRedirectUri, RefreshTokenRequest, ResponseType } from 'expo-auth-session';
+import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
@@ -51,8 +52,19 @@ export function createNativeCodexOAuth(browser?: CodexBrowserConfig): OAuthAuth 
       if (!browser) {
         notify({ type: 'progress', message: 'Requesting a sign-in code…' });
         const device = await startCodexDeviceLogin(clientId, signal);
+        signal.throwIfAborted();
+        let copied = false;
+        try {
+          copied = await Clipboard.setStringAsync(device.userCode, { android: { isSensitive: true } });
+        } catch {
+          // Clipboard access is a convenience; manual code entry must still work.
+        }
+        signal.throwIfAborted();
         notify({ type: 'device_code', userCode: device.userCode, verificationUri: DEVICE_VERIFICATION_URI,
           intervalSeconds: device.intervalSeconds, expiresInSeconds: 900 });
+        notify({ type: 'progress', message: copied
+          ? 'Sign-in code copied. Paste it on the OpenAI sign-in page.'
+          : 'Could not copy the sign-in code. Enter the displayed code on the OpenAI sign-in page.' });
         const code = await pollCodexDeviceLogin(device, signal);
         notify({ type: 'progress', message: 'Completing sign-in…' });
         return requestCodexToken(new AccessTokenRequest({

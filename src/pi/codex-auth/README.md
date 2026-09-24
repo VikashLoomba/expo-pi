@@ -7,7 +7,7 @@ The default configuration uses OpenAI's device-code flow with the public client 
 ## Requirements
 
 - `@earendil-works/pi-ai` **0.87.1**, the version this adapter was implemented against.
-- Expo **58.0.0-preview.6**, `expo-auth-session` **~58.0.4**, `expo-web-browser` **~58.0.2**, and their SDK-compatible dependencies. Use `npx @expo/agent-cli install expo-auth-session expo-web-browser expo-crypto` when integrating into an existing Expo project.
+- Expo **58.0.0-preview.6**, `expo-auth-session` **~58.0.4**, `expo-web-browser` **~58.0.2**, `expo-clipboard` **~58.0.1**, and their SDK-compatible dependencies. Use `npx @expo/agent-cli install expo-auth-session expo-web-browser expo-crypto expo-clipboard` when integrating into an existing Expo project. Rebuild the development client after adding the native clipboard dependency.
 - The [Pi native dependency setup](../../../docs/pi-native-dependency.md), including the Metro redirects and secure-random bridge loaded before Pi. Copying this folder alone does not make Pi's desktop imports compatible with Metro.
 - An iOS development build. Use the app's registered scheme for direct OAuth redirects; Expo Go cannot supply that production callback identity.
 - For the default flow, enable device-code login in your ChatGPT account's security settings or workspace permissions, as described in [OpenAI's device-code instructions](https://learn.chatgpt.com/docs/auth#login-on-headless-devices).
@@ -56,6 +56,8 @@ For this app, `const models = createCodexSession()` provides the same setup. Its
 
 Call Pi's `models.login`, render the `device_code` notification, and give the user a separate action to open the verification page. They can also enter the code at the displayed URL on another device. Approval is detected by polling; it does not redirect into the app and does not require simulator Bluetooth.
 
+The adapter automatically copies each newly issued user code with Expo `Clipboard.setStringAsync` before emitting `device_code`. It then emits a `progress` notification confirming the copy, or explaining that manual entry is needed if copying fails. Render progress notifications to show that status. Clipboard failure does not stop authorization. Only the user-facing device code is copied; tokens and the PKCE verifier are never copied. This writes to the clipboard once per login attempt and does not read it or clear it afterward.
+
 The following functions use the `models` instance created above:
 
 ```ts
@@ -74,6 +76,7 @@ export async function signIn(
       signal: current.signal,
       prompt: async () => { throw new Error('Unexpected interactive prompt.'); },
       notify: (event) => {
+        // Also render event.message when event.type is 'progress' to show copy status.
         if (event.type === 'device_code') {
           showDeviceCode(event.userCode, event.verificationUri);
         }
@@ -140,6 +143,6 @@ npx @expo/agent-cli lint
 
 The suite includes nine OAuth/device protocol checks in addition to the 31 dependency checks. Tests cover callback/state validation, token conversion, safe errors, pending/slowdown responses, cancellation, and expiry. They do not substitute for signing in to a real account.
 
-The iOS development app has requested a real OpenAI device code, presented the native authentication permission prompt, and passed cancellation/retry checks. Account approval, credential exchange, authenticated model streaming, and the local tool loop remain pending a completed user sign-in. Physical-device and release-build behavior have not been verified. See the [verification record](../../../docs/ios-compatibility.md) for the exact scope.
+The iOS development app has requested a real OpenAI device code, presented the native authentication permission prompt, and passed cancellation/retry checks. On 2026-09-24, the app was rebuilt and installed on a physical iPhone 15 Pro; its copy-success status appeared and the native clipboard contents were verified to equal the displayed real device code. TypeScript, lint, and all 40 existing protocol/compatibility tests passed. Account approval, credential exchange, authenticated model streaming, and the local tool loop remain pending a completed user sign-in. Release-build and background/suspend behavior have not been verified. See the [verification record](../../../docs/ios-compatibility.md) for the earlier integration checks.
 
-References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/).
+References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/), [Expo SDK 58 Clipboard](https://docs.expo.dev/versions/v58.0.0/sdk/clipboard/).

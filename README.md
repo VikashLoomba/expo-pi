@@ -11,8 +11,8 @@ npx @expo/agent-cli dev --ios --local --dev-client --detach --wait-ready
 
 Use a development build for OAuth; Expo Go cannot provide the app's production redirect scheme. If an older detached server is running, stop it with `npx @expo/agent-cli dev:stop`. Rebuild an older development client to remove the previous `CodexCallback` native module.
 
-1. Tap **Sign in with ChatGPT**. The app requests a real one-time device code from OpenAI.
-2. Tap **Open sign-in page**, sign in, and enter the displayed code. The page opens with Expo `openAuthSessionAsync` / Apple's `ASWebAuthenticationSession`.
+1. Tap **Sign in with ChatGPT**. The app requests a real one-time device code from OpenAI and automatically copies it to your clipboard. The status confirms whether copying succeeded; manual entry remains available if it fails.
+2. Tap **Open sign-in page**, sign in, and paste the code. The page opens with Expo `openAuthSessionAsync` / Apple's `ASWebAuthenticationSession`.
 3. Alternatively, visit `https://auth.openai.com/codex/device` on your physical phone and enter the code there. Keep this app open; it polls OpenAI for approval. This lets your phone use its own passkey without a simulator Bluetooth connection.
 4. After authorization, the app exchanges the returned authorization code with its PKCE verifier and passes the credential to Pi.
 5. Tap **Run prompt**. The default prompt asks the model to call `add_numbers(19, 23)`. Pi executes the tool on the device, sends the result back, and displays the streamed final response.
