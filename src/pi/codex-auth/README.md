@@ -8,7 +8,7 @@ The default configuration uses OpenAI's device-code flow with the public client 
 
 - `@earendil-works/pi-ai` **0.87.1**, the version this adapter was implemented against.
 - Expo **58.0.0-preview.6**, `expo-auth-session` **~58.0.4**, `expo-web-browser` **~58.0.2**, `expo-clipboard` **~58.0.1**, and their SDK-compatible dependencies. Use `npx @expo/agent-cli install expo-auth-session expo-web-browser expo-crypto expo-clipboard` when integrating into an existing Expo project. Rebuild the development client after adding the native clipboard dependency.
-- The [Pi native dependency setup](../../../docs/pi-native-dependency.md), including the Metro redirects and secure-random bridge loaded before Pi. Copying this folder alone does not make Pi's desktop imports compatible with Metro.
+- The [`@automatalabs/expo-pi`](../../../packages/expo-pi/README.md) Metro wrapper, which makes Pi's desktop-only dynamic imports bundle on native and installs the secure-random bridge. Copying this folder alone does not make Pi's desktop imports compatible with Metro.
 - An iOS development build. Use the app's registered scheme for direct OAuth redirects; Expo Go cannot supply that production callback identity.
 - For the default flow, enable device-code login in your ChatGPT account's security settings or workspace permissions, as described in [OpenAI's device-code instructions](https://learn.chatgpt.com/docs/auth#login-on-headless-devices).
 

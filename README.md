@@ -1,5 +1,7 @@
 # Pi Agent Harness on Expo / iOS
 
+This repository contains [`@automatalabs/expo-pi`](packages/expo-pi/README.md), which lets Pi run in Expo apps on iOS and Android, and a demo app that uses it.
+
 An on-device Pi **AgentHarness** app using Pi's real **`openai-codex` provider**, with `gpt-6-sol` from the pinned catalog. Sign in with your ChatGPT account. No API key or fixture provider is used.
 
 ## Run
@@ -25,7 +27,7 @@ OAuth credentials remain in Pi's in-memory credential store across prompts. Pi o
 
 ## Pi and Expo authentication
 
-See the [Codex OAuth module README](src/pi/codex-auth/README.md) for its public API, integration examples, and lifecycle requirements. The separate [native dependency guide](docs/pi-native-dependency.md) documents the Metro/runtime setup.
+See the [Codex OAuth module README](src/pi/codex-auth/README.md) for its public API, integration examples, and lifecycle requirements. The Metro and runtime setup that lets Pi bundle for iOS and Android is packaged as [`@automatalabs/expo-pi`](packages/expo-pi/README.md).
 
 Pi's public `Provider.auth.oauth` contract is pluggable: `login`, `refresh`, and `toAuth` can be replaced without changing the model catalog, streaming transport, or AgentHarness. This app injects an Expo adapter through `models.setProvider(...)` and uses `models.login(...)` / `models.logout(...)` normally.
 
@@ -59,5 +61,5 @@ The protocol unit tests are separate from the running app. Live harness verifica
 - `src/pi/codex-auth/core.ts`: callback validation, cancellable token exchange and Pi credential conversion.
 - `src/pi/codex-auth/device-auth.ts`: OpenAI device authorization, polling, timeout and cancellation.
 - `src/pi/harness.ts`: real Pi harness and `add_numbers` tool. Explicit SSE uses Expo's native streaming fetch.
-- `index.js` / `src/pi/runtime.native.ts`: secure-random bridge installed before Pi imports.
-- `metro.config.js` / `metro/`: version-guarded native redirects for Pi's desktop platform loaders.
+- `metro.config.js`: wraps the Expo Metro config with `withPi` from `@automatalabs/expo-pi`.
+- `packages/expo-pi/`: the `@automatalabs/expo-pi` package whose Metro transform makes Pi's desktop-only dynamic imports bundle on native and adds the secure-random bridge.

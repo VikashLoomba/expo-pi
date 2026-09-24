@@ -27,6 +27,8 @@ The selected provider is now `openai-codex`, with `gpt-6-sol` from the installed
 
 ## Reproduced failure and narrow replacements
 
+> **Superseded (2026-09-24):** the module replacements and exact-version guard below were replaced by the [`@automatalabs/expo-pi`](../packages/expo-pi/README.md) Metro transform, which keeps Pi's own modules and rewrites only their variable `import()` calls. The record below describes the checks as originally run.
+
 A reachable app screen imported Pi's public root APIs and a selected provider with no Metro redirects. The native iOS export failed in `pi-ai/dist/env-api-keys.js`:
 
 ```text
@@ -59,7 +61,7 @@ The resolver rejects unreviewed Pi AI versions. Pi dependencies are exact-pinned
 
 An actual iOS/Hermes probe found `fetch`, `ReadableStream`, `TextEncoder`, `TextDecoder`, `AbortController`, `structuredClone`, and `BigInt` available, but `crypto` / `crypto.getRandomValues` missing. SDK 58's inspected `expo/src/winter/runtime.native.ts` already installs Expo's streaming fetch by default.
 
-`index.js` imports `src/pi/runtime.native.ts` before `expo-router/entry`. That module conditionally exposes **only** `expo-crypto.getRandomValues` through `globalThis.crypto`. It preserves an existing implementation. It does not claim to provide `crypto.subtle` or all Web Crypto. Expo Go already includes this native module.
+The bridge is now part of the [`@automatalabs/expo-pi`](../packages/expo-pi/README.md) package: Metro's transform adds an import of it to each Pi module that calls `crypto.getRandomValues`, so it is installed before Pi uses it, without a custom entry file. (At the time of these checks, `index.js` imported it before `expo-router/entry`.) It conditionally exposes **only** `expo-crypto.getRandomValues` through `globalThis.crypto`. It preserves an existing implementation. It does not claim to provide `crypto.subtle` or all Web Crypto. Expo Go already includes this native module.
 
 Afterward, the running Hermes app passed secure random generation, UTF-8 encode/decode, structured cloning of BigInt, AbortController state, and ReadableStream construction probes. No fetch, stream, encoding, Buffer, filesystem, or Node builtin polyfills were added.
 
@@ -109,6 +111,7 @@ Pi 0.87.1's context cancellation stops observation, not necessarily the underlyi
 | Live login cancellation / retry | Cancel dismissed the native authentication prompt, cleared the code, returned to signed-out state; subsequent login received a fresh code |
 | Registered mobile callback flow | Implemented with AuthRequest.promptAsync; requires an OpenAI-issued mobile client to verify end to end |
 | Native runtime API probes | Passed after secure-random bridge |
+| `@automatalabs/expo-pi` package (2026-09-24) | Replaced the four copied modules and version guard with a Metro transform of Pi's own code. App and npm-installed tarball consumers (only `pi-agent-core` and `expo-pi` listed; Pi 0.87.1 and 0.84.4) exported for iOS and Android; a consumer without `withPi` failed with the variable-import error; `expo-crypto` autolinked transitively; iOS dev client passed smoke, and on-device probes of Pi's `uuidv7`, `fileExists` and desktop OAuth loader behaved as documented |
 | Current runtime error check | No errors observed in the post-retry two-second debugger capture window |
 | TypeScript | Passed |
 | ESLint | Passed |

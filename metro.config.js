@@ -1,4 +1,4 @@
 const { getDefaultConfig } = require('expo/metro-config');
-const withPiNative = require('./metro/with-pi-native.cjs');
+const { withPi } = require('@automatalabs/expo-pi/metro');
 
-module.exports = withPiNative(getDefaultConfig(__dirname));
+module.exports = withPi(getDefaultConfig(__dirname));
