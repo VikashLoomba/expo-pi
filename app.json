@@ -8,6 +8,7 @@
     "scheme": "piagent",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.vikashloomba.piagent",
       "icon": "./assets/expo.icon"
     },
     "android": {

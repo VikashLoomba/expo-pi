@@ -1,56 +1,63 @@
-# Welcome to your Expo app 👋
+# Pi Agent Harness on Expo / iOS
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+An on-device Pi **AgentHarness** app using Pi's real **`openai-codex` provider**, with `gpt-6-sol` from the pinned catalog. Sign in with your ChatGPT account. No API key or fixture provider is used.
 
-## Get started
+## Run
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```sh
+pnpm install --frozen-lockfile
+npx @expo/agent-cli dev --ios --local --dev-client --detach --wait-ready
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Use a development build for OAuth; Expo Go cannot provide the app's production redirect scheme. If an older detached server is running, stop it with `npx @expo/agent-cli dev:stop`. Rebuild an older development client to remove the previous `CodexCallback` native module.
 
-### Other setup steps
+1. Tap **Sign in with ChatGPT**. The app requests a real one-time device code from OpenAI.
+2. Tap **Open sign-in page**, sign in, and enter the displayed code. The page opens with Expo `openAuthSessionAsync` / Apple's `ASWebAuthenticationSession`.
+3. Alternatively, visit `https://auth.openai.com/codex/device` on your physical phone and enter the code there. Keep this app open; it polls OpenAI for approval. This lets your phone use its own passkey without a simulator Bluetooth connection.
+4. After authorization, the app exchanges the returned authorization code with its PKCE verifier and passes the credential to Pi.
+5. Tap **Run prompt**. The default prompt asks the model to call `add_numbers(19, 23)`. Pi executes the tool on the device, sends the result back, and displays the streamed final response.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+OpenAI currently labels device-code login beta and requires it to be enabled in the account's ChatGPT security settings or workspace permissions. See [OpenAI's device-code instructions](https://learn.chatgpt.com/docs/auth#login-on-headless-devices).
 
-## Learn more
+**Cancel** stops the active login or harness operation. Closing the device sign-in browser returns to the app while approval remains pending, so you can finish on another device. The code expires after fifteen minutes. Login completion, failure, cancellation, or screen unmount closes any browser the app opened.
 
-To learn more about developing your project with Expo, look at the following resources:
+OAuth credentials remain in Pi's in-memory credential store across prompts. Pi owns credential storage, serialized refresh, request auth, and logout. **Sign out** clears that store; app reload/termination also loses credentials. Browser cookies are controlled by the system authentication session. Each prompt starts a fresh in-memory conversation.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Pi and Expo authentication
 
-## Join the community
+See the [Codex OAuth module README](src/pi/codex-auth/README.md) for its public API, integration examples, and lifecycle requirements. The separate [native dependency guide](docs/pi-native-dependency.md) documents the Metro/runtime setup.
 
-Join our community of developers creating universal apps.
+Pi's public `Provider.auth.oauth` contract is pluggable: `login`, `refresh`, and `toAuth` can be replaced without changing the model catalog, streaming transport, or AgentHarness. This app injects an Expo adapter through `models.setProvider(...)` and uses `models.login(...)` / `models.logout(...)` normally.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+There is no custom native authentication module, localhost listener, Node OAuth import, desktop credential import, or callback proxy.
+
+Two explicit configurations are supported:
+
+- **Default: existing Pi/Codex client, device-code login.** Uses the device-code protocol already implemented by Pi 0.87.1 and documented by OpenAI. OpenAI's server returns the authorization code and verifier through polling. Its server-side device callback is used during token exchange; it never calls back into the app. Expo's authentication session presents the sign-in page, and the app dismisses it when polling completes. This is a device authorization flow, not an authorization-code redirect flow.
+- **Registered mobile client: Expo authorization-code login.** If OpenAI issues your app a public OAuth client with Codex access and registers `piagent://auth/callback`, set `EXPO_PUBLIC_CODEX_OAUTH_CLIENT_ID` to that client ID and restart Metro. `makeRedirectUri` constructs the app callback and `AuthRequest.promptAsync()` owns the browser/return flow. Expo generates PKCE/state; the app additionally validates the exact callback and rejects duplicate state/code parameters. The same client is used for exchange and refresh. A client ID is public configuration, not a secret. Do not set it to Pi's desktop client ID expecting that to register a mobile redirect.
+
+The callback acceptance requirement belongs to OpenAI's authorization server, not Pi. In a live browser comparison, the existing Codex client returned an authentication error for `piagent://auth/callback`, while the same request using its desktop localhost callback reached the login page. No user credentials were entered in that comparison. The registered-mobile-client branch cannot be verified end to end until an appropriate client exists.
+
+References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/).
+
+## Validation
+
+```sh
+npx @expo/agent-cli typecheck
+npx @expo/agent-cli lint
+pnpm test:compat
+npx @expo/agent-cli doctor
+npx expo export --platform ios --platform android --source-maps
+```
+
+The protocol unit tests are separate from the running app. Live harness verification requires your actual ChatGPT authorization. See [compatibility and verification notes](docs/ios-compatibility.md) for observed results and pending checks. SDK 58 and React Native are prereleases here. App Store suitability and permission to distribute a third-party Codex client are not established by these tests.
+
+## Main files
+
+- `src/app/index.tsx`: sign-in/out, device code and browser actions, prompt, streamed output, tool result, cancellation and runtime diagnostics.
+- `src/pi/codex-auth/index.ts`: Expo OAuth adapter injected into Pi's public auth interface; in-memory credential store.
+- `src/pi/codex-auth/core.ts`: callback validation, cancellable token exchange and Pi credential conversion.
+- `src/pi/codex-auth/device-auth.ts`: OpenAI device authorization, polling, timeout and cancellation.
+- `src/pi/harness.ts`: real Pi harness and `add_numbers` tool. Explicit SSE uses Expo's native streaming fetch.
+- `index.js` / `src/pi/runtime.native.ts`: secure-random bridge installed before Pi imports.
+- `metro.config.js` / `metro/`: version-guarded native redirects for Pi's desktop platform loaders.
