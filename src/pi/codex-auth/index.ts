@@ -1,4 +1,4 @@
-import { createModels, InMemoryCredentialStore, type OAuthAuth } from '@earendil-works/pi-ai';
+import { createModels, type CredentialStore, type OAuthAuth } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { AccessTokenRequest, AuthRequest, makeRedirectUri, RefreshTokenRequest, ResponseType } from 'expo-auth-session';
 import * as Clipboard from 'expo-clipboard';
@@ -6,10 +6,12 @@ import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
 import { CODEX_CLIENT_ID, CODEX_DISCOVERY, requestCodexToken, validateCodexCallback } from './core';
+import { createCodexCredentialStore } from './credential-storage';
 import { DEVICE_REDIRECT_URI, DEVICE_VERIFICATION_URI, pollCodexDeviceLogin, startCodexDeviceLogin } from './device-auth';
 
-export const CODEX_PROVIDER_ID = 'openai-codex';
-export const MODEL_ID = 'gpt-6-sol';
+export { CODEX_PROVIDER_ID, MODEL_ID } from './identity';
+export { createCodexCredentialStore } from './credential-storage';
+export type { CredentialSnapshot } from './credential-store';
 
 export interface CodexBrowserConfig {
   /** OpenAI-issued public client registered for this app's redirect and Codex access. */
@@ -93,13 +95,12 @@ export function createNativeCodexOAuth(browser?: CodexBrowserConfig): OAuthAuth 
     },
     refresh: (credential, signal) => requestCodexToken(new RefreshTokenRequest({
       clientId, refreshToken: credential.refresh,
-    }), signal),
+    }), signal, credential),
     async toAuth(credential) { return { apiKey: credential.access }; },
   };
 }
 
-export function createCodexSession() {
-  const credentials = new InMemoryCredentialStore();
+export function createCodexSession(credentials: CredentialStore = createCodexCredentialStore()) {
   const models = createModels({ credentials, authContext: { env: async () => undefined, fileExists: async () => false } });
   const provider = openaiCodexProvider();
   // A separately registered mobile client can use standard authorization-code login.

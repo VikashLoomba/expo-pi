@@ -35,9 +35,9 @@ const workspaceFile = packageFile('packages/ai/dist/auth/context.js', '@earendil
 // A nested package.json without a name (e.g. {"type": "module"}) doesn't hide the owner.
 fs.writeFileSync(path.join(fixture, 'node_modules/@earendil-works/pi-ai/dist/package.json'), '{"type":"module"}');
 
-async function run(filename, options) {
+async function run(filename, options, transformerConfig = config) {
   upstream.calls.length = 0;
-  const result = await worker.transform(config, fixture, filename, Buffer.from(fs.readFileSync(path.join(fixture, filename))), options);
+  const result = await worker.transform(transformerConfig, fixture, filename, Buffer.from(fs.readFileSync(path.join(fixture, filename))), options);
   assert.deepEqual(result, { output: 'upstream' });
   assert.equal(upstream.calls.length, 1);
   return upstream.calls[0];
@@ -57,16 +57,30 @@ test('rewrites a Pi source workspace outside node_modules', async () => {
 test('passes web bundles through unchanged', async () => {
   assert.equal((await run(piFile, { platform: 'web' })).source, PI_SOURCE);
 });
+const webConfig = { ...config, [worker.WEB_CLIENT_TRANSFORM_KEY]: true };
+test('rewrites web client Pi modules only when opted in', async () => {
+  const call = await run(piFile, { platform: 'web' }, webConfig);
+  assert.match(call.source, /__expoPiUnsupportedImport\(s\)/);
+  assert.strictEqual(call.config, webConfig);
+  assert.equal(call.filename, piFile);
+  assert.equal((await run(piFile, { platform: 'web' }, { ...webConfig, [worker.WEB_CLIENT_TRANSFORM_KEY]: false })).source, PI_SOURCE);
+  assert.equal((await run(otherFile, { platform: 'web' }, webConfig)).source, PI_SOURCE);
+});
 for (const environment of ['node', 'react-server']) {
   test(`passes ${environment} bundles through unchanged`, async () => {
     assert.equal((await run(piFile, { platform: 'ios', customTransformOptions: { environment } })).source, PI_SOURCE);
+  });
+  test(`opted-in web leaves ${environment} bundles unchanged`, async () => {
+    assert.equal((await run(piFile, { platform: 'web', customTransformOptions: { environment } }, webConfig)).source, PI_SOURCE);
+    assert.equal((await run(piFile, { platform: 'ios', customTransformOptions: { environment } }, webConfig)).source, PI_SOURCE);
   });
 }
 test('passes other packages through unchanged', async () => {
   assert.equal((await run(otherFile, { platform: 'ios' })).source, PI_SOURCE);
 });
 test('delegates the cache key to the upstream worker', () => {
-  assert.equal(worker.getCacheKey(config, { projectRoot: fixture }), `upstream-key:${fixture}`);
+  assert.equal(worker.getCacheKey(config, { projectRoot: fixture }), `upstream-key:${fixture}:expo-pi-web:0`);
+  assert.equal(worker.getCacheKey(webConfig, { projectRoot: fixture }), `upstream-key:${fixture}:expo-pi-web:1`);
 });
 test('explains a missing withPi configuration', async () => {
   await assert.rejects(worker.transform({}, fixture, piFile, Buffer.from(PI_SOURCE), { platform: 'ios' }), /configured with withPi\(\)/);

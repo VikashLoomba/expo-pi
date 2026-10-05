@@ -1,13 +1,13 @@
 # Expo Codex OAuth adapter
 
-This TypeScript module implements Pi's public `OAuthAuth` interface using Expo SDK 58. Inject it into Pi's real `openai-codex` provider; Pi continues to own credential storage, refresh coordination, request authentication, and logout. Import the folder entry point, `@/pi/codex-auth`, in this app.
+This TypeScript module implements Pi's public `OAuthAuth` interface using Expo SDK 58. Inject it into Pi's real `openai-codex` provider; Pi coordinates refresh, request authentication, and logout through the app’s credential-store implementation. Import the folder entry point, `@/pi/codex-auth`, in this app.
 
 The default configuration uses OpenAI's device-code flow with the public client from Pi 0.87.1. A separate configuration supports Expo's authorization-code/PKCE flow when you have an OpenAI-issued public client registered for your mobile redirect and Codex access. Browser presentation currently supports **iOS only**.
 
 ## Requirements
 
-- `@earendil-works/pi-ai` **0.87.1**, the version this adapter was implemented against.
-- Expo **58.0.0-preview.6**, `expo-auth-session` **~58.0.4**, `expo-web-browser` **~58.0.2**, `expo-clipboard` **~58.0.1**, and their SDK-compatible dependencies. Use `npx @expo/agent-cli install expo-auth-session expo-web-browser expo-crypto expo-clipboard` when integrating into an existing Expo project. Rebuild the development client after adding the native clipboard dependency.
+- `@earendil-works/pi-ai` **1.0.0**. The adapter was originally implemented against 0.87.1; its OAuth contract and device-code protocol remain compatible with 1.0.0.
+- Expo **58.0.2**, `expo-auth-session` **~58.0.7**, `expo-web-browser` **~58.0.4**, `expo-clipboard` **~58.0.3**, `expo-secure-store` **~58.0.2**, and their SDK-compatible dependencies. Use `npx @expo/agent-cli install expo-auth-session expo-web-browser expo-crypto expo-clipboard expo-secure-store` when integrating into an existing Expo project. Rebuild the development client after updating native dependencies.
 - The [`@automatalabs/expo-pi`](../../../packages/expo-pi/README.md) Metro wrapper, which makes Pi's desktop-only dynamic imports bundle on native and installs the secure-random bridge. Copying this folder alone does not make Pi's desktop imports compatible with Metro.
 - An iOS development build. Use the app's registered scheme for direct OAuth redirects; Expo Go cannot supply that production callback identity.
 - For the default flow, enable device-code login in your ChatGPT account's security settings or workspace permissions, as described in [OpenAI's device-code instructions](https://learn.chatgpt.com/docs/auth#login-on-headless-devices).
@@ -21,21 +21,22 @@ There is no native callback module to link, localhost listener, or callback rela
 | `createNativeCodexOAuth(browser?: CodexBrowserConfig): OAuthAuth` | Create the injectable adapter. Omit the argument for device-code login. |
 | `CodexBrowserConfig` | `{ clientId: string; redirectUri: string }` for a registered public mobile OAuth client. |
 | `openCodexDeviceBrowser(signal: AbortSignal): Promise<void>` | Present the device verification page through Expo `openAuthSessionAsync`. Aborting dismisses the browser. |
-| `createCodexSession()` | Demo convenience factory: create Models, an in-memory credential store, the real Codex provider, and this adapter. |
+| `createCodexCredentialStore()` | Observable secure credential store, with `subscribe`, `getSnapshot`, and `restore` for session restoration and UI state. |
+| `createCodexSession(credentials?)` | Create Models, the real Codex provider, and this adapter. Defaults to the secure credential store; accepts an injected Pi `CredentialStore` for testing. |
 | `CODEX_PROVIDER_ID` | `openai-codex`. |
-| `MODEL_ID` | The demo's pinned catalog selection, `gpt-6-sol`; independent of the OAuth protocol. |
+| `MODEL_ID` | The app's pinned catalog selection, `gpt-6-sol`; independent of the OAuth protocol. |
 
 `core.ts` and `device-auth.ts` are internal protocol helpers. They remain free of native imports so their validation, timeout, and cancellation behavior can be tested in Node.
 
 ## Inject into Pi
 
 ```ts
-import { createModels, InMemoryCredentialStore } from '@earendil-works/pi-ai';
+import { createModels } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
-import { createNativeCodexOAuth } from '@/pi/codex-auth';
+import { createCodexCredentialStore, createNativeCodexOAuth } from '@/pi/codex-auth';
 
 const models = createModels({
-  credentials: new InMemoryCredentialStore(),
+  credentials: createCodexCredentialStore(),
   authContext: {
     env: async () => undefined,
     fileExists: async () => false,
@@ -48,7 +49,24 @@ models.setProvider({
 });
 ```
 
-Keep this Models instance for the lifetime of the signed-in session and pass it to your AgentHarness. The provider's catalog and streaming implementation are unchanged. Select `transport: 'sse'` for native Codex requests, as the demo does in [harness.ts](../harness.ts).
+Keep this Models instance for the lifetime of the signed-in session and pass it to Pi's durable `Harness`. The provider's catalog and streaming implementation are unchanged. Set `settings.stream.transport` to `'sse'` for native Codex requests:
+
+```ts
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { createRegistry, Harness } from '@earendil-works/pi-durable';
+import { openExpoSqliteStorage } from '@/pi/storage';
+
+const storage = await openExpoSqliteStorage();
+const harness = await Harness.open(storage, {
+  models,
+  registry: createRegistry(),
+  settings: { stream: { transport: 'sse', maxRetries: 0, timeoutMs: 60_000 } },
+}, BACKGROUND_CONTEXT);
+// Create/configure conversations and submit inputs after sign-in.
+// Reuse this harness/storage across conversations; close it during teardown.
+```
+
+The app's [chat service](../chat-service.ts) adds its local tool and conversation metadata, and projects committed records for the UI. Its [lifecycle controller](../../chat/chat-runtime.ts) serializes foreground/background and account transitions. The SQLite adapter stores conversation/task state; it does not store the Models credentials.
 
 For this app, `const models = createCodexSession()` provides the same setup. Its optional `EXPO_PUBLIC_CODEX_OAUTH_CLIENT_ID` setting selects the registered-client flow described below.
 
@@ -99,14 +117,16 @@ export function cancelSignIn(): void {
 }
 
 export async function signOut(): Promise<void> {
-  // Call after any active login has settled.
+  // Call after active login has settled and active model work is closed.
+  await harness.close(BACKGROUND_CONTEXT);
   await models.logout(CODEX_PROVIDER_ID);
+  // Reopen storage/harness with scheduling paused to keep history readable.
 }
 ```
 
-The UI must handle rejected promises from `signIn` and `openSignInPage`, clear the displayed code when login settles, disable duplicate actions, and abort pending login on unmount. An abort rejection during browser dismissal is expected. The complete React integration is in [the demo screen](../../app/index.tsx).
+The UI must handle rejected promises from `signIn` and `openSignInPage`, clear the displayed code when login settles, disable duplicate actions, and abort pending login on unmount. An abort rejection during browser dismissal is expected. The complete React integration is in [ChatProvider](../../chat/chat-provider.tsx), with the [Account screen](../../app/account.tsx) presenting its controls. The app uses the lifecycle controller for sign-out so all conversations stop dispatching before credentials are removed.
 
-Closing the browser alone leaves device authorization pending, allowing approval on another device. The shared AbortController above stops polling and dismisses the browser on cancellation, completion, or failure. The adapter allows one open authentication browser at a time. It polls for up to fifteen minutes, honors slowdown responses, and aborts outstanding requests when its deadline expires. Keep the app in the foreground; background/suspend behavior has not been validated.
+Closing the browser alone leaves device authorization pending, allowing approval on another device. The shared AbortController above stops polling and dismisses the browser on cancellation, completion, or failure. The adapter allows one open authentication browser at a time. It polls for up to fifteen minutes, honors slowdown responses, and aborts outstanding requests when its deadline expires. Keep sign-in in the foreground; the operating system may suspend polling in the background. The chat runtime separately closes/reopens durable work around background/foreground transitions, without promising background execution.
 
 ## Registered mobile client: Expo callback flow
 
@@ -114,7 +134,7 @@ If OpenAI has issued a public client for your app with Codex access and register
 
 ```ts
 import { makeRedirectUri } from 'expo-auth-session';
-import { createNativeCodexOAuth } from '@/pi/codex-auth';
+import { createCodexCredentialStore, createNativeCodexOAuth } from '@/pi/codex-auth';
 
 const oauth = createNativeCodexOAuth({
   clientId: yourOpenAIRegisteredClientId,
@@ -127,11 +147,18 @@ Set `expo.scheme` to your app's scheme in `app.json` and rebuild the development
 
 The adapter uses `AuthRequest` with code response type, PKCE, state, and `promptAsync`, which opens the native authentication session and receives the return URL. It additionally checks the callback address, requires one matching state and one authorization code, and exchanges the code with the same client, redirect, and verifier. Exchange and refresh use Expo request builders through cancellable fetch because their `performAsync` helpers do not expose an AbortSignal.
 
-For the demo factory, set `EXPO_PUBLIC_CODEX_OAUTH_CLIENT_ID` to the registered client ID and restart Metro. Leave it unset for device-code login. Pi's existing public desktop client does not automatically accept a mobile redirect; supplying its ID here does not register one. No suitable mobile client has been supplied, so the direct callback branch remains unverified end to end.
+For the app factory, set `EXPO_PUBLIC_CODEX_OAUTH_CLIENT_ID` to the registered client ID and restart Metro. Leave it unset for device-code login. Pi's existing public desktop client does not automatically accept a mobile redirect; supplying its ID here does not register one. No suitable mobile client has been supplied, so the direct callback branch remains unverified end to end.
 
 ## Credentials and validation
 
-The demo's credentials are held in `InMemoryCredentialStore`; sign-out, reload, or process termination clears them. Pi uses the adapter's `refresh` and `toAuth` methods during subsequent requests. Logout clears local credentials; system browser cookies are managed separately. Secure persistence would require a separate credential-store implementation.
+Native credentials use Expo SDK 58 `expo-secure-store` asynchronously, through `ObservableCredentialStore`. One versioned JSON record is written atomically under a key scoped to the configured OAuth client. Read, write, and delete use the same Keychain service and `WHEN_UNLOCKED_THIS_DEVICE_ONLY` accessibility. Biometric prompts are disabled so ordinary token refresh does not interrupt the user. The operating system protects native credential storage; SQLite contains conversations only. Web uses tab-scoped `sessionStorage`, which is not an OS-protected credential vault.
+
+Pi's `getAuth()` checks its five-minute minimum-validity window and performs refresh inside `CredentialStore.modify`. The store serializes the complete callback plus native commit, preventing duplicate rotations and ensuring logout waits for an active mutation. If refresh omits `refresh_token`, the existing token is retained. A provided replacement is saved before authentication resolves. If saving a rotated credential fails, the process retains it for a storage retry instead of refreshing the old token again; this cannot protect an unsaved rotation after process termination. Cancellation can stop a caller waiting, but cannot release a lock while a native write is still running.
+
+Typed token errors retain only HTTP status and recognized protocol codes. `invalid_grant` on a 400/401 response clears the rejected credential under the existing mutation lock, avoiding a queued-delete deadlock. Network failures, timeouts, rate limits, and server failures retain credentials for retry. Native I/O errors are sanitized, surfaced, and never silently replaced with plaintext storage. Invalid stored records require sign-in again. The runtime keeps saved chats readable when authentication fails and blocks dispatch after a failed sign-out until removal succeeds.
+
+The provider subscribes to the store's non-secret snapshot, so restored sessions, successful login, refresh invalidation, and sign-out drive one account state. Startup, send, and resume resolve auth through Pi; there is no separate refresh timer. System browser cookies are independent of the saved credential. iOS Keychain entries may survive reinstallations; explicit sign-out deletes this app's record. See [Expo SecureStore](https://docs.expo.dev/versions/v58.0.0/sdk/securestore/) for platform storage behavior.
+
 
 Run from the project root:
 
@@ -139,10 +166,14 @@ Run from the project root:
 pnpm test:compat
 npx @expo/agent-cli typecheck
 npx @expo/agent-cli lint
+# Requires the rebuilt native development client connected to Metro:
+node scripts/check-native-auth.mjs
 ```
 
-The suite includes nine OAuth/device protocol checks in addition to the 31 dependency checks. Tests cover callback/state validation, token conversion, safe errors, pending/slowdown responses, cancellation, and expiry. They do not substitute for signing in to a real account.
+The suite retains nine OAuth/device protocol checks plus fifteen integration regressions using the actual adapter, Models, Codex SSE provider, and Expo request/PKCE builders. Native boundaries and HTTP responses are substituted in tests. Another 23 credential-store tests cover restart persistence, refresh/logout serialization, cancellation, corruption, storage failures, and observer state. A successfully decoded refresh is saved even if its caller has just cancelled; login and pre-request cancellation still prevent credential changes. Coverage also includes callback/state validation, token conversion, safe errors, pending/slowdown responses, expiry, request headers, logout, and registered-client PKCE. The app's separate durable chat and SQLite tests do not substitute for signing in to a real account.
 
-The iOS development app has requested a real OpenAI device code, presented the native authentication permission prompt, and passed cancellation/retry checks. On 2026-09-24, the app was rebuilt and installed on a physical iPhone 15 Pro; its copy-success status appeared and the native clipboard contents were verified to equal the displayed real device code. TypeScript, lint, and all 40 existing protocol/compatibility tests passed. Account approval, credential exchange, authenticated model streaming, and the local tool loop remain pending a completed user sign-in. Release-build and background/suspend behavior have not been verified. See the [verification record](../../../docs/ios-compatibility.md) for the earlier integration checks.
+The native authentication probe passed on iOS 27/Hermes after terminating and relaunching the simulator app process. It restored a synthetic access JWT over 8 KiB and refresh token over 2 KiB from the actual Keychain, made one intercepted refresh for three concurrent Pi authentication calls, restored the rotated credential in a fresh store, and verified secure deletion. It used a unique validation key and no live account credentials or model requests.
+
+Historical native checks: the iOS development app requested a real OpenAI device code, presented the native authentication permission prompt, and passed cancellation/retry checks. On 2026-09-24, the app was rebuilt and installed on a physical iPhone 15 Pro; its copy-success status appeared and the native clipboard contents were verified to equal the displayed real device code. TypeScript, lint, and all 40 existing protocol/compatibility tests passed. Those checks predate the durable chat migration. They establish the observed native sign-in presentation and clipboard behavior, not authenticated model streaming or the current SQLite/lifecycle integration. Live account approval, credential exchange, and authenticated tool execution require completed user sign-in. See the [verification record](../../../docs/ios-compatibility.md) for current gates and historical results.
 
 References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/), [Expo SDK 58 Clipboard](https://docs.expo.dev/versions/v58.0.0/sdk/clipboard/).

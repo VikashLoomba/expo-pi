@@ -1,169 +1,133 @@
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, Stack } from 'expo-router';
+import { useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CODEX_PROVIDER_ID, createCodexSession, MODEL_ID, openCodexDeviceBrowser } from '@/pi/codex-auth';
-import { DEFAULT_PROMPT, emptyProgress, runHarness, runtimeCapabilities } from '@/pi/harness';
+import { useChatApp } from '@/chat/chat-provider';
+import type { ChatSummary } from '@/chat/types';
+import { ChatActions } from '@/components/chat/chat-actions';
+import { ChatIcon } from '@/components/chat/icon';
+import { ActionButton, IconButton, InlineNotice, PiMark } from '@/components/chat/primitives';
+import { useChatColors } from '@/hooks/use-chat-colors';
 
-export default function HomeScreen() {
-  const [models] = useState(createCodexSession);
-  const [signedIn, setSignedIn] = useState(false);
-  const [authStatus, setAuthStatus] = useState('Sign in with your ChatGPT account.');
-  const [signingIn, setSigningIn] = useState(false);
-  const [deviceLogin, setDeviceLogin] = useState<{ userCode: string; verificationUri: string } | null>(null);
-  const [browserOpen, setBrowserOpen] = useState(false);
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
-  const [progress, setProgress] = useState(emptyProgress);
-  const [running, setRunning] = useState(false);
-  const controller = useRef<AbortController | null>(null);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; controller.current?.abort(); };
-  }, []);
+function dateLabel(timestamp: number) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
 
-  const signIn = async () => {
-    if (controller.current) return;
-    const current = new AbortController();
-    controller.current = current;
-    setSigningIn(true);
-    setDeviceLogin(null);
-    try {
-      await models.login(CODEX_PROVIDER_ID, 'oauth', {
-        signal: current.signal,
-        prompt: async () => { throw new Error('Unexpected interactive prompt.'); },
-        notify: (event) => {
-          if (!mounted.current) return;
-          if (event.type === 'progress') setAuthStatus(event.message);
-          if (event.type === 'device_code') {
-            setDeviceLogin({ userCode: event.userCode, verificationUri: event.verificationUri });
-            setAuthStatus('Enter this one-time code on the OpenAI sign-in page.');
-          }
-        },
-      });
-      if (mounted.current) { setSignedIn(true); setAuthStatus('Signed in with ChatGPT.'); }
-    } catch (error) {
-      if (mounted.current) setAuthStatus(current.signal.aborted || (error instanceof Error && error.name === 'AbortError')
-        ? 'Sign-in cancelled.' : error instanceof Error ? error.message : 'Sign-in failed.');
-    } finally {
-      // Close any device-code browser after success, failure or cancellation.
-      current.abort();
-      controller.current = null;
-      if (mounted.current) { setSigningIn(false); setDeviceLogin(null); }
-    }
+export default function ChatsScreen() {
+  const colors = useChatColors();
+  const insets = useSafeAreaInsets();
+  const { ready, error, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, createChat } = useChatApp();
+  const connectionsReady = catalog.every((provider) => providerAccess(provider.id).ready);
+  const connectionError = catalog.map((provider) => providerAccess(provider.id).error).find(Boolean);
+  const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [localError, setLocalError] = useState<string>();
+  const [selected, setSelected] = useState<ChatSummary>();
+  const query = search.trim().toLocaleLowerCase();
+  const visibleChats = query ? chats.filter((chat) => `${chat.title} ${chat.preview}`.toLocaleLowerCase().includes(query)) : chats;
+  const newChat = async () => {
+    if (creating || !ready) return;
+    setCreating(true); setLocalError(undefined);
+    try { const id = await createChat(); router.push({ pathname: '/chat/[id]', params: { id } }); }
+    catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'Could not create a chat.'); }
+    finally { setCreating(false); }
   };
-
-  const openSignInPage = async () => {
-    const current = controller.current;
-    if (!current || !deviceLogin || browserOpen) return;
-    setBrowserOpen(true);
-    try {
-      await openCodexDeviceBrowser(current.signal);
-    } catch (error) {
-      if (mounted.current && !current.signal.aborted) setAuthStatus(error instanceof Error ? error.message : 'Could not open sign-in.');
-    } finally {
-      if (mounted.current) setBrowserOpen(false);
-    }
-  };
-
-  const signOut = async () => {
-    if (controller.current) return;
-    await models.logout(CODEX_PROVIDER_ID);
-    setSignedIn(false);
-    setAuthStatus('Signed out. Credentials cleared from memory.');
-    setProgress(emptyProgress());
-  };
-
-  const start = async () => {
-    if (controller.current) return;
-    const current = new AbortController();
-    controller.current = current;
-    setRunning(true);
-    try {
-      await runHarness({ models, prompt, signal: current.signal, onProgress: (next) => {
-        if (mounted.current) setProgress(next);
-      } });
-    } catch (error) {
-      if (mounted.current) setProgress((previous) => ({ ...previous,
-        status: current.signal.aborted ? 'Cancelled' : 'Failed',
-        error: current.signal.aborted ? undefined : error instanceof Error ? error.message : String(error),
-      }));
-    } finally {
-      controller.current = null;
-      if (mounted.current) setRunning(false);
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.eyebrow}>PI · ON DEVICE</Text>
-        <Text style={styles.title}>Agent Harness</Text>
-        <Text style={styles.description}>Stream a response, run a local tool, and continue the conversation.</Text>
-        <Text style={styles.description}>{MODEL_ID} · OpenAI Codex</Text>
-        <Text style={styles.description}>Sign in with ChatGPT. Tokens stay in memory until you sign out or close the app.</Text>
-        <Text testID="auth-status" style={styles.description}>{authStatus}</Text>
-        <View style={styles.row}>
-          <Pressable testID="sign-in" accessibilityRole="button" disabled={running || signingIn || signedIn} onPress={signIn}
-            style={[styles.primary, (running || signingIn || signedIn) && styles.disabled]}>
-            <Text style={styles.buttonText}>{signingIn ? 'Signing in…' : 'Sign in with ChatGPT'}</Text>
-          </Pressable>
-          {signedIn && <Pressable testID="sign-out" accessibilityRole="button" disabled={running} onPress={signOut}
-            style={[styles.tab, running && styles.disabled]}><Text style={styles.buttonText}>Sign out</Text></Pressable>}
-          {signingIn && <Pressable testID="cancel-sign-in" accessibilityRole="button" onPress={() => controller.current?.abort()}
-            style={styles.tab}><Text style={styles.buttonText}>Cancel</Text></Pressable>}
-        </View>
-        {deviceLogin && <View style={styles.card}>
-          <Text selectable testID="device-code" style={styles.status}>{deviceLogin.userCode}</Text>
-          <Text selectable style={styles.description}>{deviceLogin.verificationUri}</Text>
-          <Text style={styles.description}>Open the sign-in page here, or visit this address on your phone and enter the code. Keep this app open while you approve access.</Text>
-          <Pressable testID="open-sign-in-page" accessibilityRole="button" disabled={browserOpen} onPress={openSignInPage}
-            style={[styles.primary, browserOpen && styles.disabled]}>
-            <Text style={styles.buttonText}>Open sign-in page</Text>
-          </Pressable>
+  return <View testID="chats-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
+    <Stack.Screen options={{ title: 'Chats',
+      headerLeft: () => <IconButton testID="account-button" icon="person" label="Account" onPress={() => router.push('/account')} />,
+      headerRight: () => <IconButton testID="new-chat" icon="compose" label="New chat" disabled={!ready || creating} onPress={() => { void newChat(); }} />,
+    }} />
+    <FlatList testID="chat-list" data={visibleChats} keyExtractor={(chat) => chat.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+      contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 20) + 24 }]}
+      ListHeaderComponent={<View style={styles.listHeader}>
+        <View style={styles.brandRow}><PiMark size={36} /><View style={styles.brandCopy}>
+          <Text style={[styles.brandTitle, { color: colors.text }]}>Room for a good conversation.</Text>
+          <Text style={[styles.brandCaption, { color: colors.muted }]}>Pick up where you left off.</Text>
+        </View></View>
+        {chats.length > 0 && <View style={[styles.search, { backgroundColor: colors.subtle }]}>
+          <ChatIcon name="search" color={colors.muted} size={18} />
+          <TextInput testID="search-chats" accessibilityLabel="Search chats" value={search} onChangeText={setSearch} placeholder="Search chats" placeholderTextColor={colors.muted}
+            autoCorrect={false} returnKeyType="search" style={[styles.searchInput, { color: colors.text }]} />
+          {!!search && <IconButton icon="close" label="Clear search" onPress={() => setSearch('')} />}
         </View>}
-        <TextInput testID="prompt" accessibilityLabel="Prompt" multiline value={prompt} onChangeText={setPrompt}
-          editable={!running && !signingIn} style={[styles.input, styles.prompt]} />
-        <View style={styles.row}>
-          <Pressable testID="run" accessibilityRole="button" disabled={running || signingIn || !prompt.trim() || !signedIn} onPress={start}
-            style={[styles.primary, (running || signingIn || !prompt.trim() || !signedIn) && styles.disabled]}><Text style={styles.buttonText}>Run prompt</Text></Pressable>
-          <Pressable testID="cancel" accessibilityRole="button" disabled={!running} onPress={() => controller.current?.abort()}
-            style={[styles.tab, !running && styles.disabled]}><Text style={styles.buttonText}>Cancel</Text></Pressable>
+        {(error || localError) && <InlineNotice testID="chat-list-error" message={localError || error!} />}
+        {chats.length > 0 && <View style={styles.sectionRow}>
+          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>{query ? `${visibleChats.length} results` : 'YOUR CONVERSATIONS'}</Text>
+          <Text style={[styles.savedLabel, { color: colors.muted }]}>Saved on this device</Text>
+        </View>}
+      </View>}
+      renderItem={({ item }) => <Pressable testID={`chat-row-${item.id}`} accessibilityRole="button" accessibilityLabel={`${item.title || 'New chat'}. ${item.preview || 'No messages yet'}`}
+        onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.id } })} onLongPress={() => setSelected(item)}
+        style={({ pressed }) => [styles.chatRow, { borderBottomColor: colors.border, backgroundColor: pressed ? colors.subtle : 'transparent' }]}>
+        <View style={[styles.chatGlyph, { backgroundColor: colors.surface }]}><ChatIcon name="message" color={colors.secondary} size={19} /></View>
+        <View style={styles.chatInfo}>
+          <View style={styles.chatHeading}><Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>{item.title || 'New chat'}</Text>
+            <Text style={[styles.chatDate, { color: colors.muted }]}>{dateLabel(item.updatedAt)}</Text></View>
+          <Text numberOfLines={2} style={[styles.chatPreview, { color: colors.secondary }]}>{item.preview || 'A fresh start. What’s on your mind?'}</Text>
         </View>
-        <View style={styles.card}>
-          <Text testID="status" style={styles.status}>{progress.status}</Text>
-          <Text testID="counts" style={styles.description}>{progress.deltas} text deltas · {progress.tools} tool calls</Text>
-          <Text testID="response" selectable style={styles.response}>{progress.text || 'Assistant output will appear here.'}</Text>
-          {progress.toolResult && <Text testID="tool-result" selectable style={styles.code}>{progress.toolResult}</Text>}
-          {progress.error && <Text testID="run-error" selectable style={styles.error}>{progress.error}</Text>}
-        </View>
-        <Text style={styles.heading}>Runtime capabilities</Text>
-        <Text testID="capabilities" selectable style={styles.code}>{JSON.stringify(runtimeCapabilities(), null, 2)}</Text>
-        <Text style={styles.heading}>Harness events</Text>
-        <Text testID="events" selectable style={styles.code}>{progress.events.join('\n') || 'Waiting for a prompt.'}</Text>
-      </ScrollView>
-    </SafeAreaView>
-  );
+        <Pressable testID={`chat-options-${item.id}`} accessibilityRole="button" accessibilityLabel={`Options for ${item.title || 'New chat'}`} onPress={() => setSelected(item)} hitSlop={8} style={styles.rowOptions}>
+          <ChatIcon name="more" color={colors.muted} size={18} />
+        </Pressable>
+      </Pressable>}
+      ListEmptyComponent={!ready ? <View style={styles.loading}><ActivityIndicator color={colors.accent} /><Text style={[styles.loadingText, { color: colors.muted }]}>Opening your chats…</Text></View>
+        : query ? <View style={styles.noResults}><Text style={[styles.noResultsTitle, { color: colors.text }]}>No chats found</Text><Text style={[styles.emptyBody, { color: colors.secondary }]}>Try another word or start something new.</Text></View>
+        : <View style={styles.empty}>
+          <PiMark size={70} />
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>What’s on{'\n'}your mind?</Text>
+          <Text style={[styles.emptyBody, { color: colors.secondary }]}>A question, a half-formed idea, or a plan.{'\n'}Start here and make something of it.</Text>
+          <View style={styles.startButton}><ActionButton testID="start-first-chat" title="Start a conversation" icon="plus" loading={creating} onPress={() => { void newChat(); }} /></View>
+          <View style={styles.localNote}><ChatIcon name="phone" color={colors.muted} size={14} /><Text style={[styles.localNoteText, { color: colors.muted }]}>Your conversations are saved on this device.</Text></View>
+        </View>}
+      ListFooterComponent={(!hasConnectedProvider || connectionError || signOutPending) && ready ? <Pressable testID="history-sign-in" accessibilityRole="button" onPress={() => router.push('/account')} style={[styles.accountCard, { backgroundColor: colors.accentSoft }]}>
+        <ChatIcon name="person" color={colors.accent} size={23} /><View style={styles.accountCopy}>
+          <Text style={[styles.accountTitle, { color: colors.accent }]}>{signOutPending ? 'Finish signing out' : !connectionsReady ? 'Restoring your connections' : connectionError ? 'A connection needs attention' : 'Connect a provider'}</Text>
+          <Text style={[styles.accountCaption, { color: colors.secondary }]}>{signOutPending ? 'Open Account to finish removing the saved connection.' : !connectionsReady ? 'Your saved chats are available while we reconnect.' : connectionError || 'Use ChatGPT or an API key to send messages. Your history stays here.'}</Text>
+        </View><ChatIcon name="chevron" color={colors.accent} size={12} />
+      </Pressable> : undefined}
+    />
+    <ChatActions chat={selected} onClose={() => setSelected(undefined)} />
+  </View>;
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#101820' },
-  content: { padding: 24, paddingBottom: 110, gap: 16 },
-  eyebrow: { color: '#7be4bd', fontSize: 12, fontWeight: '700', letterSpacing: 2 },
-  title: { color: '#f3f7fa', fontSize: 34, fontWeight: '700' },
-  description: { color: '#a9b9c8', fontSize: 14, lineHeight: 21 },
-  row: { flexDirection: 'row', gap: 12 },
-  tab: { padding: 14, borderRadius: 12, backgroundColor: '#263543' },
-  selected: { backgroundColor: '#27644f' },
-  primary: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#246b55', alignItems: 'center' },
-  buttonText: { color: '#f3f7fa', fontSize: 15, fontWeight: '600' },
-  disabled: { opacity: 0.4 },
-  input: { color: '#f3f7fa', backgroundColor: '#1b2935', padding: 16, borderRadius: 12, fontSize: 15 },
-  prompt: { minHeight: 96, textAlignVertical: 'top' },
-  card: { backgroundColor: '#1b2935', padding: 18, borderRadius: 16, gap: 12 },
-  status: { color: '#7be4bd', fontSize: 18, fontWeight: '600' },
-  response: { color: '#f3f7fa', fontSize: 17, lineHeight: 25 },
-  code: { color: '#a9b9c8', fontFamily: 'monospace', fontSize: 12, lineHeight: 19 },
-  error: { color: '#ffa797', lineHeight: 21 },
-  heading: { color: '#e3ebf1', fontSize: 16, fontWeight: '600' },
+  screen: { flex: 1 },
+  listContent: { flexGrow: 1, paddingHorizontal: 22, maxWidth: 760, width: '100%', alignSelf: 'center' },
+  listHeader: { gap: 20, paddingTop: 13 },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
+  brandCopy: { flex: 1 },
+  brandTitle: { fontSize: 15, fontWeight: '500' },
+  brandCaption: { fontSize: 12, marginTop: 5 },
+  search: { minHeight: 46, borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingLeft: 14, gap: 9 },
+  searchInput: { flex: 1, fontSize: 16, paddingVertical: 11, paddingRight: 12 },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 9, paddingBottom: 4 },
+  sectionTitle: { fontSize: 10, fontWeight: '600', letterSpacing: 1.1 },
+  savedLabel: { fontSize: 11 },
+  chatRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 19, borderBottomWidth: StyleSheet.hairlineWidth },
+  chatGlyph: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  chatInfo: { flex: 1, gap: 6 },
+  chatHeading: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  chatTitle: { flex: 1, fontSize: 16, fontWeight: '600', letterSpacing: -0.2 },
+  chatDate: { fontSize: 10 },
+  chatPreview: { fontSize: 13, lineHeight: 19 },
+  rowOptions: { minWidth: 28, minHeight: 40, alignItems: 'flex-end', justifyContent: 'center' },
+  loading: { paddingVertical: 100, alignItems: 'center', gap: 14 },
+  loadingText: { fontSize: 14 },
+  noResults: { paddingVertical: 70, alignItems: 'center', gap: 10 },
+  noResultsTitle: { fontSize: 20, fontWeight: '600' },
+  empty: { alignItems: 'center', paddingTop: 63, paddingBottom: 44, gap: 23 },
+  emptyTitle: { fontSize: 37, lineHeight: 44, fontWeight: '500', letterSpacing: -1.3, textAlign: 'center' },
+  emptyBody: { fontSize: 15, lineHeight: 23, textAlign: 'center' },
+  startButton: { marginTop: 8, width: '100%', maxWidth: 290 },
+  localNote: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  localNoteText: { fontSize: 10 },
+  accountCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, padding: 16, marginTop: 25 },
+  accountCopy: { flex: 1, gap: 5 },
+  accountTitle: { fontSize: 14, fontWeight: '600' },
+  accountCaption: { fontSize: 12, lineHeight: 18 },
 });

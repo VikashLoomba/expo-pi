@@ -1,7 +1,9 @@
+/* global __dirname */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { rewritePiModule, CRYPTO_BRIDGE_SPECIFIER } = require('../build/rewrite.cjs');
 
 const CRYPTO_IMPORT = `import ${JSON.stringify(CRYPTO_BRIDGE_SPECIFIER)};`;
@@ -66,6 +68,66 @@ test('returns unrelated and unparsable sources unchanged', () => {
     assert.equal(rewritePiModule(source, 'x.js').code, source);
   }
 });
+test('normalizes only Chord JSON numeric index descriptors, preserving line numbers and other keys', () => {
+  const source = 'export const load = (s) => import(s);\n' +
+    'const descriptor = Object.getOwnPropertyDescriptor(value, index);\n' +
+    'const other = Object.getOwnPropertyDescriptor(value, key);\n' +
+    'const symbol = Object.getOwnPropertyDescriptor(value, Symbol.iterator);\n';
+  for (const file of ['node_modules/@earendil-works/chord/dist/json.js', 'packages/chord/src/json.ts']) {
+    const result = rewritePiModule(source, file);
+    assert.equal(result.descriptorKeys, 1);
+    assert.equal(result.variableImports, 1);
+    const lines = result.code.split('\n');
+    assert.equal(lines[1], 'const descriptor = Object.getOwnPropertyDescriptor(value, String(index));');
+    assert.equal(lines[2], source.split('\n')[2]);
+    assert.equal(lines[3], source.split('\n')[3]);
+    assert.equal(rewritePiModule(result.code, file).descriptorKeys, 0);
+  }
+  for (const file of ['json.js', 'node_modules/other/dist/json.js', 'node_modules/@earendil-works/chord/dist/other.js']) {
+    const result = rewritePiModule(source, file);
+    assert.equal(result.descriptorKeys, 0);
+    assert.equal(result.code.split('\n')[1], source.split('\n')[1]);
+  }
+});
+
+test('copies real Chord tracked arrays when Hermes forwards numeric descriptor keys to the proxy', async () => {
+  const chord = packageDirectory('@earendil-works/chord', __dirname);
+  const filename = path.join(chord, 'dist/json.js');
+  const source = fs.readFileSync(filename, 'utf8');
+  const { track } = await import(pathToFileURL(path.join(chord, 'dist/delta/tracker.js')).href);
+  const initial = { content: [{ type: 'text', text: 'Persisted partial' }], nested: [[1, true, null]] };
+  const change = track(initial).beginChange();
+  const draft = change.state;
+  const arrays = new WeakSet([draft.content, draft.nested, draft.nested[0]]);
+  const hermesObject = new Proxy(Object, {
+    get(target, key) {
+      if (key !== 'getOwnPropertyDescriptor') return Reflect.get(target, key);
+      return (value, property) => {
+        // Hermes passes a number into the proxy trap; Chord's arrayIndex accepts
+        // string property keys only, so its descriptor trap returns undefined.
+        if (arrays.has(value) && typeof property === 'number') return undefined;
+        return Object.getOwnPropertyDescriptor(value, property);
+      };
+    },
+  });
+  const loadCopy = (code) => new Function('Object', code.replace(/^export /gm, '') + '\nreturn copyJson;')(hermesObject);
+  try {
+    assert.throws(() => loadCopy(source)(draft), /enumerable indexed data properties/);
+    const result = rewritePiModule(source, filename);
+    assert.equal(result.descriptorKeys, 1);
+    const copyJson = loadCopy(result.code);
+    const copied = copyJson(draft);
+    assert.deepEqual(copied, initial);
+    draft.content[0].text = 'Later update';
+    assert.equal(copied.content[0].text, 'Persisted partial');
+    assert.throws(() => copyJson({ [Symbol('hidden')]: 'value' }), /symbol key/);
+    assert.throws(() => copyJson(new Array(1)), /dense plain arrays/);
+    assert.throws(() => copyJson([undefined]), /non-JSON undefined/);
+    assert.throws(() => copyJson(Object.defineProperty([], '0', { get: () => 1, enumerable: true })), /indexed data properties/);
+  } finally {
+    change.abort();
+  }
+});
 
 function jsFiles(directory, files = []) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -83,19 +145,23 @@ function packageDirectory(name, from) {
     if (path.dirname(dir) === dir) throw new Error(`${name} is not installed`);
   }
 }
-test('every module of the installed Pi packages bundles: no variable import() is left', () => {
+test('rewrites every installed Pi module without leaving variable import() calls', () => {
   const core = packageDirectory('@earendil-works/pi-agent-core', __dirname);
   const ai = packageDirectory('@earendil-works/pi-ai', core);
+  const durable = packageDirectory('@earendil-works/pi-durable', __dirname);
+  const chord = packageDirectory('@earendil-works/chord', durable);
   const changed = new Map();
-  for (const root of [core, ai]) {
+  for (const root of [core, ai, durable, chord]) {
     for (const file of jsFiles(path.join(root, 'dist'))) {
       const result = rewritePiModule(fs.readFileSync(file, 'utf8'), file);
       assert.equal(rewritePiModule(result.code, file).variableImports, 0, file);
-      if (result.variableImports || result.cryptoBridge) changed.set(path.relative(root, file), result);
+      assert.equal(rewritePiModule(result.code, file).descriptorKeys, 0, file);
+      if (result.variableImports || result.cryptoBridge || result.descriptorKeys) changed.set(path.relative(root, file), result);
     }
   }
   for (const file of ['dist/auth/context.js', 'dist/auth/oauth/load.js', 'dist/env-api-keys.js']) {
     assert.ok(changed.get(file)?.variableImports > 0, file);
   }
   assert.equal(changed.get('dist/utils/uuid.js')?.cryptoBridge, true);
+  assert.equal(changed.get('dist/json.js')?.descriptorKeys, 1);
 });

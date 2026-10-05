@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { withPi } = require('../build/metro.cjs');
-const { UPSTREAM_TRANSFORMER_KEY } = require('../build/transform-worker.cjs');
+const { UPSTREAM_TRANSFORMER_KEY, WEB_CLIENT_TRANSFORM_KEY } = require('../build/transform-worker.cjs');
 
 const build = path.join(__dirname, '../build');
 const base = () => ({
@@ -19,6 +19,7 @@ test('installs the transform worker and records the previous one relative to the
   assert.equal(config.transformerPath, path.join(build, 'transform-worker.cjs'));
   assert.equal(config.transformer[UPSTREAM_TRANSFORMER_KEY], 'node_modules/@expo/metro-config/build/transform-worker/transform-worker.js');
   assert.match(config.transformer.expoPiCacheKey, /^[0-9a-f]{40}$/);
+  assert.equal(config.transformer[WEB_CLIENT_TRANSFORM_KEY], false);
   assert.equal(config.transformer.babelTransformerPath, '/app/babel.js');
   assert.deepEqual(config.resolver.sourceExts, ['ts']);
   assert.strictEqual(config.serializer, input.serializer);
@@ -35,6 +36,20 @@ test('chains another custom transform worker', () => {
 test('is idempotent', () => {
   const once = withPi(base());
   assert.strictEqual(withPi(once), once);
+});
+test('web client rewriting is opt-in and keeps the upstream chain', () => {
+  const input = base();
+  const wrapped = withPi(input, { web: true });
+  assert.equal(wrapped.transformer[WEB_CLIENT_TRANSFORM_KEY], true);
+  assert.equal(input.transformer[WEB_CLIENT_TRANSFORM_KEY], undefined);
+  assert.strictEqual(withPi(wrapped), wrapped);
+  assert.strictEqual(withPi(wrapped, { web: true }), wrapped);
+  const disabled = withPi(wrapped, { web: false });
+  assert.equal(disabled.transformer[WEB_CLIENT_TRANSFORM_KEY], false);
+  assert.equal(disabled.transformer[UPSTREAM_TRANSFORMER_KEY], wrapped.transformer[UPSTREAM_TRANSFORMER_KEY]);
+  assert.strictEqual(disabled.resolver, wrapped.resolver);
+  assert.equal(wrapped.transformer[WEB_CLIENT_TRANSFORM_KEY], true);
+  assert.equal(withPi(disabled, { web: true }).transformer[WEB_CLIENT_TRANSFORM_KEY], true);
 });
 test('resolves the crypto bridge to this package from any Pi location', () => {
   const config = withPi(base());

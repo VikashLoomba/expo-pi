@@ -1,6 +1,6 @@
 # @automatalabs/expo-pi
 
-Run [Pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`) in Expo and React Native apps on iOS and Android.
+Run [Pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, and the portable `@earendil-works/pi-durable` APIs) in Expo and React Native apps on iOS and Android.
 
 Pi's code runs on Hermes, but native Metro can't bundle it as published:
 
@@ -33,16 +33,27 @@ That's all. You don't need a custom entry file, a config plugin, or a separate `
 
 `withPi` keeps any transform worker and resolver already in the config and delegates to them, so it can be combined with other Metro wrappers such as NativeWind.
 
+### Optional web clients
+
+Metro also rejects Pi's variable desktop imports when it builds a browser bundle. If your Expo app supports web, enable the same client rewrite explicitly:
+
+```js
+module.exports = withPi(getDefaultConfig(__dirname), { web: true });
+```
+
+The default remains iOS and Android only. The option applies to **web client** bundles; Node/API-route and React Server bundles stay unchanged. Browsers retain their existing secure `crypto.getRandomValues` implementation. Desktop-only OAuth loaders still reject when called: provide an OAuth adapter suited to your app, or use another supported credential path. This option handles Pi's Metro compatibility; other browser dependencies can have their own requirements. For example, Expo SQLite web needs its WASM asset configuration and cross-origin isolation headers.
+
 ## What it changes
 
-`@automatalabs/expo-pi` doesn't replace or copy any of Pi's modules. In **iOS and Android** bundles, as Metro transforms a file from an `@earendil-works/*` package, it makes two changes:
+`@automatalabs/expo-pi` doesn't replace or copy any of Pi's modules. In **iOS and Android** bundles (and **web clients** with `{ web: true }`), as Metro transforms a file from an `@earendil-works/*` package, it makes three targeted changes:
 
 - **Variable `import()` calls become rejected promises.** Each `import(specifier)` whose specifier isn't a string literal is replaced with a call that rejects with `[expo-pi] Cannot load <specifier>: ...`. The error only surfaces if that code actually runs, which on a phone means you invoked a desktop-only feature.
 - **The secure-random bridge is imported where it's needed.** A module that calls `crypto.getRandomValues` gets an import of `@automatalabs/expo-pi/crypto`, which installs `getRandomValues` from `expo-crypto` if the runtime lacks it. An existing implementation is never replaced, and `crypto.subtle` is not provided.
+- **Chord uses string array descriptor keys.** Hermes can pass a numeric key directly into a Proxy trap, which breaks Chord's strict JSON copy of tracked arrays during durable recovery. The transform changes only the indexed descriptor lookup in Chord's JSON module to `String(index)`, preserving its validation and leaving symbol-key lookups untouched.
 
-Line numbers are preserved, so stack traces and source maps still point at Pi's code. Web, server (API routes, React Server) bundles, and every other package are left unchanged. No files in `node_modules` are modified.
+Line numbers are preserved, so stack traces and source maps still point at Pi's code. Web bundles are unchanged by default. Server bundles (API routes, React Server) and every other package are always left unchanged. No files in `node_modules` are modified.
 
-With Pi 0.87.1, this means native bundles behave as follows:
+With Pi 1.0.0, this means native bundles behave as follows:
 
 | Pi feature | Behavior on iOS and Android |
 | --- | --- |
@@ -54,15 +65,18 @@ With Pi 0.87.1, this means native bundles behave as follows:
 ## Using Pi on a device
 
 - Supply credentials explicitly through Pi's injectable interfaces, for example `createModels({ credentials, authContext })` with an `InMemoryCredentialStore` or your own secure store.
-- Use `MemorySessionRepo` or your own session repository. Avoid the Node harness environment and the coding-agent CLI, which need a filesystem and shell.
+- Use `Agent` from `@earendil-works/pi-agent-core` with an explicit `streamFn` backed by your `Models` instance. It keeps its transcript in memory. Pi 1.0 removed the old `AgentHarness` and `MemorySessionRepo` APIs. Avoid Node environments and the coding-agent CLI, which need a filesystem and shell.
+- For persistent conversations, use `Harness` from `@earendil-works/pi-durable` with a native storage adapter. The demo's [Expo SQLite adapter](../../src/pi/storage/index.ts) supplies `SqliteDatabase` to Pi's portable `SqliteStorage`; do not import `storage/sqlite/node` on a device. Install `pi-durable`, `pi-ai`, and `expo-sqlite` as direct dependencies when using that integration. Set the harness's `settings.stream.transport` to `'sse'` for Codex.
 - Import only the providers your app needs, for example `@earendil-works/pi-ai/providers/openai-codex`.
-- For `openai-codex`, pass `streamOptions: { transport: 'sse' }`. Its WebSocket path uses Node/Bun constructor options that React Native doesn't support.
+- For `openai-codex`, pass `transport: 'sse'` to `Agent` or to `models.streamSimple(...)`. Its WebSocket path uses Node/Bun constructor options that React Native doesn't support.
+
+The wrapper handles Metro and secure random; persistence and OS lifecycle remain application responsibilities. The demo now uses a shared durable Harness and SQLite storage across chats, while the `Agent` pattern above remains suitable for in-memory sessions. Its adapter passes all 23 upstream storage-conformance cases against real SQLite, plus transaction and reopen checks. Native durable-app validation is tracked separately in the [verification record](../../docs/ios-compatibility.md).
 
 ## Compatibility
 
-**Pi:** there is no pinned Pi version. The transform works on Pi's code as published instead of on copies of it, so changes Pi makes to these modules are picked up automatically. Every module of Pi AI 0.80.1 through 0.87.1 (15 releases) has been checked, and iOS and Android bundles were built with 0.84.4 and 0.87.1. If a future Pi release needs something else that Metro or Hermes doesn't support, bundling fails with Metro's error rather than behaving differently at runtime.
+**Pi:** the wrapper does not enforce a particular Pi version. The app pins **Pi AI / Pi Durable / Chord 1.0.0**; package tests additionally pin **Agent Core 1.0.0**. Installed JavaScript modules are scanned by the rewrite tests. Earlier Agent-based iOS and Android Hermes bundles built with Pi 1.0.0; current durable bundles and native runtime results are recorded separately. Earlier checks covered Pi AI 0.80.1 through 0.87.1 (15 releases), with native bundles built for 0.84.4 and 0.87.1. The transform follows Pi's published code; future releases still need separate API, bundle, and device-runtime validation.
 
-**Expo SDK:** `expo-crypto` is a native module whose version must match your Expo SDK. Like Expo's own packages, each `@automatalabs/expo-pi` release targets one SDK and depends on the matching `expo-crypto`. This release targets **Expo SDK 58**; its peer dependency on `expo` says so. It was tested with SDK 58.0.0-preview.6 and React Native 0.88.0-rc.1, on Hermes on iOS 27. Android bundles build; an Android device runtime has not been verified yet.
+**Expo SDK:** `expo-crypto` is a native module whose version must match your Expo SDK. Like Expo's own packages, each `@automatalabs/expo-pi` release targets one SDK and depends on the matching `expo-crypto`. This release targets **Expo SDK 58**; its peer dependency on `expo` says so. Current bundle checks use SDK **58.0.3**, React Native **0.88.0-rc.3**, and `expo-crypto` **58.0.4**. See the demo's [verification record](../../docs/ios-compatibility.md) for device results. Android bundles build; an Android device runtime has not been verified yet.
 
 ## Debugging
 

@@ -4,6 +4,8 @@ import { rewritePiModule } from './rewrite.cjs';
 
 /** Transformer config key holding the worker that `withPi` wraps, relative to the project root. */
 export const UPSTREAM_TRANSFORMER_KEY = 'expoPiUpstreamTransformerPath';
+/** Opt-in for applying the same rewrite to Metro browser clients. */
+export const WEB_CLIENT_TRANSFORM_KEY = 'expoPiWebClient';
 
 const PI_PACKAGE_SCOPE = '@earendil-works/';
 const SCRIPT_FILE = /\.[cm]?[jt]sx?$/;
@@ -77,14 +79,14 @@ function owningPackageName(directory: string): string | null {
   return name;
 }
 
-function isNativeClientBundle(options: TransformOptions): boolean {
+function isSupportedClientBundle(options: TransformOptions, web: boolean): boolean {
   const environment = options.customTransformOptions?.environment;
-  return (options.platform === 'ios' || options.platform === 'android') &&
+  return (options.platform === 'ios' || options.platform === 'android' || (web && options.platform === 'web')) &&
     environment !== 'node' && environment !== 'react-server';
 }
 
-export function shouldRewrite(absolutePath: string, options: TransformOptions): boolean {
-  return SCRIPT_FILE.test(absolutePath) && isNativeClientBundle(options) &&
+export function shouldRewrite(absolutePath: string, options: TransformOptions, web = false): boolean {
+  return SCRIPT_FILE.test(absolutePath) && isSupportedClientBundle(options, web) &&
     (owningPackageName(path.dirname(absolutePath))?.startsWith(PI_PACKAGE_SCOPE) ?? false);
 }
 
@@ -97,7 +99,7 @@ export async function transform(
 ): Promise<unknown> {
   const upstream = loadUpstream(config, projectRoot);
   let input = data;
-  if (shouldRewrite(path.resolve(projectRoot, filename), options)) {
+  if (shouldRewrite(path.resolve(projectRoot, filename), options, config[WEB_CLIENT_TRANSFORM_KEY] === true)) {
     const source = data.toString('utf8');
     const result = rewritePiModule(source, filename);
     if (result.code !== source) {
@@ -114,5 +116,7 @@ export async function transform(
 export function getCacheKey(config: TransformerConfig, options: CacheKeyOptions): string {
   // withPi() also adds a version stamp to the transformer config, which Expo's own
   // cache key includes when Expo CLI supervises this worker.
-  return loadUpstream(config, options.projectRoot).getCacheKey?.(config, options) ?? '';
+  const upstream = loadUpstream(config, options.projectRoot).getCacheKey?.(config, options) ?? '';
+  // Custom upstream workers may ignore our config fields, so always include the opt-in.
+  return `${upstream}:expo-pi-web:${config[WEB_CLIENT_TRANSFORM_KEY] === true ? '1' : '0'}`;
 }
