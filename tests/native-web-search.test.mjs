@@ -6,11 +6,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
+import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { Harness, createRegistry, defineExtension, hook, CompactionTask } from '@earendil-works/pi-durable';
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { createExpoSqliteDatabase } from '../src/pi/storage/expo-sqlite.ts';
 import { createNodeSqliteConnection } from './helpers/node-sqlite.mjs';
-import { MODEL_ID, SUBSCRIPTION_TOKEN, responsesModels as realResponsesModels, reasoningItem, searchItem, textItem, until } from './helpers/openai-responses.mjs';
+import { MODEL_ID, SUBSCRIPTION_TOKEN, responsesModels as realResponsesModels, reasoningItem, searchItem, sourceFact, inputText, textItem, until } from './helpers/openai-responses.mjs';
 
 const sourceRoot = new URL('../src/', import.meta.url).href;
 const hooks = registerHooks({
@@ -38,6 +40,8 @@ const { DurableChatService } = await import('../src/pi/chat-service.ts');
 const { createNativeWebSearchBridge, NativeResponsesDoc } = await import('../src/pi/native-web-search/durable.ts');
 const { withNativeWebSearch } = await import('../src/pi/native-web-search/provider.ts');
 const { bindNativeWebSearch } = await import('../src/pi/native-web-search/bindings.ts');
+const { SearchObservationEntry } = await import('../src/pi/native-web-search/observations.ts');
+const { editSearchTurn } = await import('../src/pi/native-web-search/edits.ts');
 const context = BACKGROUND_CONTEXT;
 const settings = { model: { provider: 'openai', modelId: MODEL_ID }, thinkingLevel: 'medium' };
 const responsesModels = (steps, options = {}) => realResponsesModels(steps, { ...options, wrapProvider: withNativeWebSearch });
@@ -89,11 +93,33 @@ async function records(db, id) {
 }
 
 function searchRows(service, id) { return service.getConversation(id).messages.filter((row) => row.webSearch); }
-function assertReplay(body, output) {
-  const ids = new Set(output.map((item) => item.id));
-  const replay = body.input.filter((item) => ids.has(item.id));
-  assert.deepEqual(replay, output, 'All original output items replay once, in order and without data loss');
-  for (const item of output) assert.equal(body.input.filter((value) => value.id === item.id).length, 1);
+function assertPiContext(body, output, { evidence = true } = {}) {
+  assert.equal(body.input.some((item) => item.type === 'web_search_call'), false,
+    'Native hosted-call objects are not a substitute for model-readable evidence');
+  const ordinaryUserText = inputText(body, 'user');
+  for (const original of output) {
+    if (original.type === 'web_search_call') {
+      if (evidence && original.status === 'completed') {
+        const fact = sourceFact(original.id);
+        assert.equal(ordinaryUserText.split(fact).length - 1, 1, 'The actual source fact is ordinary input exactly once');
+      }
+      continue;
+    }
+    const items = body.input.filter((item) => item.id === original.id);
+    assert.equal(items.length, 1, `Pi preserves ${original.type} identity without synthetic boundaries`);
+    const item = items[0];
+    if (original.type === 'reasoning') assert.equal(item.encrypted_content, original.encrypted_content);
+    if (original.type === 'message') {
+      assert.equal(item.phase, original.phase);
+      assert.equal(item.content.map((part) => part.text ?? part.refusal ?? '').join(''),
+        original.content.map((part) => part.text ?? part.refusal ?? '').join(''));
+    }
+    if (original.type === 'function_call') {
+      assert.equal(item.call_id, original.call_id);
+      assert.deepEqual(JSON.parse(item.arguments), JSON.parse(original.arguments));
+    }
+  }
+  assert.doesNotMatch(JSON.stringify(body.input), /msg_native_/);
 }
 
 test('bound provider composes caller hooks and preserves replacement request fields', { timeout: 10_000 }, async () => {
@@ -104,7 +130,7 @@ test('bound provider composes caller hooks and preserves replacement request fie
   bindNativeWebSearch(controller.signal, {
     record: { requestId: 'hooks-request', taskId: 101, provider: 'openai', model: MODEL_ID,
       status: 'in_progress', output: [], events: [] },
-    history: [], save: async (record) => { saves.push(structuredClone(record)); },
+    save: async (record) => { saves.push(structuredClone(record)); },
   });
   const observed = [];
   let payloadCalls = 0;
@@ -131,7 +157,7 @@ test('bound provider composes caller hooks and preserves replacement request fie
   assert.deepEqual(saves.at(-1).output, output);
 });
 
-test('caller payload replacement has the last word after historical native replay is assembled', { timeout: 10_000 }, async () => {
+test('caller payload replacement retains the last word after Pi converts historical signatures', { timeout: 10_000 }, async () => {
   const output = [reasoningItem('rs_hook_history'), searchItem('ws_hook_history'), textItem('History', 'msg_hook_history', [])];
   const provider = responsesModels([
     (exchange) => { exchange.created('resp_hook_history'); exchange.complete(output, { id: 'resp_hook_history' }); },
@@ -140,23 +166,21 @@ test('caller payload replacement has the last word after historical native repla
   const model = provider.models.getModel('openai', MODEL_ID);
   const user = { role: 'user', content: 'First', timestamp: 1 };
   const firstController = new AbortController();
-  let firstRecord;
   bindNativeWebSearch(firstController.signal, { record: { requestId: 'hook-first', taskId: 201,
-    provider: 'openai', model: MODEL_ID, status: 'in_progress', output: [], events: [] }, history: [],
-  save: async (value) => { firstRecord = structuredClone(value); } });
+    provider: 'openai', model: MODEL_ID, status: 'in_progress', output: [], events: [] }, save: async () => {} });
   const first = await provider.models.completeSimple(model, { messages: [user] }, { signal: firstController.signal });
   const nextController = new AbortController();
   bindNativeWebSearch(nextController.signal, { record: { requestId: 'hook-second', taskId: 202,
-    provider: 'openai', model: MODEL_ID, status: 'in_progress', output: [], events: [] }, history: [firstRecord], save: async () => {} });
+    provider: 'openai', model: MODEL_ID, status: 'in_progress', output: [], events: [] }, save: async () => {} });
   await provider.models.completeSimple(model, { messages: [user, first, { role: 'user', content: 'Next', timestamp: 2 }] }, {
     signal: nextController.signal,
     onPayload(payload) {
-      assertReplay(payload, output);
+      assertPiContext(payload, output, { evidence: false });
       return { ...payload, input: [...payload.input, { role: 'developer', content: 'Caller final input edit' }],
         metadata: { finalHook: true } };
     },
   });
-  assertReplay(provider.requests[1].body, output);
+  assertPiContext(provider.requests[1].body, output, { evidence: false });
   assert.deepEqual(provider.requests[1].body.input.at(-1), { role: 'developer', content: 'Caller final input edit' });
   assert.equal(provider.requests[1].body.metadata.finalHook, true);
 });
@@ -175,7 +199,7 @@ test('native persistence failures terminate the provider stream with an actionab
   const controller = new AbortController();
   let attempts = 0;
   bindNativeWebSearch(controller.signal, { record: { requestId: 'storage-failure', taskId: 301,
-    provider: 'openai', model: MODEL_ID, status: 'in_progress', output: [], events: [] }, history: [],
+    provider: 'openai', model: MODEL_ID, status: 'in_progress', output: [], events: [] },
   save: async () => { attempts++; throw new Error('Synthetic database internals must remain private'); } });
   const result = await provider.models.completeSimple(provider.models.getModel('openai', MODEL_ID), {
     messages: [{ role: 'user', content: 'Fail safely', timestamp: 1 }],
@@ -187,7 +211,7 @@ test('native persistence failures terminate the provider stream with an actionab
   assert.ok(attempts > 0);
 });
 
-test('official SDK replay strips output provenance without changing the raw SQLite archive', { timeout: 10_000 }, async (t) => {
+test('official normalization strips output provenance from Pi signatures without changing the raw SQLite archive', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const output = [reasoningItem('rs_provenance'), searchItem('ws_provenance'), textItem('A parsed answer', 'msg_provenance', [])];
   for (const item of output) item.created_by = { type: 'response', id: 'resp_provenance' };
@@ -199,14 +223,15 @@ test('official SDK replay strips output provenance without changing the raw SQLi
   assert.deepEqual((await records(db, id))[0].output, output);
   await service.waitForSubmission(await service.send(id, 'Replay it.'));
   const replay = provider.requests[1].body.input.filter((item) => output.some((original) => original.id === item.id));
-  assert.equal(replay.length, output.length);
+  assert.equal(replay.length, output.length - 1, 'Readable evidence replaces raw hosted calls in input');
   assert.ok(replay.every((item) => !Object.hasOwn(item, 'created_by')));
   assert.equal(replay[0].encrypted_content, output[0].encrypted_content);
-  assert.ok(!Object.hasOwn(replay[2].content[0], 'parsed'));
+  assert.ok(!Object.hasOwn(replay[1].content[0], 'parsed'));
+  assertPiContext(provider.requests[1].body, output);
   assert.deepEqual((await records(db, id))[0].output, output, 'Replay normalization never mutates the archive');
 });
 
-test('native search streams before text, preserves full terminal metadata, and replays after SQLite reopen', { timeout: 15_000 }, async (t) => {
+test('native search streams before text and source-only facts are ordinary input after SQLite reopen', { timeout: 15_000 }, async (t) => {
   const file = await fixture(t);
   const started = Promise.withResolvers();
   let live;
@@ -262,7 +287,9 @@ test('native search streams before text, preserves full terminal metadata, and r
   assert.deepEqual(reopened.service.getConversation(id).messages, savedRows);
   assert.equal(nextProvider.requests.length, 0, 'Opening history never starts a new search');
   await reopened.service.waitForSubmission(await reopened.service.send(id, 'Use those findings.'));
-  assertReplay(nextProvider.requests[0].body, output);
+  assertPiContext(nextProvider.requests[0].body, output);
+  assert.match(inputText(nextProvider.requests[0].body, 'user'), /External web search evidence/);
+  assert.doesNotMatch(final.text, /cobalt beacon/, 'The fact is absent from assistant prose');
 });
 
 test('interleaved native search and a local function round preserve original call ordering', { timeout: 15_000 }, async (t) => {
@@ -279,7 +306,7 @@ test('interleaved native search and a local function round preserve original cal
   const id = await newChat(service);
   assert.equal((await service.waitForSubmission(await service.send(id, 'Search and add 19 and 23.'))).status, 'done');
   assert.equal(provider.requests.length, 2, 'Only the client function requires another model round');
-  assertReplay(provider.requests[1].body, output);
+  assertPiContext(provider.requests[1].body, output);
   const input = provider.requests[1].body.input;
   const result = input.find((item) => item.type === 'function_call_output');
   assert.equal(result.call_id, 'call_add');
@@ -333,7 +360,8 @@ test('concurrent chats cannot exchange response metadata or replay history', { t
   assert.deepEqual((await records(db, a))[0].output, outA);
   assert.deepEqual((await records(db, b))[0].output, outB);
   await service.waitForSubmission(await service.send(a, 'Continue A'));
-  assertReplay(provider.requests[2].body, outA);
+  assertPiContext(provider.requests[2].body, outA);
+  assert.ok(!inputText(provider.requests[2].body).includes(sourceFact('ws_b')));
   assert.ok(!provider.requests[2].body.input.some((item) => item.id === 'ws_b' || item.id === 'msg_b'));
 });
 
@@ -381,7 +409,7 @@ test('provider terminal failure preserves raw error metadata and settles without
   assert.equal(searchRows(service, id)[0].webSearch.calls[0].status, 'failed');
 });
 
-test('incomplete native output retains its status and remains replayable on a follow-up', { timeout: 10_000 }, async (t) => {
+test('incomplete search retains activity and opaque state without claiming completed source observations', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const output = [reasoningItem('rs_incomplete'), searchItem('ws_incomplete', { status: 'incomplete' }),
     textItem('A partial researched answer.', 'msg_incomplete', [])];
@@ -399,7 +427,8 @@ test('incomplete native output retains its status and remains replayable on a fo
   assert.equal(raw.response.incomplete_details.reason, 'max_output_tokens');
   assert.equal(searchRows(service, id)[0].webSearch.calls[0].status, 'interrupted');
   await service.waitForSubmission(await service.send(id, 'Continue.'));
-  assertReplay(provider.requests[1].body, output);
+  assertPiContext(provider.requests[1].body, output);
+  assert.ok(!inputText(provider.requests[1].body).includes(sourceFact('ws_incomplete')));
 });
 
 test('an interrupted transport is retained on shutdown and recovery starts a fresh request for the same submission', { timeout: 15_000 }, async (t) => {
@@ -433,7 +462,7 @@ test('an interrupted transport is retained on shutdown and recovery starts a fre
   assert.deepEqual(fresh.output, completed);
 });
 
-test('reset and fork use only native outputs within the active durable history', { timeout: 15_000 }, async (t) => {
+test('reset and fork select only canonical source observations within active durable history', { timeout: 15_000 }, async (t) => {
   const file = await fixture(t);
   const old = [reasoningItem('rs_old'), searchItem('ws_old'), textItem('Old answer', 'msg_old', [])];
   const later = [searchItem('ws_later'), textItem('Later answer', 'msg_later', [])];
@@ -447,15 +476,17 @@ test('reset and fork use only native outputs within the active durable history',
   await (await parent.submit({ type: 'input', content: 'Later question' }, context)).wait(context);
   const child = await parent.fork(forkPoint.id, { ownership: { kind: 'ownerless' }, agent: settings }, context);
   await (await child.submit({ type: 'input', content: 'Fork follow-up' }, context)).wait(context);
-  assertReplay(provider.requests[2].body, old);
+  assertPiContext(provider.requests[2].body, old);
+  assert.ok(!inputText(provider.requests[2].body).includes(sourceFact('ws_later')));
   assert.ok(!provider.requests[2].body.input.some((item) => item.id === 'ws_later'));
   await child.reset('Start fresh', context);
   await (await child.submit({ type: 'input', content: 'After reset' }, context)).wait(context);
   assert.ok(!provider.requests[3].body.input.some((item) => item.type === 'web_search_call' || item.id === 'rs_old'),
     'Raw persistence cannot resurrect items removed by a context reset');
+  assert.ok(!inputText(provider.requests[3].body).includes(sourceFact('ws_old')));
 });
 
-test('context edits cannot restore the original native answer through its retained response ID', { timeout: 10_000 }, async (t) => {
+test('logical-turn replacement omits its associated source observations while preserving raw history', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const output = [reasoningItem('rs_edit'), searchItem('ws_edit'), textItem('Original answer that was replaced', 'msg_edit', [])];
   const provider = responsesModels([
@@ -470,27 +501,93 @@ test('context edits cannot restore the original native answer through its retain
   const original = entry.model.find((message) => message.role === 'assistant');
   const edited = { ...original, content: [{ type: 'text', text: 'The revised context supersedes the original answer.' }] };
   assert.equal(edited.responseId, 'resp_edit');
-  await conversation.commit((tx) => tx.appendEntry(conversation.id, {
-    kind: 'test.context-replacement', edits: [{ target: entry.id, action: 'replace', messages: [edited] }],
-  }), context);
+  await conversation.commit((tx) => editSearchTurn(tx, conversation.id,
+    { target: entry.id, action: 'replace', messages: [edited] }), context);
   await (await conversation.submit({ type: 'input', content: 'Continue from the revision.' }, context)).wait(context);
   const next = provider.requests[1].body.input;
   assert.match(JSON.stringify(next), /The revised context supersedes the original answer/);
   assert.doesNotMatch(JSON.stringify(next), /Original answer that was replaced/);
   assert.ok(!next.some((item) => ['rs_edit', 'ws_edit', 'msg_edit'].includes(item.id)));
+  assert.ok(!inputText(provider.requests[1].body).includes(sourceFact('ws_edit')));
   const archive = await harness.snapshot(NativeResponsesDoc, conversation.id, context);
   assert.deepEqual(Object.values(archive.responses).find((record) => record.responseId === 'resp_edit').output, output,
     'A context replacement changes replay without destroying the original raw record');
 });
 
-test('compaction excludes archived raw search items from future model context while retaining their archive', { timeout: 15_000 }, async (t) => {
+test('SQLite reopen retains canonical source-only facts and model changes preserve readable evidence', { timeout: 15_000 }, async (t) => {
+  const file = await fixture(t);
+  const raw = [reasoningItem('rs_portable'), searchItem('ws_portable'), textItem('I found a calibration bulletin.', 'msg_portable', [])];
+  const initial = await file.harness(responsesModels([raw]));
+  const conversation = await initial.harness.createConversation({ ownership: { kind: 'ownerless' }, agent: settings }, context);
+  await (await conversation.submit({ type: 'input', content: 'Research the observatory.' }, context)).wait(context);
+  const before = await conversation.context(context);
+  assert.equal(before.entries.filter((entry) => SearchObservationEntry.is(entry)).length, 1);
+  assert.equal(before.messages.filter((message) => message.role === 'user' &&
+    JSON.stringify(message.content).includes(sourceFact('ws_portable'))).length, 1);
+  assert.ok(!before.messages.some((message) => message.role === 'assistant' &&
+    JSON.stringify(message.content).includes(sourceFact('ws_portable'))));
+  await initial.close();
+
+  const provider = responsesModels([[textItem('Resumed.', 'msg_resume', [])], [textItem('Switched.', 'msg_switch', [])]]);
+  const reopened = await file.harness(provider);
+  const restored = await reopened.harness.conversation(conversation.id, context);
+  assert.deepEqual((await restored.context(context)).messages, before.messages);
+  assert.equal(provider.requests.length, 0);
+  await (await restored.submit({ type: 'input', content: 'Use the earlier finding.' }, context)).wait(context);
+  assertPiContext(provider.requests[0].body, raw);
+  await restored.configure({ model: { provider: 'openai', modelId: 'gpt-5' }, thinkingLevel: 'medium' }, context);
+  await (await restored.submit({ type: 'input', content: 'Continue with this model.' }, context)).wait(context);
+  assert.match(inputText(provider.requests[1].body, 'user'), /ws_portable observatory calibrates its cobalt beacon every 47 seconds/);
+  assert.ok(!provider.requests[1].body.input.some((item) => item.id === 'rs_portable'),
+    'Opaque reasoning is not sent to another model');
+});
+
+test('an assistant-only context edit preserves an independently completed source observation', { timeout: 10_000 }, async (t) => {
+  const file = await fixture(t);
+  const provider = responsesModels([[searchItem('ws_independent'), textItem('Remove just this answer.', 'msg_independent', [])],
+    [textItem('Continued.', 'msg_independent_next', [])]]);
+  const { harness } = await file.harness(provider);
+  const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: settings }, context);
+  await (await conversation.submit({ type: 'input', content: 'Search.' }, context)).wait(context);
+  const view = await conversation.context(context);
+  const assistant = view.entries.find((entry) => entry.kind === 'pi.assistant');
+  await conversation.commit((tx) => tx.appendEntry(conversation.id, {
+    kind: 'test.omit-answer-only', edits: [{ target: assistant.id, action: 'omit' }],
+  }), context);
+  await (await conversation.submit({ type: 'input', content: 'Use the independently retained evidence.' }, context)).wait(context);
+  assert.ok(inputText(provider.requests[1].body, 'user').includes(sourceFact('ws_independent')));
+  assert.doesNotMatch(inputText(provider.requests[1].body), /Remove just this answer/);
+});
+
+test('built-in compaction receives source-only facts and a fact-derived summary supports later continuation', { timeout: 15_000 }, async (t) => {
   const file = await fixture(t);
   const first = [reasoningItem('rs_compacted'), searchItem('ws_compacted'), textItem('Long historical answer '.repeat(50), 'msg_compacted', [])];
   const recent = [textItem('Recent answer', 'msg_recent', [])];
-  const provider = responsesModels([first, recent, [textItem('After compaction', 'msg_after_compact', [])]]);
+  let summarizerInput;
+  let summary;
+  let continuation;
+  const provider = responsesModels([first, recent,
+    (exchange, request) => {
+      summarizerInput = inputText(request.body);
+      assert.match(summarizerInput, /context summarization assistant/);
+      // This deterministic synthetic model can retain only facts actually in
+      // its request. No beforeCompact summary override supplies hidden evidence.
+      const facts = summarizerInput.match(/The ws_compacted observatory calibrates its cobalt beacon every \d+ seconds\./g) ?? [];
+      assert.ok(facts.length > 0, 'The real summarizer request must contain the source-only fact');
+      summary = `Critical source evidence: ${[...new Set(facts)].join(' ')} Source: https://example.test/observatories/ws_compacted`;
+      const item = textItem(summary, 'msg_actual_summary', []);
+      exchange.item(item, 0); exchange.complete([item], { id: 'resp_actual_summary' });
+    },
+    (exchange, request) => {
+      const found = inputText(request.body).match(/cobalt beacon every (\d+) seconds/);
+      assert.ok(found, 'Post-compaction request must preserve the useful fact');
+      continuation = `The retained source says the interval is ${found[1]} seconds.`;
+      exchange.complete([textItem(continuation, 'msg_after_compact', [])]);
+    },
+  ]);
   const summaries = [];
-  const extension = defineExtension({ name: 'test-compact-without-network', hooks: [hook(CompactionTask, {
-    beforeCompact(value) { summaries.push(value); return { summary: 'The older search was summarized.' }; },
+  const extension = defineExtension({ name: 'test-observe-compaction', hooks: [hook(CompactionTask, {
+    beforeCompact(value) { summaries.push(value); },
   })] });
   const { harness } = await file.harness(provider, { extensions: [extension], compaction: { keepRecentTokens: 1 } });
   const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: settings }, context);
@@ -500,9 +597,61 @@ test('compaction excludes archived raw search items from future model context wh
   await harness.waitForTask(task, context);
   await conversation.waitForIdle(context);
   assert.equal(summaries.length, 1);
-  await (await conversation.submit({ type: 'input', content: 'After compaction' }, context)).wait(context);
-  assert.ok(!provider.requests[2].body.input.some((item) => item.id === 'ws_compacted' || item.id === 'rs_compacted'));
+  assert.ok(JSON.stringify(summaries[0].messages).includes(sourceFact('ws_compacted')));
+  assert.ok(summarizerInput.includes(sourceFact('ws_compacted')));
+  assert.ok(summary.includes(sourceFact('ws_compacted')));
+  const compacted = await conversation.context(context);
+  assert.equal(compacted.head.kind, 'pi.compaction');
+  assert.ok(!compacted.entries.some((entry) => SearchObservationEntry.is(entry)), 'The old observation is summarized, not kept verbatim');
+  await (await conversation.submit({ type: 'input', content: 'What calibration interval did the source report?' }, context)).wait(context);
+  assert.equal(continuation, 'The retained source says the interval is 47 seconds.');
+  assert.ok(!provider.requests[3].body.input.some((item) => item.id === 'ws_compacted' || item.id === 'rs_compacted'));
+  assert.ok(inputText(provider.requests[3].body, 'user').includes(summary));
   const archive = await harness.snapshot(NativeResponsesDoc, conversation.id, context);
   assert.ok(Object.values(archive.responses).some((record) => record.output.some((item) => item.id === 'ws_compacted')),
     'Compaction changes replay context, not retained raw provider history');
+});
+
+test('a reopened OpenAI search remains readable through the actual Anthropic request converter', async (t) => {
+  const file = await fixture(t);
+  const provider = responsesModels([[reasoningItem(), searchItem('ws_anthropic'), textItem('I found a bulletin.')]]);
+  const initial = await file.open(provider);
+  const id = await newChat(initial.service);
+  await initial.service.waitForSubmission(await initial.service.send(id, 'Search for the calibration bulletin.'));
+  await initial.close();
+  const anthropic = anthropicProvider();
+  let requestBody;
+  const fetch = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    const text = requestBody.messages.flatMap((message) => typeof message.content === 'string' ? [message.content]
+      : message.content.filter((block) => block.type === 'text').map((block) => block.text)).join('\n');
+    const fact = sourceFact('ws_anthropic');
+    assert.equal(text.split(fact).length - 1, 1);
+    assert.doesNotMatch(JSON.stringify(requestBody), /opaque-encrypted-reasoning|web_search_call/);
+    const events = [
+      { type: 'message_start', message: { id: 'msg_anthropic', type: 'message', role: 'assistant', model: 'test',
+        content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 0 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: `The retained bulletin says: ${fact}` } },
+      { type: 'content_block_stop', index: 0 },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 20 } },
+      { type: 'message_stop' },
+    ];
+    return new Response(events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), {
+      status: 200, headers: { 'content-type': 'text/event-stream' },
+    });
+  };
+  provider.models.setProvider({ ...anthropic, auth: { apiKey: {
+    name: 'Synthetic Anthropic', check: async () => ({ type: 'api_key' }),
+    resolve: async () => ({ auth: { apiKey: 'synthetic-test-key' } }),
+  } }, streamSimple: (model, context, options) => anthropic.streamSimple(model, context, { ...options, fetch }) });
+  const reopened = await file.open(provider);
+  const model = provider.models.getModels('anthropic')[0];
+  await reopened.service.updateSettings(id, { model: { provider: 'anthropic', modelId: model.id },
+    thinkingLevel: getSupportedThinkingLevels(model)[0] });
+  const completed = await reopened.service.waitForSubmission(await reopened.service.send(id, 'What does the saved bulletin say?'));
+  assert.equal(completed.status, 'done');
+  assert.ok(requestBody, 'Anthropic serialized the ordinary durable observation');
+  assert.match(reopened.service.getConversation(id).messages.at(-1).text, /47 seconds/);
+  assert.equal(provider.requests.length, 1, 'Switching provider does not repeat the hosted search');
 });

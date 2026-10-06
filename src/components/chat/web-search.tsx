@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import type { WebSearchCall } from '@/chat/web-search-types';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
-import { openSourceLink } from './source-link';
+import { openExternalLink } from './source-link';
 import { safeSourceUrl, searchCallLabel, sourceHost, type SearchSource } from './web-search-presentation';
 
 function SearchCall({ call }: { call: WebSearchCall }) {
@@ -21,7 +21,7 @@ function SearchCall({ call }: { call: WebSearchCall }) {
       {call.queries?.map((query, index) => <Text key={`${index}:${query}`} selectable style={[styles.query, { color: colors.text }]}>{query}</Text>)}
       {call.pattern ? <Text selectable style={[styles.query, { color: colors.text }]}>“{call.pattern}”</Text> : null}
       {url ? <Pressable accessibilityRole="link" accessibilityLabel={`Open searched page, ${sourceHost(url)}`}
-        accessibilityHint="Opens in your browser" onPress={() => { void openSourceLink(url); }} style={styles.pageLink}>
+        accessibilityHint="Opens in your browser" onPress={() => { void openExternalLink(url); }} style={styles.pageLink}>
         <Text numberOfLines={2} style={[styles.pageLinkText, { color: colors.accent }]}>{sourceHost(url)}</Text>
         <ChatIcon name="chevron" size={10} color={colors.accent} />
       </Pressable> : null}
@@ -83,7 +83,7 @@ export const WebSearchSources = memo(function WebSearchSources({ sources, messag
     {expanded ? <View style={[styles.sourceList, { borderTopColor: colors.border }]}>{sources.map((source) => <Pressable key={source.url}
       testID={`web-source-${messageId}-${source.number}`} accessibilityRole="link"
       accessibilityLabel={`${source.cited ? 'Citation' : 'Source'} ${source.number}. ${source.title}. ${source.host}`}
-      accessibilityHint="Opens in your browser" onPress={() => { void openSourceLink(source.url); }}
+      accessibilityHint="Opens in your browser" onPress={() => { void openExternalLink(source.url); }}
       style={({ pressed }) => [styles.sourceRow, { backgroundColor: pressed ? colors.subtle : 'transparent' }]}>
       <View style={[styles.sourceNumber, { backgroundColor: colors.accentSoft }]}><Text style={[styles.numberText, { color: colors.accent }]}>{source.number}</Text></View>
       <View style={styles.headerCopy}>

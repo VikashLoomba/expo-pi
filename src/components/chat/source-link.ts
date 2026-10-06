@@ -1,11 +1,12 @@
 import * as Linking from 'expo-linking';
 import { Alert } from 'react-native';
 
-import { safeSourceUrl } from './web-search-presentation';
+import { safeSourceUrl } from '@/chat/web-search-url';
 
-export async function openSourceLink(value: string): Promise<void> {
+/** Markdown links and provider citations share one external-web URL policy. */
+export async function openExternalLink(value: string): Promise<void> {
   const url = safeSourceUrl(value);
   if (!url) return;
   try { await Linking.openURL(url); }
-  catch { Alert.alert('Could not open source', 'Try opening this source again in a moment.'); }
+  catch { Alert.alert('Could not open link', 'Try opening this link again in a moment.'); }
 }

@@ -85,7 +85,21 @@ export function searchItem(id = 'ws_search', overrides = {}) {
   return { id, type: 'web_search_call', status: 'completed', action: { type: 'search',
     queries: ['OpenAI Responses native search'],
     sources: [{ type: 'url', url: 'https://openai.com/research/', title: 'OpenAI Research', future_source_field: 'retained' }] },
+  results: [{ type: 'web_search_result', title: `Calibration bulletin for ${id}`,
+    url: `https://example.test/observatories/${id}`, snippet: sourceFact(id) }],
   future_search_field: { nested: ['retained', 42] }, ...overrides };
+}
+
+/** A source-only fact: default assistant answers deliberately do not repeat it. */
+export function sourceFact(id = 'ws_search') {
+  return `The ${id} observatory calibrates its cobalt beacon every 47 seconds.`;
+}
+
+/** Extract only ordinary message text, excluding raw hosted-call object fields. */
+export function inputText(body, role) {
+  return body.input.filter((item) => !role || item.role === role).flatMap((item) =>
+    typeof item.content === 'string' ? [item.content] : Array.isArray(item.content)
+      ? item.content.flatMap((part) => typeof part.text === 'string' ? [part.text] : []) : []).join('\n');
 }
 
 export function textItem(text = 'A sourced answer.', id = 'msg_search', annotations = [{ type: 'url_citation',

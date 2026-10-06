@@ -4,7 +4,7 @@ import {
 } from '@earendil-works/pi-ai';
 
 import { NativeResponseArchive } from './archive';
-import { replayNativeResponses } from './replay';
+import { normalizeNativeResponse } from './normalization';
 import { isObject, type NativeWebSearchIntegration } from './types';
 
 const includes = ['reasoning.encrypted_content', 'web_search_call.action.sources', 'web_search_call.results'];
@@ -31,12 +31,13 @@ export function streamNativeOpenAI<TOptions extends StreamOptions>(
     catch (error) { persistenceError = error; throw error; }
   };
   const finish = async (message: AssistantMessage) => {
-    const status = message.stopReason === 'aborted' ? 'interrupted'
-      : message.stopReason === 'error' ? 'failed' : message.stopReason === 'length' ? 'incomplete' : 'completed';
-    archive.finish(status, message.errorMessage);
-    normalizedContent = JSON.stringify(message.content);
+    const normalized = await normalizeNativeResponse(model, context, message, archive.snapshot());
+    const status = normalized.stopReason === 'aborted' ? 'interrupted'
+      : normalized.stopReason === 'error' ? 'failed' : normalized.stopReason === 'length' ? 'incomplete' : 'completed';
+    archive.finish(status, normalized.errorMessage);
+    normalizedContent = JSON.stringify(normalized.content);
     await save();
-    return message;
+    return normalized;
   };
   void (async () => {
     try {
@@ -44,19 +45,17 @@ export function streamNativeOpenAI<TOptions extends StreamOptions>(
         ...options,
         async onPayload(payload: unknown, requestModel: Model<Api>) {
           if (!isObject(payload)) throw new Error('OpenAI Responses requires an object request.');
-          const input = replayNativeResponses(requestModel, context, integration.history, integration.record.requestId);
           const tools = Array.isArray(payload.tools) ? [...payload.tools] : [];
           if (!tools.some((tool) => isObject(tool) && (tool.type === 'web_search' || tool.type === 'web_search_preview'))) {
             tools.push({ type: 'web_search' });
           }
           const request = {
             ...payload,
-            ...(input ? { input } : {}),
             tools,
             include: [...new Set([...(Array.isArray(payload.include) ? payload.include : []), ...includes])],
           };
-          // Preserve Pi's last-word hook semantics: callers see native replay
-          // and can mutate it or replace the fully assembled request.
+          // Pi owns input conversion, including encrypted reasoning and local
+          // tool pairing. Callers retain its last-word payload hook semantics.
           const replacement = await options?.onPayload?.(request, requestModel);
           return replacement === undefined ? request : replacement;
         },
@@ -69,9 +68,15 @@ export function streamNativeOpenAI<TOptions extends StreamOptions>(
         if (event.type === 'done' || event.type === 'error') {
           const message = event.type === 'done' ? event.message : event.error;
           if (persistenceError) throw persistenceError;
-          await finish(message);
-          target.push(event);
-          target.end(message);
+          const normalized = await finish(message);
+          if (event.type === 'done') {
+            const reason = normalized.stopReason;
+            if (reason !== 'stop' && reason !== 'length' && reason !== 'toolUse' && reason !== 'deferred') {
+              throw new Error('OpenAI terminal normalization did not produce a successful stop reason.');
+            }
+            target.push({ type: 'done', reason, message: normalized });
+          } else target.push({ ...event, error: normalized });
+          target.end(normalized);
           return;
         }
         partial = event.partial;

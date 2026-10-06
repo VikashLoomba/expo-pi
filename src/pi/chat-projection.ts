@@ -5,6 +5,7 @@ import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-pre
 import type { ChatConversation, ChatMessage, ChatSummary } from '../chat/types';
 import type { ChatModelSettings } from './model-catalog';
 import type { NativeLiveState, NativeResponsesState } from './native-web-search/durable';
+import { isSearchObservationEntry } from './native-web-search/observations';
 import { nativeResponseText, projectNativeWebSearch } from './native-web-search/projection';
 import type { NativeResponseRecord } from './native-web-search/types';
 
@@ -151,7 +152,10 @@ export function projectChat(id: string, cached: ChatProjectionState, previous: C
     }
   };
   if (!committed) {
-    const entries = [...cached.entries.values()].sort((a, b) => a.id - b.id);
+    // Observation model messages are external evidence for the model. Native
+    // response metadata already supplies their visible activity and sources.
+    const entries = [...cached.entries.values()].filter((entry) => !isSearchObservationEntry(entry))
+      .sort((a, b) => a.id - b.id);
     const represented = new Set(entries.flatMap((entry) => entry.model?.flatMap((message) =>
       message.role === 'assistant' && message.responseId ? [message.responseId] : []) ?? []));
     const orphaned = nativeRecords.filter((record) => record.requestId !== currentNative?.requestId &&

@@ -15,6 +15,7 @@ import { WorkspaceRuntime } from './workspace/runtime';
 import { CODEX_PROVIDER_ID, MODEL_ID } from './codex-auth/identity';
 import { assertModelSettings, buildModelCatalog, getDefaultModelSettings, type ChatModelSettings } from './model-catalog';
 import { createNativeWebSearchBridge, NativeLiveDoc, NativeResponsesDoc, type NativeLiveState, type NativeResponsesState } from './native-web-search/durable';
+import { migrateSearchObservations } from './native-web-search/migration';
 import { hasPendingWork, projectChat, sameSummary, type ChatProjectionState } from './chat-projection';
 
 type ChatMetadata = { title: string; createdAt: number; archived: boolean };
@@ -94,7 +95,7 @@ export class DurableChatService {
     const now = options.now ?? Date.now;
     let service: DurableChatService | undefined;
     const harness = await Harness.open(options.storage, {
-      models: options.models, registry, now,
+      models: nativeSearch.models, registry, now,
       settings: {
         stream: { transport: 'sse', maxRetries: 0, timeoutMs: 60_000 },
         retry: { enabled: false, maxRetries: 0 },
@@ -123,6 +124,7 @@ export class DurableChatService {
         if (record.owner) continue;
         const metadata = await this.harness.snapshot(ChatMetadataDoc, record.id, context);
         if (!metadata) continue;
+        await migrateSearchObservations(this.harness, record.id, context);
         const agent = await this.harness.snapshot(AgentDoc, record.id, context);
         const workspace = await this.harness.snapshot(WorkspaceDoc, record.id, context);
         if (!workspace?.id || workspace.capabilityRevision < WORKSPACE_CAPABILITY_REVISION) {

@@ -35,7 +35,9 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
       queries: ['OpenAI Responses native web search'], sources: [
         { type: 'url', url: 'https://developers.openai.com/api/docs/guides/tools-web-search', title: 'OpenAI web search guide' },
         { type: 'url', url: 'https://openai.com/research/', title: 'OpenAI Research' },
-      ] } },
+      ] }, results: [{ type: 'web_search_result', title: 'Calibration bulletin',
+        url: 'https://developers.openai.com/api/docs/guides/tools-web-search',
+        snippet: 'The cobalt observatory calibrates its beacon every 47 seconds.' }] },
     { id: 'msg_native', type: 'message', role: 'assistant', status: 'completed', phase: 'final_answer', content: [{
       type: 'output_text', text: 'Native web search returns sources and inline citations.\n\nThe response, search activity, and sources survive reopening this chat.',
       annotations: [{ type: 'url_citation', start_index: 0, end_index: 55,
@@ -69,7 +71,14 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
       emit('response.web_search_call.searching', { output_index: 1, item_id: 'ws_native' });
       complete = () => finish(output, 'resp_native_1');
     } else {
-      for (const item of output) check(body.input.filter((entry) => entry.id === item.id).length === 1, `Replay lost or duplicated ${item.id}`);
+      for (const item of output.filter((entry) => entry.type !== 'web_search_call')) {
+        check(body.input.filter((entry) => entry.id === item.id).length === 1, `Pi lost or duplicated ${item.id}`);
+      }
+      check(!body.input.some((entry) => entry.type === 'web_search_call'), 'Raw hosted calls replaced ordinary evidence');
+      const evidence = body.input.filter((entry) => entry.role === 'user').flatMap((entry) =>
+        typeof entry.content === 'string' ? [entry.content] : (entry.content || []).map((part) => part.text || '')).join('\n');
+      check(evidence.split('The cobalt observatory calibrates its beacon every 47 seconds.').length === 2,
+        'The source-only fact did not survive native SQLite reopen exactly once as ordinary text');
       check(body.input.find((entry) => entry.id === 'rs_native').encrypted_content === 'opaque-native-test-state', 'Encrypted state was not replayed');
       const answer = { ...output[2], id: 'msg_followup', content: [{ type: 'output_text', text: 'The saved search is available on the next turn.', annotations: [] }] };
       finish([answer], 'resp_native_2');
@@ -196,6 +205,7 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
     return { ok: true, hermes: typeof globalThis.HermesInternal === 'object', database, providerCalls: requests.length,
       checks: { realResponsesAdapter: true, nativeSQLite: true, searchVisibleBeforeText: true,
         terminalSourcesAndCitations: true, stableRow: true, reopenedProjection: true, replayedEncryptedState: true,
+        readableSourceFactAfterReopen: true, noRawHostedCallReplay: true,
         noEncryptedStateInUI: true }, network: 'Synthetic HTTP SSE only; no account credentials accessed' };
   } finally {
     for (const restore of restores.reverse()) restore();

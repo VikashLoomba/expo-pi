@@ -15,8 +15,8 @@ const hook = registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { createMarkdownParser } = await import('../src/components/chat/streaming-markdown.ts');
-const { citedInlineTokens, collectSearchSources, inlineCitations, safeSourceUrl, searchCallLabel } = await import('../src/components/chat/web-search-presentation.ts');
+const { createMarkdownParser } = await import('../src/components/chat/markdown/streaming-parser.ts');
+const { citedInlineRuns, collectSearchSources, inlineCitations, safeSourceUrl, searchCallLabel } = await import('../src/components/chat/web-search-presentation.ts');
 const { projectNativeWebSearch } = await import('../src/pi/native-web-search/projection.ts');
 hook.deregister();
 
@@ -26,10 +26,25 @@ function citation(text, value, id = value, url = 'https://example.com/source') {
   return { id, url, title: 'Source document', startIndex, endIndex: startIndex + value.length };
 }
 
+function inlineFragments(blocks) {
+  return blocks.flatMap((block) => {
+    switch (block.kind) {
+      case 'paragraph':
+      case 'heading': return [block.content];
+      case 'list': return block.items.flatMap((item) => inlineFragments(item.blocks));
+      case 'quote': return inlineFragments(block.blocks);
+      case 'table': return [block.header, ...block.rows].flatMap((row) => row.cells);
+      case 'code':
+      case 'rule': return [];
+      default: throw new Error(`Unhandled test block: ${block.kind}`);
+    }
+  });
+}
+
 function render(text, citations, streaming = false) {
   const sources = collectSearchSources({ calls: [], citations, sources: [] });
   const valid = inlineCitations(text, citations, sources);
-  return createMarkdownParser(true)(text, streaming).flatMap((block) => citedInlineTokens(block, streaming, valid));
+  return inlineFragments(createMarkdownParser()(text, streaming)).flatMap((fragment) => citedInlineRuns(fragment, valid));
 }
 
 test('citation spans stay aligned through heading/list prefixes, CRLF, continuations and inline syntax', () => {
@@ -39,8 +54,8 @@ test('citation spans stay aligned through heading/list prefixes, CRLF, continuat
   assert.deepEqual(parts.filter((part) => part.citation).map(({ text, citation }) => [text, citation.id]), [
     ['Overview', 'Overview'], ['literal', 'literal'], ['continued', 'continued'], ['Docs', 'Docs'], ['quoted', 'quoted'], ['tail', 'tail'],
   ]);
-  assert.equal(parts.find((part) => part.citation?.id === 'Overview').kind, 'strong');
-  assert.equal(parts.find((part) => part.citation?.id === 'Docs').kind, 'link');
+  assert.equal(parts.find((part) => part.citation?.id === 'Overview').marks.includes('strong'), true);
+  assert.equal(parts.find((part) => part.citation?.id === 'Docs').href, 'https://example.com/long-hidden-path');
   assert.equal(parts.some((part) => part.text.includes('long-hidden-path')), false);
 });
 
@@ -70,7 +85,7 @@ test('late annotations wait for complete spans while closed source-mapped blocks
   const sources = collectSearchSources({ calls: [], citations: [annotation], sources: [] });
   assert.deepEqual(inlineCitations(text.slice(0, -4), [annotation], sources), []);
   assert.equal(inlineCitations(text, [annotation], sources).length, 1);
-  const parser = createMarkdownParser(true);
+  const parser = createMarkdownParser();
   const first = parser('# Heading\n\nA cited', true);
   const next = parser(text, true);
   assert.equal(first[0], next[0]);
@@ -169,6 +184,104 @@ test('streaming native citation marker fragments stay hidden until a complete an
   assert.equal(render(text, []).map((part) => part.text).join(''), 'Before  after');
   assert.equal(render(text, [citation(text, marker)]).map((part) => part.text).join(''), 'Before [1] after');
   assert.equal(text, `Before ${marker} after`, 'rendering never rewrites the archived source');
+});
+
+test('table cells retain UTF-16 citations through CRLF, escaped pipes, entities and nested formatting', () => {
+  const text = '| 🌍 **_Title_** | [**Documentation**](https://example.com/docs) |\r\n'
+    + '| :--- | ---: |\r\n'
+    + '| escaped \\| pipe | `A\\|B` &amp; 😀 **bold _nested_** |';
+  const blocks = createMarkdownParser()(text, false);
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].kind, 'table');
+  assert.deepEqual(blocks[0].alignments, ['left', 'right']);
+  const citations = [
+    citation(text, 'Title'), citation(text, 'Documentation'), citation(text, '\\|', 'escaped-pipe'),
+    citation(text, 'A\\|B', 'code-pipe'), citation(text, '&amp;', 'entity'), citation(text, '😀', 'emoji'),
+    citation(text, 'nested'),
+  ];
+  const parts = render(text, citations);
+  assert.deepEqual(parts.filter((part) => part.citation).map((part) => [part.text, part.citation.id]), [
+    ['Title', 'Title'], ['Documentation', 'Documentation'], ['|', 'escaped-pipe'], ['A|B', 'code-pipe'],
+    ['&', 'entity'], ['😀', 'emoji'], ['nested', 'nested'],
+  ]);
+  assert.deepEqual(new Set(parts.find((part) => part.text === 'Title').marks), new Set(['strong', 'emphasis']));
+  assert.deepEqual(new Set(parts.find((part) => part.text === 'nested').marks), new Set(['strong', 'emphasis']));
+  assert.equal(parts.find((part) => part.text === 'A|B').marks.includes('code'), true);
+  const documentation = parts.find((part) => part.text === 'Documentation');
+  assert.equal(documentation.marks.includes('strong'), true);
+  assert.equal(documentation.href, 'https://example.com/docs');
+  assert.equal(parts.some((part) => part.text.includes('https://')), false);
+});
+
+test('one citation spanning nested formatting and links preserves all visible content and marks', () => {
+  const text = '**Bold _emphasis_ and [formatted `code`](https://example.com/target)**';
+  const parts = render(text, [citation(text, text)]);
+  assert.equal(parts.map((part) => part.text).join(''), 'Bold emphasis and formatted code');
+  assert.equal(parts.every((part) => part.citation && part.marks.includes('strong')), true);
+  assert.equal(parts.find((part) => part.text === 'emphasis').marks.includes('emphasis'), true);
+  const code = parts.find((part) => part.text === 'code');
+  assert.equal(code.marks.includes('code'), true);
+  assert.equal(code.href, 'https://example.com/target');
+});
+
+test('late table annotations decorate cached fragments without changing the archived source or parsed tree', () => {
+  const text = '| Name | Result |\r\n| --- | --- |\r\n| **😀 outcome** | `x\\|y` &amp; result |';
+  const parser = createMarkdownParser();
+  const blocks = parser(text, false);
+  const fragments = inlineFragments(blocks);
+  const originalTree = structuredClone(blocks);
+  const withoutAnnotations = fragments.flatMap((fragment) => citedInlineRuns(fragment, []));
+  assert.equal(withoutAnnotations.some((part) => part.citation), false);
+  const annotations = [citation(text, '😀 outcome'), citation(text, 'x\\|y'), citation(text, '&amp;')];
+  const sources = collectSearchSources({ calls: [], citations: annotations, sources: [] });
+  const valid = inlineCitations(text, annotations, sources);
+  const annotated = fragments.flatMap((fragment) => citedInlineRuns(fragment, valid));
+  assert.deepEqual(annotated.filter((part) => part.citation).map((part) => part.text), ['😀 outcome', 'x|y', '&']);
+  assert.equal(annotated.map((part) => part.text).join(''), withoutAnnotations.map((part) => part.text).join(''));
+  assert.equal(parser(text, false)[0], blocks[0]);
+  assert.deepEqual(blocks, originalTree);
+  assert.equal(text, '| Name | Result |\r\n| --- | --- |\r\n| **😀 outcome** | `x\\|y` &amp; result |');
+});
+
+test('table citations keep every overlapping source reachable without repeating cell prose', () => {
+  const text = '| Finding |\n| --- |\n| **Shared _finding_** &amp; more |';
+  const citations = [
+    citation(text, '**Shared _finding_** &amp; more', 'outer'),
+    citation(text, 'finding', 'nested', 'https://second.example/'),
+    citation(text, 'finding', 'third', 'https://third.example/'),
+    citation(text, '&amp;', 'entity', 'https://fourth.example/'),
+  ];
+  const parts = render(text, citations);
+  assert.equal(parts.map((part) => part.text).join(''), 'FindingShared finding [2] [3] & [4] more');
+  assert.deepEqual(new Set(parts.filter((part) => part.citation).map((part) => part.citation.id)),
+    new Set(['outer', 'nested', 'third', 'entity']));
+  assert.equal(parts.filter((part) => part.text === 'finding').length, 1);
+  assert.equal(parts.find((part) => part.text === 'finding').marks.includes('emphasis'), true);
+});
+
+test('native citation markers inside table cells remain hidden while streaming and become source links', () => {
+  const marker = '\uE200cite\uE202turn0search0\uE201';
+  const prefix = '| Source |\n| --- |\n| Before ';
+  for (let length = 1; length <= marker.length; length++) {
+    const partial = prefix + marker.slice(0, length);
+    assert.equal(render(partial, [], true).map((part) => part.text).join(''), 'SourceBefore ');
+  }
+  const text = `${prefix}${marker} after |`;
+  const parts = render(text, [citation(text, marker)]);
+  assert.equal(parts.map((part) => part.text).join(''), 'SourceBefore [1] after');
+  assert.equal(parts.find((part) => part.text === '[1]').citation.startIndex, prefix.length);
+  assert.equal(text, `${prefix}${marker} after |`);
+});
+
+test('decoded entity characters require coverage of their complete original source range', () => {
+  const text = 'A &amp; B &#x1F30D; C';
+  const full = [citation(text, '&amp;', 'ampersand'), citation(text, '&#x1F30D;', 'globe')];
+  assert.deepEqual(render(text, full).filter((part) => part.citation).map((part) => [part.text, part.citation.id]),
+    [['&', 'ampersand'], ['🌍', 'globe']]);
+  const partial = [citation(text, 'amp', 'partial-entity'), citation(text, '1F30D', 'partial-astral-entity')];
+  const parts = render(text, partial);
+  assert.equal(parts.map((part) => part.text).join(''), 'A & B 🌍 C');
+  assert.equal(parts.some((part) => part.citation), false);
 });
 
 function nativeRecord(parts) {

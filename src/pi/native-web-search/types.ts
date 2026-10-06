@@ -10,7 +10,13 @@ export type NativeResponseRecord = {
   model: string;
   status: 'in_progress' | 'completed' | 'failed' | 'incomplete' | 'interrupted';
   responseId?: string;
-  /** Serialized Pi terminal content; native replay applies only while this content remains unedited. */
+  /** Aggregate readable observation budget pinned from the request's actual model window. */
+  evidenceBudgetBytes?: number;
+  /** Last canonical entry admitted to this request; absent on legacy archives. */
+  cutoff?: number;
+  /** Genuine pi.user entry that started this logical turn, shared by its tool rounds. */
+  originEntryId?: number;
+  /** Serialized terminal content associates legacy archives with an unedited answer. */
   normalizedContent?: string;
   output: JsonObject[];
   response?: JsonObject;
@@ -21,8 +27,6 @@ export type NativeResponseRecord = {
 
 export interface NativeWebSearchIntegration {
   record: NativeResponseRecord;
-  /** Only responses referenced by the current durable model context. */
-  history: readonly NativeResponseRecord[];
   /** Resolves after storage commits. No uncommitted native state reaches the UI. */
   save(record: NativeResponseRecord): Promise<void>;
 }

@@ -1,32 +1,24 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models } from '@earendil-works/pi-ai';
 import {
-  GenerationTask, defineDoc, defineExtension, hook,
+  GenerationTask, defineExtension, hook,
   type ConversationId, type GenerationCheckpoint, type Harness,
 } from '@earendil-works/pi-durable';
 
-import { bindNativeWebSearch } from './bindings';
+import { bindNativeWebSearch, nativeWebSearchScope } from './bindings';
+import { bindSearchEvidenceBudget, failSearchEvidencePreparation, getSearchEvidenceBudget, withSearchEvidenceBudget } from './budget';
+import { NativeLiveDoc, NativeResponsesDoc } from './documents';
+import { captureRequestOrigin } from './lifecycle';
+import { migrateSearchObservations } from './migration';
+import { persistNativeResponse } from './persistence';
 import { copyJson, type NativeResponseRecord } from './types';
 
-export type NativeResponsesState = { responses: Record<string, NativeResponseRecord> };
-export type NativeLiveState = { requestId?: string; taskId?: number };
-
-/** Native output is durable application data, separate from Pi's normalized messages. */
-export const NativeResponsesDoc = defineDoc<NativeResponsesState>({
-  kind: 'app.openai.responses', version: 1, scope: 'conversation', history: 'rewindable', fork: 'asOf',
-  initial: () => ({ responses: {} }),
-});
-
-/** A fork inherits historical responses, but never its parent's in-flight presentation. */
-export const NativeLiveDoc = defineDoc<NativeLiveState>({
-  kind: 'app.openai.live', version: 1, scope: 'conversation', history: 'latest', fork: 'initial',
-  initial: () => ({}),
-});
+export { NativeLiveDoc, NativeResponsesDoc } from './documents';
+export type { NativeLiveState, NativeResponsesState } from './documents';
 
 type RequestScope = { error: unknown } | {
   conversationId: ConversationId;
   record: NativeResponseRecord;
-  history: NativeResponseRecord[];
 };
 
 /**
@@ -46,19 +38,7 @@ export function createNativeWebSearchBridge(models: Models) {
     // Mandatory persistence of a received event survives user cancellation. Harness.close
     // still seals admission and drains commits already admitted on its mutation line.
     const value = copyJson(record);
-    await harness.commit(async (tx) => {
-      const archive = await tx.doc(NativeResponsesDoc, scope.conversationId);
-      const previous = archive.responses[record.requestId];
-      if (previous?.responseId && record.responseId && previous.responseId !== record.responseId) {
-        throw new Error('A native request cannot change its response identity.');
-      }
-      archive.responses[record.requestId] = value;
-      const live = await tx.doc(NativeLiveDoc, scope.conversationId);
-      if (live.requestId === undefined || live.requestId === record.requestId) {
-        live.requestId = record.requestId;
-        live.taskId = record.taskId;
-      }
-    }, BACKGROUND_CONTEXT);
+    await harness.commit((tx) => persistNativeResponse(tx, scope.conversationId, value), BACKGROUND_CONTEXT);
   };
 
   const extension = defineExtension({
@@ -67,6 +47,7 @@ export function createNativeWebSearchBridge(models: Models) {
       async beforeRequest(request, api, context) {
         const signal = context.abortSignal;
         if (!signal) throw new Error('Durable generation did not supply its cancellation signal.');
+        failSearchEvidencePreparation(signal);
         // Hook errors are reported by Pi, so bind failure first and make the provider
         // boundary fail closed if any subsequent preparation operation fails.
         bindNativeWebSearch(signal, { error: new Error('Native search request preparation did not complete.') });
@@ -80,31 +61,34 @@ export function createNativeWebSearchBridge(models: Models) {
           }
           const checkpoint = task.state.checkpoint as GenerationCheckpoint;
           if (checkpoint.phase !== 'request') throw new Error('Native search requires a generation request checkpoint.');
+          // Startup migration normally runs before preparation. Recovery and
+          // direct SDK forks can have an older pinned cutoff: forward only
+          // canonical evidence associated with that exact request's sources.
+          const migration = await migrateSearchObservations(harness, api.conversationId, context, {
+            messages: request.messages, cutoff: checkpoint.cutoff,
+          });
+          const prepared = migration.messages.length ? { messages: [...request.messages, ...migration.messages] } : undefined;
           if (checkpoint.model.provider !== 'openai') {
             bindNativeWebSearch(signal, undefined);
-            return;
+            bindSearchEvidenceBudget(signal);
+            return prepared;
           }
           const model = models.getModel('openai', checkpoint.model.modelId);
           if (!model || model.api !== 'openai-responses') {
             bindNativeWebSearch(signal, undefined);
-            return;
-          }
-          const archive = await api.snapshot(NativeResponsesDoc, api.conversationId, context);
-          const byResponse = new Map(Object.values(archive?.responses ?? {})
-            .filter((record) => record.responseId && record.provider === 'openai' && record.model === model.id)
-            .map((record) => [record.responseId, record]));
-          const history: NativeResponseRecord[] = [];
-          for (const message of request.messages) {
-            if (message.role !== 'assistant' || message.provider !== 'openai' || message.model !== model.id || !message.responseId) continue;
-            const record = byResponse.get(message.responseId);
-            if (record && (record.status === 'completed' || record.status === 'incomplete')) history.push(copyJson(record));
+            bindSearchEvidenceBudget(signal);
+            return prepared;
           }
           const record: NativeResponseRecord = {
             requestId: uuidv7(), taskId: api.taskId, provider: 'openai', model: model.id,
+            cutoff: checkpoint.cutoff,
+            evidenceBudgetBytes: getSearchEvidenceBudget(model.contextWindow).maxBytes,
             status: 'in_progress', output: [], events: [],
           };
-          const scope = { conversationId: api.conversationId, record, history };
+          const scope = { conversationId: api.conversationId, record };
           await harness.commit(async (tx) => {
+            const originEntryId = await captureRequestOrigin(tx, api.conversationId, checkpoint.cutoff);
+            if (originEntryId !== undefined) record.originEntryId = originEntryId;
             const archive = await tx.doc(NativeResponsesDoc, api.conversationId);
             // An invocation recovered after process shutdown gets a new request ID.
             // Preserve its predecessor and mark its unfinished transport honestly.
@@ -116,17 +100,31 @@ export function createNativeWebSearchBridge(models: Models) {
             live.requestId = record.requestId;
             live.taskId = record.taskId;
           }, context);
-          bindNativeWebSearch(signal, { record, history, save: (value) => save(scope, value) });
+          bindNativeWebSearch(signal, { record, save: (value) => save(scope, value) });
+          bindSearchEvidenceBudget(signal);
+          return prepared;
         } catch (error) {
+          failSearchEvidencePreparation(signal);
           bindNativeWebSearch(signal, { error });
           throw error;
+        }
+      },
+      async afterResponse(message, api, context) {
+        const scope = nativeWebSearchScope(context.abortSignal);
+        if (!scope || 'error' in scope || message.stopReason !== 'error') return;
+        const archive = await api.snapshot(NativeResponsesDoc, api.conversationId, context);
+        const record = archive?.responses[scope.record.requestId];
+        // A local capacity rejection never enters the provider wrapper. Settle
+        // its admitted request honestly instead of leaving phantom live work.
+        if (record?.status === 'in_progress' && !record.responseId && !record.output.length) {
+          await scope.save({ ...record, status: 'failed', error: message.errorMessage });
         }
       },
     })],
   });
 
   return {
-    models, extension,
+    models: withSearchEvidenceBudget(models), extension,
     attach(value: Harness) {
       if (harness && harness !== value) throw new Error('Native search bridge already belongs to another Harness.');
       harness = value;

@@ -1,6 +1,7 @@
 import type { WebSearchCall, WebSearchCitation, WebSearchPresentation, WebSearchSource } from '../../chat/web-search-types';
 import { safeSourceUrl } from '../../chat/web-search-url';
-import { parseInline, type InlineToken, type MarkdownBlock, type SourceSpan } from './streaming-markdown';
+import { sourceRange } from './markdown/source-map';
+import type { InlineFragment, InlineRun } from './markdown/types';
 
 export { safeSourceUrl } from '../../chat/web-search-url';
 
@@ -12,7 +13,8 @@ export interface SearchSource extends WebSearchSource {
 }
 
 export interface InlineCitation extends WebSearchCitation { number: number }
-export interface CitedInlineToken extends Omit<InlineToken, 'key' | 'text'> {
+/** Rendered decoration has no source map: marker labels can be synthesized. */
+export interface CitedInlineRun extends Pick<InlineRun, 'marks' | 'href'> {
   key: string;
   text: string;
   citation?: InlineCitation;
@@ -75,11 +77,6 @@ export function inlineCitations(text: string, citations: readonly WebSearchCitat
   });
 }
 
-function sourceOffset(spans: readonly SourceSpan[] | undefined, index: number): number | undefined {
-  const span = spans?.find((item) => index >= item.start && index < item.end);
-  return span ? span.sourceStart + index - span.start : undefined;
-}
-
 function nativeCitationMarkers(text: string): { start: number; end: number; complete: boolean }[] {
   const prefix = '\uE200cite\uE202';
   const markers: { start: number; end: number; complete: boolean }[] = [];
@@ -92,53 +89,52 @@ function nativeCitationMarkers(text: string): { start: number; end: number; comp
   return markers;
 }
 
-/**
- * Compose inline -> block -> original source maps. Markdown delimiters, link
- * targets, CRLFs and list indentation never shift a provider citation range.
- * Original message text is preserved for copying, persistence and replay.
- */
-export function citedInlineTokens(block: MarkdownBlock, streaming: boolean, citations: readonly InlineCitation[]): readonly CitedInlineToken[] {
-  const parts: CitedInlineToken[] = [];
-  const markers = nativeCitationMarkers(block.text);
+/** Decorate visible runs without reparsing Markdown or changing the archived source. */
+export function citedInlineRuns(fragment: InlineFragment, citations: readonly InlineCitation[]): readonly CitedInlineRun[] {
+  const markers = nativeCitationMarkers(fragment.sourceText).map((marker) => ({
+    ...marker, start: fragment.key + marker.start, end: fragment.key + marker.end,
+  }));
+  const relevant = citations.filter((citation) => citation.endIndex > fragment.key
+    && citation.startIndex < fragment.key + fragment.sourceText.length);
+  if (!markers.length && !relevant.length) {
+    return fragment.runs.map((run) => ({ marks: run.marks, href: run.href, text: run.text, key: String(run.key) }));
+  }
+  const parts: CitedInlineRun[] = [];
   const emittedMarkers = new Set<number>();
   const linked = new Set<InlineCitation>();
   const lastVisiblePart = new Map<InlineCitation, number>();
-  for (const token of parseInline(block.text, streaming, true)) {
+  for (const run of fragment.runs) {
     let offset = 0;
-    let previousPart: CitedInlineToken | undefined;
+    let previousPart: CitedInlineRun | undefined;
     let previousMatches: readonly InlineCitation[] = [];
-    for (const character of token.text) {
-      const blockOffset = sourceOffset(token.sourceSpans, offset);
-      const originalOffset = blockOffset === undefined ? undefined : sourceOffset(block.sourceSpans, blockOffset);
-      const marker = blockOffset === undefined ? undefined : markers.find((item) => blockOffset >= item.start && blockOffset < item.end);
+    for (const character of run.text) {
+      const original = sourceRange(run.sourceSpans, offset, offset + character.length);
+      const marker = original && markers.find((item) => original.start >= item.start && original.start < item.end);
       if (marker) {
         if (!emittedMarkers.has(marker.start)) {
           emittedMarkers.add(marker.start);
-          const start = sourceOffset(block.sourceSpans, marker.start);
-          const last = sourceOffset(block.sourceSpans, marker.end - 1);
-          const matches = marker.complete && start !== undefined && last !== undefined
-            ? citations.filter((citation) => citation.startIndex <= start && citation.endIndex >= last + 1) : [];
+          const matches = marker.complete
+            ? relevant.filter((citation) => citation.startIndex <= marker.start && citation.endIndex >= marker.end) : [];
           const citation = matches[0];
           if (citation) {
-            parts.push({ kind: 'link', key: `marker:${marker.start}`, text: `[${citation.number}]`, citation });
+            parts.push({ marks: [], key: `marker:${marker.start}`, text: `[${citation.number}]`, citation });
             linked.add(citation);
             matches.forEach((item) => lastVisiblePart.set(item, parts.length - 1));
           }
         }
-        // A partial or unannotated native marker is transport syntax, never prose.
-        // Its original bytes and positions remain in ChatMessage.text.
+        // Partial/unannotated provider markers are transport syntax, never prose.
         previousPart = undefined;
         previousMatches = [];
         offset += character.length;
         continue;
       }
-      const matches = originalOffset === undefined ? []
-        : citations.filter((item) => originalOffset >= item.startIndex && originalOffset + character.length <= item.endIndex);
+      // Keep line separators selectable without turning them into link hit targets.
+      const matches = original && !/^[\r\n]+$/.test(character) ? relevant.filter((item) => original.start >= item.startIndex && original.end <= item.endIndex) : [];
       const citation = matches[0];
       if (previousPart && previousPart.citation === citation && previousMatches.length === matches.length
         && previousMatches.every((item, index) => item === matches[index])) previousPart.text += character;
       else {
-        previousPart = { ...token, key: `${token.key}:${offset}`, text: character, ...(citation ? { citation } : {}) };
+        previousPart = { marks: run.marks, href: run.href, key: `${run.key}:${offset}`, text: character, ...(citation ? { citation } : {}) };
         parts.push(previousPart);
       }
       if (citation) linked.add(citation);
@@ -148,17 +144,16 @@ export function citedInlineTokens(block: MarkdownBlock, streaming: boolean, cita
     }
   }
   const trailing = new Map<number, InlineCitation[]>();
-  for (const citation of citations) {
+  for (const citation of relevant) {
     const index = lastVisiblePart.get(citation);
     if (index === undefined || linked.has(citation) || parts[index].citation?.url === citation.url) continue;
     const group = trailing.get(index) ?? [];
-    // Repeated metadata for the same source needs only one extra link here.
     if (!group.some((item) => item.url === citation.url)) group.push(citation);
     trailing.set(index, group);
   }
   return parts.flatMap((part, index) => {
     const extras = trailing.get(index) ?? [];
-    return [part, ...extras.map((citation) => ({ kind: 'link' as const,
+    return [part, ...extras.map((citation) => ({ marks: [],
       key: `${part.key}:citation:${citation.id}`, text: ` [${citation.number}]`, citation }))];
   });
 }
