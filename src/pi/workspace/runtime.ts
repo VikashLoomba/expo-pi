@@ -5,9 +5,11 @@ import { WorkspaceFileSystem } from './filesystem/index';
 import { createMountedFileSystem } from './mounted-filesystem';
 
 type Workspace = { files: WorkspaceFileSystem };
+export type WorkspaceResource = { stop(reason: unknown): void; close(): Promise<void> };
 export type WorkspaceInvocation = {
   files: WorkspaceFileSystem;
   mounted: IFileSystem;
+  system: BoundedSystemFs;
   signal: AbortSignal;
   /** Seal this invocation locally; its owner decides whether to return a result or throw. */
   abort(reason: unknown): void;
@@ -24,10 +26,13 @@ export class WorkspaceRuntime {
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly controllers = new Set<AbortController>();
   private closing?: Promise<void>;
+  private readonly resources = new Set<WorkspaceResource>();
   private stopped = false;
   private readonly stopReason = new Error('Chat runtime closed during workspace execution.');
 
   constructor(private readonly openDatabase: () => Promise<SqliteDatabase>) {}
+
+  get isStopped(): boolean { return this.stopped; }
 
   private connection(): Promise<SqliteDatabase> {
     if (!this.database) {
@@ -52,7 +57,15 @@ export class WorkspaceRuntime {
     return pending;
   }
 
-  run<T>(id: string, signal: AbortSignal | undefined, execute: (invocation: WorkspaceInvocation) => Promise<T>): Promise<T> {
+  /** Active direct environments register lazily; metadata facades require no ownership. */
+  own(resource: WorkspaceResource): () => void {
+    if (this.stopped) throw new Error('Workspace runtime is closing.');
+    this.resources.add(resource);
+    return () => { this.resources.delete(resource); };
+  }
+
+  /** Retained system trees belong to direct envs; omitted trees are fresh per tool call. */
+  run<T>(id: string, signal: AbortSignal | undefined, execute: (invocation: WorkspaceInvocation) => Promise<T>, retainedSystem?: BoundedSystemFs): Promise<T> {
     if (this.stopped) return Promise.reject(new Error('Workspace runtime is closing.'));
     const controller = new AbortController();
     const forwardAbort = () => controller.abort(signal?.reason);
@@ -67,11 +80,11 @@ export class WorkspaceRuntime {
       await workspace.files.refresh();
       controller.signal.throwIfAborted();
       const files = workspace.files.forInvocation(controller.signal);
-      const system = new BoundedSystemFs();
+      const system = retainedSystem ?? new BoundedSystemFs();
       system.mkdirSync('/tmp', { recursive: true });
       const mounted = createMountedFileSystem(system, files, controller.signal);
       try {
-        const result = await execute({ files, mounted, signal: controller.signal, abort: (reason) => controller.abort(reason) });
+        const result = await execute({ files, mounted, system, signal: controller.signal, abort: (reason) => controller.abort(reason) });
         // An invocation may handle its local cancellation and return a result.
         // Caller cancellation and app closure always retain cancellation identity.
         signal?.throwIfAborted();
@@ -95,9 +108,24 @@ export class WorkspaceRuntime {
     return operation;
   }
 
+  /** Acquire one whole-call lease. Releasing it seals writes and awaits storage drain. */
+  async acquire(id: string, signal?: AbortSignal): Promise<{ invocation: WorkspaceInvocation; release(): Promise<void> }> {
+    let acquired!: (invocation: WorkspaceInvocation) => void;
+    let failed!: (reason: unknown) => void;
+    let release!: () => void;
+    const ready = new Promise<WorkspaceInvocation>((resolve, reject) => { acquired = resolve; failed = reject; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const operation = this.run(id, signal, async (invocation) => { acquired(invocation); await held; });
+    // Attach immediately, including admission failures before the lease is available.
+    operation.catch(failed);
+    const invocation = await ready;
+    return { invocation, release: async () => { release(); await operation; } };
+  }
+
   /** Stop admission immediately; both queued and active calls observe cancellation. */
   stop(): void {
     this.stopped = true;
+    for (const resource of this.resources) resource.stop(this.stopReason);
     for (const controller of this.controllers) controller.abort(this.stopReason);
   }
 
@@ -105,6 +133,7 @@ export class WorkspaceRuntime {
     if (!this.closing) {
       this.stop();
       this.closing = (async () => {
+        await Promise.allSettled([...this.resources].map((resource) => resource.close()));
         await Promise.allSettled([...this.queues.values()]);
         if (this.database) {
           // A rejected factory owns its own failure cleanup and has no handle to close.

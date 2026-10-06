@@ -28,8 +28,8 @@ async function workspace(t, controller = new AbortController()) {
 
 async function edit(invocation, original, edits, limits) {
   await invocation.mounted.writeFile('/workspace/file', original);
-  const env = new EditExecutionEnv(invocation, edits, { ...EDIT_BUDGET, ...limits });
-  try { return await createEditTool().execute({ path: '/workspace/file', edits }, { env }, context); }
+  const env = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), edits, { ...EDIT_BUDGET, ...limits });
+  try { return await createEditTool().execute({ path: '/workspace/file', edits }, { env, outputWindow: undefined }, context); }
   finally { await env.cleanup(context); }
 }
 
@@ -53,7 +53,7 @@ test('guarded edit preserves all SDK BOM, line ending, fuzzy and EOF semantics',
     const guardedBytes = await invocation.mounted.readFileBuffer('/workspace/file');
     await invocation.mounted.writeFile('/workspace/file', original);
     const baseline = new WorkspaceExecutionEnv(invocation);
-    const unguarded = await createEditTool().execute({ path: '/workspace/file', edits }, { env: baseline }, context);
+    const unguarded = await createEditTool().execute({ path: '/workspace/file', edits }, { env: baseline, outputWindow: undefined }, context);
     await baseline.cleanup(context);
     assert.deepEqual(await invocation.mounted.readFileBuffer('/workspace/file'), guardedBytes, JSON.stringify(original));
     assert.deepEqual(guarded, unguarded, 'preflight does not change the SDK output');
@@ -76,10 +76,10 @@ test('a targeted edit in a full 8 MiB file remains available', { timeout: 15_000
 
 test('input and replacement count are rejected before any file access', async (t) => {
   const invocation = await workspace(t);
-  assert.throws(() => new EditExecutionEnv(invocation, []), EditBudgetError);
-  assert.throws(() => new EditExecutionEnv(invocation,
+  assert.throws(() => new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), []), EditBudgetError);
+  assert.throws(() => new EditExecutionEnv(new WorkspaceExecutionEnv(invocation),
     Array.from({ length: EDIT_BUDGET.maxEdits + 1 }, () => ({ oldText: 'a', newText: 'b' }))), /between 1 and/);
-  assert.throws(() => new EditExecutionEnv(invocation,
+  assert.throws(() => new EditExecutionEnv(new WorkspaceExecutionEnv(invocation),
     [{ oldText: 'a', newText: '😀'.repeat(EDIT_BUDGET.maxInputBytes / 4 + 1) }]), /input budget/);
   assert.deepEqual(await invocation.mounted.readdir('/workspace'), []);
 });
@@ -131,7 +131,7 @@ for (const [name, original, oldText] of [
 ]) test(`native search work rejects ${name} before Pi matching`, async (t) => {
   const invocation = await workspace(t);
   await invocation.mounted.writeFile('/workspace/file', original);
-  const env = new EditExecutionEnv(invocation, [{ oldText, newText: 'replacement' }]);
+  const env = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText, newText: 'replacement' }]);
   try {
     // Exercise the read admission itself: an SDK indexOf/split must never see this source.
     await assert.rejects(env.readTextFile('/workspace/file', context),
@@ -145,18 +145,20 @@ for (const stage of ['read', 'write']) for (const owner of ['caller', 'invocatio
     const invocationController = new AbortController();
     const invocation = await workspace(t, invocationController);
     const caller = new AbortController();
-    const executionContext = withAbortSignal(caller.signal, context);
+    // The shared policy receives the scope's signal through Context; it has no
+    // local invocation knowledge. The local scope combines caller/shutdown intent.
+    const executionContext = withAbortSignal(owner === 'caller' ? caller.signal : invocation.signal, context);
     const original = `${'x'.repeat(256 * 1024)}${'Z'.repeat(128)}`;
     const proposed = `${original.slice(0, -1)}Y`;
     await invocation.mounted.writeFile('/workspace/file', original);
-    const env = new EditExecutionEnv(invocation, [{ oldText: 'Z'.repeat(128), newText: `${'Z'.repeat(127)}Y` }]);
+    const env = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText: 'Z'.repeat(128), newText: `${'Z'.repeat(127)}Y` }]);
     try {
       if (stage === 'write') assert.equal((await env.readTextFile('/workspace/file', executionContext)).ok, true);
       const reason = owner === 'caller' ? null : { reason: 'cooperative invocation stop' };
       const controller = owner === 'caller' ? caller : invocationController;
       const stopped = new Promise((resolve) => setTimeout(() => { controller.abort(reason); resolve(); }, 0));
       const operation = stage === 'read'
-        ? createEditTool().execute({ path: '/workspace/file', edits: [{ oldText: 'Z'.repeat(128), newText: `${'Z'.repeat(127)}Y` }] }, { env }, executionContext)
+        ? createEditTool().execute({ path: '/workspace/file', edits: [{ oldText: 'Z'.repeat(128), newText: `${'Z'.repeat(127)}Y` }] }, { env, outputWindow: undefined }, executionContext)
         : env.writeFile('/workspace/file', proposed, executionContext);
       await assert.rejects(operation, (cause) => cause === reason);
       await stopped;
@@ -171,7 +173,7 @@ test('cleanup during a cooperative scan prevents the environment from returning 
   const invocation = await workspace(t);
   const original = `${'x'.repeat(256 * 1024)}${'Z'.repeat(128)}`;
   await invocation.mounted.writeFile('/workspace/file', original);
-  const env = new EditExecutionEnv(invocation, [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
+  const env = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
   const closed = new Promise((resolve, reject) => setTimeout(() => { env.cleanup(context).then(resolve, reject); }, 0));
   await assert.rejects(env.readTextFile('/workspace/file', context),
     (cause) => cause.code === 'aborted' && /closed/.test(cause.message));
@@ -184,11 +186,11 @@ test('decomposed combining runs retain their count across scalar and scan bounda
   for (const marks of ['\u0301'.repeat(32) + '\u0316'.repeat(32), '\uff9e'.repeat(64), '\u{1d165}'.repeat(32)]) {
     const original = `${'x'.repeat(1000)}a${marks}\n${'Z'.repeat(128)}`;
     await invocation.mounted.writeFile('/workspace/file', original);
-    const env = new EditExecutionEnv(invocation, [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
+    const env = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
     assert.equal((await env.readTextFile('/workspace/file', context)).ok, true, '64 decomposed mark units remain admissible');
     await env.cleanup(context);
     await invocation.mounted.writeFile('/workspace/file', original.replace('\n', '\u0301\n'));
-    const rejected = new EditExecutionEnv(invocation, [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
+    const rejected = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
     await assert.rejects(rejected.readTextFile('/workspace/file', context), /combining-mark run budget/);
     assert.equal(await invocation.mounted.readFile('/workspace/file'), original.replace('\n', '\u0301\n'));
     await rejected.cleanup(context);
@@ -201,13 +203,13 @@ test('normalization expansion is charged for each edit and summed across oldText
   await invocation.mounted.writeFile('/workspace/file', original);
   const replacement = { oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) };
   const limits = { ...EDIT_BUDGET, maxNormalizationExpansionUnits: 250 };
-  const admitted = new EditExecutionEnv(invocation, [replacement], limits);
+  const admitted = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement], limits);
   assert.equal((await admitted.readTextFile('/workspace/file', context)).ok, true);
   await admitted.cleanup(context);
-  const repeated = new EditExecutionEnv(invocation, [replacement, replacement], limits);
+  const repeated = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement, replacement], limits);
   await assert.rejects(repeated.readTextFile('/workspace/file', context), /normalization expansion work budget/);
   await repeated.cleanup(context);
-  const patterns = new EditExecutionEnv(invocation,
+  const patterns = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation),
     [{ oldText: '\ufdfa'.repeat(6), newText: 'one' }, { oldText: '\ufdfa'.repeat(6), newText: 'two' }],
     { ...limits, maxNormalizationExpansionUnits: 150 });
   // Missing-file resolution must not run before rejecting excessive aggregate arguments.
@@ -219,10 +221,10 @@ test('normalization expansion is charged for each edit and summed across oldText
 test('large expanding oldText is admitted cooperatively before any full-string normalization', async (t) => {
   const invocation = await workspace(t);
   const oldText = '\ufdfa'.repeat(Math.floor((EDIT_BUDGET.maxInputBytes - 1) / 3));
-  const env = new EditExecutionEnv(invocation, [{ oldText, newText: 'Y' }]);
+  const env = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText, newText: 'Y' }]);
   await assert.rejects(env.readTextFile('/workspace/missing', context), /normalization expansion work budget/);
   await env.cleanup(context);
-  const marks = new EditExecutionEnv(invocation, [{ oldText: `a${'\u0301'.repeat(65)}`, newText: 'Y' }]);
+  const marks = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText: `a${'\u0301'.repeat(65)}`, newText: 'Y' }]);
   await assert.rejects(marks.readTextFile('/workspace/missing', context), /combining-mark run budget/);
   await marks.cleanup(context);
 });
@@ -233,10 +235,10 @@ test('combining work joins decomposed scalar runs across scan boundaries exactly
   for (const marks of ['\u0301\u0301\u0316', '\u1e69\u0301', '\uff9e\uff9e\uff9e', '\u{1d165}\u0301']) {
     const original = `${'x'.repeat(1022)}a${marks}\n${'Z'.repeat(128)}`;
     await invocation.mounted.writeFile('/workspace/file', original);
-    const admitted = new EditExecutionEnv(invocation, [replacement], { ...EDIT_BUDGET, maxCombiningWork: 9 });
+    const admitted = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement], { ...EDIT_BUDGET, maxCombiningWork: 9 });
     assert.equal((await admitted.readTextFile('/workspace/file', context)).ok, true);
     await admitted.cleanup(context);
-    const rejected = new EditExecutionEnv(invocation, [replacement], { ...EDIT_BUDGET, maxCombiningWork: 8 });
+    const rejected = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement], { ...EDIT_BUDGET, maxCombiningWork: 8 });
     await assert.rejects(rejected.readTextFile('/workspace/file', context), /aggregate Unicode combining work budget/);
     await rejected.cleanup(context);
     assert.equal(await invocation.mounted.readFile('/workspace/file'), original);
@@ -249,13 +251,13 @@ test('combining work is weighted by edit count and summed across patterns', asyn
   await invocation.mounted.writeFile('/workspace/file', original);
   const replacement = { oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) };
   const limits = { ...EDIT_BUDGET, maxCombiningWork: 12 };
-  const admitted = new EditExecutionEnv(invocation, [replacement], limits);
+  const admitted = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement], limits);
   assert.equal((await admitted.readTextFile('/workspace/file', context)).ok, true);
   await admitted.cleanup(context);
-  const repeated = new EditExecutionEnv(invocation, [replacement, replacement], limits);
+  const repeated = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement, replacement], limits);
   await assert.rejects(repeated.readTextFile('/workspace/file', context), /aggregate Unicode combining work budget/);
   await repeated.cleanup(context);
-  const patterns = new EditExecutionEnv(invocation,
+  const patterns = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation),
     [{ oldText: 'a\u0301\u0316', newText: 'one' }, { oldText: 'b\u0301\u0316', newText: 'two' }],
     { ...limits, maxCombiningWork: 7 });
   await assert.rejects(patterns.readTextFile('/workspace/missing', context), /aggregate Unicode combining work budget/);
@@ -274,7 +276,7 @@ test('many legal combining runs reject before any full-string normalization and 
     maximumNormalizedLength = Math.max(maximumNormalizedLength, this.length);
     return normalize.call(this, form);
   };
-  const env = new EditExecutionEnv(invocation, [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
+  const env = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [{ oldText: 'Z'.repeat(128), newText: 'Y'.repeat(128) }]);
   try {
     assert.equal(maximumNormalizedLength, 0, 'constructor does not normalize');
     await assert.rejects(env.readTextFile('/workspace/file', context), /aggregate Unicode combining work budget/);
@@ -294,10 +296,10 @@ test('large multibyte batches also charge source UTF-8 bytes to matching work', 
   const limits = { ...EDIT_BUDGET, maxMatchUnits: 700 };
   assert.ok(original.normalize('NFKD').length * 2 < limits.maxMatchUnits);
   assert.ok(new TextEncoder().encode(original).length * 2 > limits.maxMatchUnits);
-  const admitted = new EditExecutionEnv(invocation, [replacement], limits);
+  const admitted = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement], limits);
   assert.equal((await admitted.readTextFile('/workspace/file', context)).ok, true);
   await admitted.cleanup(context);
-  const rejected = new EditExecutionEnv(invocation, [replacement, replacement], limits);
+  const rejected = new EditExecutionEnv(new WorkspaceExecutionEnv(invocation), [replacement, replacement], limits);
   await assert.rejects(rejected.readTextFile('/workspace/file', context), /normalization and matching work budget/);
   await rejected.cleanup(context);
   assert.equal(await invocation.mounted.readFile('/workspace/file'), original);

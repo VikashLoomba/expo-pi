@@ -53,7 +53,7 @@ The default remains iOS and Android only. The option applies to **web client** b
 
 Line numbers are preserved, so stack traces and source maps still point at Pi's code. Web bundles are unchanged by default. Server bundles (API routes, React Server) and every other package are always left unchanged. No files in `node_modules` are modified.
 
-With Pi 1.0.0, this means native bundles behave as follows:
+With Pi 1.0.4, this means native bundles behave as follows:
 
 | Pi feature | Behavior on iOS and Android |
 | --- | --- |
@@ -74,7 +74,7 @@ The wrapper handles Metro and secure random; persistence and OS lifecycle remain
 
 ## Compatibility
 
-**Pi:** the wrapper does not enforce a particular Pi version. The app pins **Pi AI / Pi Durable / Chord 1.0.0**; package tests additionally pin **Agent Core 1.0.0**. Installed JavaScript modules are scanned by the rewrite tests. Earlier Agent-based iOS and Android Hermes bundles built with Pi 1.0.0; current durable bundles and native runtime results are recorded separately. Earlier checks covered Pi AI 0.80.1 through 0.87.1 (15 releases), with native bundles built for 0.84.4 and 0.87.1. The transform follows Pi's published code; future releases still need separate API, bundle, and device-runtime validation.
+**Pi:** the wrapper does not enforce a particular Pi version. The app pins **Pi AI / Pi Durable / Chord 1.0.4**; package tests additionally pin **Agent Core 1.0.4**. All 37 compatibility tests pass against that aligned release, including the installed JavaScript module scan and Chord tracked-array descriptor regression; no additional transform was needed for the upgrade. Earlier Agent-based iOS and Android Hermes bundles built with Pi 1.0.0; current durable bundles and native runtime results are recorded separately. Earlier checks covered Pi AI 0.80.1 through 0.87.1 (15 releases), with native bundles built for 0.84.4 and 0.87.1. The transform follows Pi's published code; future releases still need separate API, bundle, and device-runtime validation.
 
 **Expo SDK:** `expo-crypto` is a native module whose version must match your Expo SDK. Like Expo's own packages, each `@automatalabs/expo-pi` release targets one SDK and depends on the matching `expo-crypto`. This release targets **Expo SDK 58**; its peer dependency on `expo` says so. Current bundle checks use SDK **58.0.3**, React Native **0.88.0-rc.3**, and `expo-crypto` **58.0.4**. See the demo's [verification record](../../docs/ios-compatibility.md) for device results. Android bundles build; an Android device runtime has not been verified yet.
 

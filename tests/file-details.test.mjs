@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 import { createNodeSqliteConnection } from './helpers/node-sqlite.mjs';
 
@@ -9,7 +10,11 @@ const { createExpoSqliteDatabase } = await import('../src/pi/storage/expo-sqlite
 const { WorkspaceFileSystem } = await import('../src/pi/workspace/filesystem/index.ts');
 const { BoundedSystemFs } = await import('../src/pi/workspace/bounded-system-fs.ts');
 const { createMountedFileSystem } = await import('../src/pi/workspace/mounted-filesystem.ts');
-const { finalizeEditResult, EDIT_PRESENTATION_LIMITS } = await import('../src/pi/workspace/file-details.ts');
+const { createWorkspaceArtifactWriter } = await import('../src/pi/execution/local-artifacts.ts');
+const { finalizeEditResult: finalize, EDIT_PRESENTATION_LIMITS } = await import('../src/pi/workspace/file-details.ts');
+
+const finalizeEditResult = (result, invocation) => finalize(result,
+  withAbortSignal(invocation.signal, BACKGROUND_CONTEXT), createWorkspaceArtifactWriter(invocation));
 
 async function workspace(t, limits) {
   const database = createExpoSqliteDatabase(createNodeSqliteConnection());
@@ -90,4 +95,14 @@ test('cancellation retains its identity instead of becoming a patch-saving warni
   const reason = new Error('cancelled by caller');
   invocation.controller.abort(reason);
   await assert.rejects(finalizeEditResult(result('preview', 'p'.repeat(20_000)), invocation), (cause) => cause === reason);
+});
+
+
+test('a plain environment without artifacts still returns an honest bounded successful edit', async () => {
+  const finalized = await finalize(result('large diff\n'.repeat(10_000), 'p'.repeat(20_000)), BACKGROUND_CONTEXT);
+  assert.equal(finalized.isError, undefined);
+  assert.equal(finalized.details.patchUnavailable, true);
+  assert.equal(finalized.details.patchPath, undefined);
+  assert.ok(Buffer.byteLength(finalized.details.diff) <= EDIT_PRESENTATION_LIMITS.previewBytes);
+  assert.match(finalized.diagnostics.find(({ code }) => code === 'edit_patch_unavailable').message, /no persistent artifact writer/);
 });

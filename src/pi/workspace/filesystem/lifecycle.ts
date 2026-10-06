@@ -12,17 +12,20 @@ export async function copyWorkspace(database: SqliteDatabase, source: string, de
     const workspace = await sql.get<{ root: number; bytes: number; entry_count: number }>('SELECT root,bytes,entry_count FROM workspaces WHERE id=?', source);
     if (!workspace) throw fsError('ENOENT', source);
     if (await sql.get('SELECT 1 FROM workspaces WHERE id=?', destination)) throw fsError('EEXIST', destination);
+    // Open unlinked files belong to their readers, not to a filesystem copy.
+    const liveNodes = await sql.all<{ id: number; size: number }>(
+      'SELECT id,size FROM inodes WHERE workspace_id=? AND (id=? OR EXISTS(SELECT 1 FROM entries WHERE entries.workspace_id=inodes.workspace_id AND entries.inode=inodes.id)) ORDER BY id', source, workspace.root);
+    const copyBytes = liveNodes.reduce((total, node) => total + node.size, 0);
     const limits = limitsFor(options);
     const usage = (await sql.get<{ bytes: number; count: number; entries: number }>('SELECT COALESCE(SUM(bytes),0) AS bytes,COUNT(*) AS count,COALESCE(SUM(entry_count+1),0) AS entries FROM workspaces'))!;
-    if (usage.count >= limits.maxWorkspaces || usage.bytes + workspace.bytes > limits.maxDatabaseBytes || usage.entries + workspace.entry_count + 1 > limits.maxDatabaseEntries) {
+    if (usage.count >= limits.maxWorkspaces || usage.bytes + copyBytes > limits.maxDatabaseBytes || usage.entries + workspace.entry_count + 1 > limits.maxDatabaseEntries) {
       throw fsError('ENOSPC', destination, 'database capacity exceeded');
     }
-    if (workspace.bytes > limits.maxTotalBytes || workspace.entry_count + 1 > limits.maxEntries) throw fsError('ENOSPC', destination);
-    const largest = await sql.get<{ size: number }>('SELECT MAX(size) AS size FROM inodes WHERE workspace_id=?', source);
-    if (largest && largest.size > limits.maxFileBytes) throw fsError('EFBIG', destination);
+    if (copyBytes > limits.maxTotalBytes || workspace.entry_count + 1 > limits.maxEntries) throw fsError('ENOSPC', destination);
+    if (liveNodes.some((node) => node.size > limits.maxFileBytes)) throw fsError('EFBIG', destination);
     await sql.run('INSERT INTO workspaces(id,created) VALUES (?,?)', destination, Date.now());
     const ids = new Map<number, number>();
-    for (const node of await sql.all<{ id: number }>('SELECT id FROM inodes WHERE workspace_id=? ORDER BY id', source)) {
+    for (const node of liveNodes) {
       await sql.run('INSERT INTO inodes(workspace_id,kind,mode,mtime,size,data,target) SELECT ?,kind,mode,mtime,size,data,target FROM inodes WHERE workspace_id=? AND id=?', destination, source, node.id);
       ids.set(node.id, (await sql.get<{ id: number }>('SELECT last_insert_rowid() AS id'))!.id);
     }

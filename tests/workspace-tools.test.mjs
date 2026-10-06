@@ -12,13 +12,19 @@ const { DurableChatService } = await import('../src/pi/chat-service.ts');
 const { WorkspaceDoc } = await import('../src/pi/workspace/document.ts');
 const { WorkspaceFileSystem } = await import('../src/pi/workspace/filesystem/index.ts');
 const { WorkspaceRuntime } = await import('../src/pi/workspace/runtime.ts');
-const { WorkspaceExecutionEnv } = await import('../src/pi/workspace/execution-env.ts');
+const { WorkspaceExecutionEnv, createWorkspaceExecutionEnv, acquireWorkspaceExecutionScope } = await import('../src/pi/workspace/execution-env.ts');
 const { createWorkspaceExtension } = await import('../src/pi/workspace/extension.ts');
 const { createBashEngine } = await import('../src/pi/bash/engine/index.ts');
 const context = BACKGROUND_CONTEXT;
 const answer = { chunks: ['Done.'] };
 const rows = (service, id) => service.getConversation(id).messages.filter((message) => message.tool);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const policy = { scope: acquireWorkspaceExecutionScope, promptFacts: () => [] };
+const wrappedTool = (extension, name) => {
+  let tool = extension.tools.find((candidate) => candidate.name === name);
+  for (const wrapper of extension.wraps ?? []) if (wrapper.tool === name) tool = wrapper.wrap(tool);
+  return tool;
+};
 const deferred = () => {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
@@ -34,7 +40,7 @@ async function run(service, id) {
 test('workspace registrations make reads safe and all mutations unsafe and sequential', async () => {
   const runtime = new WorkspaceRuntime(async () => { throw new Error('Registration must remain lazy'); });
   try {
-    const tools = createWorkspaceExtension(runtime).tools;
+    const tools = createWorkspaceExtension(policy).tools;
     assert.deepEqual(tools.map(({ name, replay, executionMode }) => ({ name, replay, executionMode })), [
       { name: 'bash', replay: 'unsafe', executionMode: 'sequential' },
       { name: 'read', replay: 'safe', executionMode: 'sequential' },
@@ -130,13 +136,20 @@ test('a competing bash runtime cannot interleave while the real SDK edit is betw
   const competing = new WorkspaceRuntime(file.openWorkspaceDatabase);
   await competing.run(workspace.id, undefined, ({ files }) => files.writeFile('/race', 'original'));
   const release = deferred();
-  const originalRead = WorkspaceExecutionEnv.prototype.readTextFile;
+  const originalOpen = WorkspaceExecutionEnv.prototype.openBinaryReader;
   let paused = false;
-  WorkspaceExecutionEnv.prototype.readTextFile = async function (...args) {
-    const result = await originalRead.apply(this, args);
-    if (!paused && args[0] === '/workspace/race') {
-      paused = true;
-      await release.promise;
+  WorkspaceExecutionEnv.prototype.openBinaryReader = async function (...args) {
+    const result = await originalOpen.apply(this, args);
+    if (result.ok && args[0] === '/workspace/race') {
+      const read = result.value.read.bind(result.value);
+      result.value.read = async (...readArgs) => {
+        const source = await read(...readArgs);
+        if (!paused && source.ok) {
+          paused = true;
+          await release.promise;
+        }
+        return source;
+      };
     }
     return result;
   };
@@ -159,7 +172,7 @@ test('a competing bash runtime cannot interleave while the real SDK edit is betw
     });
   } finally {
     release.resolve();
-    WorkspaceExecutionEnv.prototype.readTextFile = originalRead;
+    WorkspaceExecutionEnv.prototype.openBinaryReader = originalOpen;
     await shell?.catch(() => {});
     await competing.close();
   }
@@ -213,7 +226,7 @@ for (const name of ['write', 'edit']) test(`unsafe ${name} is not replayed after
 test('the wrapper preserves caller cancellation after the SDK post-write check', async (t) => {
   const file = await integrationDatabase(t, DurableChatService);
   const runtime = new WorkspaceRuntime(file.openWorkspaceDatabase);
-  const tool = createWorkspaceExtension(runtime).tools.find(({ name }) => name === 'write');
+  const tool = wrappedTool(createWorkspaceExtension(policy), 'write');
   const controller = new AbortController();
   const reason = new Error('cancel after committed write');
   const originalWrite = WorkspaceExecutionEnv.prototype.writeFile;
@@ -224,7 +237,7 @@ test('the wrapper preserves caller cancellation after the SDK post-write check',
   };
   try {
     // Only the already-committed identity is supplied here; filesystem and SDK execution are real.
-    const api = { conversationId: 1, commit: async () => ({ id: 'post-write-cancel' }) };
+    const api = { conversationId: 1, outputWindow: undefined, env: createWorkspaceExecutionEnv(runtime, 'post-write-cancel', '/workspace') };
     await assert.rejects(tool.execute({ path: 'saved', content: 'committed' }, api,
       withAbortSignal(controller.signal, context)), (error) => error === reason);
     await runtime.run('post-write-cancel', undefined, async ({ files }) => {

@@ -1,10 +1,9 @@
 import type { Context } from '@earendil-works/chord';
-import type { FileError, Result } from '@earendil-works/pi-durable/env';
+import { withoutAbortSignal } from '@earendil-works/chord/context';
+import { FileError, err, ok, type ExecutionEnv, type Result } from '@earendil-works/pi-durable/env';
 import { diffLines, type Change } from 'diff';
 import { CooperativeWork, textChunkEnd } from './cooperative-work';
-import { WorkspaceExecutionEnv } from './execution-env';
-import { DEFAULT_WORKSPACE_LIMITS } from './filesystem/index';
-import type { WorkspaceInvocation } from './runtime';
+import { DelegatingExecutionEnv } from '../execution/delegating-env';
 
 export type EditReplacement = { oldText: string; newText: string };
 export type EditBudget = {
@@ -17,7 +16,7 @@ export type EditBudget = {
 
 /** Work ceilings, separate from storage limits. Native Hermes probes must validate these ceilings. */
 export const EDIT_BUDGET: Readonly<EditBudget> = Object.freeze({
-  maxEdits: 32, maxInputBytes: 1024 * 1024, maxFileBytes: DEFAULT_WORKSPACE_LIMITS.maxFileBytes,
+  maxEdits: 32, maxInputBytes: 1024 * 1024, maxFileBytes: 8 * 1024 * 1024,
   maxLines: 131_072, maxNormalizedUnits: 8 * 1024 * 1024,
   maxNormalizationExpansionUnits: 1024 * 1024, maxCombiningRun: 64,
   maxCombiningWork: 32 * 1024 * 1024,
@@ -28,6 +27,8 @@ export const EDIT_BUDGET: Readonly<EditBudget> = Object.freeze({
 });
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const SOURCE_CHUNK_BYTES = 64 * 1024;
 const normalizeLF = (text: string) => text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 const recovery = 'Use smaller targeted edits, or use write to replace the complete file.';
 
@@ -39,6 +40,28 @@ export class EditBudgetError extends Error {
 function reject(message: string): never { throw new EditBudgetError(`${message} ${recovery}`); }
 
 function byteLength(text: string) { return encoder.encode(text).length; }
+
+/** Keep only an unfinished UTF-8 scalar for the next bounded read. Invalid bytes stay for validation. */
+function utf8ChunkEnd(bytes: Uint8Array): number {
+  let start = bytes.length - 1;
+  while (start > 0 && bytes.length - start < 4 && (bytes[start] & 0xc0) === 0x80) start--;
+  const lead = bytes[start];
+  const width = lead >= 0xc2 && lead <= 0xdf ? 2 : lead >= 0xe0 && lead <= 0xef ? 3
+    : lead >= 0xf0 && lead <= 0xf4 ? 4 : 0;
+  return width > bytes.length - start ? start : bytes.length;
+}
+
+/** Round-trip validation works on Hermes without relying on TextDecoder's fatal/stream options. */
+function strictTextChunk(bytes: Uint8Array): string | undefined {
+  let prefix = 0;
+  // Default decoders remove a leading BOM. Preserve every mark, including at a chunk boundary.
+  while (bytes[prefix] === 0xef && bytes[prefix + 1] === 0xbb && bytes[prefix + 2] === 0xbf) prefix += 3;
+  const body = bytes.subarray(prefix);
+  const text = decoder.decode(body);
+  const encoded = encoder.encode(text);
+  if (encoded.length !== body.length || encoded.some((byte, index) => byte !== body[index])) return undefined;
+  return '\ufeff'.repeat(prefix / 3) + text;
+}
 
 async function scannedByteLength(text: string, work: CooperativeWork): Promise<number> {
   let bytes = 0;
@@ -252,15 +275,15 @@ async function detailsUpperBound(changes: readonly Change[], path: string, work:
 type Source = { path: string; before: string; hadBom: boolean; lines: number };
 
 /** Pi's edit factory remains responsible for matching; this class only admits bounded work. */
-export class EditExecutionEnv extends WorkspaceExecutionEnv {
+export class EditExecutionEnv extends DelegatingExecutionEnv {
   private source?: Source;
 
   constructor(
-    invocation: Pick<WorkspaceInvocation, 'mounted' | 'signal'>,
+    environment: ExecutionEnv,
     private readonly edits: readonly EditReplacement[],
     private readonly budget: Readonly<EditBudget> = EDIT_BUDGET,
   ) {
-    super(invocation);
+    super(environment);
     if (edits.length === 0 || edits.length > budget.maxEdits) {
       reject(`An edit call must contain between 1 and ${budget.maxEdits} replacements.`);
     }
@@ -272,8 +295,57 @@ export class EditExecutionEnv extends WorkspaceExecutionEnv {
     }
   }
 
+  private closed = false;
+
+  private active(context: Context, path?: string): void {
+    context.abortSignal?.throwIfAborted();
+    if (this.closed) throw new FileError('aborted', 'Edit policy is closed.', path);
+  }
+
+  // The scope owns backend cleanup. Closing this policy never kills another consumer.
+  override async cleanup(_context: Context): Promise<void> { this.closed = true; }
+
   private work(context: Context, path: string): CooperativeWork {
     return new CooperativeWork(() => this.active(context, path));
+  }
+
+  /** Read the opened file itself, never a whole-file backend text method or a second pathname lookup. */
+  private async readSource(path: string, context: Context, work: CooperativeWork): Promise<Result<{ text: string; bytes: number }, FileError>> {
+    const opened = await this.environment.openBinaryReader(path, undefined, context);
+    if (!opened.ok) { this.active(context, path); return opened; }
+    try {
+      this.active(context, path);
+      const info = await opened.value.info(context);
+      this.active(context, path);
+      if (!info.ok) return info;
+      if (info.value.size > this.budget.maxFileBytes) reject('This file exceeds the edit file-size limit.');
+      const chunks: string[] = [];
+      let bytes = 0;
+      let pending = new Uint8Array();
+      while (true) {
+        await work.checkpoint();
+        // The single extra byte detects growth past the ceiling without receiving the enlarged file.
+        const length = Math.min(SOURCE_CHUNK_BYTES, this.budget.maxFileBytes - bytes + 1);
+        const part = await opened.value.read(bytes, length, context);
+        this.active(context, path);
+        if (!part.ok) return part;
+        if (part.value.length > length) return err(new FileError('invalid', 'Binary reader exceeded its requested byte range.', path));
+        bytes += part.value.length;
+        if (bytes > this.budget.maxFileBytes) reject('This file exceeds the edit file-size limit.');
+        const complete = part.value.length < length;
+        const joined = new Uint8Array(pending.length + part.value.length);
+        joined.set(pending);
+        joined.set(part.value, pending.length);
+        const end = complete ? joined.length : utf8ChunkEnd(joined);
+        const text = strictTextChunk(joined.subarray(0, end));
+        if (text === undefined) return err(new FileError('invalid', 'File is not valid UTF-8 text.', path));
+        chunks.push(text);
+        pending = joined.slice(end);
+        if (complete) return ok({ text: chunks.join(''), bytes });
+      }
+    } finally {
+      await opened.value.close(withoutAbortSignal(context));
+    }
   }
 
   override async readTextFile(path: string, context: Context): Promise<Result<string, FileError>> {
@@ -296,15 +368,12 @@ export class EditExecutionEnv extends WorkspaceExecutionEnv {
       patternCombiningWork += measured.combiningWork;
       rawPatterns.push(raw);
     }
-    const result = await super.readTextFile(path, context);
+    this.active(context, path);
+    const result = await this.readSource(path, context, work);
+    this.active(context, path);
     if (!result.ok) return result;
     if (this.source) reject('One edit invocation can read only one original file.');
-    const text = result.value;
-    if (text.length > this.budget.maxFileBytes) reject('This file exceeds the workspace file-size limit.');
-    const fileBytes = await scannedByteLength(text, work);
-    if (fileBytes > this.budget.maxFileBytes) {
-      reject('This file exceeds the workspace file-size limit.');
-    }
+    const { text, bytes: fileBytes } = result.value;
     // Repeated SDK normalization also costs work on multibyte text whose UTF-16
     // length is much smaller than its UTF-8 size. Charge the larger quantity.
     if (fileBytes * this.edits.length > this.budget.maxMatchUnits) {
@@ -334,7 +403,7 @@ export class EditExecutionEnv extends WorkspaceExecutionEnv {
     await admitSearchWork(before, patterns, this.budget, work);
     await work.yield();
     this.source = { path, before, hadBom, lines };
-    return result;
+    return ok(text);
   }
 
   override async writeFile(path: string, content: string | Uint8Array, context: Context): Promise<Result<void, FileError>> {
@@ -344,7 +413,7 @@ export class EditExecutionEnv extends WorkspaceExecutionEnv {
     }
     const work = this.work(context, path);
     if (content.length > this.budget.maxFileBytes || await scannedByteLength(content, work) > this.budget.maxFileBytes) {
-      reject('The edited file would exceed the workspace file-size limit.');
+      reject('The edited file would exceed the edit file-size limit.');
     }
     if (source.hadBom && !content.startsWith('\ufeff')) reject('The edit implementation did not preserve the original BOM.');
     // Remove exactly the BOM Pi restored. A BOM inserted by newText must remain,

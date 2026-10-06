@@ -3,15 +3,15 @@ import { Type, uuidv7, type Models } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, InboxDoc, LiveDoc, configure, createRegistry, defineDoc, defineExtension, defineTool, section,
   type AgentState, type ConversationId, type Cursor, type EntryRecord, type LiveState,
-  type SettledSubmissionRecord, type Storage, type SubmissionId, type SubmissionRecord,
+  type SettledSubmissionRecord, type Storage, type SubmissionId, type SubmissionRecord, type Tx,
 } from '@earendil-works/pi-durable';
 import type { SqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite';
 
 import type { ChatConversation, ChatSummary } from '../chat/types';
 import { openWorkspaceDatabase } from './workspace/database';
 import { createWorkspaceExtension } from './workspace/extension';
-import { migrateWorkspaceCapabilities, WORKSPACE_CAPABILITY_REVISION, WorkspaceDoc } from './workspace/document';
-import { WorkspaceRuntime } from './workspace/runtime';
+import { ensureWorkspaceDoc } from './workspace/document';
+import { createLocalExecution, type ExecutionComposition } from './execution/composition';
 import { CODEX_PROVIDER_ID, MODEL_ID } from './codex-auth/identity';
 import { assertModelSettings, buildModelCatalog, getDefaultModelSettings, type ChatModelSettings } from './model-catalog';
 import { createNativeWebSearchBridge, NativeLiveDoc, NativeResponsesDoc, type NativeLiveState, type NativeResponsesState } from './native-web-search/durable';
@@ -59,7 +59,7 @@ export class DurableChatService {
   private closePromise?: Promise<void>;
   private unsubscribeCommits = () => {};
   private notifyScheduled = false;
-  private commands: Promise<unknown> = Promise.resolve();
+  private readonly commands = new Map<string, Promise<unknown>>();
   private readonly hydratingForks = new Set<string>();
 
   private constructor(
@@ -67,16 +67,20 @@ export class DurableChatService {
     private readonly storage: Storage,
     private readonly models: Models,
     private readonly canRun: () => boolean,
-    private readonly workspaces: WorkspaceRuntime,
+    private readonly execution: ExecutionComposition,
   ) {}
 
   static async open(options: {
     storage: Storage; models: Models; platform: string; now?: () => number; canRun?: () => boolean;
     openWorkspaceDatabase?: () => Promise<SqliteDatabase>;
+    /** One authoritative resolver and resource owner, shared by tools, prompts and tasks. */
+    execution?: (local: ExecutionComposition) => ExecutionComposition;
   }): Promise<DurableChatService> {
     const registry = createRegistry();
-    const workspaces = new WorkspaceRuntime(options.openWorkspaceDatabase ?? openWorkspaceDatabase);
-    registry.install(createWorkspaceExtension(workspaces));
+    const local = createLocalExecution(options.openWorkspaceDatabase ?? openWorkspaceDatabase);
+    const execution = options.execution?.(local) ?? local;
+    registry.install(createWorkspaceExtension(execution.toolPolicy));
+    for (const extension of execution.extensions ?? []) registry.install(extension);
     const nativeSearch = createNativeWebSearchBridge(options.models);
     registry.install(nativeSearch.extension);
     registry.install(defineExtension({
@@ -95,7 +99,7 @@ export class DurableChatService {
     const now = options.now ?? Date.now;
     let service: DurableChatService | undefined;
     const harness = await Harness.open(options.storage, {
-      models: nativeSearch.models, registry, now,
+      models: nativeSearch.models, registry, now, env: execution.resolve,
       settings: {
         stream: { transport: 'sse', maxRetries: 0, timeoutMs: 60_000 },
         retry: { enabled: false, maxRetries: 0 },
@@ -105,12 +109,18 @@ export class DurableChatService {
       async conversationCreated(tx, conversation) {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
         metadata.createdAt = now();
-        await migrateWorkspaceCapabilities(tx, conversation.id, conversation.parent ? 'fork' : 'new');
+        await ensureWorkspaceDoc(tx, conversation.id, conversation.parent ? 'fork' : 'new');
+        await execution.conversationCreated?.(tx, conversation);
       },
       onReport: (error) => service?.report(error),
-    }, context);
+    }, context).catch(async (error) => {
+      execution.stop();
+      try { await execution.close(); }
+      catch (closeError) { throw new AggregateError([error, closeError], 'Execution resources could not close after opening failed.'); }
+      throw error;
+    });
     nativeSearch.attach(harness);
-    service = new DurableChatService(harness, options.storage, options.models, options.canRun ?? (() => true), workspaces);
+    service = new DurableChatService(harness, options.storage, options.models, options.canRun ?? (() => true), execution);
     try { await service.initialize(); }
     catch (error) { await service.close(); throw error; }
     return service;
@@ -121,19 +131,11 @@ export class DurableChatService {
     do {
       const page = await this.storage.scanConversations({}, 100, cursor, context);
       for (const record of page.items) {
-        if (record.owner) continue;
         const metadata = await this.harness.snapshot(ChatMetadataDoc, record.id, context);
         if (!metadata) continue;
         await migrateSearchObservations(this.harness, record.id, context);
         const agent = await this.harness.snapshot(AgentDoc, record.id, context);
-        const workspace = await this.harness.snapshot(WorkspaceDoc, record.id, context);
-        if (!workspace?.id || workspace.capabilityRevision < WORKSPACE_CAPABILITY_REVISION) {
-          // Upgrade existing conversations while dispatch is still paused. Never copy a
-          // parent's workspace ID: inherited transcript entries are not file snapshots.
-          await this.harness.commit(async (tx) => {
-            await migrateWorkspaceCapabilities(tx, record.id, record.parent ? 'fork' : 'existing');
-          }, context);
-        }
+        if (record.owner) continue;
         const native = await this.harness.snapshot(NativeResponsesDoc, record.id, context);
         const nativeLive = await this.harness.snapshot(NativeLiveDoc, record.id, context);
         const cached: CachedChat = { revision: 0, metadata: { ...metadata }, settings: settingsOf(agent), entries: new Map(), live: {},
@@ -318,9 +320,13 @@ export class DurableChatService {
 
   private report(error: unknown) { this.snapshot = { ...this.snapshot, error: errorText(error) }; this.notify(); }
   private assertOpen() { if (this.closed) throw new Error('Chat storage is closed.'); }
-  private serializeCommand<T>(action: () => Promise<T>): Promise<T> {
-    const command = this.commands.then(action);
-    this.commands = command.catch(() => {});
+  private serializeCommand<T>(id: string, action: () => Promise<T>): Promise<T> {
+    // A cancelled environment may take time to drain. Its conversation retains
+    // ordering without holding admission or cancellation in unrelated chats.
+    const command = (this.commands.get(id) ?? Promise.resolve()).catch(() => {}).then(action);
+    this.commands.set(id, command);
+    const finish = () => { if (this.commands.get(id) === command) this.commands.delete(id); };
+    command.then(finish, finish);
     return command;
   }
   private async requireAuth(id: string) {
@@ -376,7 +382,7 @@ export class DurableChatService {
   }
   updateSettings(id: string, settings: ChatModelSettings): Promise<void> {
     const selected = { model: { ...settings.model }, thinkingLevel: settings.thinkingLevel };
-    return this.serializeCommand(async () => {
+    return this.serializeCommand(id, async () => {
       assertModelSettings(this.getCatalog(), selected);
       const conversation = await this.conversation(id);
       await conversation.commit(async (tx) => {
@@ -395,6 +401,32 @@ export class DurableChatService {
       }, context);
     });
   }
+  /** Commit cwd and application-owned selection state together after old work settles. */
+  configureExecution(id: string, change: { cwd?: string | null },
+    updateState?: (tx: Tx, id: ConversationId) => Promise<void>): Promise<void> {
+    return this.serializeCommand(id, async () => {
+      const conversation = await this.conversation(id);
+      await conversation.commit(async (tx) => {
+        // Any durable task can call runtime.env(), including custom/background
+        // tasks that never appear in LiveDoc. Abort intent is not settled work.
+        // Read on this same transaction line before changing selection or cwd,
+        // so a task admitted concurrently cannot slip through an earlier check.
+        for (const status of ['pending', 'running', 'waiting', 'completing'] as const) {
+          if ((await tx.scanTasks({ conversationId: conversation.id, status }, 1)).items.length) {
+            throw new Error('Wait for execution to stop before changing its environment or working directory.');
+          }
+        }
+        const live = await tx.doc(LiveDoc, conversation.id);
+        const inbox = await tx.doc(InboxDoc, conversation.id);
+        if (live.run || live.compactions?.length || inbox.items.some((item) => item.mode !== 'write')) {
+          throw new Error('Wait for execution to stop before changing its environment or working directory.');
+        }
+        if ((await tx.doc(ChatMetadataDoc, conversation.id)).archived) throw new Error('This chat is archived.');
+        await updateState?.(tx, conversation.id);
+        await configure(tx, conversation.id, change);
+      }, context);
+    });
+  }
   async renameChat(id: string, title: string) {
     const value = title.trim();
     if (!value) throw new Error('Enter a conversation name.');
@@ -408,7 +440,7 @@ export class DurableChatService {
     await conversation.commit(async (tx) => { (await tx.doc(ChatMetadataDoc, conversation.id)).archived = true; }, context);
   }
   send(id: string, text: string, requestId = uuidv7()): Promise<string> {
-    return this.serializeCommand(async () => {
+    return this.serializeCommand(id, async () => {
       if (!text.trim()) throw new Error('Enter a message.');
       await this.requireAuth(id);
       const conversation = await this.conversation(id);
@@ -440,7 +472,7 @@ export class DurableChatService {
     this.enableScheduling();
   }
   cancel(id: string): Promise<void> {
-    return this.serializeCommand(async () => {
+    return this.serializeCommand(id, async () => {
       const conversation = await this.conversation(id);
       if (this.scheduling) {
         await conversation.abort(context);
@@ -460,9 +492,9 @@ export class DurableChatService {
     this.closed = true;
     this.unsubscribeCommits();
     this.listeners.clear();
-    this.workspaces.stop();
+    this.execution.stop();
     this.closePromise = (async () => {
-      const results = await Promise.allSettled([this.harness.close(context), this.workspaces.close()]);
+      const results = await Promise.allSettled([this.harness.close(context), this.execution.close()]);
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Chat storage could not close cleanly.');
     })();

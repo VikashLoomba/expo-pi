@@ -1,4 +1,4 @@
-import { InMemoryFs } from 'just-bash/browser';
+import { InMemoryFs, type FsStat } from 'just-bash/browser';
 
 export const SYSTEM_FS_LIMITS = Object.freeze({
   maxTotalBytes: 4 * 1024 * 1024,
@@ -16,6 +16,37 @@ type SystemLimits = typeof SYSTEM_FS_LIMITS;
  */
 export class BoundedSystemFs extends InMemoryFs {
   private readonly limits: SystemLimits;
+  private readonly openHandles = new Set<{ path: string; bytes?: Uint8Array; stat?: FsStat }>();
+
+  /** Live opened-file handles, updated by rename and retained independently after unlink. */
+  async openReadHandle(path: string) {
+    const record: { path: string; bytes?: Uint8Array; stat?: FsStat } = { path: await this.realpath(path) };
+    this.openHandles.add(record);
+    return {
+      info: () => record.stat ? Promise.resolve(record.stat) : this.stat(record.path),
+      read: async (offset: number, length: number) => (record.bytes ?? await this.readFileBuffer(record.path)).slice(offset, offset + length),
+      close: async () => { this.openHandles.delete(record); record.bytes = undefined; record.stat = undefined; },
+    };
+  }
+
+  private async retainRemoved(path: string): Promise<() => void> {
+    const records = [...this.openHandles].filter((record) => !record.bytes && (record.path === path || record.path.startsWith(`${path}/`)));
+    const snapshots = new Map<string, { bytes: Uint8Array; stat: FsStat }>();
+    for (const record of records) {
+      if (!snapshots.has(record.path)) snapshots.set(record.path, { bytes: await this.readFileBuffer(record.path), stat: await this.stat(record.path) });
+    }
+    const retained = new Set([...this.openHandles].flatMap((record) => record.bytes ? [record.bytes] : []));
+    const bytes = [...retained].reduce((sum, bytes) => sum + bytes.length, 0)
+      + [...snapshots.values()].reduce((sum, snapshot) => sum + snapshot.bytes.length, 0);
+    if (bytes > this.limits.maxTotalBytes) throw Object.assign(new Error('ENOSPC: open temporary reader retention limit exceeded'), { code: 'ENOSPC' });
+    return () => { for (const record of records) Object.assign(record, snapshots.get(record.path)); };
+  }
+
+  override async rm(...args: Parameters<InMemoryFs['rm']>): Promise<void> {
+    const retained = await this.retainRemoved(this.path(args[0]));
+    await super.rm(...args);
+    retained();
+  }
 
   constructor(limits: Partial<SystemLimits> = {}) {
     const resolved = { ...SYSTEM_FS_LIMITS, ...limits };
@@ -100,7 +131,12 @@ export class BoundedSystemFs extends InMemoryFs {
     // Upstream creates destination directories before removing source entries.
     // Count both trees so the transient namespace is bounded as well.
     this.admitTree(args[0], args[1]);
-    return super.mv(...args);
+    const from = this.path(args[0]), to = this.path(args[1]);
+    const moving = [...this.openHandles].filter((record) => !record.bytes && (record.path === from || record.path.startsWith(`${from}/`)));
+    const retained = from !== to ? await this.retainRemoved(to) : undefined;
+    await super.mv(...args);
+    retained?.();
+    for (const record of moving) record.path = `${to}${record.path.slice(from.length)}`;
   }
 
   override async symlink(...args: Parameters<InMemoryFs['symlink']>): Promise<void> {

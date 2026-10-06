@@ -1,7 +1,6 @@
-import type { JsonValue } from '@earendil-works/chord';
-import { uuidv7 } from '@earendil-works/pi-ai';
+import type { Context, JsonValue } from '@earendil-works/chord';
 import type { ToolDiagnostic, ToolExecutionResult } from '@earendil-works/pi-durable';
-import type { WorkspaceInvocation } from './runtime';
+import type { ArtifactWriter } from '../execution/types';
 
 export const EDIT_PRESENTATION_LIMITS = Object.freeze({
   contentBytes: 32 * 1024, previewBytes: 24 * 1024, previewLines: 200,
@@ -49,46 +48,18 @@ function editDetails(value: JsonValue | undefined): { diff: string; patch: strin
       ? { firstChangedLine: value.firstChangedLine } : {}) };
 }
 
-async function savePatch(patch: string, invocation: Pick<WorkspaceInvocation, 'mounted' | 'signal'>): Promise<string> {
-  const { mounted, signal } = invocation;
-  const directory = '/workspace/.edit-output';
-  signal.throwIfAborted();
-  try { await mounted.mkdir(directory); }
-  catch (cause) {
-    signal.throwIfAborted();
-    const stat = await mounted.lstat(directory);
-    if (!stat.isDirectory || stat.isSymbolicLink) throw cause;
-  }
-  // The workspace queue prevents concurrent guest mutations. lstat prevents a
-  // guest-created output-directory symlink from redirecting persistent artifacts.
-  const directoryStat = await mounted.lstat(directory);
-  if (!directoryStat.isDirectory || directoryStat.isSymbolicLink) throw new Error('Patch output directory must be a real directory.');
-  if (!mounted.createExclusive) throw new Error('The workspace cannot create patch files exclusively.');
-  const path = `${directory}/${uuidv7()}.patch`;
-  await mounted.createExclusive(path, { mode: 0o600 });
-  try {
-    signal.throwIfAborted();
-    await mounted.writeFile(path, patch);
-    signal.throwIfAborted();
-    return path;
-  } catch (cause) {
-    // Remove an admitted empty artifact after quota errors, but never write after cancellation.
-    if (!signal.aborted) await mounted.rm(path).catch(() => {});
-    throw cause;
-  }
-}
-
 /**
  * Finalize edit results only. Read's selected content and continuation diagnostics
  * must remain untouched: clipping it here would make its next offset skip text.
  */
 export async function finalizeEditResult(
   result: ToolExecutionResult,
-  invocation: Pick<WorkspaceInvocation, 'mounted' | 'signal'>,
+  context: Context,
+  artifacts?: ArtifactWriter,
 ): Promise<ToolExecutionResult> {
   const original = editDetails(result.details);
   if (!original) return result;
-  invocation.signal.throwIfAborted();
+  context.abortSignal?.throwIfAborted();
   const diff = preview(original.diff);
   const details: EditPresentationDetails = {
     diff, diffTruncated: diff !== original.diff, patchBytes: size(original.patch),
@@ -100,10 +71,11 @@ export async function finalizeEditResult(
     details.patch = original.patch;
   } else {
     try {
-      details.patchPath = await savePatch(original.patch, invocation);
+      if (!artifacts) throw new Error('This environment has no persistent artifact writer.');
+      details.patchPath = await artifacts.write('edit-patch', original.patch, context);
       diagnostics.push({ severity: 'info', code: 'edit_patch_saved', message: `Full edit patch: ${details.patchPath}` });
     } catch (cause) {
-      invocation.signal.throwIfAborted();
+      context.abortSignal?.throwIfAborted();
       details.patchUnavailable = true;
       const message = excerpt(cause instanceof Error ? cause.message : String(cause), 1024);
       diagnostics.push({ severity: 'warn', code: 'edit_patch_unavailable',

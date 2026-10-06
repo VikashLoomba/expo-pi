@@ -24,7 +24,7 @@ export const BASH_CAPABILITY_DESCRIPTION =
   'checksums, gzip/gunzip/zcat and rg (including gzip search). ' +
   'No native programs, network commands, JS, Python, sqlite3, tar, yq, xan, file, or html-to-markdown. ' +
   '/workspace is persistent; system directories and /tmp are recreated for every call (4 MiB, 1024 entries). ' +
-  'Each call starts in /workspace with fresh shell variables/functions. ' +
+  'Each call starts in the selected conversation cwd (default /workspace) with fresh shell variables/functions. ' +
   'Commands have a requested cooperative deadline of at most 30 seconds, a 64 KiB source limit and 4 MiB output limit. ' +
   'Compression accepts at most 4 MiB input/output and 128 gzip members. ' +
   `Available commands: ${BASH_CAPABILITIES.join(', ')}.`;

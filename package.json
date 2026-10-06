@@ -4,9 +4,9 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@automatalabs/expo-pi": "workspace:*",
-    "@earendil-works/chord": "1.0.0",
-    "@earendil-works/pi-ai": "1.0.0",
-    "@earendil-works/pi-durable": "1.0.0",
+    "@earendil-works/chord": "1.0.4",
+    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-durable": "1.0.4",
     "@expo/dom-webview": "~58.0.2",
     "@expo/metro-runtime": "~58.0.11",
     "@expo/ui": "~58.0.12",

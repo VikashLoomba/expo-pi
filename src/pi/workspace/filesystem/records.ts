@@ -1,6 +1,7 @@
 import { entryKey, fsError } from './types';
 import type { Entry, Inode, Kind, Operation } from './types';
 import { inode } from './paths';
+import { retainedInodeCount } from './opened-inodes';
 
 export async function capacity(op: Operation, bytes = 0, entries = 0, inodes = 0): Promise<void> {
   const usage = (await op.sql.get<{ bytes: number; entry_count: number; inode_count: number }>(
@@ -42,8 +43,10 @@ export async function addEntry(op: Operation, parent: number, name: string, id: 
 }
 export async function removeEntry(op: Operation, parent: number, name: string, id: number): Promise<void> {
   await op.sql.run('DELETE FROM entries WHERE workspace_id=? AND parent=? AND name=?', op.workspace, parent, name);
-  await op.sql.run('DELETE FROM inodes WHERE workspace_id=? AND id=? AND id<>? AND NOT EXISTS(SELECT 1 FROM entries WHERE workspace_id=? AND inode=?)',
-    op.workspace, id, op.root, op.workspace, id);
+  if (!retainedInodeCount(op.workspace, id)) {
+    await op.sql.run('DELETE FROM inodes WHERE workspace_id=? AND id=? AND id<>? AND NOT EXISTS(SELECT 1 FROM entries WHERE workspace_id=? AND inode=?)',
+      op.workspace, id, op.root, op.workspace, id);
+  }
   op.changes.push((cache) => cache.entries.delete(entryKey(parent, name)));
   await touchParent(op, parent);
 }

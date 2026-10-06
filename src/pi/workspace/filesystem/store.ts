@@ -1,5 +1,6 @@
 import type { SqliteDatabase, SqliteExecutor, SqliteValue } from '@earendil-works/pi-durable/storage/sqlite';
 import { initialize } from './schema';
+import { retainedInodeCount } from './opened-inodes';
 import { abortIfNeeded, entryKey, fsError, limitsFor } from './types';
 import type { Entry, NamespaceCache, Operation, WorkspaceOptions } from './types';
 
@@ -46,6 +47,13 @@ export class Store {
         const root = (await sql.get<{ id: number }>('SELECT last_insert_rowid() AS id'))!.id;
         await sql.run('UPDATE workspaces SET root=? WHERE id=?', root, workspace);
         row = { root };
+      }
+      // A process crash releases open handles. Reclaim orphan file rows lazily,
+      // while preserving handles owned by another live runtime/connection.
+      const orphans = await sql.all<{ id: number }>(
+        'SELECT id FROM inodes WHERE workspace_id=? AND id<>? AND NOT EXISTS(SELECT 1 FROM entries WHERE entries.workspace_id=inodes.workspace_id AND entries.inode=inodes.id)', workspace, row.root);
+      for (const orphan of orphans) {
+        if (!retainedInodeCount(workspace, orphan.id)) await sql.run('DELETE FROM inodes WHERE workspace_id=? AND id=?', workspace, orphan.id);
       }
       const entries = await sql.all<Entry>('SELECT parent,name,inode FROM entries WHERE workspace_id=?', workspace);
       if (entries.length + 1 > limitsFor(options).maxEntries) throw fsError('ENOSPC', '/', 'namespace exceeds configured limit');

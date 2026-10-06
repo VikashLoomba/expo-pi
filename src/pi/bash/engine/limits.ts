@@ -10,8 +10,9 @@ export const BASH_EXECUTION_LIMITS = Object.freeze({
   maxSourceBytes: 64 * 1024,
   maxExecDepth: 16,
   maxCallDepth: 32,
-  maxCommandCount: 2_000,
-  maxLoopIterations: 2_000,
+  // A 2000-line POSIX loop executes multiple commands per iteration.
+  maxCommandCount: 10_000,
+  maxLoopIterations: 4_096,
   maxAwkIterations: 10_000,
   maxSedIterations: 10_000,
   maxJqIterations: 10_000,

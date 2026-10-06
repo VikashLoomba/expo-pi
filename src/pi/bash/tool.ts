@@ -1,38 +1,43 @@
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-durable';
-import { ensureWorkspaceDoc } from '../workspace/document';
-import type { WorkspaceRuntime } from '../workspace/runtime';
-import { createBashEngine } from './engine/index';
-import { withBashDeadline } from './execution';
-import { presentOutput, TOOL_OUTPUT_BYTES } from './output';
+import type { SharedToolPolicy } from '../execution/types';
+import { BashOutput, presentOutput, TOOL_OUTPUT_BYTES } from './output';
 
-export function createBashTool(workspaces: WorkspaceRuntime) {
+/**
+ * Pi's stock factory combines streams, keeps the tail, and advertises temporary spill files.
+ * This thin public adapter preserves historic split-stream heads, exit status and durable artifacts.
+ */
+export function createBashTool(policy: Pick<SharedToolPolicy, 'artifacts'> = {}) {
   return defineTool({
     name: 'bash',
-    description: 'Execute a bounded local bash script in this chat’s persistent /workspace. Returns buffered stdout, stderr and exit status. Optional timeout is in seconds (default 10, maximum 30). No external binaries, JavaScript/Python runtimes or networking.',
+    description: 'Execute a bash script in the selected execution environment and its current directory. Returns bounded stdout, stderr and exit status. Optional timeout is in seconds (default 10, maximum 30). Available programs and filesystem behavior are described in the execution context.',
     parameters: Type.Object({ command: Type.String({ maxLength: 65536 }), timeout: Type.Optional(Type.Number({ minimum: 0.1, maximum: 30 })) }),
     replay: 'unsafe', executionMode: 'sequential',
     outputLimits: { maxBytes: TOOL_OUTPUT_BYTES + 4096, maxLines: 2000 },
     async execute({ command, timeout = 10 }, api, context) {
       context.abortSignal?.throwIfAborted();
-      const workspace = await api.commit((tx) => ensureWorkspaceDoc(tx, api.conversationId), context);
-      const timeoutMs = Math.ceil(timeout * 1000);
-      return workspaces.run(workspace.id, context.abortSignal, (invocation) =>
-        withBashDeadline(invocation, timeoutMs, async ({ files, mounted, signal, finishExecution }) => {
-          const bash = createBashEngine(mounted, timeoutMs);
-          const result = await bash.exec(command, { signal, rawScript: true });
-          const timedOut = finishExecution();
-          if (!timedOut) signal.throwIfAborted();
-          const presented = timedOut ? {
-            ...result,
-            exitCode: 124,
-            stderr: `${result.stderr}${result.stderr && !result.stderr.endsWith('\n') ? '\n' : ''}`
-              + `Bash timed out after ${timeoutMs / 1000} seconds. Files may have been partially changed; inspect before retrying. `
-              + 'Output produced before interruption may be unavailable because this shell buffers output.\n',
-          } : result;
-          const output = await presentOutput(files, presented, { allowSpill: !timedOut });
-          return { content: [{ type: 'text' as const, text: output.text }], details: output.details, isError: presented.exitCode !== 0 };
-        }));
+      if (!api.env) throw new Error('No execution environment is configured.');
+      if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('Bash timeout must be a positive finite number of seconds.');
+      const effectiveTimeout = Math.min(30, Math.max(0.1, timeout));
+      const artifacts = policy.artifacts?.(api.env);
+      const output = new BashOutput(artifacts !== undefined);
+      const result = await api.env.exec(command, {
+        cwd: api.env.cwd, timeout: Math.ceil(effectiveTimeout * 1000) / 1000, inheritEnv: true,
+        // No coalesced window: stream identity is needed for the persisted presentation.
+        onOutput: (text, _context, info) => output[info.stream].append(text),
+      }, context);
+      context.abortSignal?.throwIfAborted();
+      const timedOut = !result.ok && result.error.code === 'timeout';
+      let exitCode: number;
+      let failure: string | undefined;
+      if (result.ok) exitCode = result.value.exitCode;
+      else {
+        exitCode = timedOut ? 124 : 1;
+        // Keep failure visible even when stderr already exhausted its preview.
+        failure = `${result.error.message.slice(0, 512)}\nFiles may have been partially changed; inspect before retrying.`;
+      }
+      const presented = await presentOutput(output, exitCode, context, artifacts, { allowSpill: !timedOut, failure });
+      return { content: [{ type: 'text' as const, text: presented.text }], details: presented.details, isError: exitCode !== 0 };
     },
   });
 }

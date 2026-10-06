@@ -4,7 +4,8 @@ import { metadata, statFor, write } from './content';
 import { decode, encode, latin1 } from './encoding';
 import { copyWorkspace, deleteWorkspace } from './lifecycle';
 import * as namespace from './namespace';
-import { existing, lexicalPath } from './paths';
+import { releaseInode, retainInode, retainedInodeCount } from './opened-inodes';
+import { existing, inode, lexicalPath } from './paths';
 import { bytesFor, children } from './records';
 import { Store } from './store';
 import { abortIfNeeded, fsError, limitsFor } from './types';
@@ -52,6 +53,40 @@ export class WorkspaceFileSystem implements IFileSystem {
   readFileBuffer(path: string): Promise<Uint8Array> {
     return this.run(false, async (op) => bytesFor(op, (await existing(op, path)).inode));
   }
+  /** Keep one opened inode alive even after its final name is removed or replaced. */
+  async retainOpenedInode(id: number): Promise<() => Promise<void>> {
+    await this.run(false, async (op) => {
+      const node = await inode(op, id);
+      if (node.kind !== 'file') throw fsError('EISDIR', String(id));
+      // Publish ownership only after the open transaction passes cancellation and commits.
+      op.changes.push(() => retainInode(op.workspace, id));
+    });
+    let closing: Promise<void> | undefined;
+    return () => closing ??= this.owner.run(this.workspaceId, this.options, undefined, true, async (op) => {
+      if (retainedInodeCount(op.workspace, id) === 1) {
+        await op.sql.run('DELETE FROM inodes WHERE workspace_id=? AND id=? AND id<>? AND NOT EXISTS(SELECT 1 FROM entries WHERE workspace_id=? AND inode=?)',
+          op.workspace, id, op.root, op.workspace, id);
+      }
+      op.changes.push(() => releaseInode(op.workspace, id));
+    }, this.cache.root).catch((error) => {
+      // Deleting/replacing the entire workspace invalidates all its handles.
+      if (['ENOENT', 'ESTALE'].includes((error as { code?: string }).code ?? '')) { releaseInode(this.workspaceId, id); return; }
+      throw error;
+    });
+  }
+  /** Positional SQL BLOB reads retain only the requested range in JavaScript. */
+  readInodeRange(id: number, offset: number, length: number): Promise<Uint8Array> {
+    return this.run(false, async (op) => {
+      const node = await inode(op, id);
+      if (node.kind !== 'file') throw fsError('EISDIR', String(id));
+      const count = Math.min(length, Math.max(0, node.size - offset));
+      if (count === 0) return new Uint8Array();
+      const row = await op.sql.get<{ data: Uint8Array }>(
+        'SELECT substr(data,?,?) AS data FROM inodes WHERE workspace_id=? AND id=?', offset + 1, count, op.workspace, id);
+      return new Uint8Array(row!.data);
+    });
+  }
+  statInode(id: number) { return this.run(false, async (op) => statFor(await inode(op, id))); }
   async readFile(path: string, options?: ReadFileOptions | BufferEncoding): Promise<string> {
     return decode(await this.readFileBuffer(path), options);
   }

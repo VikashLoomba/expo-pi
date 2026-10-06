@@ -22,14 +22,13 @@ function value(result) {
 
 async function environment(t, limits) {
   const database = createExpoSqliteDatabase(createNodeSqliteConnection());
-  t.after(() => database.close());
   const files = await WorkspaceFileSystem.open(database, 'environment', { mountPath: '/workspace', limits });
   const system = new BoundedSystemFs();
   await system.mkdir('/tmp');
   const controller = new AbortController();
   const mounted = createMountedFileSystem(system, files, controller.signal);
-  const env = new WorkspaceExecutionEnv({ mounted, signal: controller.signal });
-  t.after(() => env.cleanup(context));
+  const env = new WorkspaceExecutionEnv({ files, system, mounted, signal: controller.signal });
+  t.after(async () => { await env.cleanup(context); await database.close(); });
   return { files, mounted, env, controller };
 }
 
@@ -170,20 +169,24 @@ test('temporary creation is exclusive and unsupported capabilities never pretend
   assert.equal((await mounted.stat(first)).mode & 0o777, 0o600);
   const directory = value(await env.createTempDir('probe-', context));
   assert.equal((await mounted.stat(directory)).isDirectory, true);
-  assert.equal((await env.truncateFile(first, 10, context)).error.code, 'not_supported');
-  assert.equal((await env.flushFile(first, context)).error.code, 'not_supported');
-  assert.equal((await env.exec('echo unsafe', undefined, context)).error.code, 'shell_unavailable');
+  value(await env.truncateFile(first, 10, context));
+  assert.equal(value(await env.fileInfo(first, context)).size, 10);
+  value(await env.flushFile(first, context));
+  assert.equal(value(await env.exec('echo supported', undefined, context)).exitCode, 0);
+  assert.equal((await env.watch([], () => {}, context)).error.code, 'not_supported');
 });
 
-test('caller cancellation and invocation cancellation preserve their exact reasons', async (t) => {
+test('env cancellation returns typed aborted failures while preserving the cause', async (t) => {
   const { env, controller, mounted } = await environment(t);
   const caller = new AbortController();
   const reason = Object.assign(new Error('ENOENT: cancellation must not become not_found'), { code: 'ENOENT' });
   caller.abort(reason);
-  await assert.rejects(env.writeFile('late', 'forbidden', withAbortSignal(caller.signal, context)), (error) => error === reason);
+  const cancelled = await env.writeFile('late', 'forbidden', withAbortSignal(caller.signal, context));
+  assert.equal(cancelled.error.code, 'aborted');
+  assert.equal(cancelled.error.cause, reason);
   assert.equal(await mounted.exists('/workspace/late'), false);
   controller.abort(reason);
-  await assert.rejects(env.exists('missing', context), (error) => error === reason);
+  assert.equal((await env.exists('missing', context)).error.code, 'aborted');
 });
 
 test('cleanup seals environment handles and line readers without deleting persistent files', async (t) => {
@@ -195,4 +198,18 @@ test('cleanup seals environment handles and line readers without deleting persis
   assert.equal((await env.writeFile('late', 'forbidden', context)).ok, false);
   assert.equal((await reader.readLine(context)).ok, false);
   assert.equal(await mounted.readFile('/workspace/saved'), 'one\ntwo');
+});
+
+test('retained unlinked inode bytes remain subject to quotas until the final reader closes', async (t) => {
+  const { env } = await environment(t, { maxFileBytes: 32, maxTotalBytes: 48 });
+  value(await env.writeFile('opened', 'x'.repeat(32), context));
+  const reader = value(await env.openBinaryReader('opened', undefined, context));
+  value(await env.remove('opened', undefined, context));
+  const full = await env.writeFile('new', 'y'.repeat(32), context);
+  assert.equal(full.ok, false);
+  assert.match(full.error.message, /limit|ENOSPC/);
+  assert.equal(value(await reader.info(context)).size, 32);
+  await reader.close(context);
+  value(await env.writeFile('new', 'y'.repeat(32), context));
+  assert.equal(value(await env.readTextFile('new', context)), 'y'.repeat(32));
 });

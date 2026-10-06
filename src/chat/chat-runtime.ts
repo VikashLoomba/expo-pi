@@ -1,8 +1,10 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { AuthInteraction, LoginOptions, Models } from '@earendil-works/pi-ai';
 import type { Storage } from '@earendil-works/pi-durable';
+import type { SqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite';
 
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
+import type { ExecutionComposition } from '../pi/execution/composition';
 import { CODEX_PROVIDER_ID } from '../pi/codex-auth/identity';
 import { buildModelCatalog, type ChatModelSettings } from '../pi/model-catalog';
 import type { ProviderAccess } from '../pi/provider-credentials';
@@ -46,7 +48,11 @@ export class ChatRuntime {
   private unsubscribeCredentials?: () => void;
   private credentialRestoration?: Promise<void>;
 
-  constructor(private readonly options: { models: Models; openStorage: () => Promise<Storage>; platform: string; credentials?: ObservableCredentials }) {}
+  constructor(private readonly options: {
+    models: Models; openStorage: () => Promise<Storage>; platform: string; credentials?: ObservableCredentials;
+    execution?: (local: ExecutionComposition) => ExecutionComposition;
+    openWorkspaceDatabase?: () => Promise<SqliteDatabase>;
+  }) {}
 
   private serialize<T>(action: () => Promise<T>): Promise<T> {
     const operation = this.queue.then(action);
@@ -178,6 +184,7 @@ export class ChatRuntime {
       storage = await this.options.openStorage();
       service = await DurableChatService.open({ storage, models: this.options.models, platform: this.options.platform,
         canRun: () => this.canRun(),
+        execution: this.options.execution, openWorkspaceDatabase: this.options.openWorkspaceDatabase,
       });
       this.service = service;
       this.opened = true;
@@ -255,6 +262,7 @@ export class ChatRuntime {
     this.publish();
   }
   private operate<T>(action: (service: DurableChatService) => Promise<T>): Promise<T> {
+    if (!this.active) return Promise.reject(new Error('Return to the app to continue.'));
     return this.serialize(async () => {
       if (!this.active) throw new Error('Return to the app to continue.');
       await this.open();
@@ -267,17 +275,26 @@ export class ChatRuntime {
   createChat() { return this.operate((service) => service.createChat()); }
   renameChat(id: string, title: string) { return this.operate((service) => service.renameChat(id, title)); }
   archiveChat(id: string) { return this.operate((service) => service.archiveChat(id)); }
-  updateSettings(id: string, settings: ChatModelSettings) { return this.operate((service) => service.updateSettings(id, settings)); }
+  async updateSettings(id: string, settings: ChatModelSettings) {
+    const { pending } = await this.operate(async (service) => ({ pending: service.updateSettings(id, settings) }));
+    await pending;
+  }
   async send(id: string, text: string) {
-    await this.operate(async (service) => {
+    const { pending } = await this.operate(async (service) => {
       const conversation = service.getConversation(id);
       if (!conversation) throw new Error('Conversation not found.');
       await this.requireAuth(conversation.settings.model.provider);
       if (!await this.authenticateRecovery()) throw new Error('Connect the providers for pending responses in Account before continuing.');
-      return service.send(id, text);
+      // Authenticate and choose the live service on the lifecycle line. Waiting
+      // for a prior cancelled call to drain belongs to that conversation only.
+      return { pending: service.send(id, text) };
     });
+    await pending;
   }
-  cancel(id: string) { return this.operate((service) => service.cancel(id)); }
+  async cancel(id: string) {
+    const { pending } = await this.operate(async (service) => ({ pending: service.cancel(id) }));
+    await pending;
+  }
   resume(id?: string) { return this.operate(async (service) => {
     const conversations = id ? [service.getConversation(id)].filter((conversation) => !!conversation) : [...service.getConversations()];
     for (const providerId of new Set(conversations.map((conversation) => conversation.settings.model.provider))) await this.requireAuth(providerId);

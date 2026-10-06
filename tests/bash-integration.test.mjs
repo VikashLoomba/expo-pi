@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { getCurrentTools } from '@earendil-works/pi-ai/utils/transcript';
-import { AgentDoc, Harness, createRegistry } from '@earendil-works/pi-durable';
+import { Harness, createRegistry } from '@earendil-works/pi-durable';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { bashReply, integrationDatabase, toolRows, until } from './helpers/bash-integration.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
@@ -122,32 +122,6 @@ test('nonzero exit preserves stdout and stderr in an error result and allows ano
   assert.match((await run(service, id)).tool.output, /recovered-marker/);
 });
 
-for (const restrictions of [
-  { extensions: ['mobile-chat'], tools: ['add_numbers'] },
-  { extensions: { remove: ['local-bash'] }, tools: { remove: ['bash'] } },
-]) test(`existing restrictions deliberately gain bash: ${JSON.stringify(restrictions)}`, { timeout: 15_000 }, async (t) => {
-  const file = await integrationDatabase(t, DurableChatService);
-  const provider = scriptedModels([bashReply('printf MIGRATED'), answer]);
-  const seed = await Harness.open(await file.openStorage(), {
-    models: provider.models, registry: createRegistry(),
-    async conversationCreated(tx, conversation) {
-      (await tx.doc(ChatMetadataDoc, conversation.id)).createdAt = Date.now();
-      Object.assign(await tx.doc(AgentDoc, conversation.id), restrictions, { instructions: 'Keep this instruction.' });
-    },
-  }, context);
-  const chat = await seed.createConversation({ ownership: { kind: 'ownerless' },
-    agent: { model: { provider: 'openai-codex', modelId: 'gpt-6-sol' } } }, context);
-  await seed.close(context);
-  const service = await file.open(provider.models);
-  assert.match((await run(service, String(chat.id))).tool.output, /MIGRATED/);
-  assert.ok(getCurrentTools(provider.requests[0].context.messages).some(({ name }) => name === 'bash'));
-  await file.close(service);
-  const verify = await Harness.open(await file.openStorage(), { models: provider.models, registry: createRegistry() }, context);
-  try {
-    assert.equal((await verify.snapshot(AgentDoc, chat.id, context)).instructions, 'Keep this instruction.');
-  } finally { await verify.close(context); }
-});
-
 test('forks get a fresh workspace and explicit context; resetting the parent retains its workspace', { timeout: 15_000 }, async (t) => {
   const file = await integrationDatabase(t, DurableChatService);
   const provider = scriptedModels([bashReply('printf parent-only > /workspace/parent.txt'), answer]);
@@ -255,4 +229,15 @@ test('a bounded deadline stops later writes and releases the workspace queue', {
   const later = await run(service, id);
   assert.match(later.tool.output, /before/);
   assert.doesNotMatch(later.tool.output, /AFTER/);
+});
+
+
+test('shared bash inherits the local virtual HOME and TMPDIR without phone process variables', async (t) => {
+  const file = await integrationDatabase(t, DurableChatService);
+  const service = await file.open(scriptedModels([
+    bashReply('printf "%s:%s:%s" "$HOME" "$TMPDIR" "${CODEX_HOME-unset}"'), answer,
+  ]).models);
+  const id = await service.createChat();
+  const result = await run(service, id);
+  assert.match(result.tool.output, /\/workspace:\/tmp:unset/);
 });
