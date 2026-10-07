@@ -49,7 +49,7 @@
   },
   "dependencies": {
     "@babel/parser": "^7.29.0",
-    "expo-crypto": "~58.0.4"
+    "expo-crypto": "~58.0.5"
   },
   "peerDependencies": {
     "expo": "~58.0.2"
@@ -60,7 +60,7 @@
     "@earendil-works/pi-ai": "1.0.4",
     "@earendil-works/pi-durable": "1.0.4",
     "@types/node": "^26.6.2",
-    "expo": "~58.0.3",
+    "expo": "~58.0.6",
     "typescript": "~6.0.3"
   },
   "publishConfig": {

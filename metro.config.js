@@ -5,6 +5,7 @@ const { isBashBrowser } = require('./src/pi/bash/engine/browser-compat.cjs');
 
 const config = getDefaultConfig(__dirname);
 if (!config.resolver.assetExts.includes('wasm')) config.resolver.assetExts.push('wasm');
+if (!config.resolver.assetExts.includes('bin')) config.resolver.assetExts.push('bin');
 const enhanceMiddleware = config.server.enhanceMiddleware;
 config.server.enhanceMiddleware = (middleware, server) => {
   const handler = enhanceMiddleware ? enhanceMiddleware(middleware, server) : middleware;
