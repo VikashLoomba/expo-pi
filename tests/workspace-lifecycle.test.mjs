@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { integrationDatabase, toolRound } from './helpers/bash-integration.mjs';
+import { readChat } from './helpers/chat-view.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 
 const hooks = installBashBrowserHooks();
@@ -11,7 +12,7 @@ const { DurableChatService } = await import('../src/pi/chat-service.ts');
 const { WorkspaceDoc } = await import('../src/pi/workspace/document.ts');
 const { WorkspaceFileSystem, DEFAULT_WORKSPACE_LIMITS } = await import('../src/pi/workspace/filesystem/index.ts');
 const answer = { chunks: ['Done.'] };
-const rows = (service, id) => service.getConversation(id).messages.filter((message) => message.tool);
+const rows = async (service, id) => (await readChat(service, id)).messages.filter((message) => message.tool);
 
 async function run(service, id) {
   const submission = await service.send(id, 'Perform the requested workspace operation.');
@@ -144,7 +145,7 @@ test('full edit patch survives transcript and SQLite reopen and is readable by r
     { name: 'bash', arguments: { command: `wc -c < '${patchPath}'; sha256sum '${patchPath}'` } },
   ]), answer]);
   const second = await file.open(next.models);
-  const persistedEdit = rows(second, id).find(({ tool }) => tool.name === 'edit');
+  const persistedEdit = (await rows(second, id)).find(({ tool }) => tool.name === 'edit');
   assert.deepEqual(persistedEdit.tool.file, edited.tool.file, 'projection restores the same bounded diff and artifact path');
   const results = (await run(second, id)).slice(-2);
   assert.equal(results[0].tool.status, 'completed');

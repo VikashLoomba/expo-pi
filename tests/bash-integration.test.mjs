@@ -9,7 +9,8 @@ import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 
 const hooks = installBashBrowserHooks();
 test.after(() => hooks.deregister());
-const { ChatMetadataDoc, DurableChatService } = await import('../src/pi/chat-service.ts');
+const { DurableChatService } = await import('../src/pi/chat-service.ts');
+const { ChatMetadataDoc } = await import('../src/pi/chat-metadata.ts');
 const { WorkspaceDoc, ensureWorkspaceDoc } = await import('../src/pi/workspace/document.ts');
 const { WorkspaceFileSystem } = await import('../src/pi/workspace/filesystem/index.ts');
 const context = BACKGROUND_CONTEXT;
@@ -18,7 +19,7 @@ const answer = { chunks: ['Done.'] };
 async function run(service, id, prompt = 'Perform the requested local operation.') {
   const submission = await service.send(id, prompt);
   assert.equal((await service.waitForSubmission(submission)).status, 'done');
-  return toolRows(service, id).at(-1);
+  return (await toolRows(service, id)).at(-1);
 }
 
 test('bash is centrally offered without opening workspace storage until execution', async (t) => {
@@ -141,7 +142,7 @@ test('forks get a fresh workspace and explicit context; resetting the parent ret
   try {
     const parent = await raw.conversation(Number(id), context);
     const at = (await parent.entries({}, 1, undefined, context)).items[0].id;
-    forkId = String((await parent.fork(at, { ownership: { kind: 'ownerless' } }, context)).id);
+    forkId = (await parent.fork(at, { ownership: { kind: 'ownerless' } }, context)).id;
     await parent.reset(undefined, context);
     assert.equal((await raw.snapshot(WorkspaceDoc, Number(id), context)).id, parentWorkspace.id);
   } finally { await raw.close(context); }
@@ -178,9 +179,8 @@ test('closing mid-command drains work and unsafe recovery never duplicates an ad
     assert.equal(await observer.readFile('/marker'), 'once', 'no later write remains active after close resolves');
     const recoveredProvider = scriptedModels([answer, bashReply('cat /workspace/marker'), answer]);
     const second = await file.open(recoveredProvider.models);
-    await second.resume();
     await second.waitForSubmission(submission);
-    const interrupted = toolRows(second, id).find(({ tool }) => tool.status === 'error');
+    const interrupted = (await toolRows(second, id)).find(({ tool }) => tool.status === 'error');
     assert.ok(interrupted);
     assert.match(interrupted.tool.output, /interrupted|partially/i);
     assert.equal(await observer.readFile('/marker'), 'once');

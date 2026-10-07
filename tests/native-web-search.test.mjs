@@ -11,7 +11,9 @@ import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { Harness, createRegistry, defineExtension, hook, CompactionTask } from '@earendil-works/pi-durable';
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { createExpoSqliteDatabase } from '../src/pi/storage/expo-sqlite.ts';
+import { readChat } from './helpers/chat-view.mjs';
 import { createNodeSqliteConnection } from './helpers/node-sqlite.mjs';
+import { additionTool } from './helpers/scripted-models.mjs';
 import { MODEL_ID, SUBSCRIPTION_TOKEN, responsesModels as realResponsesModels, reasoningItem, searchItem, sourceFact, inputText, textItem, until } from './helpers/openai-responses.mjs';
 
 const sourceRoot = new URL('../src/', import.meta.url).href;
@@ -58,7 +60,7 @@ async function fixture(t) {
   return {
     async open(provider) {
       const db = await storage();
-      const service = await DurableChatService.open({ storage: db, models: provider.models, platform: 'ios' });
+      const service = await DurableChatService.open({ storage: db, models: provider.models, extensions: [additionTool] });
       const result = { service, db, async close() { await service.close(); openHandles.delete(result); } };
       openHandles.add(result);
       return result;
@@ -92,7 +94,7 @@ async function records(db, id) {
   return found ? Object.values((await db.document(found.id, 'current', context)).value.responses) : [];
 }
 
-function searchRows(service, id) { return service.getConversation(id).messages.filter((row) => row.webSearch); }
+async function searchRows(service, id) { return (await readChat(service, id)).messages.filter((row) => row.webSearch); }
 function assertPiContext(body, output, { evidence = true } = {}) {
   assert.equal(body.input.some((item) => item.type === 'web_search_call'), false,
     'Native hosted-call objects are not a substitute for model-readable evidence');
@@ -244,9 +246,9 @@ test('native search streams before text and source-only facts are ordinary input
   live.emit('response.output_item.added', { output_index: 1, item: { id: 'ws_search', type: 'web_search_call', status: 'in_progress' } });
   live.emit('response.web_search_call.in_progress', { output_index: 1, item_id: 'ws_search' });
   live.emit('response.web_search_call.searching', { output_index: 1, item_id: 'ws_search' });
-  await until(() => searchRows(first.service, id).some((row) => row.webSearch.calls.some((call) => call.status === 'running')),
+  await until(async () => (await searchRows(first.service, id)).some((row) => row.webSearch.calls.some((call) => call.status === 'running')),
     'Native search activity must reach the app before any text or reasoning summary');
-  const partial = searchRows(first.service, id)[0];
+  const partial = (await searchRows(first.service, id))[0];
   assert.equal(partial.text, '');
   assert.equal(partial.streaming, true);
   // The terminal response is authoritative even when the stream omitted output_item.done.
@@ -258,7 +260,7 @@ test('native search streams before text and source-only facts are ordinary input
   assert.deepEqual(raw[0].output, output);
   assert.deepEqual(raw[0].response.future_response_field, { retained: true });
   assert.ok(raw[0].events.some((event) => event.type === 'response.web_search_call.searching'));
-  const final = searchRows(first.service, id)[0];
+  const final = (await searchRows(first.service, id))[0];
   assert.equal(final.id, partial.id, 'A native-only streaming row retains identity when the answer commits');
   assert.equal(final.text, 'A sourced answer.');
   assert.equal(!!final.streaming, false);
@@ -280,11 +282,11 @@ test('native search streams before text and source-only facts are ordinary input
   assert.ok(request.body.include.includes('web_search_call.action.sources'));
   assert.ok(request.body.include.includes('reasoning.encrypted_content'));
   assert.equal(request.body.max_output_tokens, undefined);
-  const savedRows = first.service.getConversation(id).messages;
+  const savedRows = (await readChat(first.service, id)).messages;
   await first.close();
   const nextProvider = responsesModels([[textItem('Follow-up answer.', 'msg_followup', [])]]);
   const reopened = await file.open(nextProvider);
-  assert.deepEqual(reopened.service.getConversation(id).messages, savedRows);
+  assert.deepEqual((await readChat(reopened.service, id)).messages, savedRows);
   assert.equal(nextProvider.requests.length, 0, 'Opening history never starts a new search');
   await reopened.service.waitForSubmission(await reopened.service.send(id, 'Use those findings.'));
   assertPiContext(nextProvider.requests[0].body, output);
@@ -312,7 +314,7 @@ test('interleaved native search and a local function round preserve original cal
   assert.equal(result.call_id, 'call_add');
   assert.match(result.output, /"sum":42/);
   assert.ok(input.indexOf(result) > input.findIndex((item) => item.id === 'fc_add'));
-  assert.equal(service.getConversation(id).messages.filter((row) => row.tool).length, 1);
+  assert.equal((await readChat(service, id)).messages.filter((row) => row.tool).length, 1);
   assert.equal((await records(db, id)).length, 2);
 });
 
@@ -331,7 +333,7 @@ test('terminal-only additional text and citations extend an already normalized a
   const { service } = await file.open(provider);
   const id = await newChat(service);
   await service.waitForSubmission(await service.send(id, 'A multi-message search answer.'));
-  const row = searchRows(service, id)[0];
+  const row = (await searchRows(service, id))[0];
   assert.equal(row.text, 'First part. Second part.');
   assert.equal(row.webSearch.citations[0].startIndex, 12);
   assert.equal(row.webSearch.citations[0].endIndex, 24);
@@ -374,7 +376,7 @@ test('cancelling a search before text preserves interrupted activity and never r
   const first = await file.open(provider);
   const id = await newChat(first.service);
   const submission = await first.service.send(id, 'Start searching.');
-  await until(() => searchRows(first.service, id).length > 0, 'Search-only activity is durably visible');
+  await until(async () => (await searchRows(first.service, id)).length > 0, 'Search-only activity is durably visible');
   await first.service.cancel(id);
   const result = await first.service.waitForSubmission(submission);
   assert.equal(result.status, 'unanswered');
@@ -382,21 +384,20 @@ test('cancelling a search before text preserves interrupted activity and never r
   assert.equal(live.request.signal.aborted, true);
   const raw = await records(first.db, id);
   assert.equal(raw[0].status, 'interrupted');
-  assert.equal(searchRows(first.service, id)[0].webSearch.calls[0].status, 'interrupted');
+  assert.equal((await searchRows(first.service, id))[0].webSearch.calls[0].status, 'interrupted');
   await first.close();
   const nextProvider = responsesModels([]);
   const reopened = await file.open(nextProvider);
-  await reopened.service.resume();
   assert.equal(nextProvider.requests.length, 0);
-  assert.equal(reopened.service.getConversation(id).pending, false);
-  assert.equal(searchRows(reopened.service, id)[0].webSearch.calls[0].status, 'interrupted');
+  assert.equal((await readChat(reopened.service, id)).busy, false);
+  assert.equal((await searchRows(reopened.service, id))[0].webSearch.calls[0].status, 'interrupted');
 });
 
 test('provider terminal failure preserves raw error metadata and settles without retrying', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const output = [searchItem('ws_failure', { status: 'failed' })];
   const provider = responsesModels([(exchange) => { exchange.created('resp_failure');
-    exchange.complete(output, { id: 'resp_failure', status: 'failed', error: { code: 'server_error', message: 'Synthetic search failure' } }); }]);
+    exchange.complete(output, { id: 'resp_failure', status: 'failed', error: { code: 'invalid_prompt', message: 'Synthetic search failure' } }); }]);
   const { service, db } = await file.open(provider);
   const id = await newChat(service);
   const result = await service.waitForSubmission(await service.send(id, 'Search will fail.'));
@@ -406,7 +407,7 @@ test('provider terminal failure preserves raw error metadata and settles without
   assert.equal(raw[0].status, 'failed');
   assert.deepEqual(raw[0].output, output);
   assert.equal(raw[0].response.error.message, 'Synthetic search failure');
-  assert.equal(searchRows(service, id)[0].webSearch.calls[0].status, 'failed');
+  assert.equal((await searchRows(service, id))[0].webSearch.calls[0].status, 'failed');
 });
 
 test('incomplete search retains activity and opaque state without claiming completed source observations', { timeout: 10_000 }, async (t) => {
@@ -425,7 +426,7 @@ test('incomplete search retains activity and opaque state without claiming compl
   assert.equal(raw.status, 'incomplete');
   assert.deepEqual(raw.output, output);
   assert.equal(raw.response.incomplete_details.reason, 'max_output_tokens');
-  assert.equal(searchRows(service, id)[0].webSearch.calls[0].status, 'interrupted');
+  assert.equal((await searchRows(service, id))[0].webSearch.calls[0].status, 'interrupted');
   await service.waitForSubmission(await service.send(id, 'Continue.'));
   assertPiContext(provider.requests[1].body, output);
   assert.ok(!inputText(provider.requests[1].body).includes(sourceFact('ws_incomplete')));
@@ -441,15 +442,12 @@ test('an interrupted transport is retained on shutdown and recovery starts a fre
   const first = await file.open(firstProvider);
   const id = await newChat(first.service);
   const submission = await first.service.send(id, 'Resume after shutdown.');
-  await until(() => searchRows(first.service, id).length > 0, 'Unfinished search was committed');
+  await until(async () => (await searchRows(first.service, id)).length > 0, 'Unfinished search was committed');
   const previous = (await records(first.db, id))[0];
   await first.close();
   const completed = [searchItem('ws_recovered'), textItem('Recovered answer', 'msg_recovered', [])];
   const nextProvider = responsesModels([(exchange) => { exchange.created('resp_recovered'); exchange.complete(completed, { id: 'resp_recovered' }); }]);
   const reopened = await file.open(nextProvider);
-  assert.equal(nextProvider.requests.length, 0);
-  assert.equal(reopened.service.getConversation(id).pending, true);
-  await reopened.service.resume();
   assert.equal((await reopened.service.waitForSubmission(submission)).status, 'done');
   assert.equal(nextProvider.requests.length, 1);
   assert.ok(!nextProvider.requests[0].body.input.some((item) => item.id === 'ws_unfinished'));
@@ -652,6 +650,6 @@ test('a reopened OpenAI search remains readable through the actual Anthropic req
   const completed = await reopened.service.waitForSubmission(await reopened.service.send(id, 'What does the saved bulletin say?'));
   assert.equal(completed.status, 'done');
   assert.ok(requestBody, 'Anthropic serialized the ordinary durable observation');
-  assert.match(reopened.service.getConversation(id).messages.at(-1).text, /47 seconds/);
+  assert.match((await readChat(reopened.service, id)).messages.at(-1).text, /47 seconds/);
   assert.equal(provider.requests.length, 1, 'Switching provider does not repeat the hosted search');
 });

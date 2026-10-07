@@ -26,7 +26,9 @@ Run lint and typecheck before declaring any task done.
 ## Coding rules
 
 - Never use `any`.
-- Never use type casts (`as X`, `as unknown as X`) or non-null assertions (`x!`) without explicit permission from the owner. `as const` is fine. Prefer typed SDK APIs and small typed decoders.
+- Never use type casts (`as X`, `as unknown as X`) or non-null assertions (`x!`) without explicit permission from the owner. `as const` is fine. Prefer typed SDK APIs. A cast that seems necessary usually means a design seam is wrong (for example, rebuilding an SDK-issued id from a string instead of looking it up among the records the SDK returned).
+- Approved exception: reading pi-durable's built-in documents from `ConversationView.docs` by kind with the SDK's own types (`docs["pi.live"] as LiveState`, likewise `InboxState` and `AgentState`), in one helper, exactly as pi's v1.0.4 example `packages/durable/test/examples/21-late-join.ts` does. Don't replace it with hand-written decoders or shadow types.
+- Before inventing a pattern for a pi-durable, pi-ai or pi-env integration, find the matching upstream example or source at the installed version tag (github.com/earendil-works/pi, `packages/*/test/examples`, tag `v<installed version>`) and follow it, or state why none applies.
 - Tests assert behavior a user or an upstream contract cares about. Never assert object identity, memoization, lock ownership, call counts or internal ordering, and never keep a test only because the current code makes it pass.
 - Specs in `docs/` that carry a "Superseded" banner are historical. Don't implement from them.
 

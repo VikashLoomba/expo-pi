@@ -1,74 +1,97 @@
-import type { ChatExecutionSettings } from './execution/document';
-import type { Message } from '@earendil-works/pi-ai';
-import type { EntryRecord, LiveState, SubmissionId, SubmissionRecord } from '@earendil-works/pi-durable';
+import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai';
+import {
+  AgentDoc, CompactionEntry, InboxDoc, LiveDoc, ResetEntry,
+  type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord, type InboxState,
+  type LiveState, type SubmissionRecord,
+} from '@earendil-works/pi-durable';
 
 import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-presentation';
-import type { ChatConversation, ChatMessage, ChatSummary } from '../chat/types';
+import type { ChatControls, ChatMessage, ChatSummary } from '../chat/types';
+import type { ChatMetadata } from './chat-metadata';
+import { executionSettings, type ExecutionTargetState } from './execution/document';
 import type { ChatModelSettings } from './model-catalog';
 import type { NativeLiveState, NativeResponsesState } from './native-web-search/durable';
 import { isSearchObservationEntry } from './native-web-search/observations';
 import { nativeResponseText, projectNativeWebSearch } from './native-web-search/projection';
 import type { NativeResponseRecord } from './native-web-search/types';
 
-type ChatMetadata = { title: string; createdAt: number; archived: boolean };
-
-export type CommittedProjection = {
-  messages: ChatMessage[];
-  calls: Map<string, number>;
-  assistantCount: number;
-  firstUser?: string;
-  preview?: string;
-  updatedAt: number;
+/** Committed state of one chat: its conversation view, app documents and latest input submission. */
+export type ChatState = {
+  readonly id: ConversationId;
+  readonly metadata?: Readonly<ChatMetadata>;
+  readonly agent?: Readonly<AgentState>;
+  readonly execution?: Readonly<ExecutionTargetState>;
+  readonly live?: Readonly<LiveState>;
+  readonly inbox?: Readonly<InboxState>;
+  readonly native?: Readonly<NativeResponsesState>;
+  readonly nativeLive?: Readonly<NativeLiveState>;
+  readonly submission?: SubmissionRecord;
 };
 
-export type ChatProjectionState = {
-  metadata: ChatMetadata;
-  settings: ChatModelSettings;
-  execution: ChatExecutionSettings;
-  entries: Map<number, EntryRecord>;
-  live: LiveState;
-  native: NativeResponsesState;
-  nativeLive: NativeLiveState;
-  submission?: SubmissionRecord;
-  unsettled: Set<number>;
-  abortRequested: Set<number>;
-  committed?: CommittedProjection;
-};
+/** Rows built from an immutable source (a message, entry, native record or submission) and the inputs used. */
+export type RowCache = WeakMap<object, { readonly inputs: readonly unknown[]; readonly rows: readonly ChatMessage[] }>;
+
+const SUMMARIZED_NOTICE = 'Earlier messages summarized';
+
+/**
+ * The built-in documents of a conversation view, published with its entries in one revision so a row never shows
+ * a streamed partial beside its saved entry. The view keys them by kind as JSON whose shapes pi-durable defines.
+ */
+export function readConversationView(view: ConversationView) {
+  // pi-durable reads its view this way in its own example, test/examples/21-late-join.ts.
+  return {
+    live: view.docs[LiveDoc.definition.kind] as LiveState | undefined,
+    inbox: view.docs[InboxDoc.definition.kind] as InboxState | undefined,
+    agent: view.docs[AgentDoc.definition.kind] as AgentState | undefined,
+  };
+}
+
 const textOf = (content: Message['content']) => typeof content === 'string' ? content
-  : content.filter((part) => part.type === 'text').map((part) => part.text).join('');
+  : content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('');
 
-export function hasPendingWork(cached: ChatProjectionState): boolean {
-  const run = cached.live.run;
-  const cancelled = !!run && cached.abortRequested.has(run.taskId);
-  return (!!run && !cancelled) || [...cached.unsettled].some((id) => !cancelled || !run.inputs.includes(id as SubmissionId)) ||
-    !!cached.live.compactions?.some((task) => !cached.abortRequested.has(task.taskId));
+/** Collapse whitespace for one-line titles and previews. */
+export const oneLine = (text: string, length: number) => text.replace(/\s+/g, ' ').trim().slice(0, length);
+
+export function settingsOf(agent?: Readonly<AgentState> | null): ChatModelSettings {
+  // Missing models stay visibly unavailable; never replace a saved choice with
+  // another provider. An omitted effort follows the SDK's own default.
+  return { model: { provider: agent?.model?.provider ?? '', modelId: agent?.model?.modelId ?? '' },
+    thinkingLevel: agent?.thinkingLevel ?? 'off' };
 }
 
-function sameMessage(left: ChatMessage, right: ChatMessage): boolean {
-  return left === right || (left.id === right.id && left.role === right.role && left.text === right.text &&
-    left.createdAt === right.createdAt && left.streaming === right.streaming &&
-    left.interrupted === right.interrupted && left.thinking === right.thinking && left.error === right.error &&
-    JSON.stringify(left.webSearch) === JSON.stringify(right.webSearch) &&
-    (left.tool === right.tool || (!!left.tool && !!right.tool && left.tool.name === right.tool.name &&
-      left.tool.args === right.tool.args && left.tool.output === right.tool.output && left.tool.status === right.tool.status &&
-      JSON.stringify(left.tool.file) === JSON.stringify(right.tool.file))));
+export function summarizeChat(id: ConversationId, metadata: Readonly<ChatMetadata>): ChatSummary | undefined {
+  if (metadata.archived) return undefined;
+  return { id, title: metadata.title || 'New chat', preview: metadata.preview || 'Start a conversation',
+    updatedAt: Math.max(metadata.createdAt, metadata.updatedAt ?? 0) };
 }
 
-/** Reuse immutable rows, and the entire list when a publication changed no displayed fields. */
-function shareMessages(messages: ChatMessage[], previous?: ChatMessage[]): ChatMessage[] {
-  if (!previous) return messages;
-  let identical = messages.length === previous.length;
-  for (let index = 0; index < messages.length; index++) {
-    const old = previous[index];
-    if (old && sameMessage(old, messages[index])) messages[index] = old;
-    else identical = false;
+/** Queued inputs, a run and compactions all keep the chat busy until they settle or are aborted. */
+export function isBusy(live?: Readonly<LiveState>, inbox?: Readonly<InboxState>): boolean {
+  return !!live?.run || !!live?.compactions?.length || !!inbox?.items.some((item) => item.mode !== 'write');
+}
+
+function submissionError(submission?: SubmissionRecord): string | undefined {
+  if (submission?.status !== 'unanswered' || submission.reason === 'aborted') return undefined;
+  const { detail } = submission;
+  if (typeof detail === 'string' && detail) return detail;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.message === 'string') {
+    return detail.message;
   }
-  return identical ? previous : messages;
+  return `The response could not finish (${submission.reason}). You can send another message to continue.`;
 }
 
-export function sameSummary(left: ChatSummary | undefined, right: ChatSummary | undefined): boolean {
-  return left === right || (!!left && !!right && left.id === right.id && left.title === right.title &&
-    left.preview === right.preview && left.updatedAt === right.updatedAt);
+export function projectControls(state: ChatState): ChatControls {
+  const error = submissionError(state.submission);
+  return {
+    id: state.id,
+    title: state.metadata?.title || 'New chat',
+    settings: settingsOf(state.agent),
+    execution: executionSettings(state.execution, state.agent),
+    busy: isBusy(state.live, state.inbox),
+    // pi-durable waits before retrying a failed request; the failed attempt is not an answer.
+    retrying: state.live?.generation?.retry !== undefined,
+    ...(error ? { error } : {}),
+  };
 }
 
 function nativeTimestamp(record: NativeResponseRecord, fallback: number): number {
@@ -80,143 +103,200 @@ function nativeTimestamp(record: NativeResponseRecord, fallback: number): number
     ? Number.parseInt(record.requestId.replaceAll('-', '').slice(0, 12), 16) : fallback;
 }
 
-/** Derive UI rows from immutable durable revisions; never read or write storage. */
-export function projectChat(id: string, cached: ChatProjectionState, previous: ChatConversation | undefined, scheduling: boolean) {
-  let committed = cached.committed;
-  // Most publications contain only a streaming partial. Keep immutable
-  // committed rows and their tool indexes until an entry actually changes.
-  const messages: ChatMessage[] = committed?.messages.slice() ?? [];
-  const calls = new Map(committed?.calls);
-  let assistantCount = committed?.assistantCount ?? 0;
-  const cancelled = !!cached.live.run && cached.abortRequested.has(cached.live.run.taskId);
-  const nativeRecords = Object.values(cached.native.responses);
-  const nativeByResponse = new Map(nativeRecords.filter((record) => record.responseId)
-    .map((record) => [record.responseId!, record]));
-  const currentNative = cached.nativeLive.requestId && cached.nativeLive.taskId === cached.live.run?.taskId
-    ? cached.native.responses[cached.nativeLive.requestId] : undefined;
-  const nativeInterrupted = (record: NativeResponseRecord) => record.status === 'in_progress' &&
-    (!scheduling || record.requestId !== currentNative?.requestId || cancelled);
-  const appendNative = (record: NativeResponseRecord, streaming: boolean) => {
-    const text = nativeResponseText(record);
-    const interrupted = nativeInterrupted(record) || record.status === 'interrupted';
-    const webSearch = projectNativeWebSearch(record, text, interrupted);
-    if (!text && !webSearch) return;
-    messages.push({ id: `assistant-${assistantCount++}`, role: 'assistant', text,
-      createdAt: nativeTimestamp(record, cached.metadata.createdAt), streaming: streaming && !interrupted,
-      ...(webSearch ? { webSearch } : {}), ...(interrupted ? { interrupted: true } : {}),
-      ...(record.status === 'failed' ? { error: record.error || 'Response failed.' } : {}),
+/** Return the rows built from `source` when its inputs are unchanged, so a memoized row skips rendering. */
+function reuse(cache: RowCache, source: object, inputs: readonly unknown[], build: () => ChatMessage[]) {
+  const hit = cache.get(source);
+  if (hit && hit.inputs.length === inputs.length && hit.inputs.every((input, index) => input === inputs[index])) {
+    return hit.rows;
+  }
+  const rows = build();
+  cache.set(source, { inputs, rows });
+  return rows;
+}
+
+function userRows(message: UserMessage, key: string): ChatMessage[] {
+  const text = textOf(message.content);
+  return text ? [{ id: key, role: 'user', text, createdAt: message.timestamp }] : [];
+}
+
+function toolResultRow(message: ToolResultMessage, key: string, call: ChatMessage | undefined): ChatMessage {
+  const output = textOf(message.content);
+  const status = message.isError ? 'error' : 'completed';
+  if (!call?.tool) {
+    return { id: key, role: 'tool', text: output, createdAt: message.timestamp,
+      tool: { name: message.toolName, args: '', output, status } };
+  }
+  return { ...call, text: output,
+    tool: { ...call.tool, output, status, file: withFileToolDetails(call.tool.file, message.details) } };
+}
+
+/** An assistant row (when it has anything to show) followed by one row per tool call. */
+function assistantRows(message: AssistantMessage, key: string, streaming: boolean,
+  native: NativeResponseRecord | undefined, nativeInterrupted: boolean): ChatMessage[] {
+  const rows: ChatMessage[] = [];
+  const nativeText = native ? nativeResponseText(native) : '';
+  // A terminal envelope can contain message items absent from Pi's deltas. Use that complete native text for
+  // citation offsets, but keep Pi's partial after cancellation or failure when native snapshots are sparse.
+  const ownText = message.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('');
+  const text = nativeText && (native?.status === 'completed' || native?.status === 'incomplete')
+    ? nativeText : ownText || nativeText;
+  const webSearch = native
+    ? projectNativeWebSearch(native, text, nativeInterrupted || message.stopReason === 'aborted') : undefined;
+  const thinking = message.content.flatMap((part) => part.type === 'thinking' ? [part.thinking] : []).join('');
+  const failed = message.stopReason === 'error';
+  if (text || thinking || webSearch || failed || (streaming && message.content.length === 0)) {
+    rows.push({ id: key, role: 'assistant', text, createdAt: message.timestamp, streaming,
+      ...(thinking ? { thinking } : {}),
+      ...(webSearch ? { webSearch } : {}),
+      ...(!streaming && message.stopReason === 'aborted' ? { interrupted: true } : {}),
+      ...(failed ? { error: message.errorMessage || 'Response failed.' } : {}),
     });
+  }
+  for (const part of message.content) {
+    if (part.type !== 'toolCall') continue;
+    const file = fileToolPresentation(part.name, part.arguments);
+    const args = file ? '' : JSON.stringify(part.arguments, null, 2);
+    rows.push({ id: `${key}-tool-${part.id}`, role: 'tool', text: '', createdAt: message.timestamp,
+      tool: { name: part.name, args, output: '', status: 'running', ...(file ? { file } : {}) } });
+  }
+  return rows;
+}
+
+function nativeRows(record: NativeResponseRecord, key: string, interrupted: boolean, streaming: boolean,
+  fallbackTime: number): ChatMessage[] {
+  const text = nativeResponseText(record);
+  const webSearch = projectNativeWebSearch(record, text, interrupted);
+  if (!text && !webSearch) return [];
+  return [{ id: key, role: 'assistant', text, createdAt: nativeTimestamp(record, fallbackTime),
+    streaming: streaming && !interrupted,
+    ...(webSearch ? { webSearch } : {}), ...(interrupted ? { interrupted: true } : {}),
+    ...(record.status === 'failed' ? { error: record.error || 'Response failed.' } : {}),
+  }];
+}
+
+/**
+ * Derive transcript rows from committed entries (ascending IDs) and live documents. Row IDs stay stable as a
+ * streamed partial becomes a saved entry: assistants are numbered in order, and the partial takes the next number.
+ * Rows of committed entries come from `cache` while their inputs are unchanged.
+ */
+export function projectMessages(state: ChatState, entries: readonly EntryRecord[],
+  cache: RowCache = new WeakMap()): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  const calls = new Map<string, number>();
+  let assistantCount = 0;
+  const createdAt = state.metadata?.createdAt ?? 0;
+  const responses = state.native?.responses ?? {};
+  const nativeRecords = Object.values(responses);
+  const nativeByResponse = new Map(nativeRecords.flatMap((record) =>
+    record.responseId ? [[record.responseId, record] as const] : []));
+  const liveRequest = state.nativeLive?.requestId;
+  const runTask = state.live?.run?.taskId;
+  const currentNative = liveRequest !== undefined && state.nativeLive?.taskId === runTask
+    ? responses[liveRequest] : undefined;
+  // A native response still marked in progress is interrupted unless it is the live request.
+  const nativeInterrupted = (record: NativeResponseRecord) =>
+    record.status === 'in_progress' && record.requestId !== currentNative?.requestId;
+  const pushAssistant = (rows: readonly ChatMessage[], key: string, message: AssistantMessage) => {
+    const start = messages.length;
+    messages.push(...rows);
+    for (const part of message.content) {
+      if (part.type !== 'toolCall') continue;
+      const offset = rows.findIndex((row) => row.id === `${key}-tool-${part.id}`);
+      if (offset >= 0) calls.set(part.id, start + offset);
+    }
   };
-  const append = (message: Message, key: string, streaming = false) => {
-    if (message.role === 'system') return;
-    // Entries are append-only. The next assistant's ordinal is known before
-    // its entry ID exists, and remains the same when a partial is committed
-    // or interrupted. Count every assistant, including tool-only responses.
-    if (message.role === 'assistant') key = `assistant-${assistantCount++}`;
-    if (message.role === 'toolResult') {
-      const index = calls.get(message.toolCallId);
-      const existing = index === undefined ? undefined : messages[index];
-      const output = textOf(message.content);
-      if (existing?.tool && index !== undefined) {
-        messages[index] = { ...existing, text: output,
-          tool: { ...existing.tool, output, status: message.isError ? 'error' : 'completed',
-            file: withFileToolDetails(existing.tool.file, message.details) } };
-      } else messages.push({ id: key, role: 'tool', text: output, createdAt: message.timestamp,
-        tool: { name: message.toolName, args: '', output, status: message.isError ? 'error' : 'completed' } });
-      return;
+  const appendNative = (record: NativeResponseRecord) => {
+    const key = `assistant-${assistantCount++}`;
+    const interrupted = nativeInterrupted(record) || record.status === 'interrupted';
+    messages.push(...reuse(cache, record, [key, interrupted, createdAt],
+      () => nativeRows(record, key, interrupted, false, createdAt)));
+  };
+
+  // Observation model messages are external evidence for the model. Native
+  // response metadata already supplies their visible activity and sources.
+  const visible = entries.filter((entry) => !isSearchObservationEntry(entry));
+  const represented = new Set(visible.flatMap((entry) => entry.model?.flatMap((message) =>
+    message.role === 'assistant' && message.responseId ? [message.responseId] : []) ?? []));
+  const orphaned = nativeRecords.filter((record) => record.requestId !== currentNative?.requestId
+    && (!record.responseId || !represented.has(record.responseId)))
+    .sort((a, b) => a.taskId - b.taskId || a.requestId.localeCompare(b.requestId));
+  // pi-durable saves each failed attempt before retrying it. The attempt is not an answer while its generation
+  // still runs, or once that generation saved a later response.
+  const lastAssistant = new Map<number, number>();
+  for (const entry of visible) {
+    if (entry.byTaskId !== undefined && entry.model?.some((message) => message.role === 'assistant')) {
+      lastAssistant.set(entry.byTaskId, entry.id);
     }
-    const native = message.role === 'assistant' && message.responseId ? nativeByResponse.get(message.responseId) : undefined;
-    const nativeText = native ? nativeResponseText(native) : '';
-    // A terminal envelope can contain message items absent from Pi's deltas.
-    // Use that complete native text for citation offsets, but retain Pi's live
-    // partial after cancellation or failure when native item snapshots are sparse.
-    const text = nativeText && (native?.status === 'completed' || native?.status === 'incomplete')
-      ? nativeText : textOf(message.content) || nativeText;
-    const webSearch = native ? projectNativeWebSearch(native, text,
-      nativeInterrupted(native) || (message.role === 'assistant' && message.stopReason === 'aborted')) : undefined;
-    const thinking = message.role === 'assistant' ? message.content.filter((part) => part.type === 'thinking').map((part) => part.thinking).join('') : undefined;
-    if (text || thinking || webSearch || (message.role === 'assistant' && (message.stopReason === 'error' || (streaming && message.content.length === 0)))) {
-      messages.push({ id: key, role: message.role, text, createdAt: message.timestamp, streaming,
-        ...(thinking ? { thinking } : {}),
-        ...(webSearch ? { webSearch } : {}),
-        ...(!streaming && message.role === 'assistant' && message.stopReason === 'aborted' ? { interrupted: true } : {}),
-        ...(message.role === 'assistant' && message.stopReason === 'error' ? { error: message.errorMessage || 'Response failed.' } : {}),
-      });
+  }
+  const retried = (entry: EntryRecord) => entry.byTaskId !== undefined
+    && (entry.byTaskId === runTask || (lastAssistant.get(entry.byTaskId) ?? entry.id) > entry.id);
+  // A summary replaces what came before its head, so its notice marks that boundary. Its model message is the
+  // summary for the model, never something the user said.
+  const summaries = new Map<EntryId, EntryRecord[]>();
+  const present = new Set(visible.map((entry) => entry.id));
+  for (const entry of visible) {
+    if (!CompactionEntry.is(entry) && !ResetEntry.is(entry)) continue;
+    const at = entry.head !== undefined && present.has(entry.head) ? entry.head : entry.id;
+    summaries.set(at, [...summaries.get(at) ?? [], entry]);
+  }
+  let nativeIndex = 0;
+  for (const entry of visible) {
+    while (nativeIndex < orphaned.length && orphaned[nativeIndex].taskId < entry.id) {
+      appendNative(orphaned[nativeIndex++]);
     }
-    if (message.role === 'assistant') {
-      for (const part of message.content) if (part.type === 'toolCall') {
-        const file = fileToolPresentation(part.name, part.arguments);
-        const tool: ChatMessage = { id: `${key}-tool-${part.id}`, role: 'tool', text: '', createdAt: message.timestamp,
-          tool: { name: part.name, args: file ? '' : JSON.stringify(part.arguments, null, 2), output: '', status: 'running', ...(file ? { file } : {}) } };
-        calls.set(part.id, messages.length);
-        messages.push(tool);
+    for (const summary of summaries.get(entry.id) ?? []) {
+      messages.push(...reuse(cache, summary, [],
+        () => [{ id: `summary-${summary.id}`, role: 'notice', text: SUMMARIZED_NOTICE, createdAt: 0 }]));
+    }
+    if (CompactionEntry.is(entry) || ResetEntry.is(entry)) continue;
+    entry.model?.forEach((message, index) => {
+      const entryKey = `${entry.id}-${index}`;
+      if (message.role === 'user') {
+        messages.push(...reuse(cache, message, [entryKey], () => userRows(message, entryKey)));
       }
-    }
-  };
-  if (!committed) {
-    // Observation model messages are external evidence for the model. Native
-    // response metadata already supplies their visible activity and sources.
-    const entries = [...cached.entries.values()].filter((entry) => !isSearchObservationEntry(entry))
-      .sort((a, b) => a.id - b.id);
-    const represented = new Set(entries.flatMap((entry) => entry.model?.flatMap((message) =>
-      message.role === 'assistant' && message.responseId ? [message.responseId] : []) ?? []));
-    const orphaned = nativeRecords.filter((record) => record.requestId !== currentNative?.requestId &&
-      (!record.responseId || !represented.has(record.responseId))).sort((a, b) => a.taskId - b.taskId || a.requestId.localeCompare(b.requestId));
-    let nativeIndex = 0;
-    for (const entry of entries) {
-      while (nativeIndex < orphaned.length && orphaned[nativeIndex].taskId < entry.id) appendNative(orphaned[nativeIndex++], false);
-      entry.model?.forEach((message, index) => append(message, `${entry.id}-${index}`));
-    }
-    while (nativeIndex < orphaned.length) appendNative(orphaned[nativeIndex++], false);
-    shareMessages(messages, previous?.messages);
-    const transcript = messages.filter((message) => message.role === 'user' || message.role === 'assistant');
-    committed = { messages: messages.slice(), calls: new Map(calls), assistantCount,
-      firstUser: transcript.find((message) => message.role === 'user')?.text,
-      preview: transcript.at(-1)?.text.replace(/\s+/g, ' ').slice(0, 120),
-      updatedAt: transcript.reduce((latest, message) => Math.max(latest, message.createdAt), 0),
-    };
+      if (message.role === 'toolResult') {
+        const callIndex = calls.get(message.toolCallId);
+        const call = callIndex === undefined ? undefined : messages[callIndex];
+        const rows = reuse(cache, message, [entryKey, call], () => [toolResultRow(message, entryKey, call)]);
+        if (call?.tool && callIndex !== undefined) messages[callIndex] = rows[0];
+        else messages.push(...rows);
+      }
+      if (message.role !== 'assistant') return;
+      // Entries are append-only, so the next assistant's ordinal is known before its entry exists. Count every
+      // assistant, including tool-only responses and hidden attempts, so a partial and its entry share a row ID.
+      const key = `assistant-${assistantCount++}`;
+      if (message.stopReason === 'error' && retried(entry)) return;
+      const native = message.responseId ? nativeByResponse.get(message.responseId) : undefined;
+      const interrupted = native ? nativeInterrupted(native) : false;
+      pushAssistant(reuse(cache, message, [key, native, interrupted],
+        () => assistantRows(message, key, false, native, interrupted)), key, message);
+    });
   }
-  if (cached.live.generation?.message) append(cancelled
-    ? { ...cached.live.generation.message, stopReason: 'aborted' } as Message
-    : cached.live.generation.message as Message, 'streaming', !cancelled);
-  if (currentNative && (!currentNative.responseId || cached.live.generation?.message?.responseId !== currentNative.responseId) &&
-      ![...cached.entries.values()].some((entry) => entry.model?.some((message) =>
-        message.role === 'assistant' && !!message.responseId && message.responseId === currentNative.responseId))) {
-    appendNative(currentNative, scheduling && !cancelled);
+  while (nativeIndex < orphaned.length) appendNative(orphaned[nativeIndex++]);
+
+  const partial = state.live?.generation?.message;
+  if (partial) {
+    const key = `assistant-${assistantCount++}`;
+    const native = partial.responseId ? nativeByResponse.get(partial.responseId) : undefined;
+    pushAssistant(assistantRows(partial, key, true, native, native ? nativeInterrupted(native) : false), key, partial);
   }
-  for (const slot of cached.live.tools ?? []) {
+  if (currentNative && (!currentNative.responseId || partial?.responseId !== currentNative.responseId)
+      && !(currentNative.responseId && represented.has(currentNative.responseId))) {
+    const key = `assistant-${assistantCount++}`;
+    messages.push(...nativeRows(currentNative, key, nativeInterrupted(currentNative), true, createdAt));
+  }
+  for (const slot of state.live?.tools ?? []) {
     const index = calls.get(slot.callId);
     const message = index === undefined ? undefined : messages[index];
     if (message?.tool && index !== undefined && slot.status !== 'done') {
-      messages[index] = { ...message, tool: { ...message.tool, output: slot.output ?? '', status: cancelled ? 'error' : 'running',
+      messages[index] = { ...message, tool: { ...message.tool, output: slot.output ?? '', status: 'running',
         file: withFileToolDetails(message.tool.file, slot.details) } };
     }
   }
-  const firstUser = committed.firstUser;
-  const title = cached.metadata.title || firstUser?.replace(/\s+/g, ' ').slice(0, 64) || 'New chat';
-  const last = cached.submission;
-  let error: string | undefined;
-  if (last?.status === 'unanswered') {
-    if (last.reason === 'aborted') messages.push({ id: `submission-${last.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 });
-    else {
-      const detail = last.detail && typeof last.detail === 'object' && !Array.isArray(last.detail) ? last.detail : undefined;
-      error = typeof last.detail === 'string' && last.detail ? last.detail
-        : typeof detail?.message === 'string' ? detail.message
-          : `The response could not finish (${last.reason}). You can send another message to continue.`;
-    }
+  const last = state.submission;
+  if (last?.status === 'unanswered' && last.reason === 'aborted') {
+    messages.push(...reuse(cache, last, [],
+      () => [{ id: `submission-${last.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 }]));
   }
-  if (cancelled && last?.status !== 'unanswered') messages.push({ id: `submission-${last?.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 });
-  const unfinished = hasPendingWork(cached);
-  const sharedMessages = shareMessages(messages, previous?.messages);
-  const busy = unfinished && scheduling;
-  const pending = unfinished && !scheduling;
-  let conversation = previous;
-  if (!previous || previous.title !== title || previous.messages !== sharedMessages ||
-      previous.settings !== cached.settings || previous.execution !== cached.execution || previous.busy !== busy || previous.pending !== pending || previous.error !== error) {
-    conversation = { id, title, settings: cached.settings, execution: cached.execution, messages: sharedMessages, busy, pending, ...(error ? { error } : {}) };
-  }
-  const summary = cached.metadata.archived ? undefined : { id, title,
-    preview: committed.preview || 'Start a conversation',
-    updatedAt: Math.max(cached.metadata.createdAt, committed.updatedAt) };
-  return { conversation: conversation!, summary, committed };
+  return messages;
 }

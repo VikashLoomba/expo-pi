@@ -3,8 +3,9 @@ import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { getCurrentTools } from '@earendil-works/pi-ai/utils/transcript';
 import { AgentDoc, configure, defineDoc, defineExtension, defineTask } from '@earendil-works/pi-durable';
-import { scriptedModels } from './helpers/scripted-models.mjs';
-import { integrationDatabase, toolReply, until } from './helpers/bash-integration.mjs';
+import { readChat } from './helpers/chat-view.mjs';
+import { additionTool, scriptedModels } from './helpers/scripted-models.mjs';
+import { integrationDatabase, toolReply } from './helpers/bash-integration.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 
 const hooks = installBashBrowserHooks();
@@ -18,7 +19,7 @@ const sharedTools = ['bash', 'read', 'write', 'edit'];
 async function run(service, id) {
   const submission = await service.send(id, 'Inspect the workspace.');
   assert.equal((await service.waitForSubmission(submission)).status, 'done');
-  return service.getConversation(id).messages.filter((message) => message.tool).at(-1);
+  return (await readChat(service, id)).messages.filter((message) => message.tool).at(-1);
 }
 
 function offeredTools(request) {
@@ -28,7 +29,7 @@ function offeredTools(request) {
 test('fresh chats use Pi registry defaults without storing redundant capability selections', async (t) => {
   const file = await integrationDatabase(t, DurableChatService);
   const provider = scriptedModels([answer]);
-  const service = await file.open(provider.models);
+  const service = await file.open(provider.models, { extensions: [additionTool] });
   const id = await service.createChat();
   const agent = await service.harness.snapshot(AgentDoc, Number(id), context);
   assert.equal(agent.extensions, undefined);
@@ -42,12 +43,12 @@ test('fresh chats use Pi registry defaults without storing redundant capability 
 });
 
 for (const selection of [
-  { name: 'exact tool selection', settings: { extensions: ['mobile-chat', 'local-bash'], tools: ['add_numbers', 'read'] }, expected: ['add_numbers', 'read'] },
+  { name: 'exact tool selection', settings: { extensions: ['test-addition', 'local-bash'], tools: ['add_numbers', 'read'] }, expected: ['add_numbers', 'read'] },
   { name: 'tool exclusions', settings: { extensions: { remove: ['unrelated-extension'] }, tools: { remove: ['write', 'edit', 'add_numbers'] } }, expected: ['bash', 'read'] },
   { name: 'extension exclusion', settings: { extensions: { remove: ['local-bash'] }, tools: { remove: [] } }, expected: ['add_numbers'] },
 ]) test(`reopening retains current workspace identity, settings and ${selection.name}`, { timeout: 15_000 }, async (t) => {
   const file = await integrationDatabase(t, DurableChatService);
-  const initial = await file.open(scriptedModels([]).models);
+  const initial = await file.open(scriptedModels([]).models, { extensions: [additionTool] });
   const id = await initial.createChat();
   const workspace = await file.workspace(initial, id, WorkspaceDoc);
   const parent = await initial.harness.conversation(Number(id), context);
@@ -59,7 +60,7 @@ for (const selection of [
   await file.close(initial);
   for (let attempt = 0; attempt < 2; attempt++) {
     const provider = scriptedModels([answer]);
-    const service = await file.open(provider.models);
+    const service = await file.open(provider.models, { extensions: [additionTool] });
     assert.deepEqual(await file.workspace(service, id, WorkspaceDoc), workspace);
     assert.deepEqual(await service.harness.snapshot(AgentDoc, parent.id, context), agent);
     await run(service, id);
@@ -87,13 +88,13 @@ test('service-created historical forks start with empty workspaces while parent 
     toolReply('read', { path: 'parent-file' }), answer,
   ]);
   const service = await file.open(provider.models);
-  const fork = await run(service, String(child.id));
+  const fork = await run(service, child.id);
   assert.equal(fork.tool.status, 'error');
   assert.match(fork.tool.output, /ENOENT/);
   assert.match(JSON.stringify(provider.requests[0].context.messages.filter(({ role }) => role === 'system')), /fork.*empty|inherited.*NOT copied/i);
   assert.equal((await run(service, parentId)).tool.output, 'parent bytes');
   assert.deepEqual(await file.workspace(service, parentId, WorkspaceDoc), parentWorkspace);
-  assert.deepEqual(await file.workspace(service, String(child.id), WorkspaceDoc), childWorkspace);
+  assert.deepEqual(await file.workspace(service, child.id, WorkspaceDoc), childWorkspace);
 });
 
 test('Pi preserves historical fork settings and task-owned inheritance while each workspace starts fresh', { timeout: 15_000 }, async (t) => {
@@ -115,7 +116,9 @@ test('Pi preserves historical fork settings and task-owned inheritance while eac
   });
   const extension = defineExtension({ name: 'test.workspace-owned', tasks: [Owned] });
   const provider = scriptedModels([answer, answer]);
-  const service = await file.open(provider.models, { execution: (local) => ({ ...local, extensions: [extension] }) });
+  const service = await file.open(provider.models, {
+    execution: (local) => ({ ...local, extensions: [extension] }), extensions: [additionTool],
+  });
   const id = await service.createChat();
   const parent = await service.harness.conversation(Number(id), context);
   const before = await parent.commit(async (tx) => {
@@ -136,8 +139,9 @@ test('Pi preserves historical fork settings and task-owned inheritance while eac
   assert.deepEqual(await service.harness.snapshot(AgentDoc, firstFork.id, context), firstAgent);
   assert.deepEqual(await service.harness.snapshot(AgentDoc, currentFork.id, context), currentAgent);
   for (const fork of [firstFork, currentFork]) {
-    await until(() => service.getConversation(String(fork.id))?.settings.model.provider, 'fork projection hydrated');
-    await run(service, String(fork.id));
+    // The fork was created through the harness, so it is driven through the harness too.
+    const answered = await (await fork.submit({ type: 'input', content: 'Inspect the workspace.' }, context)).wait(context);
+    assert.equal(answered.status, 'done');
   }
   assert.deepEqual(offeredTools(provider.requests[0]), ['add_numbers', ...sharedTools].sort());
   assert.deepEqual(offeredTools(provider.requests[1]), ['add_numbers']);

@@ -1,10 +1,12 @@
+import type { ConversationId } from '@earendil-works/pi-durable';
+
 import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { FileToolPresentation } from './file-tool-presentation';
 import type { ChatModelSettings } from '../pi/model-catalog';
 import type { WebSearchPresentation } from './web-search-types';
 
 export interface ChatSummary {
-  id: string;
+  id: ConversationId;
   title: string;
   preview: string;
   updatedAt: number;
@@ -23,13 +25,18 @@ export interface ChatMessage {
   error?: string;
 }
 
-export interface ChatConversation {
-  id: string;
+/** What the header, composer and settings need; it does not change while text streams. */
+export interface ChatControls {
+  id: ConversationId;
   title: string;
   settings: ChatModelSettings;
   execution: ChatExecutionSettings;
-  messages: ChatMessage[];
   busy: boolean;
-  pending: boolean;
+  /** A request failed and is waiting to be tried again. */
+  retrying: boolean;
   error?: string;
+}
+
+export interface ChatConversation extends ChatControls {
+  messages: readonly ChatMessage[];
 }

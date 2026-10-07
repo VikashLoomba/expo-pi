@@ -40,10 +40,36 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
   const models = ai.createModels({ credentials: new ai.InMemoryCredentialStore(),
     authContext: { env: async () => undefined, fileExists: async () => false } });
   models.setProvider(anthropicProvider());
+  // Read a chat the way the chat screen does: subscribe to its view until it has loaded.
+  const readChat = async (chatService, chatId) => {
+    const view = chatService.chat(chatId, { transcript: true });
+    const stop = view.subscribe(() => {});
+    try {
+      const deadline = Date.now() + 5_000;
+      while (view.getSnapshot().status === 'loading') {
+        if (Date.now() > deadline) throw new Error('The chat view did not load.');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return view.getSnapshot().conversation;
+    } finally { stop(); }
+  };
   const service = await DurableChatService.open({
-    storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models, platform,
+    storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models,
     openWorkspaceDatabase: () => openWorkspaceDatabase(`${namespace}-files.db`),
   });
+  // The route resolves its chat before any screen calls the hook, so bind the mounted runtime up front.
+  function mountedRuntime(devtoolsHook) {
+    for (const renderer of devtoolsHook.renderers.keys()) for (const root of devtoolsHook.getFiberRoots(renderer)) {
+      const stack = [root.current];
+      while (stack.length) {
+        const fiber = stack.pop();
+        const value = fiber.memoizedProps?.value;
+        if (value?.runtime && 'chats' in value) return value.runtime;
+        for (let child = fiber.child; child; child = child.sibling) stack.push(child);
+      }
+    }
+    throw new Error('The mounted chat runtime was not found.');
+  }
   const restores = [];
   function replaceRuntimeMethod(runtime, name, replacement) {
     const descriptor = Object.getOwnPropertyDescriptor(runtime, name);
@@ -54,20 +80,19 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
   try {
     const id = service.getSnapshot().chats[0]?.id;
     check(id, 'Persisted fixture conversation required');
-    row = service.getConversation(id).messages.find((message) => message.tool?.name === 'edit' && message.tool.file?.diff?.includes('edited'));
+    const messages = (await readChat(service, id)).messages;
+    row = messages.find((message) => message.tool?.name === 'edit' && message.tool.file?.diff?.includes('edited'));
     check(row, 'Persisted successful edit diff required');
     let boundRuntime;
     function delegate(runtime) {
       if (boundRuntime === runtime) return;
       check(!boundRuntime, 'App runtime changed during fixture');
       boundRuntime = runtime;
-      const subscribe = runtime.subscribe;
       const overrides = {
-        subscribe: (listener) => { const app = subscribe(listener); const fixture = service.subscribe(listener); return () => { app(); fixture(); }; },
-        getConversation: (chatId) => service.getConversation(chatId),
-        getConversationState: (chatId) => service.getConversation(chatId),
+        findChat: (key) => service.findChat(key),
+        chat: (chatId, options) => service.chat(chatId, options),
         send: (chatId, text) => service.send(chatId, text), cancel: (chatId) => service.cancel(chatId),
-        resume: () => service.resume(), updateSettings: (chatId, settings) => service.updateSettings(chatId, settings),
+        updateSettings: (chatId, settings) => service.updateSettings(chatId, settings),
         createChat: () => service.createChat(), renameChat: (chatId, title) => service.renameChat(chatId, title),
         archiveChat: (chatId) => service.archiveChat(chatId),
       };
@@ -84,6 +109,7 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
         providerAccess: () => ({ ready: true, connected: true }), signingIn: false, hasConnectedProvider: true };
     };
     restores.push(() => Object.defineProperty(providerModule, 'useChatApp', descriptor));
+    delegate(mountedRuntime(hook));
     router.push(`/chat/${id}`);
     await until(() => mountedProps().some((props) => props.testID === `tool-${row.id}` && props.onPress), 'Persisted edit card did not mount');
     const card = mountedProps().find((props) => props.testID === `tool-${row.id}` && props.onPress);
@@ -100,7 +126,7 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
       await sleep(350);
       const list = mountedFibers().find((fiber) => fiber.memoizedProps.testID === 'message-list' && fiber.stateNode?.scrollToIndex);
       check(list, 'Mounted transcript list required for screenshot');
-      list.stateNode.scrollToIndex({ index: service.getConversation(id).messages.findIndex((message) => message.id === row.id), viewPosition: 0.2, animated: false });
+      list.stateNode.scrollToIndex({ index: messages.findIndex((message) => message.id === row.id), viewPosition: 0.2, animated: false });
       await sleep(holdMs);
     }
     return { ok: true, hermes: typeof globalThis.HermesInternal === 'object', conversationId: id,

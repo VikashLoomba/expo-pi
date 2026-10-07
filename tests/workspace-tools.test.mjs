@@ -4,6 +4,7 @@ import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/conte
 import { getCurrentTools } from '@earendil-works/pi-ai/utils/transcript';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { integrationDatabase, toolReply, toolRound, until } from './helpers/bash-integration.mjs';
+import { readChat } from './helpers/chat-view.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 
 const hooks = installBashBrowserHooks();
@@ -17,7 +18,7 @@ const { createWorkspaceExtension } = await import('../src/pi/workspace/extension
 const { createBashEngine } = await import('../src/pi/bash/engine/index.ts');
 const context = BACKGROUND_CONTEXT;
 const answer = { chunks: ['Done.'] };
-const rows = (service, id) => service.getConversation(id).messages.filter((message) => message.tool);
+const rows = async (service, id) => (await readChat(service, id)).messages.filter((message) => message.tool);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const policy = { scope: acquireWorkspaceExecutionScope, promptFacts: () => [] };
 const wrappedTool = (extension, name) => {
@@ -209,9 +210,8 @@ for (const name of ['write', 'edit']) test(`unsafe ${name} is not replayed after
     WorkspaceExecutionEnv.prototype.writeFile = originalWrite;
     await observer.writeFile('/recovery', 'original external change');
     const second = await file.open(scriptedModels([answer]).models);
-    await second.resume();
     await second.waitForSubmission(submission);
-    const interrupted = rows(second, id).find(({ tool }) => tool.name === name && tool.status === 'error');
+    const interrupted = (await rows(second, id)).find(({ tool }) => tool.name === name && tool.status === 'error');
     assert.ok(interrupted);
     assert.match(interrupted.tool.output, /interrupted|partially/i);
     assert.equal(await observer.readFile('/recovery'), 'original external change', 'recovery did not repeat the committed mutation');

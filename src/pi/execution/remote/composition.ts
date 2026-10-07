@@ -27,7 +27,7 @@ export function createRemoteExecution(local: ExecutionComposition, hosts: Remote
     conversationCreated: local.conversationCreated,
     async resolve(target, context) {
       assertOpen();
-      const selection = await target.read.snapshot(ExecutionTargetDoc, target.conversationId, context);
+      const selection = (await target.read.snapshot(ExecutionTargetDoc, target.conversationId, context))?.target;
       if (!selection || selection.kind === 'local') return local.resolve(target, context);
       if (!target.cwd?.startsWith('/') || target.cwd.includes('\0')) {
         throw new Error('Choose a working directory in this chat’s settings before remote execution.');

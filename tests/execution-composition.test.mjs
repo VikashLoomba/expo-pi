@@ -6,6 +6,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { AgentDoc, defineExtension, defineTask, section } from '@earendil-works/pi-durable';
 import { getOrThrow } from '@earendil-works/pi-durable/env';
 import { integrationDatabase, toolReply, toolRound, until } from './helpers/bash-integration.mjs';
+import { readChat } from './helpers/chat-view.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { DirectEnvTask, independentExecution, OwnedConversationTask, TestExecutionDoc } from './helpers/independent-env.mjs';
@@ -15,7 +16,7 @@ test.after(() => hooks.deregister());
 const { DurableChatService } = await import('../src/pi/chat-service.ts');
 const context = BACKGROUND_CONTEXT;
 const answer = { chunks: ['Done.'] };
-const rows = (service, id) => service.getConversation(id).messages.filter((message) => message.tool);
+const rows = async (service, id) => (await readChat(service, id)).messages.filter((message) => message.tool);
 
 async function fixture(t, script) {
   const file = await integrationDatabase(t, DurableChatService);
@@ -41,7 +42,6 @@ async function task(service, id, definition) {
   const taskId = await service.harness.commit((tx) => tx.createTask(definition, {}, {
     conversationId: Number(id), ownership: { kind: 'conversation' },
   }), context);
-  await service.resume();
   return (await service.harness.waitForTask(taskId, context)).state;
 }
 
@@ -197,14 +197,14 @@ test('test selector and cwd commit atomically, survive reopen, rewind at forks, 
   const provider = scriptedModels([toolReply('read', { path: 'persisted' }), answer]);
   const reopened = await file.open(provider.models, { execution: independent.decorate });
   assert.equal(provider.requests.length, 0, 'inspection and reopen do not resume the scheduler');
-  assert.equal((await run(reopened, String(fork.id))).at(-1).tool.output, 'kept by independent host');
-  const owned = await task(reopened, String(fork.id), OwnedConversationTask);
+  assert.equal((await run(reopened, fork.id)).at(-1).tool.output, 'kept by independent host');
+  const owned = await task(reopened, fork.id, OwnedConversationTask);
   assert.equal(owned.outcome.status, 'completed', JSON.stringify(owned));
   const child = owned.outcome.result.conversationId;
   assert.equal((await reopened.harness.snapshot(TestExecutionDoc, child, context)).kind, 'independent');
   assert.equal((await reopened.harness.snapshot(AgentDoc, child, context)).cwd, independent.root);
   assert.deepEqual(owned.outcome.result.direct, { status: 'completed', result: { text: 'written through runtime.env()', cwd: independent.root } });
-  const direct = await task(reopened, String(fork.id), DirectEnvTask);
+  const direct = await task(reopened, fork.id, DirectEnvTask);
   assert.deepEqual(direct.outcome, owned.outcome.result.direct);
   assert.equal(file.metrics.opened, 0, 'reopen, fork, owned creation and runtime.env remain independent');
 });
@@ -214,7 +214,7 @@ for (const kind of ['missing', 'failing']) test(`a ${kind} selected env fails wi
   const id = await service.createChat();
   await select(service, id, independent, kind);
   const result = await service.waitForSubmission(await service.send(id, 'Try the selected host.'));
-  const tools = rows(service, id);
+  const tools = await rows(service, id);
   assert.equal(result.status, 'done');
   assert.equal(tools.length, 1);
   assert.equal(tools[0].tool.status, 'error');
@@ -289,10 +289,8 @@ test('a cancelled independent command awaiting drain does not block a local chat
   const pending = await service.send(external, 'Start waiting.');
   await until(() => independent.metrics.active === 1, 'independent command reached its wait');
   const cancelling = service.cancel(external);
-  let retry;
   try {
     await until(() => independent.metrics.aborted === 1, 'cancellation reaches the selected env');
-    retry = service.send(external, 'Continue after the cancelled command drains.');
     const progressing = run(service, local, 'Run locally while the other host drains.');
     const localRows = await Promise.race([progressing, new Promise((_, reject) => setTimeout(() => reject(new Error('Local chat was blocked by cancelled independent environment drainage.')), 1500))]);
     assert.match(localRows.at(-1).tool.output, /LOCAL_PROGRESS/);
@@ -302,7 +300,8 @@ test('a cancelled independent command awaiting drain does not block a local chat
     independent.releaseDrain();
     await cancelling;
     await service.waitForSubmission(pending);
-    if (retry) await service.waitForSubmission(await retry);
   }
+  // Stop resolves once the chat is idle, so the next message starts after the drain.
+  await service.waitForSubmission(await service.send(external, 'Continue after the cancelled command drains.'));
   assert.equal(independent.metrics.active, 0);
 });

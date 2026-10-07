@@ -11,7 +11,9 @@ import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
 import { collectSearchSources, inlineCitations } from './web-search-presentation';
 
-export const MessageRow = memo(function MessageRow({ message }: { message: ChatMessage }) {
+export const MessageRow = memo(function MessageRow({ message, stopping = false }: {
+  message: ChatMessage; stopping?: boolean;
+}) {
   const colors = useChatColors();
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -38,7 +40,9 @@ export const MessageRow = memo(function MessageRow({ message }: { message: ChatM
     <View style={styles.assistantIdentity}>
       <PiMark size={25} />
       <Text style={[styles.assistantName, { color: colors.secondary }]}>Pi</Text>
-      <Text numberOfLines={1} style={[styles.streamingLabel, { color: colors.muted }]}>{message.streaming ? 'Responding' : message.interrupted ? 'Interrupted' : ' '}</Text>
+      <Text numberOfLines={1} style={[styles.streamingLabel, { color: colors.muted }]}>
+        {message.streaming ? stopping ? 'Stopping…' : 'Responding' : message.interrupted ? 'Interrupted' : ' '}
+      </Text>
     </View>
     {message.webSearch ? <WebSearchActivity calls={message.webSearch.calls} messageId={message.id} /> : null}
     {message.thinking ? <View>

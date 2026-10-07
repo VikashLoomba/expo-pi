@@ -1,6 +1,6 @@
 # Pi Chat on Expo / iOS
 
-An on-device chat app built with Pi's **durable `Harness`**, Expo SQLite, and Pi's provider registry. Connect OpenAI with ChatGPT or an API key, or use Anthropic, Google, OpenRouter, or xAI with an API key. Continue independent conversations across app restarts, each with its own provider, model, and reasoning effort. A new chat uses the first connected provider in the catalog and that provider's first model with a supported reasoning setting; the `add_numbers` tool executes locally on the device.
+An on-device chat app built with Pi's **durable `Harness`**, Expo SQLite, and Pi's provider registry. Connect OpenAI with ChatGPT or an API key, or use Anthropic, Google, OpenRouter, or xAI with an API key. Continue independent conversations across app restarts, each with its own provider, model, and reasoning effort. A new chat uses the first connected provider in the catalog and that provider's first model with a supported reasoning setting.
 
 The app exact-pins `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord` to **1.0.4**. The previous one-prompt Agent Core runner has been replaced by a shared durable session with separate conversations. [`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge needed to run Pi in Expo on iOS and Android.
 
@@ -15,7 +15,7 @@ Use a development build for the app's OAuth integration. Rebuild an existing dev
 
 1. Open **Providers**. In **OpenAI**, choose **Continue with ChatGPT** for the modern browser flow or **Use API key**. Each replaces the other authentication method for this provider.
 2. Complete browser sign-in. On iOS, a local Swift Expo module receives Pi's localhost callback and the app closes the authentication browser automatically. If the listener or browser is unavailable, the same PKCE/state attempt can finish through **Open in browser** and the full callback URL field. See the [modern OAuth adapter](src/pi/openai-auth/README.md) for the callback lifecycle and validation boundaries.
-3. Return to **Chats** and start a chat. It uses a connected provider; change the provider, model or effort in the chat's **Model settings**. Asking it to add 19 and 23 exercises the on-device `add_numbers` tool.
+3. Return to **Chats** and start a chat. It uses a connected provider; change the provider, model or effort in the chat's **Model settings**.
 4. Use **Stop** to cancel a response. Rename or archive conversations from their chat actions; archived chats are hidden from the list, while their durable records remain stored.
 
 Existing chats remain readable without a provider connection. Starting a chat, sending, or resuming model work requires credentials for a provider. Pi's `openai` OAuth provider has no device-code route in the installed `pi-ai` 1.0.4.
@@ -50,15 +50,15 @@ Chats receive local `read`, `write`, `edit`, and `bash` tools sharing a private,
 
 One `SqliteStorage` instance backs the app's durable session and all conversations. The custom Expo driver opens **`pi-chats.db`** and supplies the asynchronous database interface expected by Pi's portable `SqliteStorage`. Pi owns the schema, migrations, records, document revisions, task checkpoints, and atomic commits. The adapter serializes native operations and transactions, rolls failed transactions back, and waits for admitted work before closing.
 
-The UI is a projection of committed Pi records, including streamed partials in `pi.live`; it does not maintain a separate persisted transcript. Conversation titles, history, tool results, archive state, and unfinished work survive closing and reopening the database. Reopened work remains paused until the runtime has authentication and asks the harness to resume. Completed requests with an existing request ID are not submitted again.
+The UI reads pi-durable's own views and keeps no copy of them. The chat list reads one `app.chat` document per chat: its title, a preview of the last message sent, and when it was sent. It never reads transcripts, so opening the app costs the same however long the chats are. An open chat subscribes to its conversation view (`viewState()`), which carries the active entries together with `pi.live`, `pi.inbox` and `pi.agent` in one revision, and to `documentState()` for the app's own documents. Because the view holds only the active context, the open chat also reads its full history once with `conversation.entries()`, so messages from before a compaction stay visible. Subscriptions start when a screen shows the chat and end when it leaves. A compaction summary shows as "Earlier messages summarized", never as a user message.
+
+The app opens the database once at launch and keeps it open, including in the background, until the app's root unmounts. After opening it calls `harness.resume()`, so work the last process left unfinished continues. Each request resolves its credentials when it starts. A recovered chat whose provider is signed out fails with a visible error and does not hold up other chats. Requests use SSE with pi-durable's default retry and timeout policy, so a request cut off by a transient network error, for example while iOS suspended the app, is retried. The app does not keep running work in the background; that is a separate, later feature. Completed requests with an existing request ID are not submitted again.
 
 Streaming follows the bottom of the transcript until you drag to read earlier messages. Returning to the bottom or choosing **Scroll to latest message** resumes following. The scroll animation runs on the UI thread and respects the system's Reduce Motion setting. Markdown keeps completed blocks in place as the last block grows, and assistant/tool rows retain their identity when a partial becomes a saved message. The [Markdown architecture and parser decision](docs/markdown.md) explains CommonMark/GFM parsing, native tables, citation source maps, streaming behavior, and the explicit rendering limits. The header and composer subscribe only to control-state changes. These presentation changes preserve Pi's existing 100 ms durable partial-checkpoint cadence.
 
-When the app enters the background, the runtime requests a harness close and closes its storage. On foreground activation, it reopens the database and resumes unfinished work when credentials are available. This is foreground recovery of committed state; the app does **not** promise model execution while iOS or Android suspends it. A recovered unfinished generation can start a new provider request. Native suspend/resume and process-termination checks are tracked separately in the [verification record](docs/ios-compatibility.md).
-
 **Credentials persist in Expo SecureStore** (iOS Keychain / Android Keystore), one record per provider: an API key, or for ChatGPT the access token, refresh token, expiry, issued client ID and scopes. They are restored on startup and never stored in the chat SQLite database. Pi refreshes OAuth tokens near expiry and saves the replacement before authenticating the request. System authentication-browser cookies are managed separately.
 
-Signing out first stops the active scheduler, then removes saved credentials. Saved chats remain available. Failed credential deletion leaves requests paused and offers a retry; a temporary network or Keychain error preserves the stored session. A token-endpoint `invalid_grant` removes the rejected credential and asks for sign-in again. Authentication restoration and retry errors do not close readable chat history.
+Signing in, saving an API key and signing out change only the credential store; open chats stay open and readable. After signing out, the next message for that provider asks you to connect it again. A failed credential deletion is reported and can be retried from Providers; a temporary network or Keychain error preserves the stored session. A token-endpoint `invalid_grant` removes the rejected credential and asks for sign-in again.
 
 ## Pi and Expo authentication
 
@@ -106,7 +106,7 @@ pnpm test:native
 pnpm test:native --platform android --port 8081
 ```
 
-The command discovers the running app's Metro modules and uses a unique `pi-validation-*.db` SQLite database plus a scripted provider, without real credentials or model HTTP requests. It verifies the tool result **42** reaches the next model request, committed streaming output, title/history persistence after close/reopen, paused recovery while signed out, resumption of the same submission, durable cancellation after another reopen, and SSE transport. It also verifies settings remain independent across chats, survive SQLite reopening, and reach the selected provider's request with the saved effort. Its JSON report includes the validation database name and results; the command does not start or reload the app and is separate from `test:compat`.
+The command discovers the running app's Metro modules and uses unique `pi-validation-*.db` SQLite databases plus a scripted provider, without real credentials or model HTTP requests. It verifies that a probe-registered tool's result reaches the next model request, title and history survive close/reopen, work cut off by closing resumes once on the next open, a recovered chat whose provider is signed out fails visibly while another chat still answers, cancellation is durable, and requests use SSE. It also verifies settings stay independent across chats, survive reopening, and reach the selected provider's request. Finally it times opening with 1 chat, 100 chats, and 100 chats with four times the history, and fails if more history makes opening slower. The command does not start or reload the app and is separate from `test:compat`.
 
 For the streaming UI check, use an iOS Hermes development build connected to Metro on port 8081:
 
@@ -118,7 +118,7 @@ node scripts/check-native-streaming.mjs --manual
 node scripts/check-native-streaming.mjs --manual --duration-seconds 120
 ```
 
-The streaming probe temporarily opens its own scripted SQLite conversation, then restores its hooks and returns home. It reports growing-content following, completion at the bottom, stable message/React row identity, scroll commands, and JavaScript frame timing. The manual run requires native gestures and phase markers; follow the [streaming verification procedure](docs/ios-compatibility.md#streaming-presentation-and-repeatable-check). JavaScript frame timing measures JS responsiveness, not UI-thread frames per second.
+The streaming probe temporarily routes the mounted runtime's chat methods to its own scripted SQLite conversation, then restores them and returns home. It checks growing-content following, completion at the bottom, and that the streamed answer keeps one row ID from its first delta to the saved message. Scroll commands and JavaScript frame timing are reported as diagnostics; `--seed-turns N` first saves N earlier turns to measure a long chat. The manual run requires native gestures and phase markers; follow the [streaming verification procedure](docs/ios-compatibility.md#streaming-presentation-and-repeatable-check). JavaScript frame timing measures JS responsiveness, not UI-thread frames per second.
 
 Both default following and the manual native-gesture check passed on the iOS simulator with a scripted provider. During the reading-history interval, content grew by 1,220.67 points without moving the reader's position; tapping scroll-to-latest resumed following and finished at the measured bottom with the same assistant row.
 
@@ -132,12 +132,13 @@ Native integration, background/foreground behavior, and live authenticated ChatG
 - `src/app/chat/[id].tsx`: conversation transcript, composer, streaming, tool output, and cancellation.
 - `src/app/chat-settings/[id].tsx`: staged per-chat provider, model, and reasoning settings.
 - `src/app/account.tsx`: provider API keys, ChatGPT sign-in, browser actions, connection retry, and disconnecting accounts.
-- `src/chat/chat-provider.tsx`: shared Models instance, account state, and React subscriptions.
-- `src/chat/chat-runtime.ts`: serialized foreground/background, storage, and account lifecycle.
+- `src/chat/chat-provider.tsx`: shared Models instance, account state, and the hooks that subscribe a screen to a chat.
+- `src/chat/chat-runtime.ts`: opens chat storage once, and sign-in, API keys and sign-out.
 - `src/components/chat/transcript.tsx` and `src/hooks/use-transcript-scroll.ts`: transcript-only subscriptions and UI-thread following that yields to the reader.
 - `src/components/chat/streaming-markdown.ts` and `message-content.tsx`: incremental Markdown parsing and stable rendered blocks.
-- `src/pi/chat-service.ts`: durable Harness, `add_numbers`, chat metadata, and committed-revision subscriptions.
-- `src/pi/chat-projection.ts`: pure transcript, live-state, and chat-summary projections.
+- `src/pi/chat-service.ts`: durable Harness, the chat list from `app.chat` documents (`chat-metadata.ts`), sending and settings.
+- `src/pi/chat-view.ts`: `ChatView`, one chat's conversation view and document subscriptions while it is shown.
+- `src/pi/chat-projection.ts`: pure mapping from a chat's committed state to rows, controls and list summaries.
 - `src/pi/native-web-search/`: OpenAI provider wrapper, native archive/replay, durable documents, and safe presentation projection.
 - `src/components/chat/web-search.tsx`: native search activity and sources, with citation source maps in the existing Markdown renderer.
 - `src/pi/model-catalog.ts`: SDK-derived provider/model choices, effort capabilities, and selection validation.

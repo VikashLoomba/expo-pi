@@ -22,7 +22,7 @@ function dateLabel(timestamp: number) {
 export default function ChatsScreen() {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { ready, error, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, createChat } = useChatApp();
+  const { ready, error, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, runtime } = useChatApp();
   const connectionsReady = catalog.every((provider) => providerAccess(provider.id).ready);
   const connectionError = catalog.map((provider) => providerAccess(provider.id).error).find(Boolean);
   const [search, setSearch] = useState('');
@@ -34,7 +34,10 @@ export default function ChatsScreen() {
   const newChat = async () => {
     if (creating || !ready) return;
     setCreating(true); setLocalError(undefined);
-    try { const id = await createChat(); router.push({ pathname: '/chat/[id]', params: { id } }); }
+    try {
+      const id = await runtime.createChat();
+      router.push({ pathname: '/chat/[id]', params: { id } });
+    }
     catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'Could not create a chat.'); }
     finally { setCreating(false); }
   };
@@ -43,7 +46,8 @@ export default function ChatsScreen() {
       headerLeft: () => <IconButton testID="account-button" icon="person" label="Account" onPress={() => router.push('/account')} />,
       headerRight: () => <IconButton testID="new-chat" icon="compose" label="New chat" disabled={!ready || creating} onPress={() => { void newChat(); }} />,
     }} />
-    <FlatList testID="chat-list" data={visibleChats} keyExtractor={(chat) => chat.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+    <FlatList testID="chat-list" data={visibleChats} keyExtractor={(chat) => String(chat.id)}
+      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 20) + 24 }]}
       ListHeaderComponent={<View style={styles.listHeader}>
         <View style={styles.brandRow}><PiMark size={36} /><View style={styles.brandCopy}>
@@ -56,7 +60,7 @@ export default function ChatsScreen() {
             autoCorrect={false} returnKeyType="search" style={[styles.searchInput, { color: colors.text }]} />
           {!!search && <IconButton icon="close" label="Clear search" onPress={() => setSearch('')} />}
         </View>}
-        {(error || localError) && <InlineNotice testID="chat-list-error" message={localError || error!} />}
+        {(localError || error) && <InlineNotice testID="chat-list-error" message={localError || error || ''} />}
         {chats.length > 0 && <View style={styles.sectionRow}>
           <Text style={[styles.sectionTitle, { color: colors.secondary }]}>{query ? `${visibleChats.length} results` : 'YOUR CONVERSATIONS'}</Text>
           <Text style={[styles.savedLabel, { color: colors.muted }]}>Saved on this device</Text>

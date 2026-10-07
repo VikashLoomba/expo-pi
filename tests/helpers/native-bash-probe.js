@@ -77,14 +77,27 @@ export default async function nativeBashProbe({ namespace, stage, platform }) {
     name: 'Scripted local validation', check: async () => ({ type: 'api_key' }),
     resolve: async () => ({ auth: { apiKey: 'synthetic-no-network' } }),
   } }, stream: dispatch, streamSimple: dispatch });
-  const service = await DurableChatService.open({ models, platform,
+  // Read a chat the way the chat screen does: subscribe to its view until it has loaded.
+  const readChat = async (chatService, chatId) => {
+    const view = chatService.chat(chatId, { transcript: true });
+    const stop = view.subscribe(() => {});
+    try {
+      const deadline = Date.now() + 5_000;
+      while (view.getSnapshot().status === 'loading') {
+        if (Date.now() > deadline) throw new Error('The chat view did not load.');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return view.getSnapshot().conversation;
+    } finally { stop(); }
+  };
+  const service = await DurableChatService.open({ models,
     storage: await openExpoSqliteStorage(`${namespace}-chats.db`),
     openWorkspaceDatabase: () => openWorkspaceDatabase(`${namespace}-files.db`) });
   try {
     const id = stage === 'seed' ? await service.createChat() : service.getSnapshot().chats[0]?.id;
     if (!id) throw new Error('The seed conversation did not survive restart.');
     const receipt = await service.waitForSubmission(await service.send(id, `Run ${stage} validation.`));
-    const rows = service.getConversation(id).messages.filter((row) => row.tool?.name === 'bash');
+    const rows = (await readChat(service, id)).messages.filter((row) => row.tool?.name === 'bash');
     const output = rows[rows.length - 1]?.tool.output ?? '';
     const expected = stage === 'seed' ? ['SEEDED']
       : ['héllo 世界', '/workspace/one/value', 'AP9B', '640', '42', 'VERIFIED'];

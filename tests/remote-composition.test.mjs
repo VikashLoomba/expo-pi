@@ -7,6 +7,7 @@ import { AgentDoc, defineExtension, defineTask, section } from '@earendil-works/
 import { getOrThrow } from '@earendil-works/pi-durable/env';
 import { integrationDatabase, toolReply, toolRound, until } from './helpers/bash-integration.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
+import { readChat } from './helpers/chat-view.mjs';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { DirectEnvTask, OwnedConversationTask } from './helpers/independent-env.mjs';
 import { remoteDaemonFixture, remoteDaemonPath } from './helpers/remote-daemon.mjs';
@@ -20,7 +21,7 @@ const { ExecutionTargetDoc } = await import('../src/pi/execution/document.ts');
 const C = BACKGROUND_CONTEXT;
 const real = { skip: await remoteDaemonPath() ? false : 'Install Pi Env 1.0.4 or set PI_ENV_DAEMON.', timeout: 20_000 };
 const answer = { chunks: ['Done.'] };
-const rows = (service, id) => service.getConversation(id).messages.filter((message) => message.tool);
+const rows = async (service, id) => (await readChat(service, id)).messages.filter((message) => message.tool);
 function backend() {
   const data = new Map();
   return { getItemAsync: async (key) => data.get(key) ?? null, setItemAsync: async (key, value) => { data.set(key, value); }, deleteItemAsync: async (key) => { data.delete(key); } };
@@ -51,7 +52,6 @@ async function run(service, id) {
 }
 async function task(service, id, definition) {
   const taskId = await service.harness.commit((tx) => tx.createTask(definition, {}, { conversationId: Number(id), ownership: { kind: 'conversation' } }), C);
-  await service.resume();
   return (await service.harness.waitForTask(taskId, C)).state;
 }
 function target(service, id, cwd) { return { conversationId: Number(id), cwd, read: service.harness }; }
@@ -64,7 +64,7 @@ test('production remote composition runs all shared tools through the real daemo
     { name: 'read', arguments: { path: 'nested/note' } },
   ]), answer]);
   const id = await f.service.createChat();
-  assert.deepEqual(f.service.getConversation(id).execution, { target: { kind: 'local' }, cwd: '/workspace' });
+  assert.deepEqual((await readChat(f.service, id)).execution, { target: { kind: 'local' }, cwd: '/workspace' });
   await select(f, id);
   assert.equal(f.remote.metrics.sessions, 0);
   assert.equal(f.file.metrics.opened, 0);
@@ -163,7 +163,6 @@ test('cancelling one chat task leaves another chat using the same remote environ
     }));
     return ids;
   }, C);
-  await f.service.resume();
   await Promise.all(started.map((ready) => ready.promise));
   assert.equal(borrowed[0], borrowed[1], 'same connection settings and cwd share the owner across chats');
   await f.service.harness.abortTask(taskIds[0], C);
@@ -224,8 +223,8 @@ test('two chats on one remote machine keep independent committed directories thr
     toolReply('read', { path: 'same-name' }), answer,
   ]);
   const reopened = await f.file.open(provider.models, { execution: f.decorate });
-  assert.deepEqual(reopened.getConversation(first).execution, { target: remoteTarget, cwd: firstDirectory });
-  assert.deepEqual(reopened.getConversation(second).execution, { target: remoteTarget, cwd: secondDirectory });
+  assert.deepEqual((await readChat(reopened, first)).execution, { target: remoteTarget, cwd: firstDirectory });
+  assert.deepEqual((await readChat(reopened, second)).execution, { target: remoteTarget, cwd: secondDirectory });
   assert.equal((await run(reopened, first)).at(-1).tool.output, 'first chat');
   assert.equal((await run(reopened, second)).at(-1).tool.output, 'second chat');
   assert.equal(f.file.metrics.opened, 0);
@@ -267,19 +266,19 @@ test('production selection/cwd survive reopen, historical fork, and direct task-
   const firstEntry = (await parent.entries({}, 100, undefined, C)).items[0].id;
   await f.service.updateExecution(id, { target: { kind: 'local' }, cwd: '/workspace' });
   const fork = await parent.fork(firstEntry, { ownership: { kind: 'ownerless' } }, C);
-  assert.deepEqual(await f.service.harness.snapshot(ExecutionTargetDoc, fork.id, C), { kind: 'ssh', machineId: f.host.id });
+  assert.deepEqual(await f.service.harness.snapshot(ExecutionTargetDoc, fork.id, C), { target: { kind: 'ssh', machineId: f.host.id } });
   assert.equal((await f.service.harness.snapshot(AgentDoc, fork.id, C)).cwd, f.remote.directory);
   await f.file.close(f.service);
   const provider = scriptedModels([toolReply('read', { path: 'persisted' }), answer]);
   const reopened = await f.file.open(provider.models, { execution: f.decorate });
   const before = f.remote.metrics.sessions;
-  assert.deepEqual(reopened.getConversation(String(fork.id)).execution, { target: { kind: 'ssh', machineId: f.host.id }, cwd: f.remote.directory });
+  assert.deepEqual((await readChat(reopened, fork.id)).execution, { target: { kind: 'ssh', machineId: f.host.id }, cwd: f.remote.directory });
   assert.equal(f.remote.metrics.sessions, before, 'reopen is metadata-only');
-  assert.equal((await run(reopened, String(fork.id))).at(-1).tool.output, 'remote-current-files');
-  const owned = await task(reopened, String(fork.id), OwnedConversationTask);
+  assert.equal((await run(reopened, fork.id)).at(-1).tool.output, 'remote-current-files');
+  const owned = await task(reopened, fork.id, OwnedConversationTask);
   assert.equal(owned.outcome.status, 'completed', JSON.stringify(owned));
   const child = owned.outcome.result.conversationId;
-  assert.deepEqual(await reopened.harness.snapshot(ExecutionTargetDoc, child, C), { kind: 'ssh', machineId: f.host.id });
+  assert.deepEqual(await reopened.harness.snapshot(ExecutionTargetDoc, child, C), { target: { kind: 'ssh', machineId: f.host.id } });
   assert.equal((await reopened.harness.snapshot(AgentDoc, child, C)).cwd, f.remote.directory);
   assert.deepEqual(owned.outcome.result.direct, { status: 'completed', result: { text: 'written through runtime.env()', cwd: f.remote.directory } });
   assert.equal(f.remote.children.size, 1, 'the direct task and inherited child borrow the retained environment');
@@ -320,8 +319,9 @@ test('removed production hosts retain chat selection and fail without local fall
   await f.hosts.remove(f.host.id);
   const result = await f.service.waitForSubmission(await f.service.send(id, 'Try the selected host.'));
   assert.ok(['done', 'error'].includes(result.status), JSON.stringify(result));
-  assert.deepEqual(f.service.getConversation(id).execution.target, { kind: 'ssh', machineId: f.host.id });
-  const observable = JSON.stringify({ result, conversation: f.service.getConversation(id) });
+  const conversation = await readChat(f.service, id);
+  assert.deepEqual(conversation.execution.target, { kind: 'ssh', machineId: f.host.id });
+  const observable = JSON.stringify({ result, conversation });
   assert.match(observable, /removed|execution environment/i);
   assert.equal(f.remote.metrics.sessions, 0);
   assert.equal(f.file.metrics.opened, 0);
@@ -410,9 +410,9 @@ test('production execution settings do not publish target or cwd when a durable 
   // Create a task without resuming the scheduler; pending work must block selection.
   await f.service.harness.commit((tx) => tx.createTask(DirectEnvTask, {}, { conversationId: Number(id), ownership: { kind: 'conversation' } }), C);
   await assert.rejects(f.service.updateExecution(id, { target: { kind: 'local' }, cwd: '/workspace' }), /Wait for execution to stop/);
-  assert.deepEqual(f.service.getConversation(id).execution, { target: { kind: 'ssh', machineId: f.host.id }, cwd: f.remote.directory });
+  assert.deepEqual((await readChat(f.service, id)).execution, { target: { kind: 'ssh', machineId: f.host.id }, cwd: f.remote.directory });
   assert.equal((await f.service.harness.snapshot(AgentDoc, Number(id), C)).cwd, f.remote.directory);
-  assert.deepEqual(await f.service.harness.snapshot(ExecutionTargetDoc, Number(id), C), { kind: 'ssh', machineId: f.host.id });
+  assert.deepEqual(await f.service.harness.snapshot(ExecutionTargetDoc, Number(id), C), { target: { kind: 'ssh', machineId: f.host.id } });
 });
 
 test('native admitted channel refuses missing SSH trust before constructing a transport', () => {
@@ -422,12 +422,12 @@ test('native admitted channel refuses missing SSH trust before constructing a tr
 test('combined execution and model settings capture caller drafts before asynchronous admission', real, async (t) => {
   const f = await fixture(t, []);
   const id = await f.service.createChat();
-  const expected = structuredClone(f.service.getConversation(id).settings);
+  const expected = structuredClone((await readChat(f.service, id)).settings);
   const draft = structuredClone(expected);
   const pending = f.service.updateExecution(id, { target: { kind: 'ssh', machineId: f.host.id }, cwd: f.remote.directory }, draft);
   draft.model.modelId = 'mutated-after-validation';
   await pending;
-  assert.deepEqual(f.service.getConversation(id).settings, expected);
+  assert.deepEqual((await readChat(f.service, id)).settings, expected);
 });
 
 test('production remote filesystem identity follows accepted server identity and remains stable across cwd changes', real, async (t) => {

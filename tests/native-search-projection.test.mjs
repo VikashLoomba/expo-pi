@@ -4,7 +4,7 @@ import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 
 const hooks = installBashBrowserHooks();
 test.after(() => hooks.deregister());
-const { projectChat } = await import('../src/pi/chat-projection.ts');
+const { projectControls, projectMessages, summarizeChat } = await import('../src/pi/chat-projection.ts');
 
 const evidenceText = 'External source evidence: the unique source fact is cobalt-73.';
 const source = { url: 'https://example.com/research', title: 'Research source' };
@@ -40,20 +40,24 @@ function native(status = 'completed', answer = true) {
 }
 
 function state(entries, record) {
-  return { metadata: { title: '', createdAt: 1, archived: false },
-    settings: { model: { provider: 'openai', modelId: 'gpt-6-astra' }, thinkingLevel: 'low' },
+  return { id: 1, metadata: { title: '', createdAt: 1, archived: false },
+    agent: { model: { provider: 'openai', modelId: 'gpt-6-astra' }, thinkingLevel: 'low' },
     entries: new Map(entries.map((entry) => [entry.id, entry])), live: {},
-    native: { responses: record ? { [record.requestId]: record } : {} }, nativeLive: {},
-    unsettled: new Set(), abortRequested: new Set() };
+    native: { responses: record ? { [record.requestId]: record } : {} }, nativeLive: {} };
+}
+
+/** Project the way the open chat does: committed entries in ID order plus live documents. */
+function project(cached) {
+  return projectMessages(cached, [...cached.entries.values()].sort((left, right) => left.id - right.id));
 }
 
 test('model-facing search evidence cannot appear as a human message, title, or preview', () => {
   const cached = state([observation(3)]);
-  const projected = projectChat('1', cached, undefined, false);
-  assert.deepEqual(projected.conversation.messages, []);
-  assert.equal(projected.conversation.title, 'New chat');
-  assert.equal(projected.summary.preview, 'Start a conversation');
-  assert.equal(projected.summary.updatedAt, 1);
+  assert.deepEqual(project(cached), []);
+  // Titles and previews come from what the user sent, never from transcript entries.
+  assert.equal(projectControls(cached).title, 'New chat');
+  assert.equal(summarizeChat(1, cached.metadata).preview, 'Start a conversation');
+  assert.equal(summarizeChat(1, cached.metadata).updatedAt, 1);
   assert.equal(cached.entries.get(3).model[0].content[0].text, evidenceText,
     'Projection must not remove evidence from the canonical transcript.');
 });
@@ -61,75 +65,70 @@ test('model-facing search evidence cannot appear as a human message, title, or p
 test('an actual user message remains visible even when it quotes the external-evidence label', () => {
   const quoted = user();
   quoted.model[0].content = evidenceText;
-  const projected = projectChat('1', state([quoted]), undefined, false);
-  assert.equal(projected.conversation.messages.length, 1);
-  assert.equal(projected.conversation.messages[0].role, 'user');
-  assert.equal(projected.conversation.messages[0].text, evidenceText);
+  const messages = project(state([quoted]));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].role, 'user');
+  assert.equal(messages[0].text, evidenceText);
 });
 
 test('canonical observations preserve one native activity row and the original answer and citations', () => {
   const cached = state([user(), observation(3), assistant()], native());
-  const projected = projectChat('1', cached, undefined, false);
-  assert.deepEqual(projected.conversation.messages.map((row) => row.role), ['user', 'assistant']);
-  assert.equal(projected.conversation.title, 'Find the release details.');
-  assert.equal(projected.summary.preview, 'A sourced answer.');
-  assert.equal(projected.summary.updatedAt, 30, 'An evidence timestamp must not reorder the chat list.');
-  const answer = projected.conversation.messages[1];
+  const messages = project(cached);
+  assert.deepEqual(messages.map((row) => row.role), ['user', 'assistant']);
+  const answer = messages[1];
   assert.equal(answer.text, 'A sourced answer.');
   assert.equal(answer.webSearch.calls[0].id, 'search-one');
   assert.equal(answer.webSearch.sources.length, 1);
   assert.equal(answer.webSearch.citations[0].url, source.url);
-  assert.doesNotMatch(JSON.stringify(projected.conversation), /cobalt-73|opaque-secret/);
-  const reopened = projectChat('1', structuredClone(cached), undefined, false);
-  assert.deepEqual(reopened.conversation, projected.conversation);
+  assert.doesNotMatch(JSON.stringify(messages), /cobalt-73|opaque-secret/);
+  assert.deepEqual(project(structuredClone(cached)), messages);
 });
 
 test('a completed observation remains one search activity when its assistant is interrupted', () => {
   const cached = state([user(), observation(3)], native('interrupted', false));
-  const projected = projectChat('1', cached, undefined, false);
-  assert.deepEqual(projected.conversation.messages.map((row) => row.role), ['user', 'assistant']);
-  const activity = projected.conversation.messages[1];
+  const messages = project(cached);
+  assert.deepEqual(messages.map((row) => row.role), ['user', 'assistant']);
+  const activity = messages[1];
   assert.equal(activity.text, '');
   assert.equal(activity.interrupted, true);
   assert.equal(activity.streaming, false);
   assert.equal(activity.webSearch.calls[0].status, 'completed', 'The received search survived the interrupted answer.');
   assert.deepEqual(activity.webSearch.sources, [source]);
-  assert.doesNotMatch(JSON.stringify(projected.conversation), /cobalt-73|opaque-secret/);
+  assert.doesNotMatch(JSON.stringify(messages), /cobalt-73|opaque-secret/);
 });
 
 test('native activity identity survives observation commits and a final assistant entry', () => {
   const cached = state([user()], native('in_progress', false));
   cached.live = { run: { taskId: 2, inputs: [] } };
   cached.nativeLive = { requestId: 'request-search', taskId: 2 };
-  const initial = projectChat('1', cached, undefined, true);
-  const initialActivity = initial.conversation.messages[1];
+  const initialActivity = project(cached)[1];
   assert.equal(initialActivity.streaming, true);
 
   cached.entries.set(3, observation(3));
-  const observed = projectChat('1', cached, initial.conversation, true);
-  assert.equal(observed.conversation.messages.length, 2);
-  assert.equal(observed.conversation.messages[1].id, initialActivity.id);
+  const observed = project(cached);
+  assert.equal(observed.length, 2);
+  assert.equal(observed[1].id, initialActivity.id);
 
   cached.entries.set(5, assistant());
   cached.native.responses['request-search'] = native();
   cached.live = {};
   cached.nativeLive = {};
-  const completed = projectChat('1', cached, observed.conversation, true);
-  assert.equal(completed.conversation.messages.length, 2);
-  assert.equal(completed.conversation.messages[1].id, initialActivity.id);
-  assert.equal(completed.conversation.messages[1].webSearch.calls[0].id, initialActivity.webSearch.calls[0].id);
-  assert.equal(completed.conversation.messages[1].streaming, false);
+  const completed = project(cached);
+  assert.equal(completed.length, 2);
+  assert.equal(completed[1].id, initialActivity.id);
+  assert.equal(completed[1].webSearch.calls[0].id, initialActivity.webSearch.calls[0].id);
+  assert.equal(completed[1].streaming, false);
 });
 
 test('immutable observation enrichment does not duplicate activity or expose either source body', () => {
   const cached = state([user(), observation(3), assistant()], native());
-  const first = projectChat('1', cached, undefined, false);
+  const first = project(cached);
   const correction = observation(7, 'External source evidence: a later enriched source fact.');
   correction.kind = 'app.openai.search-observation-change';
   correction.edits = [{ target: 3, action: 'omit' }];
   cached.entries.set(correction.id, correction);
-  const next = projectChat('1', cached, first.conversation, false);
-  assert.equal(next.conversation, first.conversation, 'Model-context enrichment alone leaves presentation unchanged.');
-  assert.equal(next.conversation.messages.length, 2);
-  assert.doesNotMatch(JSON.stringify(next.conversation), /cobalt-73|later enriched/);
+  const next = project(cached);
+  assert.deepEqual(next, first, 'Model-context enrichment alone leaves presentation unchanged.');
+  assert.equal(next.length, 2);
+  assert.doesNotMatch(JSON.stringify(next), /cobalt-73|later enriched/);
 });

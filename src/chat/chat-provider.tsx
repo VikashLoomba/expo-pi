@@ -1,19 +1,25 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { AppState, Platform } from 'react-native';
+import type { Models } from '@earendil-works/pi-ai';
+import type { ConversationId } from '@earendil-works/pi-durable';
+import React, {
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
+} from 'react';
+import { AppState } from 'react-native';
 
+import type { ChatView, ChatViewSnapshot } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/composition';
-import type { ChatExecutionSettings } from '../pi/execution/document';
-import { buildModelCatalog, type ChatModelSettings } from '../pi/model-catalog';
+import { buildModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
-import type { ProviderAccess } from '../pi/provider-credentials';
+import type { ProviderAccess, ProviderCredentialStore } from '../pi/provider-credentials';
 import { openExpoSqliteStorage } from '../pi/storage';
 import { AuthPromptController } from './auth-prompt-controller';
 import { ChatRuntime } from './chat-runtime';
+import type { ChatControls, ChatMessage } from './types';
 
-function useChatController() {
+/** App-lifetime objects. Chats open at launch and stay open in the background until the provider unmounts. */
+function useChatRuntime() {
   const [remoteHosts] = useState(createRemoteHostRepository);
   const [credentials] = useState(createChatCredentialStore);
   const [models] = useState(() => {
@@ -21,11 +27,27 @@ function useChatController() {
     credentials.registerProviders(session.getProviders().map((provider) => provider.id));
     return session;
   });
-  const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
   const [runtime] = useState(() => new ChatRuntime({ models, credentials, openStorage: openExpoSqliteStorage,
-    platform: Platform.OS, execution: (local) => createRemoteExecution(local, remoteHosts), newChat: NEW_CHAT_DEFAULTS }));
-  const snapshot = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
-  const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
+    execution: (local) => createRemoteExecution(local, remoteHosts), newChat: NEW_CHAT_DEFAULTS }));
+  useEffect(() => {
+    void remoteHosts.restore().catch((error) => runtime.report(error));
+    // The runtime reports a failed open. Returning to the app retries it; an open runtime ignores the call.
+    const open = () => { void runtime.open().catch(() => {}); };
+    open();
+    const subscription = AppState.addEventListener('change', (state) => { if (state === 'active') open(); });
+    return () => {
+      subscription.remove();
+      void runtime.close().catch((error) => runtime.report(error));
+    };
+  }, [remoteHosts, runtime]);
+  return { remoteHosts, credentials, models, runtime };
+}
+
+/** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
+function useProviderSignIn({ runtime, models, credentials, signOutPending, onSignedIn }: {
+  runtime: ChatRuntime; models: Models; credentials: ProviderCredentialStore; signOutPending: boolean;
+  onSignedIn: () => void;
+}) {
   const [signingInProvider, setSigningInProvider] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<{ providerId: string; message: string }>();
   const [prompts] = useState(() => new AuthPromptController());
@@ -35,29 +57,23 @@ function useChatController() {
   const browser = useRef<AbortController | null>(null);
   const authUrl = useRef<string | null>(null);
   const mounted = useRef(false);
-  const signingIn = signingInProvider !== null;
 
   useEffect(() => {
     mounted.current = true;
-    void remoteHosts.restore().catch((error) => runtime.report(error));
-    if (AppState.currentState !== 'background') void runtime.activate().catch((error) => runtime.report(error));
-    const subscription = AppState.addEventListener('change', (state) => {
-      const operation = state === 'background' ? runtime.deactivate() : state === 'active' ? runtime.activate() : undefined;
-      void operation?.catch((error) => runtime.report(error));
-    });
     return () => {
       mounted.current = false;
-      subscription.remove();
       login.current?.abort();
       browser.current?.abort();
       prompts.cancel();
-      void runtime.deactivate().catch((error) => runtime.report(error));
     };
-  }, [prompts, remoteHosts, runtime]);
+  }, [prompts]);
 
-  const cancelSignIn = useCallback(() => { login.current?.abort(); browser.current?.abort(); }, []);
+  const cancelSignIn = useCallback(() => {
+    login.current?.abort();
+    browser.current?.abort();
+  }, []);
   const signIn = useCallback(async (providerId: string) => {
-    if (login.current || snapshot.signOutPending || !credentials.getProviderSnapshot(providerId).ready) return;
+    if (login.current || signOutPending || !credentials.getProviderSnapshot(providerId).ready) return;
     if (!models.getProvider(providerId)?.auth.oauth) return;
     const controller = new AbortController();
     login.current = controller;
@@ -80,17 +96,19 @@ function useChatController() {
           // OAuth diagnostics can include callback URLs or tokens. The account
           // screen uses public status copy and never renders raw server payloads.
           if (event.type === 'progress' || event.type === 'info' || event.type === 'auth_url') {
-            setAuthNotice({ providerId, message: event.type === 'auth_url' ? 'Continue in your browser to sign in.' : 'Sign-in in progress…' });
+            setAuthNotice({ providerId,
+              message: event.type === 'auth_url' ? 'Continue in your browser to sign in.' : 'Sign-in in progress…' });
           }
         },
       }, options);
       if (mounted.current && !controller.signal.aborted) {
         setAuthNotice(undefined);
-        setCatalog(buildModelCatalog(models));
+        onSignedIn();
       }
     } catch {
       if (mounted.current) {
-        setAuthNotice({ providerId, message: controller.signal.aborted ? 'Sign-in cancelled.' : 'Sign-in could not be completed. Please try again.' });
+        setAuthNotice({ providerId, message: controller.signal.aborted
+          ? 'Sign-in cancelled.' : 'Sign-in could not be completed. Please try again.' });
       }
     } finally {
       if (login.current === controller) login.current = null;
@@ -99,7 +117,7 @@ function useChatController() {
       prompts.cancel();
       if (mounted.current) setSigningInProvider(null);
     }
-  }, [credentials, models, prompts, runtime, snapshot.signOutPending]);
+  }, [credentials, models, onSignedIn, prompts, runtime, signOutPending]);
   const openSignInPage = useCallback(async () => {
     if (!login.current || browser.current || !signingInProvider) return;
     const controller = new AbortController();
@@ -110,48 +128,62 @@ function useChatController() {
         await openOpenAIManualBrowser(authUrl.current, controller.signal);
       }
     } catch {
-      if (mounted.current && !controller.signal.aborted) setAuthNotice({ providerId: signingInProvider, message: 'Could not open the sign-in page. Please try again.' });
+      if (mounted.current && !controller.signal.aborted) {
+        setAuthNotice({ providerId: signingInProvider, message: 'Could not open the sign-in page. Please try again.' });
+      }
     } finally {
       if (browser.current === controller) browser.current = null;
       if (mounted.current) setBrowserOpen(false);
     }
   }, [signingInProvider]);
-  const retryAuth = useCallback(async (providerId: string) => {
-    setAuthNotice(undefined);
-    await runtime.retryAuth(providerId);
-  }, [runtime]);
+
+  return { signingIn: signingInProvider !== null, signingInProvider, authNotice, setAuthNotice, browserOpen,
+    authPrompt, submitAuthPrompt: prompts.submit, signIn, cancelSignIn, openSignInPage };
+}
+
+function useChatController() {
+  const { remoteHosts, credentials, models, runtime } = useChatRuntime();
+  const snapshot = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
+  const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
+  const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
+  const onSignedIn = useCallback(() => setCatalog(buildModelCatalog(models)), [models]);
+  const { setAuthNotice, ...signIn } = useProviderSignIn({
+    runtime, models, credentials, signOutPending: snapshot.signOutPending, onSignedIn,
+  });
+  const { signingIn, cancelSignIn } = signIn;
+
   const providerAccess = useCallback((providerId: string): ProviderAccess => {
     const state = credentialState.providers[providerId] ?? { ready: false, connected: false };
     return snapshot.signOutPending ? { ...state, ready: false, connected: false } : state;
   }, [credentialState, snapshot.signOutPending]);
-  const hasConnectedProvider = catalog.some((provider) => providerAccess(provider.id).connected);
   const refreshCatalog = useCallback(async () => {
     const result = await models.refresh();
-    if (mounted.current) setCatalog(buildModelCatalog(models));
-    if (result.errors.size) throw new Error('Some provider models could not be refreshed. Existing models are still available.');
+    setCatalog(buildModelCatalog(models));
+    if (result.errors.size) {
+      throw new Error('Some provider models could not be refreshed. Existing models are still available.');
+    }
   }, [models]);
+  const retryAuth = useCallback(async (providerId: string) => {
+    setAuthNotice(undefined);
+    await runtime.retryAuth(providerId);
+  }, [runtime, setAuthNotice]);
   const saveProviderKey = useCallback(async (providerId: string, key: string) => {
-    if (login.current) throw new Error('Finish or cancel sign-in before changing provider credentials.');
+    if (signingIn) throw new Error('Finish or cancel sign-in before changing provider credentials.');
     await runtime.saveProviderKey(providerId, key);
     await refreshCatalog();
-  }, [runtime, refreshCatalog]);
+  }, [refreshCatalog, runtime, signingIn]);
+  const disconnectProvider = useCallback(async (providerId: string) => {
+    cancelSignIn();
+    await runtime.signOut(providerId);
+  }, [cancelSignIn, runtime]);
+  const providerOAuth = useCallback((providerId: string) => {
+    const oauth = models.getProvider(providerId)?.auth.oauth;
+    return oauth ? { name: oauth.name, loginLabel: oauth.loginLabel, isSubscription: oauth.isSubscription } : undefined;
+  }, [models]);
 
-  return { ...snapshot, runtime, remoteHosts, catalog, refreshCatalog, providerAccess, hasConnectedProvider,
-    signingIn, signingInProvider, authNotice, browserOpen, authPrompt, submitAuthPrompt: prompts.submit,
-    providerOAuth: useCallback((providerId: string) => {
-      const oauth = models.getProvider(providerId)?.auth.oauth;
-      return oauth ? { name: oauth.name, loginLabel: oauth.loginLabel, isSubscription: oauth.isSubscription } : undefined;
-    }, [models]),
-    signIn, cancelSignIn, openSignInPage, retryAuth,
-    saveProviderKey,
-    disconnectProvider: useCallback(async (providerId: string) => {
-      cancelSignIn();
-      await runtime.signOut(providerId);
-    }, [cancelSignIn, runtime]),
-    createChat: useCallback(() => runtime.createChat(), [runtime]),
-    renameChat: useCallback((id: string, title: string) => runtime.renameChat(id, title), [runtime]),
-    archiveChat: useCallback((id: string) => runtime.archiveChat(id), [runtime]),
-  };
+  return { ...snapshot, ...signIn, runtime, remoteHosts, catalog, refreshCatalog, providerAccess,
+    hasConnectedProvider: catalog.some((provider) => providerAccess(provider.id).connected),
+    providerOAuth, retryAuth, saveProviderKey, disconnectProvider };
 }
 
 const ChatContext = createContext<ReturnType<typeof useChatController> | null>(null);
@@ -164,29 +196,45 @@ export function useChatApp() {
   if (!value) throw new Error('ChatProvider is missing.');
   return value;
 }
-export function useChatConversation(id: string) {
-  const { runtime } = useChatApp();
-  const getConversation = useCallback(() => runtime.getConversation(id), [runtime, id]);
-  const conversation = useSyncExternalStore(runtime.subscribe, getConversation, getConversation);
-  return { conversation, error: conversation?.error,
-    send: useCallback((text: string) => runtime.send(id, text), [runtime, id]),
-    cancel: useCallback(() => runtime.cancel(id), [runtime, id]),
-    resume: useCallback(() => runtime.resume(id), [runtime, id]),
-    updateExecution: useCallback((execution: ChatExecutionSettings, settings?: ChatModelSettings) => runtime.updateExecution(id, execution, settings), [runtime, id]),
-    updateSettings: useCallback((settings: ChatModelSettings) => runtime.updateSettings(id, settings), [runtime, id]),
-  };
+
+const subscribeNothing = () => () => {};
+const noControls = () => undefined;
+const noMessages: readonly ChatMessage[] = [];
+const getNoMessages = () => noMessages;
+
+/** The chat a route parameter names, once chats are open; undefined when there is no such chat. */
+export function useChatId(key: string | undefined): ConversationId | undefined {
+  const { runtime, ready } = useChatApp();
+  return ready && key !== undefined ? runtime.findChat(key) : undefined;
 }
 
-/** Header and composer subscribe to control state, not every streamed character. */
-export function useChatConversationState(id: string) {
-  const { runtime } = useChatApp();
-  const getState = useCallback(() => runtime.getConversationState(id), [runtime, id]);
-  const conversation = useSyncExternalStore(runtime.subscribe, getState, getState);
-  return { conversation, error: conversation?.error,
-    send: useCallback((text: string) => runtime.send(id, text), [runtime, id]),
-    cancel: useCallback(() => runtime.cancel(id), [runtime, id]),
-    resume: useCallback(() => runtime.resume(id), [runtime, id]),
-    updateExecution: useCallback((execution: ChatExecutionSettings, settings?: ChatModelSettings) => runtime.updateExecution(id, execution, settings), [runtime, id]),
-    updateSettings: useCallback((settings: ChatModelSettings) => runtime.updateSettings(id, settings), [runtime, id]),
-  };
+/**
+ * One chat's committed state for the calling component. It attaches when the first hook below subscribes and
+ * detaches when the last unmounts. `transcript` also reads the messages; controls alone never do.
+ */
+export function useChatView(id: ConversationId | undefined, transcript = false): ChatView | undefined {
+  const { runtime, ready } = useChatApp();
+  return useMemo(() => ready && id !== undefined ? runtime.chat(id, { transcript }) : undefined,
+    [runtime, ready, id, transcript]);
+}
+
+export function useChatControls(view: ChatView | undefined): ChatControls | undefined {
+  return useSyncExternalStore(view?.subscribe ?? subscribeNothing, view?.getControls ?? noControls,
+    view?.getControls ?? noControls);
+}
+
+export function useChatMessages(view: ChatView | undefined): readonly ChatMessage[] {
+  return useSyncExternalStore(view?.subscribe ?? subscribeNothing, view?.getMessages ?? getNoMessages,
+    view?.getMessages ?? getNoMessages);
+}
+
+export function useChatStatus(view: ChatView | undefined): ChatViewSnapshot['status'] {
+  const getStatus = useCallback(() => view?.getSnapshot().status ?? 'loading', [view]);
+  return useSyncExternalStore(view?.subscribe ?? subscribeNothing, getStatus, getStatus);
+}
+
+/** Why the chat could not be opened, when it could not. */
+export function useChatError(view: ChatView | undefined): string | undefined {
+  const getError = useCallback(() => view?.getSnapshot().error, [view]);
+  return useSyncExternalStore(view?.subscribe ?? subscribeNothing, getError, getError);
 }

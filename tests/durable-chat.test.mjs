@@ -7,11 +7,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
-import { Harness, LiveDoc, createRegistry } from '@earendil-works/pi-durable';
+import { AgentDoc, Harness, StorageRejected, createRegistry } from '@earendil-works/pi-durable';
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { createExpoSqliteDatabase } from '../src/pi/storage/expo-sqlite.ts';
+import { readChat, watchChat } from './helpers/chat-view.mjs';
 import { createNodeSqliteConnection } from './helpers/node-sqlite.mjs';
-import { controlledReply, scriptedModels } from './helpers/scripted-models.mjs';
+import { additionTool, controlledReply, scriptedModels } from './helpers/scripted-models.mjs';
 
 // Node runs the actual app service; this resolves and transforms app TypeScript
 // as Metro does. No harness, storage, or conversation mocks.
@@ -36,10 +37,11 @@ const hooks = registerHooks({
     return nextLoad(url, context);
   },
 });
-const { ChatMetadataDoc, DurableChatService } = await import('../src/pi/chat-service.ts');
+const { DurableChatService } = await import('../src/pi/chat-service.ts');
+const { ChatMetadataDoc } = await import('../src/pi/chat-metadata.ts');
 hooks.deregister();
 
-async function fixture(t) {
+async function fixture(t, { configureStorage } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'pi-durable-chat-'));
   const filename = join(directory, 'chat.sqlite');
   const services = new Set();
@@ -47,12 +49,16 @@ async function fixture(t) {
     await Promise.allSettled([...services].map((service) => service.close()));
     await rm(directory, { recursive: true, force: true });
   });
-  const openStorage = () => SqliteStorage.open(createExpoSqliteDatabase(createNodeSqliteConnection(filename)));
+  const openStorage = async () => {
+    const storage = await SqliteStorage.open(createExpoSqliteDatabase(createNodeSqliteConnection(filename)));
+    configureStorage?.(storage);
+    return storage;
+  };
   return {
     openStorage,
     async open(models, options = {}) {
       const storage = await openStorage();
-      const service = await DurableChatService.open({ storage, models, platform: 'ios', ...options });
+      const service = await DurableChatService.open({ storage, models, extensions: [additionTool], ...options });
       services.add(service);
       return service;
     },
@@ -75,7 +81,23 @@ function textOf(conversation) {
   return conversation.messages.map(({ text, tool }) => [text, tool?.output].filter(Boolean).join(' ')).join('\n');
 }
 
-test('durable chat publishes committed streaming state, executes a tool, and persists the answer', { timeout: 10_000 }, async (t) => {
+const users = (conversation) => conversation.messages.filter(({ role }) => role === 'user');
+
+/** A second API-key provider whose connection the test controls. */
+function addProvider(provider, id, access = { connected: true }) {
+  const base = provider.models.getProvider('anthropic');
+  const model = { ...base.getModels()[0], provider: id, id: `${id}-model`, name: `${id} model` };
+  provider.models.setProvider({ ...base, id, name: id, getModels: () => [model],
+    auth: { apiKey: {
+      name: `${id} key`,
+      check: async () => access.connected ? { type: 'api_key' } : undefined,
+      resolve: async () => access.connected ? { auth: { apiKey: `${id}-key` } } : undefined,
+    } },
+  });
+  return { model: { provider: id, modelId: model.id }, thinkingLevel: 'high' };
+}
+
+test('a sent message streams its answer into the open chat, runs a tool, and keeps its row IDs', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const started = Promise.withResolvers();
   let active;
@@ -85,49 +107,134 @@ test('durable chat publishes committed streaming state, executes a tool, and per
   ]);
   const service = await file.open(provider.models);
   const id = await service.createChat();
-  const observed = [];
-  const unsubscribe = service.subscribe(() => {
-    const value = service.getConversation(id);
-    if (value) observed.push(structuredClone(value));
-  });
-  t.after(unsubscribe);
+  const chat = await watchChat(service, id);
+  t.after(chat.close);
   const submission = await service.send(id, 'Add 19 and 23.');
   await started.promise;
   active.text('Adding now.');
-  await until(() => service.getConversation(id).messages.some(({ streaming, text }) => streaming && text.includes('Adding now.')),
-    'a committed partial assistant message reaches the app before the provider finishes');
-  const streamingId = service.getConversation(id).messages.find(({ streaming }) => streaming).id;
-  assert.equal(service.getConversation(id).busy, true);
+  await until(() => chat.conversation.messages.some(({ streaming, text }) => streaming && text.includes('Adding now.')),
+    'a committed partial reaches the open chat before the provider finishes');
+  const streamingId = chat.conversation.messages.find(({ streaming }) => streaming).id;
+  assert.equal(chat.conversation.busy, true);
   active.finish({ tool: { a: 19, b: 23 } });
   assert.equal((await service.waitForSubmission(submission)).status, 'done');
-  const conversation = service.getConversation(id);
-  assert.equal(conversation.busy, false);
-  assert.equal(conversation.pending, false);
+  await until(() => !chat.conversation.busy && textOf(chat.conversation).includes('42.'), 'the open chat settles');
+  const conversation = chat.conversation;
   assert.match(textOf(conversation), /The answer is 42\./);
   const tool = conversation.messages.find(({ tool }) => tool?.name === 'add_numbers');
-  assert.ok(tool);
   assert.equal(tool.tool.status, 'completed');
-  assert.deepEqual(JSON.parse(tool.tool.output), { sum: 42, platform: 'ios', runtime: 'on-device' });
-  assert.ok(observed.some(({ messages }) => messages.some(({ streaming }) => streaming)));
+  assert.deepEqual(JSON.parse(tool.tool.output), { sum: 42 });
   assert.ok(conversation.messages.every(({ streaming }) => !streaming), 'settled entries replace live partials');
   assert.equal(conversation.messages.find(({ text }) => text === 'Adding now.').id, streamingId,
-    'the committed assistant keeps its streaming row identity');
-  for (let index = 1; index < observed.length; index++) {
-    assert.notDeepEqual(observed[index], observed[index - 1], 'task-only checkpoints do not republish an unchanged conversation');
-  }
-  assert.equal(conversation.messages.filter(({ role }) => role === 'user').length, 1);
+    'the saved assistant keeps its streaming row ID');
+  assert.equal(users(conversation).length, 1);
   assert.equal(provider.requests.length, 2);
   const toolResult = provider.requests[1].context.messages.find(({ role }) => role === 'toolResult');
-  assert.deepEqual(JSON.parse(toolResult.content[0].text), JSON.parse(tool.tool.output));
+  assert.deepEqual(JSON.parse(toolResult.content[0].text), { sum: 42 });
   for (const { options } of provider.requests) {
     assert.equal(options.transport, 'sse');
-    assert.equal(options.maxRetries, 0);
-    assert.equal(options.timeoutMs, 60_000);
     assert.equal(options.apiKey, 'test-only-key');
+  }
+  assert.deepEqual(await readChat(service, id), conversation, 'opening the chat again shows the same rows');
+});
+
+test('the open chat never shows a streamed partial beside its saved answer', { timeout: 10_000 }, async (t) => {
+  const file = await fixture(t);
+  const started = Promise.withResolvers();
+  let active;
+  const provider = scriptedModels([
+    { chunks: ['An earlier answer.'] },
+    (request) => { active = controlledReply(request); started.resolve(); return active.stream; },
+  ]);
+  const service = await file.open(provider.models);
+  const id = await service.createChat();
+  await service.waitForSubmission(await service.send(id, 'An earlier question.'));
+  const view = service.chat(id, { transcript: true });
+  const shown = [];
+  const close = view.subscribe(() => {
+    const conversation = view.getSnapshot().conversation;
+    if (conversation) shown.push(conversation.messages.filter(({ role }) => role === 'assistant'));
+  });
+  t.after(close);
+  await until(() => shown.length > 0, 'the chat loads');
+  const submission = await service.send(id, 'Stream the next answer.');
+  await started.promise;
+  for (const chunk of ['First. ', 'Second. ', 'Third.']) {
+    active.text(chunk);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  active.finish();
+  await service.waitForSubmission(submission);
+  await until(() => shown.at(-1).length === 2 && !shown.at(-1)[1].streaming, 'the answer is saved');
+  assert.ok(shown.some((rows) => rows.at(-1)?.streaming), 'the answer streamed into the open chat');
+  for (const rows of shown) {
+    assert.ok(rows.length <= 2, `one row per answer, saw ${rows.map(({ id, streaming }) => `${id}${streaming ? '*' : ''}`)}`);
   }
 });
 
-test('chat identity, title, archive state and transcript survive reopening and support followup', { timeout: 10_000 }, async (t) => {
+test('a retried request shows one answer, and a failure that is not retried stays visible', { timeout: 15_000 }, async (t) => {
+  const file = await fixture(t);
+  const provider = scriptedModels([
+    (request) => {
+      const attempt = controlledReply(request);
+      attempt.text('Half an ans');
+      attempt.finish({ error: 'fetch failed: network connection lost' });
+      return attempt.stream;
+    },
+    { chunks: ['Half an answer, now complete.'] },
+    { error: 'Scripted provider refusal' },
+  ]);
+  const service = await file.open(provider.models);
+  const id = await service.createChat();
+  const chat = await watchChat(service, id);
+  t.after(chat.close);
+  const submission = await service.send(id, 'Question');
+  await until(() => chat.conversation.retrying, 'the chat shows that it will retry');
+  assert.deepEqual(chat.conversation.messages.filter(({ role }) => role === 'assistant'), [],
+    'a failed attempt is not shown while the retry waits');
+  assert.equal((await service.waitForSubmission(submission)).status, 'done');
+  await until(() => !chat.conversation.busy && !chat.conversation.retrying, 'the retried answer settles');
+  const answers = chat.conversation.messages.filter(({ role }) => role === 'assistant');
+  assert.deepEqual(answers.map(({ text, error }) => [text, error]), [['Half an answer, now complete.', undefined]]);
+  assert.equal(provider.requests.length, 2);
+  await service.waitForSubmission(await service.send(id, 'Ask again.'));
+  await until(() => !!chat.conversation.error, 'the failure settles');
+  const after = chat.conversation.messages.filter(({ role }) => role === 'assistant');
+  assert.deepEqual(after.map(({ text, error }) => [text, error]),
+    [['Half an answer, now complete.', undefined], ['', 'Scripted provider refusal']]);
+  assert.deepEqual(await readChat(service, id), chat.conversation, 'reopening the chat shows the same rows');
+});
+
+test('a send whose list update fails still resolves, reports it, and the next send clears the report', { timeout: 10_000 }, async (t) => {
+  let storage;
+  let rejectListUpdate;
+  const file = await fixture(t, { configureStorage(opened) {
+    storage = opened;
+    const commit = opened.commit.bind(opened);
+    // Reject only the chat-list update that follows an admitted message, leaving the session usable.
+    opened.commit = (writes, context) => {
+      if (rejectListUpdate !== undefined && writes.some((write) => write.type === 'document.change' && write.id === rejectListUpdate)) {
+        rejectListUpdate = undefined;
+        return Promise.reject(new StorageRejected('Injected chat list failure'));
+      }
+      return commit(writes, context);
+    };
+  } });
+  const service = await file.open(scriptedModels([{ chunks: ['First answer.'] }, { chunks: ['Second answer.'] }]).models);
+  const id = await service.createChat();
+  rejectListUpdate = (await storage.findDocument({ kind: ChatMetadataDoc.definition.kind,
+    scope: { kind: 'conversation', conversationId: id } }, 'current', BACKGROUND_CONTEXT)).id;
+  const first = await service.send(id, 'First question.');
+  assert.equal(rejectListUpdate, undefined, 'the list update was attempted and rejected');
+  assert.match(service.getSnapshot().error, /Injected chat list failure/);
+  assert.equal((await service.waitForSubmission(first)).status, 'done', 'the admitted message is still answered');
+  await service.waitForSubmission(await service.send(id, 'Second question.'));
+  assert.equal(service.getSnapshot().error, undefined);
+  assert.equal(service.getSnapshot().chats[0].preview, 'Second question.');
+  assert.equal(users(await readChat(service, id)).length, 2, 'neither message was sent twice');
+});
+
+test('chat identity, title, preview, archive state and transcript survive reopening and support followup', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const firstProvider = scriptedModels([{ chunks: ['Remembered blue.'] }]);
   const first = await file.open(firstProvider.models);
@@ -135,25 +242,49 @@ test('chat identity, title, archive state and transcript survive reopening and s
   const archivedId = await first.createChat();
   const submission = await first.send(id, 'Remember my favorite color is blue.');
   await first.waitForSubmission(submission);
+  assert.equal(first.getSnapshot().chats[0].title, 'Remember my favorite color is blue.',
+    'an untitled chat is named after its first message');
   await first.renameChat(id, 'Favorite color');
   await first.archiveChat(archivedId);
-  const previousMessages = first.getConversation(id).messages;
+  const previousMessages = (await readChat(first, id)).messages;
   await file.close(first);
 
   const secondProvider = scriptedModels([{ chunks: ['Your favorite color is blue.'] }]);
   const second = await file.open(secondProvider.models);
   assert.equal(secondProvider.requests.length, 0, 'opening stored history does not dispatch model work');
-  assert.equal(second.getConversation(id).title, 'Favorite color');
-  assert.deepEqual(second.getConversation(id).messages, previousMessages);
-  assert.ok(second.getSnapshot().chats.some((chat) => chat.id === id));
-  assert.ok(!second.getSnapshot().chats.some((chat) => chat.id === archivedId));
+  const reopened = await readChat(second, id);
+  assert.equal(reopened.title, 'Favorite color');
+  assert.deepEqual(reopened.messages, previousMessages);
+  assert.deepEqual(second.getSnapshot().chats.map((chat) => [chat.id, chat.title, chat.preview]),
+    [[id, 'Favorite color', 'Remember my favorite color is blue.']], 'archived chats leave the list');
   await second.waitForSubmission(await second.send(id, 'What is my favorite color?'));
   const requestText = JSON.stringify(secondProvider.requests[0].context.messages);
   assert.match(requestText, /Remember my favorite color is blue/);
   assert.match(requestText, /Remembered blue/);
   assert.match(requestText, /What is my favorite color/);
-  assert.equal(second.getConversation(id).messages.filter(({ role }) => role === 'user').length, 2);
-  assert.match(textOf(second.getConversation(id)), /Your favorite color is blue/);
+  const followup = await readChat(second, id);
+  assert.equal(users(followup).length, 2);
+  assert.match(textOf(followup), /Your favorite color is blue/);
+  assert.equal(second.getSnapshot().chats[0].preview, 'What is my favorite color?', 'the list previews the latest message');
+});
+
+test('the chat list opens without reading any transcript', { timeout: 10_000 }, async (t) => {
+  let unreadable = false;
+  const file = await fixture(t, { configureStorage(storage) {
+    const scan = storage.scanEntries.bind(storage);
+    storage.scanEntries = (...args) => unreadable ? Promise.reject(new Error('Transcript unavailable')) : scan(...args);
+  } });
+  const first = await file.open(scriptedModels([{ chunks: ['Saved.'] }]).models);
+  const id = await first.createChat();
+  await first.waitForSubmission(await first.send(id, 'Keep this chat in the list.'));
+  await file.close(first);
+  unreadable = true;
+  const second = await file.open(scriptedModels([]).models);
+  assert.deepEqual(second.getSnapshot().chats.map((chat) => [chat.id, chat.title, chat.preview]),
+    [[id, 'Keep this chat in the list.', 'Keep this chat in the list.']]);
+  const chat = await watchChat(second, id);
+  t.after(chat.close);
+  assert.equal(chat.status, 'failed', 'only opening the chat reads its transcript');
 });
 
 test('a retried requestId returns the persisted submission without another user entry or model call', { timeout: 10_000 }, async (t) => {
@@ -169,7 +300,7 @@ test('a retried requestId returns the persisted submission without another user 
   const retried = await second.send(id, 'Please answer once.', 'stable-request-id');
   assert.equal(retried, original);
   assert.equal((await second.waitForSubmission(retried)).status, 'done');
-  assert.equal(second.getConversation(id).messages.filter(({ role }) => role === 'user').length, 1);
+  assert.equal(users(await readChat(second, id)).length, 1);
   assert.equal(afterRestart.requests.length, 0);
 });
 
@@ -182,28 +313,31 @@ test('cancelling live work persists cancellation and keeps partial output withou
   }]);
   const first = await file.open(provider.models);
   const id = await first.createChat();
+  const chat = await watchChat(first, id);
   const submission = await first.send(id, 'Begin a long answer.');
   await started.promise;
   active.text('Saved partial answer.');
-  await until(() => textOf(first.getConversation(id)).includes('Saved partial answer.'), 'partial is committed before cancellation');
-  const partialId = first.getConversation(id).messages.find(({ streaming }) => streaming).id;
+  await until(() => textOf(chat.conversation).includes('Saved partial answer.'), 'partial is committed before cancellation');
+  const partialId = chat.conversation.messages.find(({ streaming }) => streaming).id;
   await first.cancel(id);
   const settled = await first.waitForSubmission(submission);
   assert.equal(settled.status, 'unanswered');
   assert.equal(settled.reason, 'aborted');
   assert.equal(active.signal.aborted, true);
-  assert.equal(first.getConversation(id).busy, false);
-  assert.match(textOf(first.getConversation(id)), /Saved partial answer/);
-  assert.equal(first.getConversation(id).messages.find(({ interrupted }) => interrupted).id, partialId);
+  await until(() => chat.conversation.messages.some(({ text }) => text === 'Response stopped'), 'the stop notice shows');
+  assert.equal(chat.conversation.busy, false);
+  assert.match(textOf(chat.conversation), /Saved partial answer/);
+  assert.equal(chat.conversation.messages.find(({ interrupted }) => interrupted).id, partialId);
+  chat.close();
   await file.close(first);
   const resumedProvider = scriptedModels([]);
   const second = await file.open(resumedProvider.models);
-  await second.resume();
-  assert.equal(second.getConversation(id).busy, false);
-  assert.equal(second.getConversation(id).pending, false);
-  assert.match(textOf(second.getConversation(id)), /Saved partial answer/);
-  assert.equal(second.getConversation(id).messages.find(({ interrupted }) => interrupted).id, partialId,
-    'an interrupted assistant keeps the same row identity after SQLite reopen');
+  const reopened = await readChat(second, id);
+  assert.equal(reopened.busy, false);
+  assert.match(textOf(reopened), /Saved partial answer/);
+  assert.equal(reopened.messages.find(({ interrupted }) => interrupted).id, partialId,
+    'an interrupted assistant keeps the same row ID after SQLite reopen');
+  assert.equal(reopened.messages.at(-1).text, 'Response stopped');
   assert.equal((await second.waitForSubmission(submission)).reason, 'aborted');
   assert.equal(resumedProvider.requests.length, 0);
 });
@@ -219,14 +353,15 @@ test('provider failure is a persisted unanswered submission, not a completed ans
   assert.equal(result.reason, 'model_error');
   assert.match(JSON.stringify(result.detail), /Scripted durable provider failure/);
   assert.equal(provider.requests.length, 1);
-  assert.equal(first.getConversation(id).busy, false);
-  assert.match(first.getConversation(id).error, /Scripted durable provider failure/);
+  const failed = await readChat(first, id);
+  assert.equal(failed.busy, false);
+  assert.match(failed.error, /Scripted durable provider failure/);
   await file.close(first);
   const second = await file.open(scriptedModels([]).models);
   const persisted = await second.waitForSubmission(submission);
   assert.equal(persisted.status, 'unanswered');
   assert.match(JSON.stringify(persisted.detail), /Scripted durable provider failure/);
-  assert.match(second.getConversation(id).error, /Scripted durable provider failure/);
+  assert.match((await readChat(second, id)).error, /Scripted durable provider failure/);
 });
 
 test('new chats reuse the last-used model or a connected default and need a connection', { timeout: 10_000 }, async (t) => {
@@ -249,28 +384,28 @@ test('new chats reuse the last-used model or a connected default and need a conn
 
   provider.auth.authenticated = true;
   const keyOnly = await service.createChat();
-  assert.deepEqual(service.getConversation(keyOnly).settings,
+  assert.deepEqual((await readChat(service, keyOnly)).settings,
     { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'low' },
     'an API-key-only user gets that provider default at its lowest supported effort');
   await service.archiveChat(keyOnly);
 
   await provider.models.login('openai', 'oauth', { prompt: async () => '', notify() {} });
   const first = await service.createChat();
-  assert.deepEqual(service.getConversation(first).settings,
+  assert.deepEqual((await readChat(service, first)).settings,
     { model: { provider: 'openai', modelId: 'gpt-6-sol' }, thinkingLevel: 'off' },
     'ChatGPT is preferred over a provider listed earlier, so native web search applies');
   await service.waitForSubmission(await service.send(first, 'Answer on the first send.'));
-  assert.match(textOf(service.getConversation(first)), /Answered through ChatGPT/);
+  assert.match(textOf(await readChat(service, first)), /Answered through ChatGPT/);
   assert.equal(provider.requests[0].options.apiKey, 'synthetic-access');
 
   const chosen = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'high' };
   await service.updateSettings(first, chosen);
   const second = await service.createChat();
-  assert.deepEqual(service.getConversation(second).settings, chosen, 'a new chat continues with the last-used model');
+  assert.deepEqual((await readChat(service, second)).settings, chosen, 'a new chat continues with the last-used model');
 
   provider.auth.authenticated = false;
   const third = await service.createChat();
-  assert.deepEqual(service.getConversation(third).settings.model, { provider: 'openai', modelId: 'gpt-6-sol' },
+  assert.deepEqual((await readChat(service, third)).settings.model, { provider: 'openai', modelId: 'gpt-6-sol' },
     'a last-used model whose provider is disconnected falls back to a connected default');
 });
 
@@ -280,14 +415,15 @@ test('signed-out sends cannot create failed model work or change the conversatio
   const service = await file.open(provider.models);
   const id = await service.createChat();
   provider.auth.authenticated = false;
-  const before = service.getConversation(id).messages;
+  const before = (await readChat(service, id)).messages;
   await assert.rejects(service.send(id, 'Do not admit this while signed out.'), /sign in/i);
-  assert.deepEqual(service.getConversation(id).messages, before);
-  assert.equal(service.getConversation(id).busy, false);
+  const after = await readChat(service, id);
+  assert.deepEqual(after.messages, before);
+  assert.equal(after.busy, false);
   assert.equal(provider.requests.length, 0);
 });
 
-test('unfinished work survives close and stays pending while signed out, then resumes the same input after auth', { timeout: 10_000 }, async (t) => {
+test('a chat closed mid-answer resumes the same input when the app opens again', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const started = Promise.withResolvers();
   let active;
@@ -296,31 +432,52 @@ test('unfinished work survives close and stays pending while signed out, then re
   }]);
   const first = await file.open(firstProvider.models);
   const id = await first.createChat();
+  const chat = await watchChat(first, id);
   const submission = await first.send(id, 'Recover this request.', 'recover-request');
   await started.promise;
   active.text('Before restart.');
-  await until(() => textOf(first.getConversation(id)).includes('Before restart.'), 'the interrupted partial is stored');
+  await until(() => textOf(chat.conversation).includes('Before restart.'), 'the partial is stored');
+  chat.close();
   await file.close(first);
-  assert.equal(active.signal.aborted, true, 'close interrupts the current transport without aborting its durable task');
+  assert.equal(active.signal.aborted, true, 'closing interrupts the transport without settling the durable input');
 
-  const secondProvider = scriptedModels([{ chunks: ['Recovered answer.'] }], { authenticated: false });
+  const secondProvider = scriptedModels([{ chunks: ['Recovered answer.'] }]);
   const second = await file.open(secondProvider.models);
-  assert.equal(secondProvider.requests.length, 0);
-  assert.equal(second.getConversation(id).pending, true);
-  await assert.rejects(second.resume(), /sign in/i);
-  await new Promise((resolve) => setTimeout(resolve, 25));
-  assert.equal(secondProvider.requests.length, 0, 'no unauthenticated scheduler dispatch');
-  assert.equal(second.getConversation(id).pending, true, 'sign-in absence does not fail the recovered work');
-  secondProvider.auth.authenticated = true;
-  await second.resume();
   const settled = await second.waitForSubmission(submission);
   assert.equal(settled.status, 'done');
   assert.equal(secondProvider.requests.length, 1);
-  const conversation = second.getConversation(id);
-  assert.equal(conversation.pending, false);
+  const conversation = await readChat(second, id);
   assert.equal(conversation.busy, false);
-  assert.equal(conversation.messages.filter(({ role }) => role === 'user').length, 1);
+  assert.equal(users(conversation).length, 1);
   assert.match(textOf(conversation), /Recovered answer/);
+  assert.ok(conversation.messages.find(({ text }) => text === 'Before restart.').interrupted,
+    'the cut-off partial stays visible as interrupted');
+});
+
+test('recovered work whose provider is disconnected fails visibly without blocking another chat', { timeout: 10_000 }, async (t) => {
+  const file = await fixture(t);
+  const started = Promise.withResolvers();
+  const firstProvider = scriptedModels([(request) => { started.resolve(); return controlledReply(request).stream; }]);
+  const disconnected = addProvider(firstProvider, 'future-provider');
+  const first = await file.open(firstProvider.models);
+  const recovered = await first.createChat();
+  const other = await first.createChat();
+  await first.updateSettings(recovered, disconnected);
+  const pending = await first.send(recovered, 'Recover me after reopening.');
+  await started.promise;
+  await file.close(first);
+
+  const secondProvider = scriptedModels([{ chunks: ['The other chat answered.'] }]);
+  addProvider(secondProvider, 'future-provider', { connected: false });
+  const second = await file.open(secondProvider.models);
+  await second.waitForSubmission(await second.send(other, 'Answer while the other provider is disconnected.'));
+  assert.match(textOf(await readChat(second, other)), /The other chat answered/);
+  const failure = await second.waitForSubmission(pending);
+  assert.equal(failure.status, 'unanswered');
+  const failed = await readChat(second, recovered);
+  assert.equal(failed.busy, false);
+  assert.match(failed.error, /future-provider/, 'the disconnected chat shows why it stopped');
+  assert.equal(secondProvider.requests.length, 1, 'no request is sent without credentials');
 });
 
 test('separate conversations run independently and cancelling one leaves the other answer intact', { timeout: 10_000 }, async (t) => {
@@ -337,71 +494,11 @@ test('separate conversations run independently and cancelling one leaves the oth
   await started.promise;
   await service.waitForSubmission(await service.send(second, 'Answer in the second chat.'));
   assert.ok(!JSON.stringify(provider.requests[1].context).includes('Keep the first chat running'));
-  assert.equal(service.getConversation(first).busy, true);
-  assert.equal(service.getConversation(second).busy, false);
+  assert.equal((await readChat(service, first)).busy, true);
+  assert.equal((await readChat(service, second)).busy, false);
   await service.cancel(first);
   assert.equal((await service.waitForSubmission(pending)).reason, 'aborted');
-  assert.match(textOf(service.getConversation(second)), /Second chat answer/);
-});
-
-test('waiting for a recovered submission enables the scheduler and updates pending to busy without explicit resume', { timeout: 10_000 }, async (t) => {
-  const file = await fixture(t);
-  const firstStarted = Promise.withResolvers();
-  const firstProvider = scriptedModels([(request) => {
-    const response = controlledReply(request); firstStarted.resolve(); return response.stream;
-  }]);
-  const first = await file.open(firstProvider.models);
-  const id = await first.createChat();
-  const submission = await first.send(id, 'Continue after reopening.');
-  await firstStarted.promise;
-  await file.close(first);
-
-  const secondStarted = Promise.withResolvers();
-  let active;
-  const secondProvider = scriptedModels([(request) => {
-    active = controlledReply(request); secondStarted.resolve(); return active.stream;
-  }]);
-  const second = await file.open(secondProvider.models);
-  assert.equal(second.getConversation(id).pending, true);
-  const wait = second.waitForSubmission(submission);
-  void wait.catch(() => {});
-  await secondStarted.promise;
-  assert.equal(second.getConversation(id).pending, false);
-  assert.equal(second.getConversation(id).busy, true);
-  active.text('Finished after direct wait.');
-  active.finish();
-  assert.equal((await wait).status, 'done');
-  assert.equal(second.getConversation(id).busy, false);
-});
-
-test('hydration reads every page of conversations, transcript entries, and submission outcomes', { timeout: 30_000 }, async (t) => {
-  const file = await fixture(t);
-  const provider = scriptedModels([
-    ...Array.from({ length: 101 }, (_, index) => ({ chunks: [`Answer ${index}.`] })),
-    { error: 'Latest paginated failure' },
-  ]);
-  const first = await file.open(provider.models);
-  const ids = [];
-  for (let index = 0; index < 101; index++) ids.push(await first.createChat());
-  const lastChat = ids.at(-1);
-  let lastSubmission;
-  for (let index = 0; index < 102; index++) {
-    lastSubmission = await first.send(lastChat, `Message ${index}.`);
-    await first.waitForSubmission(lastSubmission);
-  }
-  const before = structuredClone(first.getConversation(lastChat));
-  assert.equal(before.messages.filter(({ role }) => role === 'user').length, 102);
-  assert.ok(before.error, 'the final submission records a visible failure');
-  await file.close(first);
-
-  const noRequests = scriptedModels([]);
-  const second = await file.open(noRequests.models);
-  assert.equal(second.getSnapshot().chats.length, 101);
-  assert.deepEqual(new Set(second.getSnapshot().chats.map(({ id }) => id)), new Set(ids));
-  assert.deepEqual(second.getConversation(lastChat).messages, before.messages);
-  assert.equal(second.getConversation(lastChat).error, before.error, 'the latest outcome is after the first submissions page');
-  assert.equal((await second.waitForSubmission(lastSubmission)).status, 'unanswered');
-  assert.equal(noRequests.requests.length, 0);
+  assert.match(textOf(await readChat(service, second)), /Second chat answer/);
 });
 
 test('reused provider tool call IDs create distinct stable history rows across conversation turns', { timeout: 10_000 }, async (t) => {
@@ -416,14 +513,14 @@ test('reused provider tool call IDs create distinct stable history rows across c
   const id = await first.createChat();
   await first.waitForSubmission(await first.send(id, 'Add 19 and 23.'));
   await first.waitForSubmission(await first.send(id, 'Now add 1 and 2.'));
-  const tools = first.getConversation(id).messages.filter(({ tool }) => tool);
+  const tools = (await readChat(first, id)).messages.filter(({ tool }) => tool);
   assert.equal(tools.length, 2);
   assert.equal(new Set(tools.map(({ id }) => id)).size, 2, 'React list keys are unique across persisted tool rows');
   assert.deepEqual(tools.map(({ tool }) => JSON.parse(tool.output).sum), [42, 3]);
   assert.ok(tools.every(({ tool }) => tool.status === 'completed'));
   await file.close(first);
   const second = await file.open(scriptedModels([]).models);
-  assert.deepEqual(second.getConversation(id).messages.filter(({ tool }) => tool), tools);
+  assert.deepEqual((await readChat(second, id)).messages.filter(({ tool }) => tool), tools);
 });
 
 test('an assistant error with no content remains in chat history after a successful followup and reopen', { timeout: 10_000 }, async (t) => {
@@ -436,109 +533,15 @@ test('an assistant error with no content remains in chat history after a success
   const id = await first.createChat();
   await first.waitForSubmission(await first.send(id, 'First attempt.'));
   await first.waitForSubmission(await first.send(id, 'Try again.'));
-  const conversation = first.getConversation(id);
+  const conversation = await readChat(first, id);
   assert.equal(conversation.error, undefined, 'the latest successful run clears the current error banner');
-  const failure = conversation.messages.find(({ role, error }) => role === 'assistant' && error === 'First attempt failed before producing text.');
+  const failure = conversation.messages.find(({ role, error }) => role === 'assistant'
+    && error === 'First attempt failed before producing text.');
   assert.ok(failure, 'a failed prior response remains visible even though it had no text');
   assert.match(textOf(conversation), /The followup succeeded/);
   await file.close(first);
   const second = await file.open(scriptedModels([]).models);
-  assert.deepEqual(second.getConversation(id).messages.find(({ id }) => id === failure.id), failure);
-});
-
-test('a persisted queued input remains pending without a live run and can be durably withdrawn', { timeout: 10_000 }, async (t) => {
-  const file = await fixture(t);
-  const started = Promise.withResolvers();
-  let active;
-  const provider = scriptedModels([(request) => {
-    active = controlledReply(request); started.resolve(); return active.stream;
-  }]);
-  // The app rejects new input while busy. Seed a valid queued-only recovery
-  // state through the public durable API, as another durable client can write.
-  const harness = await Harness.open(await file.openStorage(), {
-    models: provider.models, registry: createRegistry(),
-    settings: { retry: { enabled: false }, compaction: { enabled: false } },
-    async conversationCreated(tx, conversation) {
-      (await tx.doc(ChatMetadataDoc, conversation.id)).createdAt = Date.now();
-    },
-  }, BACKGROUND_CONTEXT);
-  let id;
-  let queuedId;
-  try {
-    const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' },
-      agent: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' } },
-    }, BACKGROUND_CONTEXT);
-    id = String(conversation.id);
-    const first = await conversation.submit({ type: 'input', content: 'First attempt.' }, BACKGROUND_CONTEXT);
-    await started.promise;
-    const queued = await conversation.submit({ type: 'input', content: 'Queued followup.' }, BACKGROUND_CONTEXT);
-    queuedId = String(queued.id);
-    active.finish({ error: 'First run failed.' });
-    assert.equal((await first.wait(BACKGROUND_CONTEXT)).status, 'unanswered');
-    assert.equal((await queued.status(BACKGROUND_CONTEXT)).status, 'queued');
-    assert.equal((await harness.snapshot(LiveDoc, conversation.id, BACKGROUND_CONTEXT)).run, undefined);
-  } finally { await harness.close(BACKGROUND_CONTEXT); }
-
-  const reopenedProvider = scriptedModels([], { authenticated: false });
-  const service = await file.open(reopenedProvider.models);
-  assert.equal(service.getConversation(id).pending, true);
-  assert.equal(service.getConversation(id).busy, false);
-  await assert.rejects(service.archiveChat(id), /Stop the response/);
-  await service.cancel(id);
-  assert.equal((await service.waitForSubmission(queuedId)).reason, 'aborted');
-  assert.equal(service.getConversation(id).pending, false);
-  assert.equal(service.getConversation(id).busy, false);
-  assert.equal(reopenedProvider.requests.length, 0);
-});
-
-test('streaming and entry commits reuse unchanged historical rows and chat summaries', { timeout: 10_000 }, async (t) => {
-  const file = await fixture(t);
-  const started = Promise.withResolvers();
-  let active;
-  const provider = scriptedModels([
-    { chunks: ['An earlier answer.'] },
-    (request) => { active = controlledReply(request); started.resolve(); return active.stream; },
-  ]);
-  const service = await file.open(provider.models);
-  const otherId = await service.createChat();
-  const id = await service.createChat();
-  await service.waitForSubmission(await service.send(id, 'An earlier question.'));
-  const history = service.getConversation(id).messages;
-  const otherConversation = service.getConversation(otherId);
-  const otherSummary = service.getSnapshot().chats.find((chat) => chat.id === otherId);
-  const submission = await service.send(id, 'Stream the next answer.');
-  await started.promise;
-  const list = service.getSnapshot();
-  active.text('First paragraph.');
-  await until(() => service.getConversation(id).messages.some(({ streaming, text }) => streaming && text === 'First paragraph.'),
-    'the first partial is durably published');
-  const firstPartial = service.getConversation(id);
-  const partialId = firstPartial.messages.at(-1).id;
-  for (let index = 0; index < history.length; index++) assert.equal(firstPartial.messages[index], history[index]);
-  assert.equal(service.getSnapshot(), list, 'streaming does not invalidate the unchanged chat-list snapshot');
-
-  active.text('\n\nSecond paragraph.');
-  await until(() => service.getConversation(id).messages.at(-1).text.includes('Second paragraph.'), 'the next partial is published');
-  const nextPartial = service.getConversation(id);
-  assert.notEqual(nextPartial, firstPartial);
-  assert.equal(nextPartial.messages.at(-1).id, partialId);
-  assert.equal(firstPartial.messages.at(-1).text, 'First paragraph.', 'published snapshots remain immutable');
-  for (let index = 0; index < nextPartial.messages.length - 1; index++) {
-    assert.equal(nextPartial.messages[index], firstPartial.messages[index], 'unchanged transcript rows retain object identity');
-  }
-  await service.renameChat(id, 'A stable title');
-  assert.equal(service.getConversation(id).messages, nextPartial.messages, 'metadata-only edits retain the transcript array');
-  active.finish();
-  await service.waitForSubmission(submission);
-  const finished = service.getConversation(id);
-  assert.equal(finished.messages.at(-1).id, partialId);
-  assert.equal(finished.messages.at(-1).streaming, false);
-  for (let index = 0; index < finished.messages.length - 1; index++) {
-    assert.equal(finished.messages[index], nextPartial.messages[index], 'committing the answer preserves earlier rows');
-  }
-  assert.equal(service.getConversation(otherId), otherConversation);
-  assert.equal(service.getSnapshot().chats.find((chat) => chat.id === otherId), otherSummary,
-    'an unrelated saved-chat row keeps its memoization identity');
+  assert.deepEqual((await readChat(second, id)).messages.find(({ id }) => id === failure.id), failure);
 });
 
 test('a partial tool keeps its row key when it commits, executes, and reloads from SQLite', { timeout: 10_000 }, async (t) => {
@@ -552,6 +555,8 @@ test('a partial tool keeps its row key when it commits, executes, and reloads fr
   ]);
   const service = await file.open(provider.models);
   const id = await service.createChat();
+  const chat = await watchChat(service, id);
+  t.after(chat.close);
   const submission = await service.send(id, 'Use the addition tool.');
   await started.promise;
   const partial = {
@@ -562,18 +567,65 @@ test('a partial tool keeps its row key when it commits, executes, and reloads fr
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
   };
   active.stream.push({ type: 'toolcall_delta', contentIndex: 0, delta: JSON.stringify(partial.content[0].arguments), partial });
-  await until(() => service.getConversation(id).messages.some(({ tool }) => tool?.name === 'add_numbers'), 'the tool partial is persisted');
-  const liveTool = service.getConversation(id).messages.find(({ tool }) => tool);
+  await until(() => chat.conversation.messages.some(({ tool }) => tool?.name === 'add_numbers'), 'the tool partial is persisted');
+  const liveTool = chat.conversation.messages.find(({ tool }) => tool);
+  assert.equal(liveTool.tool.status, 'running');
   active.finish({ tool: { a: 19, b: 23 } });
   await service.waitForSubmission(submission);
-  const settledTool = service.getConversation(id).messages.find(({ tool }) => tool);
+  await until(() => !chat.conversation.busy, 'the answer settles');
+  const settledTool = chat.conversation.messages.find(({ tool }) => tool);
   assert.equal(settledTool.id, liveTool.id);
   assert.equal(settledTool.tool.status, 'completed');
-  assert.equal(liveTool.tool.status, 'running', 'updating a tool does not mutate the previous snapshot');
   assert.equal(JSON.parse(settledTool.tool.output).sum, 42);
+  chat.close();
   await file.close(service);
   const reopened = await file.open(scriptedModels([]).models);
-  assert.deepEqual(reopened.getConversation(id).messages.find(({ tool }) => tool), settledTool);
+  assert.deepEqual((await readChat(reopened, id)).messages.find(({ tool }) => tool), settledTool);
+});
+
+test('a compaction summary shows as a notice, keeps earlier messages, and never becomes the preview', { timeout: 10_000 }, async (t) => {
+  const file = await fixture(t);
+  const first = await file.open(scriptedModels([{ chunks: ['First answer.'] }, { chunks: ['Second answer.'] }]).models);
+  const id = await first.createChat();
+  await first.waitForSubmission(await first.send(id, 'First question.'));
+  await first.waitForSubmission(await first.send(id, 'Second question.'));
+  const before = await readChat(first, id);
+  await file.close(first);
+  // The app compacts only long chats. Compact this one through the SDK with a tiny recent window.
+  const summarizer = scriptedModels([{ chunks: ['A summary of the first exchange.'] }]);
+  const harness = await Harness.open(await file.openStorage(), {
+    models: summarizer.models, registry: createRegistry(), settings: { compaction: { keepRecentTokens: 1 } },
+  }, BACKGROUND_CONTEXT);
+  try {
+    const conversation = await harness.conversation(id, BACKGROUND_CONTEXT);
+    const task = await conversation.compact(undefined, BACKGROUND_CONTEXT);
+    const { outcome } = (await harness.waitForTask(task, BACKGROUND_CONTEXT)).state;
+    assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
+    const placed = await (await harness.submission(outcome.result.submissionId, BACKGROUND_CONTEXT)).wait(BACKGROUND_CONTEXT);
+    assert.equal(placed.status, 'done');
+    const view = await conversation.viewState(BACKGROUND_CONTEXT);
+    const active = view.value.entries.length;
+    view.dispose();
+    assert.ok(active < 5, 'the active context no longer holds the summarized messages');
+  } finally { await harness.close(BACKGROUND_CONTEXT); }
+
+  const provider = scriptedModels([{ chunks: ['Third answer.'] }]);
+  const service = await file.open(provider.models);
+  const compacted = await readChat(service, id);
+  assert.deepEqual(users(compacted).map(({ text }) => text), ['First question.', 'Second question.']);
+  assert.match(textOf(compacted), /First answer\.[\s\S]*Second answer\./, 'messages before the summary stay visible');
+  assert.deepEqual(compacted.messages.filter(({ role }) => role === 'notice').map(({ text }) => text),
+    ['Earlier messages summarized']);
+  assert.ok(!JSON.stringify(compacted.messages).includes('A summary of the first exchange'));
+  assert.deepEqual(compacted.messages.filter(({ role }) => role !== 'notice').map(({ id }) => id),
+    before.messages.map(({ id }) => id), 'existing rows keep their IDs');
+  assert.equal(service.getSnapshot().chats[0].preview, 'Second question.');
+  await service.waitForSubmission(await service.send(id, 'Third question.'));
+  const requestText = JSON.stringify(provider.requests[0].context.messages);
+  assert.match(requestText, /A summary of the first exchange/, 'the model sees the summary');
+  const continued = await readChat(service, id);
+  assert.deepEqual(users(continued).map(({ text }) => text), ['First question.', 'Second question.', 'Third question.']);
+  assert.match(textOf(continued), /Third answer/);
 });
 
 test('provider, model and supported effort persist per chat and control the next request after reopen', { timeout: 10_000 }, async (t) => {
@@ -582,27 +634,27 @@ test('provider, model and supported effort persist per chat and control the next
   const first = await file.open(initial.models);
   const id = await first.createChat();
   const other = await first.createChat();
-  const otherSettings = first.getConversation(other).settings;
+  const otherSettings = (await readChat(first, other)).settings;
   await first.waitForSubmission(await first.send(id, 'Remember the earlier turn.'));
   const original = initial.models.getProvider('anthropic');
   const customModel = { ...original.getModels()[0], provider: 'future-provider', id: 'future-model', name: 'Future Model' };
   initial.models.setProvider({ ...original, id: 'future-provider', name: 'Future Provider', getModels: () => [customModel] });
   const selected = { model: { provider: 'future-provider', modelId: 'future-model' }, thinkingLevel: 'high' };
-  const before = first.getConversation(id);
-  const list = first.getSnapshot();
+  const before = await readChat(first, id);
   await first.updateSettings(id, selected);
-  assert.deepEqual(first.getConversation(id).settings, selected);
-  assert.equal(first.getConversation(id).messages, before.messages, 'settings commits preserve transcript identity');
-  assert.equal(first.getSnapshot(), list, 'settings commits do not rebuild the chat list');
-  assert.deepEqual(first.getConversation(other).settings, otherSettings, 'other chats keep independent choices');
+  const after = await readChat(first, id);
+  assert.deepEqual(after.settings, selected);
+  assert.deepEqual(after.messages, before.messages, 'settings changes keep the transcript');
+  assert.deepEqual((await readChat(first, other)).settings, otherSettings, 'other chats keep independent choices');
   assert.equal(initial.requests.length, 1, 'saving settings never makes a model request');
   await file.close(first);
 
   const next = scriptedModels([{ chunks: ['New provider remembered.'] }]);
-  next.models.setProvider({ ...next.models.getProvider('anthropic'), id: 'future-provider', name: 'Future Provider', getModels: () => [customModel] });
+  next.models.setProvider({ ...next.models.getProvider('anthropic'), id: 'future-provider', name: 'Future Provider',
+    getModels: () => [customModel] });
   const second = await file.open(next.models);
-  assert.deepEqual(second.getConversation(id).settings, selected);
-  assert.deepEqual(second.getConversation(other).settings, otherSettings);
+  assert.deepEqual((await readChat(second, id)).settings, selected);
+  assert.deepEqual((await readChat(second, other)).settings, otherSettings);
   await second.waitForSubmission(await second.send(id, 'Continue with my saved settings.'));
   assert.equal(next.requests[0].model.provider, 'future-provider');
   assert.equal(next.requests[0].model.id, 'future-model');
@@ -616,23 +668,28 @@ test('settings reject unavailable models, unsupported effort and in-flight or re
   const provider = scriptedModels([(request) => { const reply = controlledReply(request); started.resolve(); return reply.stream; }]);
   const first = await file.open(provider.models);
   const id = await first.createChat();
-  const original = first.getConversation(id).settings;
+  const original = (await readChat(first, id)).settings;
   const selected = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'high' };
   await assert.rejects(first.updateSettings(id, { ...selected, thinkingLevel: 'off' }), /reasoning|effort|support/i);
-  await assert.rejects(first.updateSettings(id, { ...selected, model: { provider: 'missing', modelId: 'missing' } }), /available|provider/i);
-  assert.deepEqual(first.getConversation(id).settings, original);
+  await assert.rejects(first.updateSettings(id, { ...selected, model: { provider: 'missing', modelId: 'missing' } }),
+    /available|provider/i);
+  assert.deepEqual((await readChat(first, id)).settings, original);
   await first.send(id, 'Keep running.');
   await started.promise;
   await assert.rejects(first.updateSettings(id, selected), /pending response/i);
-  assert.deepEqual(first.getConversation(id).settings, original);
+  assert.deepEqual((await readChat(first, id)).settings, original);
   await file.close(first);
-  const second = await file.open(scriptedModels([]).models);
-  assert.equal(second.getConversation(id).pending, true);
+  const resumed = Promise.withResolvers();
+  const second = await file.open(scriptedModels([(request) => {
+    const reply = controlledReply(request); resumed.resolve(); return reply.stream;
+  }]).models);
+  assert.equal((await readChat(second, id)).busy, true, 'recovered work continues after reopening');
   await assert.rejects(second.updateSettings(id, selected), /pending response/i);
-  assert.deepEqual(second.getConversation(id).settings, original);
+  await resumed.promise;
+  assert.deepEqual((await readChat(second, id)).settings, original);
   await second.cancel(id);
   await second.updateSettings(id, selected);
-  assert.deepEqual(second.getConversation(id).settings, selected);
+  assert.deepEqual((await readChat(second, id)).settings, selected);
 });
 
 test('unregistered saved providers survive reopening and block sends until explicitly changed', { timeout: 10_000 }, async (t) => {
@@ -648,14 +705,13 @@ test('unregistered saved providers survive reopening and block sends until expli
   await file.close(first);
   const next = scriptedModels([]);
   const second = await file.open(next.models);
-  assert.deepEqual(second.getConversation(id).settings, settings, 'catalog changes do not rewrite saved choices');
+  assert.deepEqual((await readChat(second, id)).settings, settings, 'catalog changes do not rewrite saved choices');
   await assert.rejects(second.send(id, 'Do not silently select another model.'), /provider|available/i);
-  assert.equal(second.getConversation(id).messages.length, 0);
+  assert.equal((await readChat(second, id)).messages.length, 0);
   assert.equal(next.requests.length, 0);
 });
 
 test('updating existing SDK agent settings preserves unrelated fields and reads legacy omitted effort', { timeout: 10_000 }, async (t) => {
-  const { AgentDoc } = await import('@earendil-works/pi-durable');
   const file = await fixture(t);
   const provider = scriptedModels([]);
   const harness = await Harness.open(await file.openStorage(), { models: provider.models, registry: createRegistry(),
@@ -664,11 +720,10 @@ test('updating existing SDK agent settings preserves unrelated fields and reads 
   const chat = await harness.createConversation({ ownership: { kind: 'ownerless' },
     agent: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, instructions: 'Preserve this instruction.' },
   }, BACKGROUND_CONTEXT);
-  const id = String(chat.id);
   await harness.close(BACKGROUND_CONTEXT);
   const service = await file.open(provider.models);
-  assert.equal(service.getConversation(id).settings.thinkingLevel, 'off');
-  await service.updateSettings(id, { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'max' });
+  assert.equal((await readChat(service, chat.id)).settings.thinkingLevel, 'off');
+  await service.updateSettings(chat.id, { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'max' });
   await file.close(service);
   const verify = await Harness.open(await file.openStorage(), { models: provider.models, registry: createRegistry() }, BACKGROUND_CONTEXT);
   try {
@@ -679,92 +734,6 @@ test('updating existing SDK agent settings preserves unrelated fields and reads 
   } finally { await verify.close(BACKGROUND_CONTEXT); }
 });
 
-test('offline cancellation of a removed provider is durable and never dispatches another pending chat', { timeout: 10_000 }, async (t) => {
-  const file = await fixture(t);
-  const started = [Promise.withResolvers(), Promise.withResolvers()];
-  const initial = scriptedModels(started.map((signal) => (request) => {
-    const reply = controlledReply(request);
-    signal.resolve(reply);
-    return reply.stream;
-  }));
-  const base = initial.models.getProvider('anthropic');
-  initial.models.setProvider({ ...base, id: 'removed-provider', name: 'Removed provider',
-    getModels: () => [{ ...base.getModels()[0], provider: 'removed-provider', id: 'saved-model' }] });
-  const first = await file.open(initial.models);
-  const cancelled = await first.createChat();
-  const other = await first.createChat();
-  await first.updateSettings(cancelled, { model: { provider: 'removed-provider', modelId: 'saved-model' }, thinkingLevel: 'high' });
-  const cancelledSubmission = await first.send(cancelled, 'Cancel me while offline.');
-  const cancelledReply = await started[0].promise;
-  cancelledReply.text('Keep this partial.');
-  const otherSubmission = await first.send(other, 'Preserve my pending request.');
-  await started[1].promise;
-  await until(() => textOf(first.getConversation(cancelled)).includes('Keep this partial.'), 'partial response is committed');
-  await file.close(first);
-
-  const signedOut = scriptedModels([], { authenticated: false });
-  const second = await file.open(signedOut.models);
-  assert.equal(second.getConversation(cancelled).pending, true);
-  await assert.rejects(second.resume(), /provider|available|connect|sign in/i);
-  await second.cancel(cancelled);
-  assert.equal(second.getConversation(cancelled).pending, false, 'durable abort intent releases the settings UI');
-  assert.equal(second.getConversation(cancelled).busy, false);
-  assert.equal(second.getConversation(other).pending, true, 'another provider stays safely paused');
-  assert.equal(signedOut.requests.length, 0);
-  assert.match(textOf(second.getConversation(cancelled)), /Keep this partial/);
-  assert.ok(second.getConversation(cancelled).messages.find(({ text }) => text === 'Keep this partial.').interrupted);
-  const selection = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'high' };
-  await second.updateSettings(cancelled, selection);
-  await file.close(second);
-
-  const reconnect = scriptedModels([{ chunks: ['Other response resumed.'] }, { chunks: ['A fresh answer.'] }], { authenticated: false });
-  const third = await file.open(reconnect.models);
-  assert.equal(third.getConversation(cancelled).pending, false, 'the abort mark survives a process restart');
-  assert.deepEqual(third.getConversation(cancelled).settings, selection);
-  assert.equal(third.getConversation(other).pending, true);
-  await assert.rejects(third.resume(), /connect|sign in/i);
-  assert.equal(reconnect.requests.length, 0);
-  reconnect.auth.authenticated = true;
-  await third.resume();
-  assert.equal((await third.waitForSubmission(cancelledSubmission)).reason, 'aborted');
-  assert.equal((await third.waitForSubmission(otherSubmission)).status, 'done');
-  assert.equal(reconnect.requests.length, 1, 'cleanup does not replay the cancelled request');
-  await third.waitForSubmission(await third.send(cancelled, 'Start a fresh request.'));
-  assert.equal(reconnect.requests.length, 2);
-  assert.equal(reconnect.requests[1].options.reasoning, 'high');
-});
-
-test('settings cannot change the provider while send is awaiting its credential admission', { timeout: 10_000 }, async (t) => {
-  const file = await fixture(t);
-  const checking = Promise.withResolvers();
-  const release = Promise.withResolvers();
-  const started = Promise.withResolvers();
-  const provider = scriptedModels([(request) => {
-    const reply = controlledReply(request); started.resolve(reply); return reply.stream;
-  }]);
-  const service = await file.open(provider.models);
-  const id = await service.createChat();
-  const originalCheck = provider.models.checkAuth.bind(provider.models);
-  let hold = true;
-  provider.models.checkAuth = async (...args) => {
-    if (hold) { hold = false; checking.resolve(); await release.promise; }
-    return originalCheck(...args);
-  };
-  const original = service.getConversation(id).settings;
-  const sending = service.send(id, 'Use the admitted model.');
-  await checking.promise;
-  const update = service.updateSettings(id, { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'high' });
-  const rejected = assert.rejects(update, /pending response/i);
-  release.resolve();
-  const submission = await sending;
-  const reply = await started.promise;
-  await rejected;
-  assert.deepEqual(service.getConversation(id).settings, original);
-  assert.equal(provider.requests[0].model.id, original.model.modelId);
-  reply.finish();
-  await service.waitForSubmission(submission);
-});
-
 test('credential-specific model availability is checked before creating durable model work', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const provider = scriptedModels([]);
@@ -773,53 +742,8 @@ test('credential-specific model availability is checked before creating durable 
   const service = await file.open(provider.models);
   const id = await service.createChat();
   await assert.rejects(service.send(id, 'Do not send an inaccessible model.'), /not available for this account/i);
-  assert.equal(service.getConversation(id).messages.length, 0);
-  assert.equal(service.getConversation(id).busy, false);
+  const conversation = await readChat(service, id);
+  assert.equal(conversation.messages.length, 0);
+  assert.equal(conversation.busy, false);
   assert.equal(provider.requests.length, 0);
-});
-
-test('a new send drains an offline cancellation before using changed model settings', { timeout: 10_000 }, async (t) => {
-  const file = await fixture(t);
-  const started = Promise.withResolvers();
-  const initial = scriptedModels([(request) => {
-    const reply = controlledReply(request); started.resolve(); return reply.stream;
-  }]);
-  const first = await file.open(initial.models);
-  const id = await first.createChat();
-  const stoppedSubmission = await first.send(id, 'Stop the original response.');
-  await started.promise;
-  await file.close(first);
-  const next = scriptedModels([{ chunks: ['The replacement model answered.'] }]);
-  const second = await file.open(next.models);
-  await second.cancel(id);
-  await second.updateSettings(id, { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'max' });
-  await second.waitForSubmission(await second.send(id, 'Use the replacement model.'));
-  assert.equal((await second.waitForSubmission(stoppedSubmission)).reason, 'aborted');
-  assert.equal(next.requests.length, 1);
-  assert.equal(next.requests[0].model.id, 'claude-sonnet-5-5');
-  assert.equal(next.requests[0].options.reasoning, 'max');
-});
-
-test('cancellation submitted during credential admission cannot miss the pending send', { timeout: 10_000 }, async (t) => {
-  const file = await fixture(t);
-  const checking = Promise.withResolvers();
-  const release = Promise.withResolvers();
-  const provider = scriptedModels([(request) => controlledReply(request).stream]);
-  const service = await file.open(provider.models);
-  const id = await service.createChat();
-  const originalCheck = provider.models.checkAuth.bind(provider.models);
-  let hold = true;
-  provider.models.checkAuth = async (...args) => {
-    if (hold) { hold = false; checking.resolve(); await release.promise; }
-    return originalCheck(...args);
-  };
-  const sending = service.send(id, 'Cancel this pending admission.');
-  await checking.promise;
-  const cancel = service.cancel(id);
-  release.resolve();
-  const submission = await sending;
-  await cancel;
-  assert.equal((await service.waitForSubmission(submission)).reason, 'aborted');
-  assert.equal(service.getConversation(id).busy, false);
-  assert.equal(service.getConversation(id).pending, false);
 });

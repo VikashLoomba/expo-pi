@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { integrationDatabase, toolReply, until } from './helpers/bash-integration.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
+import { readChat } from './helpers/chat-view.mjs';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { independentExecution, TestExecutionDoc } from './helpers/independent-env.mjs';
 
@@ -10,19 +11,19 @@ test.after(() => hooks.deregister());
 const { DurableChatService } = await import('../src/pi/chat-service.ts');
 const { ChatRuntime } = await import('../src/chat/chat-runtime.ts');
 
-test('runtime cancellation drain does not hold unrelated chat admission and backgrounding still drains', { timeout: 15_000 }, async (t) => {
+test('a draining cancellation does not hold another chat, and closing the app waits for admitted work', { timeout: 15_000 }, async (t) => {
   const file = await integrationDatabase(t, DurableChatService);
   const independent = await independentExecution(file.directory);
   independent.behavior.holdCancelledDrain = true;
   const provider = scriptedModels([
     toolReply('bash', { command: 'fixture:wait' }),
-    toolReply('bash', { command: 'printf RUNTIME_LOCAL_PROGRESS' }), { chunks: ['Done.'] }, { chunks: ['Retried.'] },
+    toolReply('bash', { command: 'printf RUNTIME_LOCAL_PROGRESS' }), { chunks: ['Done.'] },
   ]);
-  const runtime = new ChatRuntime({ models: provider.models, platform: 'ios',
+  const runtime = new ChatRuntime({ models: provider.models,
     openStorage: file.openStorage, openWorkspaceDatabase: file.openWorkspaceDatabase,
     execution: independent.decorate });
-  t.after(async () => { independent.releaseDrain(); await runtime.deactivate(); });
-  await runtime.activate();
+  t.after(async () => { independent.releaseDrain(); await runtime.close(); });
+  await runtime.open();
   const external = await runtime.createChat();
   const local = await runtime.createChat();
   await runtime.service.configureExecution(external, { cwd: independent.root }, async (tx, id) => {
@@ -32,31 +33,27 @@ test('runtime cancellation drain does not hold unrelated chat admission and back
   await until(() => independent.metrics.active === 1, 'independent exec started');
   const cancelling = runtime.cancel(external);
   cancelling.catch(() => {});
-  let background;
-  let retry;
-  let settings;
+  let closing;
   try {
     await until(() => independent.metrics.aborted === 1, 'cancellation reached environment');
-    retry = runtime.send(external, 'Retry after the environment drains.');
-    // Attach the rejection handler before deliberately closing its owning service.
-    retry.catch(() => {});
-    settings = runtime.updateSettings(external, runtime.getConversation(external).settings);
-    settings.catch(() => {});
+    // The stopping chat stays busy until its environment drains.
+    await assert.rejects(runtime.send(external, 'Retry before the environment drains.'), /busy/);
+    const settings = (await readChat(runtime, external)).settings;
+    await assert.rejects(runtime.updateSettings(external, settings), /pending response/);
     const sent = runtime.send(local, 'Run the local chat.');
-    await Promise.race([sent, new Promise((_, reject) => setTimeout(() => reject(new Error('Runtime lifecycle queue held by environment drain.')), 1500))]);
-    await until(() => runtime.getConversation(local)?.messages.some((row) => row.tool?.output.includes('RUNTIME_LOCAL_PROGRESS')), 'local execution completed while external drain held');
+    await Promise.race([sent, new Promise((_, reject) => setTimeout(() => reject(new Error('Local admission waited for an environment drain.')), 1500))]);
+    await until(async () => (await readChat(runtime, local)).messages.some((row) => row.tool?.output.includes('RUNTIME_LOCAL_PROGRESS')),
+      'local execution completed while external drain held');
     assert.equal(independent.metrics.active, 1);
-    let backgroundDone = false;
-    background = runtime.deactivate().then(() => { backgroundDone = true; });
+    let closed = false;
+    closing = runtime.close().then(() => { closed = true; });
     await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal(backgroundDone, false, 'background shutdown awaits admitted external work');
-    assert.equal(runtime.getSnapshot().ready, false, 'backgrounding stops new admission immediately');
-    await assert.rejects(runtime.send(local, 'No admission after backgrounding.'), /Return to the app/);
+    assert.equal(closed, false, 'closing awaits admitted external work');
+    assert.equal(runtime.getSnapshot().ready, false, 'closing stops new admission immediately');
+    await assert.rejects(runtime.send(local, 'No admission while closing.'), /opening/);
   } finally {
     independent.releaseDrain();
     await cancelling.catch((error) => { assert.match(String(error), /closed/); });
-    await retry?.catch((error) => { assert.match(String(error), /closed|Return to the app|not active/i); });
-    await settings?.catch((error) => { assert.match(String(error), /closed/); });
-    await background;
+    await closing;
   }
 });

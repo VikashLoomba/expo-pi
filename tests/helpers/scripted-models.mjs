@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
-import { createAssistantMessageEventStream, createModels, InMemoryCredentialStore } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, createModels, InMemoryCredentialStore, Type } from '@earendil-works/pi-ai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
+import { defineExtension, defineTool } from '@earendil-works/pi-durable';
+
+/** A test-only tool; the app ships none. `controlledReply().finish({ tool })` calls it with `{ a, b }`. */
+export const additionTool = defineExtension({ name: 'test-addition', tools: [defineTool({
+  name: 'add_numbers', description: 'Add two numbers.', replay: 'safe',
+  parameters: Type.Object({ a: Type.Number(), b: Type.Number() }),
+  async execute({ a, b }) {
+    const result = { sum: a + b };
+    return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
+  },
+})] });
 
 function assistant(model, content = [], stopReason = 'stop', errorMessage) {
   return {

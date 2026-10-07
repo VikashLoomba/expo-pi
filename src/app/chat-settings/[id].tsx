@@ -1,13 +1,17 @@
+import type { ConversationId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams, usePreventRemove } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useChatApp, useChatConversationState } from '@/chat/chat-provider';
+import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
 import { ActionButton, InlineNotice } from '@/components/chat/primitives';
 import { SettingRow, SettingsChoices, thinkingLevelLabel, type SettingsChoice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import { createModelSettings, findCatalogModel, getModelSettingsError, type ChatModelSettings, type ModelThinkingLevel } from '@/pi/model-catalog';
+import type { ChatView } from '@/pi/chat-view';
+import {
+  createModelSettings, findCatalogModel, getModelSettingsError, type ChatModelSettings,
+} from '@/pi/model-catalog';
 
 import { sameExecution, validateExecution, type ChatExecutionSettings } from '@/pi/execution/document';
 import { sameRemoteConnection } from '@/pi/execution/remote/hosts';
@@ -15,40 +19,51 @@ import { resolveRemoteWorkingDirectory } from '@/pi/execution/remote/test-host';
 
 type Picker = 'provider' | 'model' | 'effort' | 'environment';
 
-function dismissSettings(id: string) {
+function dismissSettings(id: string | ConversationId) {
   if (router.canGoBack()) router.back();
   else router.replace({ pathname: '/chat/[id]', params: { id } });
 }
 
 export default function ChatSettingsRoute() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: routeId } = useLocalSearchParams<{ id: string }>();
+  const id = useChatId(routeId);
   const colors = useChatColors();
   const { ready, error: appError } = useChatApp();
-  const { conversation, error } = useChatConversationState(id);
-  if (!conversation) return <View style={[styles.loading, { backgroundColor: colors.background }]}>
-    <Stack.Screen options={{ title: 'Chat settings', headerLeft: () => <HeaderAction title="Cancel" onPress={() => dismissSettings(id)} /> }} />
-    {!ready && !appError ? <ActivityIndicator color={colors.accent} /> : <InlineNotice message={error || appError || 'This chat is no longer available.'} />}
+  const view = useChatView(id);
+  const conversation = useChatControls(view);
+  const status = useChatStatus(view);
+  if (!conversation || id === undefined) return <View style={[styles.loading, { backgroundColor: colors.background }]}>
+    <Stack.Screen options={{ title: 'Chat settings',
+      headerLeft: () => <HeaderAction title="Cancel" onPress={() => dismissSettings(routeId)} /> }} />
+    {(!ready || status === 'loading') && !appError && id !== undefined ? <ActivityIndicator color={colors.accent} />
+      : <InlineNotice message={appError || 'This chat is no longer available.'} />}
   </View>;
   // Draft state belongs to this editor session; incoming chat snapshots do not
   // overwrite choices before the user saves or cancels.
-  return <ChatSettingsEditor key={id} id={id} initialSettings={conversation.settings} initialExecution={conversation.execution} />;
+  return <ChatSettingsEditor key={id} id={id} view={view} initialSettings={conversation.settings}
+    initialExecution={conversation.execution} />;
 }
 
-function ChatSettingsEditor({ id, initialSettings, initialExecution }: { id: string; initialSettings: ChatModelSettings; initialExecution: ChatExecutionSettings }) {
+function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
+  id: ConversationId; view: ChatView | undefined; initialSettings: ChatModelSettings;
+  initialExecution: ChatExecutionSettings;
+}) {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { ready, catalog, providerAccess, refreshCatalog, remoteHosts } = useChatApp();
-  const { conversation, updateSettings, updateExecution } = useChatConversationState(id);
+  const { ready, runtime, catalog, providerAccess, refreshCatalog, remoteHosts } = useChatApp();
+  const conversation = useChatControls(view);
   const hosts = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   const [execution, setExecution] = useState<ChatExecutionSettings>(initialExecution);
   const executionChanged = !sameExecution(execution, initialExecution);
-  const selectedHost = execution.target.kind === 'ssh' ? hosts.hosts.find((host) => host.id === (execution.target as { machineId: string }).machineId) : undefined;
+  const target = execution.target;
+  const selectedHost = target.kind === 'ssh' ? hosts.hosts.find((host) => host.id === target.machineId) : undefined;
   let executionError: string | undefined;
   // An empty remote draft selects the account's home. Only its resolved absolute
   // path is committed; durable execution settings never contain this UI choice.
   const usesRemoteHome = execution.target.kind === 'ssh' && execution.cwd.trim() === '';
   if (!usesRemoteHome) {
-    try { validateExecution(execution); } catch (cause) { executionError = (cause as Error).message; }
+    try { validateExecution(execution); }
+    catch (cause) { executionError = cause instanceof Error ? cause.message : String(cause); }
   }
   if (executionChanged && execution.target.kind === 'ssh' && !selectedHost) executionError = 'Choose an available remote machine.';
   const [draft, setDraft] = useState<ChatModelSettings>(initialSettings);
@@ -77,7 +92,7 @@ function ChatSettingsEditor({ id, initialSettings, initialExecution }: { id: str
   const access = providerAccess(draft.model.provider);
   const settingsError = getModelSettingsError(catalog, draft);
   const canChooseEffort = !!model?.thinkingLevels.length && (model.thinkingLevels.length > 1 || !model.thinkingLevels.includes(draft.thinkingLevel));
-  const blocked = !ready || !conversation || conversation.busy || conversation.pending;
+  const blocked = !ready || !conversation || conversation.busy;
   const disabled = blocked || saving || refreshing;
   const changed = draft.model.provider !== initialSettings.model.provider || draft.model.modelId !== initialSettings.model.modelId || draft.thinkingLevel !== initialSettings.thinkingLevel;
   const canSave = !disabled && (changed || executionChanged) && (!changed || !settingsError) && !executionError;
@@ -110,9 +125,9 @@ function ChatSettingsEditor({ id, initialSettings, initialExecution }: { id: str
           directoryCheck.current = undefined;
           setCheckingDirectory(false);
         }
-        await updateExecution(selected, changed ? draft : undefined);
+        await runtime.updateExecution(id, selected, changed ? draft : undefined);
       }
-      else await updateSettings(draft);
+      else await runtime.updateSettings(id, draft);
       if (!mounted.current) return;
       setSaving(false);
       disableRemovalPrevention();
@@ -167,13 +182,19 @@ function ChatSettingsEditor({ id, initialSettings, initialExecution }: { id: str
           choosePage();
         } else if (picker === 'provider') selectProvider(value);
         else if (picker === 'model') selectModel(value);
-        else { setDraft({ ...draft, thinkingLevel: value as ModelThinkingLevel }); choosePage(); }
+        else {
+          const thinkingLevel = model?.thinkingLevels.find((level) => level === value);
+          if (thinkingLevel) setDraft({ ...draft, thinkingLevel });
+          choosePage();
+        }
       }} /> : <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}>
       <View style={styles.intro}>
         <Text style={[styles.chatTitle, { color: colors.text }]}>{conversation?.title || 'New chat'}</Text>
         <Text style={[styles.description, { color: colors.secondary }]}>These settings apply to the next response in this chat and are saved on this device.</Text>
       </View>
-      {blocked && <InlineNotice tone="neutral" testID="settings-locked" message={conversation?.pending || conversation?.busy ? 'Finish or stop the current response before changing settings.' : 'Chat settings will be available when this chat finishes loading.'} />}
+      {blocked && <InlineNotice tone="neutral" testID="settings-locked" message={conversation?.busy
+        ? 'Finish or stop the current response before changing settings.'
+        : 'Chat settings will be available when this chat finishes loading.'} />}
       {error && <InlineNotice testID="settings-save-error" message={error} />}
       {checkingDirectory && <View style={styles.directory}>
         <InlineNotice tone="neutral" message="Checking the working directory on this chat’s remote machine…" />

@@ -4,16 +4,17 @@ import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 const hooks = installBashBrowserHooks();
 test.after(() => hooks.deregister());
 const { fileToolPresentation, withFileToolDetails } = await import('../src/chat/file-tool-presentation.ts');
-const { projectChat } = await import('../src/pi/chat-projection.ts');
+const { projectMessages } = await import('../src/pi/chat-projection.ts');
 
 function state() {
   return {
+    id: 1,
     metadata: { title: 'Tools', createdAt: 1, archived: false },
-    settings: { model: { provider: 'openai', modelId: 'gpt-6-sol' }, thinkingLevel: 'off' },
-    entries: new Map([[1, { id: 1, model: [{ role: 'assistant', timestamp: 1,
-      content: [{ type: 'toolCall', id: 'edit-call', name: 'edit', arguments: { path: 'notes', edits: [{ oldText: 'old', newText: 'new' }] } }] }] }]]),
+    agent: { model: { provider: 'openai', modelId: 'gpt-6-sol' }, thinkingLevel: 'off' },
+    entries: [{ id: 1, model: [{ role: 'assistant', timestamp: 1,
+      content: [{ type: 'toolCall', id: 'edit-call', name: 'edit', arguments: { path: 'notes', edits: [{ oldText: 'old', newText: 'new' }] } }] }] }],
     live: { tools: [{ callId: 'edit-call', name: 'edit', status: 'running', details: { diff: '- old\n+ new', firstChangedLine: 2 } }] },
-    native: { responses: {} }, nativeLive: {}, unsettled: new Set(), abortRequested: new Set(),
+    native: { responses: {} }, nativeLive: {},
   };
 }
 
@@ -43,30 +44,29 @@ test('historical malformed or oversized details cannot inject arbitrary presenta
   assert.equal(details.patchPath, undefined);
 });
 
-test('live details and details-only updates reach immutable rows and unchanged rows are reused', () => {
+test('live details and details-only updates reach the tool row without changing earlier rows', () => {
   const cached = state();
-  const first = projectChat('1', cached, undefined, true);
-  const row = first.conversation.messages[0];
+  const row = projectMessages(cached, cached.entries)[0];
   assert.equal(row.tool.file.diff, '- old\n+ new');
   assert.equal(row.tool.file.firstChangedLine, 2);
   assert.equal(row.tool.args, '', 'file input is a typed summary instead of duplicate raw content');
-  const same = projectChat('1', { ...cached, committed: first.committed }, first.conversation, true);
-  assert.equal(same.conversation.messages[0], row);
   cached.live.tools[0].details = { diff: '- old\n+ newer', firstChangedLine: 3 };
-  const changed = projectChat('1', { ...cached, committed: first.committed }, first.conversation, true);
-  assert.notEqual(changed.conversation.messages[0], row);
-  assert.equal(changed.conversation.messages[0].tool.file.diff, '- old\n+ newer');
+  const changed = projectMessages(cached, cached.entries)[0];
+  assert.equal(changed.id, row.id);
+  assert.equal(changed.tool.file.diff, '- old\n+ newer');
+  assert.equal(row.tool.file.diff, '- old\n+ new', 'an earlier projection is not mutated');
 });
 
 test('committed result details survive a fresh projection and retain the patch artifact path', () => {
   const cached = state();
   cached.live = {};
-  cached.entries.set(2, { id: 2, model: [{ role: 'toolResult', toolCallId: 'edit-call', toolName: 'edit', timestamp: 2,
+  cached.entries.push({ id: 2, model: [{ role: 'toolResult', toolCallId: 'edit-call', toolName: 'edit', timestamp: 2,
     content: [{ type: 'text', text: 'Edited notes.' }], isError: false,
     details: { diff: '- old\n+ new', diffTruncated: true, firstChangedLine: 2, patchPath: '/workspace/.tool-output/full.patch' } }] });
-  const first = projectChat('1', cached, undefined, false).conversation;
-  const reopened = projectChat('1', structuredClone(cached), undefined, false).conversation;
-  assert.deepEqual(reopened.messages, first.messages);
-  assert.equal(reopened.messages[0].tool.status, 'completed');
-  assert.equal(reopened.messages[0].tool.file.patchPath, '/workspace/.tool-output/full.patch');
+  const first = projectMessages(cached, cached.entries);
+  const copy = structuredClone(cached);
+  const reopened = projectMessages(copy, copy.entries);
+  assert.deepEqual(reopened, first);
+  assert.equal(reopened[0].tool.status, 'completed');
+  assert.equal(reopened[0].tool.file.patchPath, '/workspace/.tool-output/full.patch');
 });

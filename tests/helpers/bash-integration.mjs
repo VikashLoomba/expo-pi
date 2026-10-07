@@ -6,6 +6,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { createExpoSqliteDatabase } from '../../src/pi/storage/expo-sqlite.ts';
+import { readChat } from './chat-view.mjs';
 import { createNodeSqliteConnection } from './node-sqlite.mjs';
 
 /** Deterministic model transport, never evidence of a real provider run. */
@@ -61,7 +62,7 @@ export async function integrationDatabase(t, Service) {
     directory, workspacePath, metrics, openStorage, openWorkspaceDatabase,
     async open(models, options = {}) {
       const storage = await openStorage();
-      const service = await Service.open({ storage, models, platform: 'ios', openWorkspaceDatabase, ...options });
+      const service = await Service.open({ storage, models, openWorkspaceDatabase, ...options });
       services.add(service);
       storageByService.set(service, storage);
       return service;
@@ -85,6 +86,6 @@ export async function until(check, description, timeout = 4_000) {
   }
 }
 
-export function toolRows(service, id) {
-  return service.getConversation(id).messages.filter((message) => message.tool?.name === 'bash');
+export async function toolRows(service, id) {
+  return (await readChat(service, id)).messages.filter((message) => message.tool?.name === 'bash');
 }

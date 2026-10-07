@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
-import { memo, useImperativeHandle, type Ref } from 'react';
+import { memo, useCallback, useImperativeHandle, type Ref } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { useChatConversation } from '@/chat/chat-provider';
+import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@/chat/chat-provider';
 import type { ChatMessage } from '@/chat/types';
+import type { ChatView } from '@/pi/chat-view';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { useTranscriptScroll } from '@/hooks/use-transcript-scroll';
 import { ChatIcon, type ChatIconName } from './icon';
@@ -14,7 +15,8 @@ import { ActionButton, PiMark } from './primitives';
 const suggestions: { icon: ChatIconName; title: string; detail: string; prompt: string }[] = [
   { icon: 'idea', title: 'Make something of an idea', detail: 'Find a starting point, together.', prompt: 'Help me think through an idea. Ask me a few questions to get started.' },
   { icon: 'pencil', title: 'Find the right words', detail: 'A first draft, a fresh perspective.', prompt: 'Help me write something clearly. First, ask what I am writing and who it is for.' },
-  { icon: 'number', title: 'Work it out', detail: 'A little help with the numbers.', prompt: 'Use add_numbers to add 19 and 23, then explain the result in one sentence.' },
+  { icon: 'number', title: 'Work it out', detail: 'A little help with the numbers.',
+    prompt: 'Help me work through a calculation step by step. First, ask what I need to figure out.' },
 ];
 
 function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
@@ -33,32 +35,48 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
 }
 
 const keyExtractor = (message: ChatMessage) => message.id;
-const renderMessage = ({ item }: { item: ChatMessage }) => <MessageRow message={item} />;
 
 export interface ChatTranscriptHandle { scrollToLatest: () => void }
 
 /** Only this subtree subscribes to text deltas. Header, composer and history rows stay still. */
-export const ChatTranscript = memo(function ChatTranscript({ id, ready, onChoose, ref }: {
-  id: string; ready: boolean; onChoose: (text: string) => void; ref: Ref<ChatTranscriptHandle>;
+export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, ref }: {
+  view: ChatView | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
+  ref: Ref<ChatTranscriptHandle>;
 }) {
   const colors = useChatColors();
-  const { conversation } = useChatConversation(id);
+  const messages = useChatMessages(view);
+  const controls = useChatControls(view);
+  const busy = !!controls?.busy;
+  const status = useChatStatus(view);
+  const error = useChatError(view);
+  // Only the streaming row reads `stopping`, so the other rows keep their memoized render.
+  const renderMessage = useCallback(({ item }: { item: ChatMessage }) =>
+    <MessageRow message={item} stopping={stopping && !!item.streaming} />, [stopping]);
+  const working = stopping ? 'Stopping…' : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
   const { list, onScroll, onContentSizeChange, onLayout, scrollToLatest, showScrollDown } = useTranscriptScroll();
   useImperativeHandle(ref, () => ({ scrollToLatest }), [scrollToLatest]);
-  const messages = conversation?.messages ?? [];
-  const showWorking = !!conversation?.busy && !messages.some((message) => message.streaming || message.tool?.status === 'running');
+  const showWorking = busy && !messages.some((message) => message.streaming || message.tool?.status === 'running');
+  const unavailable = status === 'missing' || status === 'failed' || (ready && !view);
   if (!messages.length) return <View style={styles.transcript}>
-    {!ready ? <View style={styles.loading}><ActivityIndicator color={colors.accent} /><Text style={[styles.loadingText, { color: colors.muted }]}>Opening this conversation…</Text></View>
-      : !conversation ? <View style={styles.loading}><Text style={[styles.missingTitle, { color: colors.text }]}>Chat unavailable</Text><Text style={[styles.loadingText, { color: colors.secondary }]}>This conversation may have been archived.</Text><ActionButton title="Back to chats" secondary onPress={() => router.replace('/')} /></View>
+    {unavailable ? <View style={styles.loading}>
+      <Text style={[styles.missingTitle, { color: colors.text }]}>Chat unavailable</Text>
+      <Text style={[styles.loadingText, { color: colors.secondary }]}>{status === 'failed' && error
+        ? error : 'This conversation may have been archived.'}</Text>
+      <ActionButton title="Back to chats" secondary onPress={() => router.replace('/')} />
+    </View>
+      : !ready || status === 'loading' ? <View style={styles.loading}><ActivityIndicator color={colors.accent} />
+        <Text style={[styles.loadingText, { color: colors.muted }]}>Opening this conversation…</Text></View>
       : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.emptyMessages}><EmptyConversation onChoose={onChoose} /></ScrollView>}
   </View>;
   return <View style={styles.transcript}>
-    <Animated.FlatList ref={list} testID="message-list" data={messages} keyExtractor={keyExtractor} renderItem={renderMessage}
+    <Animated.FlatList ref={list} testID="message-list" data={messages} keyExtractor={keyExtractor}
+      renderItem={renderMessage} extraData={stopping}
       keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'} keyboardShouldPersistTaps="handled"
       scrollEventThrottle={16} initialNumToRender={20} contentContainerStyle={styles.messages}
       onScroll={onScroll} onContentSizeChange={onContentSizeChange} onLayout={onLayout}
       ListFooterComponent={<View style={styles.working}>
-        {showWorking && <><ActivityIndicator color={colors.accent} size="small" /><Text style={[styles.workingText, { color: colors.secondary }]}>Pi is thinking…</Text></>}
+        {showWorking && <><ActivityIndicator color={colors.accent} size="small" />
+          <Text style={[styles.workingText, { color: colors.secondary }]}>{working}</Text></>}
       </View>}
     />
     {showScrollDown && <Pressable testID="scroll-to-latest" accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={scrollToLatest}

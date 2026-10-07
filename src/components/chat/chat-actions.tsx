@@ -1,32 +1,33 @@
+import type { ConversationId } from '@earendil-works/pi-durable';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useChatApp, useChatConversationState } from '@/chat/chat-provider';
+import { useChatApp, useChatControls, useChatView } from '@/chat/chat-provider';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
 import { ActionButton, IconButton, InlineNotice } from './primitives';
 
 export function ChatActions({ chat, onClose, onArchived }: {
-  chat?: { id: string; title: string }; onClose: () => void; onArchived?: () => void;
+  chat?: { id: ConversationId; title: string }; onClose: () => void; onArchived?: () => void;
 }) {
   return chat ? <ChatActionsDialog key={`${chat.id}:${chat.title}`} chat={chat} onClose={onClose} onArchived={onArchived} /> : null;
 }
 
 function ChatActionsDialog({ chat, onClose, onArchived }: {
-  chat: { id: string; title: string }; onClose: () => void; onArchived?: () => void;
+  chat: { id: ConversationId; title: string }; onClose: () => void; onArchived?: () => void;
 }) {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { ready, renameChat, archiveChat } = useChatApp();
-  const { conversation } = useChatConversationState(chat.id);
+  const { ready, runtime } = useChatApp();
+  const conversation = useChatControls(useChatView(chat.id));
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [openingSettings, setOpeningSettings] = useState(false);
-  const settingsDisabled = !ready || !!conversation?.busy || !!conversation?.pending || working;
+  const settingsDisabled = !ready || !!conversation?.busy || working;
   const navigateToSettings = () => {
     onClose();
     router.push({ pathname: '/chat-settings/[id]', params: { id: chat.id } });
@@ -41,14 +42,14 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
   const save = async () => {
     if (!chat || !title.trim() || working) return;
     setWorking(true); setError(undefined);
-    try { await renameChat(chat.id, title.trim()); onClose(); }
+    try { await runtime.renameChat(chat.id, title.trim()); onClose(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not rename this chat.'); }
     finally { setWorking(false); }
   };
   const archive = async () => {
     if (!chat || working) return;
     setWorking(true); setError(undefined);
-    try { await archiveChat(chat.id); onClose(); onArchived?.(); }
+    try { await runtime.archiveChat(chat.id); onClose(); onArchived?.(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not archive this chat.'); }
     finally { setWorking(false); }
   };
@@ -71,7 +72,8 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
             style={[styles.option, { opacity: settingsDisabled ? 0.45 : 1 }]}>
             <ChatIcon name="spark" color={colors.secondary} size={20} /><View style={styles.archiveText}>
               <Text style={[styles.optionLabel, { color: colors.text }]}>Model settings</Text>
-              <Text style={[styles.caption, { color: colors.muted }]}>{conversation?.busy || conversation?.pending ? 'Finish or stop the response to make changes.' : 'Provider, model, and reasoning effort.'}</Text>
+              <Text style={[styles.caption, { color: colors.muted }]}>{conversation?.busy
+                ? 'Finish or stop the response to make changes.' : 'Provider, model, and reasoning effort.'}</Text>
             </View>
           </Pressable>
           <Pressable testID="rename-chat" accessibilityRole="button" onPress={() => setRenaming(true)} disabled={working} style={styles.option}>

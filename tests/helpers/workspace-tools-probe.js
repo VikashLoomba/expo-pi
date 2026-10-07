@@ -166,14 +166,27 @@ export default async function workspaceToolsProbe({ namespace, stage, platform }
     check: async () => ({ type: 'api_key' }), resolve: async () => ({ auth: { apiKey: 'synthetic-no-network' } }) } },
     stream: dispatch, streamSimple: dispatch });
   const storage = await openExpoSqliteStorage(`${namespace}-chats.db`);
-  const service = await DurableChatService.open({ storage, models, platform, openWorkspaceDatabase: () => openWorkspaceDatabase(fileName) });
+  // Read a chat the way the chat screen does: subscribe to its view until it has loaded.
+  const readChat = async (chatService, chatId) => {
+    const view = chatService.chat(chatId, { transcript: true });
+    const stop = view.subscribe(() => {});
+    try {
+      const deadline = Date.now() + 5_000;
+      while (view.getSnapshot().status === 'loading') {
+        if (Date.now() > deadline) throw new Error('The chat view did not load.');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return view.getSnapshot().conversation;
+    } finally { stop(); }
+  };
+  const service = await DurableChatService.open({ storage, models, openWorkspaceDatabase: () => openWorkspaceDatabase(fileName) });
   try {
     const id = stage === 'seed' ? await service.createChat() : service.getSnapshot().chats[0]?.id;
     check(id, 'Seed conversation must survive process restart');
-    const previous = service.getConversation(id).messages.filter((row) => row.tool);
+    const previous = (await readChat(service, id)).messages.filter((row) => row.tool);
     if (stage === 'verify') record('committed edit diff survives restart', previous.some((row) => row.tool.name === 'edit' && row.tool.file?.diff?.includes('edited')));
     const receipt = await service.waitForSubmission(await service.send(id, `Run ${stage} verification.`));
-    const rows = service.getConversation(id).messages.filter((row) => row.tool).slice(previous.length);
+    const rows = (await readChat(service, id)).messages.filter((row) => row.tool).slice(previous.length);
     record('real durable submission completed', receipt.status === 'done');
     record('all four tools offered', ['read', 'write', 'edit', 'bash'].every((name) => offered.includes(name)));
     record('expected tool outcomes', rows.length === calls.length && rows.every((row, index) => row.tool.status === (stage === 'seed' && [4, 6].includes(index) ? 'error' : 'completed')));

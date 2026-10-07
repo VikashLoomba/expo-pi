@@ -96,10 +96,39 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
   } }, stream: (model, context, options) => base.stream(model, context, { ...options, fetch }),
   streamSimple: (model, context, options) => base.streamSimple(model, context, { ...options, fetch }) }));
   let service;
-  const reopen = async () => { service = await DurableChatService.open({ storage: await openExpoSqliteStorage(database), models, platform }); };
+  const reopen = async () => { service = await DurableChatService.open({ storage: await openExpoSqliteStorage(database), models }); };
   const restores = [];
   let id;
   let fixtureRowId;
+  // The fixture chat as the chat screen reads it, from whichever service instance is open.
+  let watched;
+  let stopWatching = () => {};
+  const watchFixture = async () => {
+    stopWatching();
+    watched = service.chat(id, { transcript: true });
+    stopWatching = watched.subscribe(() => {});
+    await until(() => watched.getSnapshot().status !== 'loading', 'Fixture chat view did not load');
+  };
+  const messages = () => watched?.getMessages() ?? [];
+  // The route resolves its chat before any screen calls the hook, so bind the mounted runtime up front.
+  function mountedRuntime(devtoolsHook) {
+    for (const renderer of devtoolsHook.renderers.keys()) for (const root of devtoolsHook.getFiberRoots(renderer)) {
+      const stack = [root.current];
+      while (stack.length) {
+        const fiber = stack.pop();
+        const value = fiber.memoizedProps?.value;
+        if (value?.runtime && 'chats' in value) return value.runtime;
+        for (let child = fiber.child; child; child = child.sibling) stack.push(child);
+      }
+    }
+    throw new Error('The mounted chat runtime was not found.');
+  }
+  // Evaluated source runs without per-iteration loop bindings, so each restore captures its own parameters.
+  function replaceRuntimeMethod(runtime, name, replacement) {
+    const descriptor = Object.getOwnPropertyDescriptor(runtime, name);
+    Object.defineProperty(runtime, name, { configurable: true, writable: true, value: replacement });
+    restores.push(() => { if (descriptor) Object.defineProperty(runtime, name, descriptor); else delete runtime[name]; });
+  }
   function mountedProps() {
     const props = [];
     for (const renderer of devtools.renderers?.keys?.() || [1]) for (const root of devtools.getFiberRoots(renderer) || []) {
@@ -118,33 +147,20 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
     id = await service.createChat();
     await service.updateSettings(id, { model: { provider: 'openai', modelId: 'gpt-6-sol' }, thinkingLevel: 'medium' });
     await service.renameChat(id, 'Native web search verification');
+    await watchFixture();
     let boundRuntime;
     const delegateRuntime = (runtime) => {
       if (boundRuntime === runtime) return;
       check(!boundRuntime, 'The mounted app runtime changed during the fixture');
       boundRuntime = runtime;
-      const originalSubscribe = runtime.subscribe;
-      const overrides = {
-        subscribe: (listener) => {
-          const unsubscribeApp = originalSubscribe(listener);
-          const unsubscribeFixture = service.subscribe(listener);
-          return () => { unsubscribeApp(); unsubscribeFixture(); };
-        },
-        getConversation: (chatId) => service.getConversation(chatId),
-        getConversationState: (chatId) => service.getConversation(chatId),
-        send: (chatId, text) => service.send(chatId, text),
-        cancel: (chatId) => service.cancel(chatId),
-        resume: () => service.resume(),
-        updateSettings: (chatId, settings) => service.updateSettings(chatId, settings),
-        createChat: () => service.createChat(),
-        renameChat: (chatId, title) => service.renameChat(chatId, title),
-        archiveChat: (chatId) => service.archiveChat(chatId),
-      };
-      for (const [name, replacement] of Object.entries(overrides)) {
-        const descriptor = Object.getOwnPropertyDescriptor(runtime, name);
-        Object.defineProperty(runtime, name, { configurable: true, writable: true, value: replacement });
-        restores.push(() => { if (descriptor) Object.defineProperty(runtime, name, descriptor); else delete runtime[name]; });
-      }
+      replaceRuntimeMethod(runtime, 'findChat', (key) => service.findChat(key));
+      replaceRuntimeMethod(runtime, 'chat', (chatId, options) => service.chat(chatId, options));
+      replaceRuntimeMethod(runtime, 'send', (chatId, text) => service.send(chatId, text));
+      replaceRuntimeMethod(runtime, 'cancel', (chatId) => service.cancel(chatId));
+      replaceRuntimeMethod(runtime, 'updateSettings', (chatId, settings) => service.updateSettings(chatId, settings));
+      replaceRuntimeMethod(runtime, 'createChat', () => service.createChat());
+      replaceRuntimeMethod(runtime, 'renameChat', (chatId, title) => service.renameChat(chatId, title));
+      replaceRuntimeMethod(runtime, 'archiveChat', (chatId) => service.archiveChat(chatId));
     };
     // Keep every original React hook call. Changing a mounted screen from
     // useContext to useSyncExternalStore corrupts its hook list after cleanup.
@@ -161,16 +177,17 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
     restores.push(() => Object.defineProperty(providerModule, 'useChatApp', appDescriptor));
     const probeDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__PI_NATIVE_SEARCH_PROBE__');
     globalThis.__PI_NATIVE_SEARCH_PROBE__ = { snapshot: () => ({ phase, database, id,
-      messageIds: service.getConversation(id)?.messages.map((row) => row.id),
+      messageIds: messages().map((row) => row.id),
       testIds: mountedProps().map((props) => props.testID).filter((testId) => testId.startsWith('web-')) }) };
     restores.push(() => { if (probeDescriptor) Object.defineProperty(globalThis, '__PI_NATIVE_SEARCH_PROBE__', probeDescriptor);
       else delete globalThis.__PI_NATIVE_SEARCH_PROBE__; });
+    delegateRuntime(mountedRuntime(devtools));
     router.push(`/chat/${id}`);
     await until(() => mountedProps().some((props) => props.testID === 'conversation-screen'), 'Fixture conversation did not mount');
     const submission = await service.send(id, 'Search the web and include sources.');
-    await until(() => service.getConversation(id).messages.some((row) => row.webSearch?.calls.some((call) => call.status === 'running')),
+    await until(() => messages().some((row) => row.webSearch?.calls.some((call) => call.status === 'running')),
       'Search activity did not reach the committed app projection');
-    const running = service.getConversation(id).messages.find((row) => row.webSearch);
+    const running = messages().find((row) => row.webSearch);
     fixtureRowId = running.id;
     check(!running.text, 'Search progress must be visible before the first text');
     await until(() => mountedProps().some((props) => props.testID === `web-search-${running.id}` && props.accessibilityState?.busy),
@@ -179,7 +196,8 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
     await sleep(holdStage === 'searching' ? Math.max(350, holdMs) : 350);
     complete();
     check((await service.waitForSubmission(submission)).status === 'done', 'Native response did not settle');
-    const finished = service.getConversation(id).messages.find((row) => row.webSearch?.citations.length);
+    await until(() => messages().some((row) => row.webSearch?.citations.length && !row.streaming), 'The answer did not settle');
+    const finished = messages().find((row) => row.webSearch?.citations.length);
     check(finished?.id === running.id, 'The assistant row identity changed at completion');
     check(finished.webSearch.calls[0].status === 'completed', 'The search did not complete');
     check(finished.webSearch.sources.length === 2 && finished.webSearch.citations.length === 1, 'Sources or citations were lost');
@@ -187,10 +205,12 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
     await until(() => mountedProps().some((props) => props.testID === `web-sources-${finished.id}`), 'Sources UI did not mount');
     phase = 'completed';
     if (holdMs && holdStage === 'completed') await sleep(holdMs);
-    const previous = JSON.stringify(service.getConversation(id).messages);
+    const previous = JSON.stringify(messages());
+    stopWatching();
     await service.close();
     await reopen();
-    check(JSON.stringify(service.getConversation(id).messages) === previous, 'Native SQLite reopen lost displayed metadata');
+    await watchFixture();
+    check(JSON.stringify(messages()) === previous, 'Native SQLite reopen lost displayed metadata');
     // Re-mount after replacing the service so the fixture hooks subscribe to the new instance.
     router.replace('/');
     await until(() => !mountedProps().some((props) => props.testID === `web-search-${fixtureRowId}`),
@@ -208,6 +228,7 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
         readableSourceFactAfterReopen: true, noRawHostedCallReplay: true,
         noEncryptedStateInUI: true }, network: 'Synthetic HTTP SSE only; no account credentials accessed' };
   } finally {
+    stopWatching();
     for (const restore of restores.reverse()) restore();
     try {
       // The follow-up push has mounted above; restore the original runtime

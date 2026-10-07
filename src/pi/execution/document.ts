@@ -1,15 +1,28 @@
-import { defineDoc, type AgentState } from '@earendil-works/pi-durable';
+import { defineDoc, type AgentState, type JsonObject } from '@earendil-works/pi-durable';
 
 export type ExecutionTarget = { kind: 'local' } | { kind: 'ssh'; machineId: string };
+export type ExecutionTargetState = { target: ExecutionTarget };
 export type ChatExecutionSettings = { target: ExecutionTarget; cwd: string };
 
-/** Configuration follows agent history; filesystem contents do not. */
-export const ExecutionTargetDoc = defineDoc<ExecutionTarget>({
-  kind: 'app.execution-target', version: 1, scope: 'conversation',
-  history: 'rewindable', fork: 'asOf', initial: () => ({ kind: 'local' }),
+/** Version 1 stored the target as the document root. Anything unreadable falls back to this device. */
+function readTargetV1(value: JsonObject): ExecutionTarget {
+  return value.kind === 'ssh' && typeof value.machineId === 'string'
+    ? { kind: 'ssh', machineId: value.machineId } : { kind: 'local' };
+}
+
+/**
+ * Configuration follows agent history; filesystem contents do not. The target sits under `target` so a commit can
+ * replace it whole: a draft cannot turn one variant of a root union into another.
+ */
+export const ExecutionTargetDoc = defineDoc<ExecutionTargetState>({
+  kind: 'app.execution-target', version: 2, scope: 'conversation',
+  history: 'rewindable', fork: 'asOf', initial: () => ({ target: { kind: 'local' } }),
+  migrate: (value) => ({ target: readTargetV1(value) }),
 });
 
-export function executionSettings(target?: Readonly<ExecutionTarget> | null, agent?: Readonly<AgentState> | null): ChatExecutionSettings {
+export function executionSettings(state?: Readonly<ExecutionTargetState> | null,
+  agent?: Pick<AgentState, 'cwd'> | null): ChatExecutionSettings {
+  const target = state?.target;
   return { target: target?.kind === 'ssh' ? { kind: 'ssh', machineId: target.machineId } : { kind: 'local' },
     cwd: agent?.cwd ?? '/workspace' };
 }

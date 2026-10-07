@@ -3,7 +3,7 @@ import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { defineExtension, defineTask, ProviderDoc } from '@earendil-works/pi-durable';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
-import { integrationDatabase, until } from './helpers/bash-integration.mjs';
+import { integrationDatabase } from './helpers/bash-integration.mjs';
 import { MODEL_ID, responsesModels, searchItem, textItem } from './helpers/openai-responses.mjs';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 
@@ -101,9 +101,9 @@ for (const transport of transports) test(`${transport.name}: stable through turn
   const parent = await reopened.harness.conversation(Number(id), context);
   const at = (await parent.entries({}, 1, undefined, context)).items[0].id;
   const fork = await parent.fork(at, { ownership: { kind: 'ownerless' } }, context);
-  await until(() => reopened.getConversation(String(fork.id))?.settings.model.provider,
-    'the service finishes hydrating the newly forked conversation');
-  await send(reopened, String(fork.id), 'Answer in this fork.');
+  // The fork was created through the harness, so it is driven through the harness too.
+  const answered = await (await fork.submit({ type: 'input', content: 'Answer in this fork.' }, context)).wait(context);
+  assert.equal(answered.status, 'done', JSON.stringify(answered));
   const forkIdentity = transport.identity(after.requests[1]);
   assert.notEqual(forkIdentity, identity);
   assert.equal((await reopened.harness.snapshot(ProviderDoc, fork.id, context)).sessionId, forkIdentity);

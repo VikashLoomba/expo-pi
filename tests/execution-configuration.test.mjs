@@ -64,10 +64,9 @@ for (const scenario of [
   };
   let aborting;
   try {
-    assert.equal((await service.harness.getTask(taskId, context)).state.status, 'pending');
+    // The task is live as soon as its commit lands, whether or not it has started running.
     await assert.rejects(switchTarget(), /Wait for execution to stop/);
     await unchanged();
-    await service.resume();
     await started.promise;
     assert.deepEqual(await service.harness.snapshot(LiveDoc, Number(id), context), {},
       'custom tasks are absent from the agent run/compaction projection');

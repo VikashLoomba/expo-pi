@@ -80,16 +80,29 @@ export default async function probe({ platform, signal, config }) {
     };
     models.setProvider({ ...anthropicProvider(), auth: { apiKey: { name: 'Remote verification',
       check: async () => ({ type: 'api_key' }), resolve: async () => ({ auth: { apiKey: 'synthetic-no-network' } }) } }, stream: dispatch, streamSimple: dispatch });
-    const openService = async () => DurableChatService.open({ storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models, platform,
+    // Read a chat the way the chat screen does: subscribe to its view until it has loaded.
+    const readChat = async (chatService, chatId) => {
+      const view = chatService.chat(chatId, { transcript: true });
+      const stop = view.subscribe(() => {});
+      try {
+        const deadline = Date.now() + 5_000;
+        while (view.getSnapshot().status === 'loading') {
+          if (Date.now() > deadline) throw new Error('The chat view did not load.');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return view.getSnapshot().conversation;
+      } finally { stop(); }
+    };
+    const openService = async () => DurableChatService.open({ storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models,
       openWorkspaceDatabase: openLocal, execution: (local) => { const execution = createRemoteExecution(local, hosts); return { ...execution,
         extensions: [defineExtension({ name: 'test.remote-tasks', tasks: [Direct] })] }; } });
     service = await openService();
     const id = await service.createChat();
-    check(service.getConversation(id).execution.target.kind === 'local', 'local execution remains the default');
+    check((await readChat(service, id)).execution.target.kind === 'local', 'local execution remains the default');
     await service.updateExecution(id, { target: { kind: 'ssh', machineId: host.id }, cwd: root });
     const receipt = await service.waitForSubmission(await service.send(id, 'Exercise remote shared tools.'));
     check(receipt.status === 'done', 'remote tool generation answered');
-    const rows = service.getConversation(id).messages.filter((row) => row.tool);
+    const rows = (await readChat(service, id)).messages.filter((row) => row.tool);
     check(rows.length === 4 && rows.every((row) => row.tool.status === 'completed'), 'all four shared tools completed through production composition');
     check(JSON.stringify(requests[1]).includes('edited') && JSON.stringify(requests[1]).includes('DISTINCT_STDERR'), 'committed remote tool results reached the following model request');
     check(getOrThrow(await base.readTextFile(`${root}/production.txt`, context)) === 'edited\n世界 😀\n', 'real remote file bytes match shared write/edit');
@@ -100,10 +113,11 @@ export default async function probe({ platform, signal, config }) {
     check(task.state.outcome.status === 'completed' && task.state.outcome.result.text === 'DIRECT_TASK', 'direct TaskRuntime.env borrows the selected remote environment');
     const at = await conversation.commit((tx) => tx.appendEntry(conversation.id, { kind: 'test.remote', data: {} }), context);
     const fork = await conversation.fork(at.id, { ownership: { kind: 'ownerless' } }, context);
-    check((await service.harness.snapshot(ExecutionTargetDoc, fork.id, context)).machineId === host.id &&
+    check((await service.harness.snapshot(ExecutionTargetDoc, fork.id, context)).target.machineId === host.id &&
       (await service.harness.snapshot(AgentDoc, fork.id, context)).cwd === root, 'remote fork inherits target and cwd');
     await service.close(); service = await openService();
-    check(service.getConversation(id).execution.cwd === root && service.getConversation(id).execution.target.machineId === host.id, 'remote selection and cwd reopen from native SQLite');
+    const reopened = await readChat(service, id);
+    check(reopened.execution.cwd === root && reopened.execution.target.machineId === host.id, 'remote selection and cwd reopen from native SQLite');
     check(workspaceOpens === 0, 'remote harness and metadata never open local workspace database');
     const cancelled = await resolve(root);
     const controller = new AbortController();
