@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Chat Markdown architecture and parser choice
 
 Chat Markdown uses a CommonMark parser with GFM extensions, a small typed adapter, and native React Native components. The intent is a maintainable, idiomatic architecture that humans and agents can extend without a custom grammar framework, duplicated citation logic, or unrelated changes to chat state.

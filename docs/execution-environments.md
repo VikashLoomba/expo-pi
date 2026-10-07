@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Execution environment ownership
 
 The application uses Pi Durable 1.0.4. `DurableChatService.open` installs one `HarnessOptions.env` function from an `ExecutionComposition`. Pi calls that function for tools, prompt preparation and `TaskRuntime.env()`. The production composition combines the existing local workspace with SSH over Tailscale. Local execution remains the default; a committed `ExecutionTargetDoc` selects a configured remote machine per chat.

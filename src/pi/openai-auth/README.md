@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Expo adapter for Pi's modern OpenAI OAuth provider
 
 This module implements Pi's public `OAuthAuth` contract for **`openai` / Sign in with ChatGPT** using Expo SDK 58. It retains the SDK provider's model catalog, API-key authentication, and Responses API transport. Pi's `Models` persists credentials and coordinates refresh; `pi-durable` consumes that same `Models` instance.

@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Execution environment architecture refactor
 
 Refactor the mobile application's execution layer so a future custom `ExecutionEnv` plugs into Pi Durable's environment factory and works with the same tools as local execution. Upgrade Pi first, complete the local integration and lifecycle ownership, use Pi's native durable configuration, and prove the boundary with an independent test environment. Production execution remains on the device during this work.

@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Expo Codex OAuth adapter
 
 This TypeScript module implements Pi's public `OAuthAuth` interface using Expo SDK 58. Inject it into Pi's real `openai-codex` provider; Pi coordinates refresh, request authentication, and logout through the app’s credential-store implementation. Import the folder entry point, `@/pi/codex-auth`, in this app.

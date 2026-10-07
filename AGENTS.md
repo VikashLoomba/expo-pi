@@ -23,6 +23,13 @@ npx @expo/agent-cli install --fix      # fix incompatible package versions
 
 Run lint and typecheck before declaring any task done.
 
+## Coding rules
+
+- Never use `any`.
+- Never use type casts (`as X`, `as unknown as X`) or non-null assertions (`x!`) without explicit permission from the owner. `as const` is fine. Prefer typed SDK APIs and small typed decoders.
+- Tests assert behavior a user or an upstream contract cares about. Never assert object identity, memoization, lock ownership, call counts or internal ordering, and never keep a test only because the current code makes it pass.
+- Specs in `docs/` that carry a "Superseded" banner are historical. Don't implement from them.
+
 ## Upstream contracts and integration review
 
 - Before implementing or reviewing a dependency integration, inspect the installed package's public contracts and the current canonical upstream example. Record the package version and source revision used; an existing app abstraction or test is not evidence of the upstream contract.

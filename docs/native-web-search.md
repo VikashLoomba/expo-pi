@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Native web search and durable source evidence
 
 OpenAI executes `web_search` as a hosted Responses tool. The application captures the returned provider data and commits completed searches as ordinary pi-durable conversation entries. Their model-facing content contains readable, attributed source excerpts. Subsequent requests, reopened chats, provider changes, and compaction therefore receive the findings through the same canonical context machinery as the rest of the conversation.

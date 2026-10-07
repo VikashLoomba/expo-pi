@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Local tools and persistent workspaces
 
 Every ordinary Pi chat receives `bash`, `read`, `write`, and `edit` through one shared extension in `DurableChatService`. Pi Durable 1.0.4 selects their environment through `HarnessOptions.env`. In production the local environment runs the pinned `just-bash@3.6.0` interpreter on the device and exposes the same mounted filesystem to the SDK file tools. See [execution environment ownership](execution-environments.md) for the composition-owned registry and lifetime rules. The local backend has no native process, JavaScript runtime, Python runtime, or shell network capability; the same tools can instead use a chat's selected [remote machine](remote-ssh-execution.md). The same extension works with the app's registered model providers.

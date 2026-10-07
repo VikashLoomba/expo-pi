@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Remote execution over SSH through Tailscale
 
 Updated October 7, 2026, against the current working tree. **The remote feature and automatic daemon setup are implemented in the production application.** Host management, secure SSH credentials and trust, the mobile `ExecutionEnv`, the combined composition and durable per-chat selection use the completed Pi 1.0.4 execution seams. Implementation status and verification status are separate: the original completion criteria, transport-only evidence and first manual-install production validation are preserved below. Automatic provisioning has separate verification evidence.

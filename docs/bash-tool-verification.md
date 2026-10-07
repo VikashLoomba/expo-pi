@@ -1,3 +1,5 @@
+> **Superseded by the pi-agent Cleanup Plan (https://claude.ai/code/artifact/a114f99b-474c-48bc-97ab-69b9a7bd2c66). Do not implement from this file.** It describes the pre-cleanup design and will be rewritten or deleted as the cleanup lands.
+
 # Local workspace tools implementation and verification record
 
 Verified on 2026-10-04 against the existing Expo 58.0.2, expo-sqlite 58.0.8, React Native 0.88.0-rc.3 and Pi durable 1.0.0 checkout. New runtime dependencies are pinned to just-bash 3.6.0, fflate 0.8.2 and buffer 6.0.3. The complete requested scope is retained in [the implementation goal](bash-tool-implementation-goal.md); architecture, ownership and maintenance procedures are in [the implementation guide](bash-tool.md).
