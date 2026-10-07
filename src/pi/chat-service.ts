@@ -13,8 +13,10 @@ import { createWorkspaceExtension } from './workspace/extension';
 import { ensureWorkspaceDoc } from './workspace/document';
 import { createLocalExecution, type ExecutionComposition } from './execution/composition';
 import { ExecutionTargetDoc, executionSettings, sameExecution, validateExecution, type ChatExecutionSettings, type ExecutionTarget } from './execution/document';
-import { CODEX_PROVIDER_ID, MODEL_ID } from './codex-auth/identity';
-import { assertModelSettings, buildModelCatalog, getDefaultModelSettings, type ChatModelSettings } from './model-catalog';
+import {
+  assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
+  type ChatModelSettings, type NewChatDefaults,
+} from './model-catalog';
 import { createNativeWebSearchBridge, NativeLiveDoc, NativeResponsesDoc, type NativeLiveState, type NativeResponsesState } from './native-web-search/durable';
 import { migrateSearchObservations } from './native-web-search/migration';
 import { hasPendingWork, projectChat, sameSummary, type ChatProjectionState } from './chat-projection';
@@ -69,6 +71,7 @@ export class DurableChatService {
     private readonly models: Models,
     private readonly canRun: () => boolean,
     private readonly execution: ExecutionComposition,
+    private readonly newChat: NewChatDefaults,
   ) {}
 
   static async open(options: {
@@ -76,6 +79,7 @@ export class DurableChatService {
     openWorkspaceDatabase?: () => Promise<SqliteDatabase>;
     /** One authoritative resolver and resource owner, shared by tools, prompts and tasks. */
     execution?: (local: ExecutionComposition) => ExecutionComposition;
+    newChat?: NewChatDefaults;
   }): Promise<DurableChatService> {
     const registry = createRegistry();
     const local = createLocalExecution(options.openWorkspaceDatabase ?? openWorkspaceDatabase);
@@ -123,7 +127,8 @@ export class DurableChatService {
       throw error;
     });
     nativeSearch.attach(harness);
-    service = new DurableChatService(harness, options.storage, options.models, options.canRun ?? (() => true), execution);
+    service = new DurableChatService(harness, options.storage, options.models, options.canRun ?? (() => true), execution,
+      options.newChat ?? { models: {} });
     try { await service.initialize(); }
     catch (error) { await service.close(); throw error; }
     return service;
@@ -384,10 +389,39 @@ export class DurableChatService {
   getConversations() { return this.conversations.values(); }
   getCatalog() { return buildModelCatalog(this.models); }
 
+  /**
+   * A new chat continues with the most recently used chat's model and effort while that model
+   * is available and its provider connected. Otherwise it uses a connected provider's default.
+   */
+  private async defaultSettings(): Promise<ChatModelSettings | undefined> {
+    const catalog = this.getCatalog();
+    // Saved credentials that cannot be read do not make a provider usable for a new chat.
+    const connected = (providerId: string) => this.models.checkAuth(providerId).then(Boolean, () => false);
+    const recent = this.snapshot.chats[0];
+    const recentSettings = recent ? this.cache.get(recent.id)?.settings : undefined;
+    if (recentSettings && !getModelSettingsError(catalog, recentSettings)
+        && await connected(recentSettings.model.provider)) {
+      return { model: { ...recentSettings.model }, thinkingLevel: recentSettings.thinkingLevel };
+    }
+    const { preferredProvider, models } = this.newChat;
+    // Sorting is stable: the preferred provider moves first and the rest keep catalog order.
+    const providers = [...catalog].sort((left, right) =>
+      Number(right.id === preferredProvider) - Number(left.id === preferredProvider));
+    for (const provider of providers) {
+      if (!await connected(provider.id)) continue;
+      const modelId = models[provider.id];
+      const preferred = modelId === undefined ? undefined : { provider: provider.id, modelId };
+      const settings = getDefaultModelSettings([provider], preferred);
+      if (settings) return settings;
+    }
+    return undefined;
+  }
+
   async createChat(): Promise<string> {
     this.assertOpen();
-    const settings = getDefaultModelSettings(this.getCatalog(), { provider: CODEX_PROVIDER_ID, modelId: MODEL_ID });
+    const settings = await this.defaultSettings();
     if (!settings) throw new Error('No chat models are available. Connect a provider in Account.');
+    this.assertOpen();
     const conversation = await this.harness.createConversation({ ownership: { kind: 'ownerless' },
       agent: settings,
     }, context);

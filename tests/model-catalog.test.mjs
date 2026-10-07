@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
-import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
+import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import {
   assertModelSettings, buildModelCatalog, createModelSettings, findCatalogModel,
   getDefaultModelSettings, getModelSettingsError,
@@ -29,7 +29,7 @@ function register(models, id, entries, name = id) {
 
 test('registered SDK providers supply their own labels, models, and exact reasoning capabilities', () => {
   const models = createModels();
-  models.setProvider(openaiCodexProvider());
+  models.setProvider(openaiProvider());
   models.setProvider(anthropicProvider());
   const catalog = buildModelCatalog(models);
   assert.equal(catalog.length, 2);
@@ -101,12 +101,16 @@ test('saved missing providers, removed models, and unsupported effort are explic
 test('new-chat defaults prefer a valid requested model and handle empty catalogs', () => {
   const models = createModels();
   assert.equal(getDefaultModelSettings(buildModelCatalog(models)), undefined);
-  register(models, 'future-provider', [model('first'), model('preferred', { thinkingLevelMap: { off: null, minimal: null } })]);
+  register(models, 'future-provider', [
+    model('a-unusable', { thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null } }),
+    model('b-fallback'),
+    model('c-preferred', { thinkingLevelMap: { off: null, minimal: null } }),
+  ]);
   const catalog = buildModelCatalog(models);
-  assert.deepEqual(getDefaultModelSettings(catalog, { provider: 'future-provider', modelId: 'preferred' }), {
-    model: { provider: 'future-provider', modelId: 'preferred' }, thinkingLevel: 'low',
+  assert.deepEqual(getDefaultModelSettings(catalog, { provider: 'future-provider', modelId: 'c-preferred' }), {
+    model: { provider: 'future-provider', modelId: 'c-preferred' }, thinkingLevel: 'low',
   });
   assert.deepEqual(getDefaultModelSettings(catalog, { provider: 'removed-provider', modelId: 'old' }), {
-    model: { provider: 'future-provider', modelId: 'first' }, thinkingLevel: 'off',
-  });
+    model: { provider: 'future-provider', modelId: 'b-fallback' }, thinkingLevel: 'off',
+  }, 'a missing preference falls back to the first model with a supported effort');
 });

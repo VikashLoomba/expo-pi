@@ -59,7 +59,7 @@ function discoverModules() {
   if (!modules) throw new Error('Metro development module registry is unavailable. Use a development build.');
   const suffixes = {
     ai: '@earendil-works/pi-ai/dist/index.js',
-    codex: '@earendil-works/pi-ai/dist/providers/openai-codex.js',
+    anthropic: '@earendil-works/pi-ai/dist/providers/anthropic.js',
     storage: 'src/pi/storage/index.ts',
     service: 'src/pi/chat-service.ts',
   };

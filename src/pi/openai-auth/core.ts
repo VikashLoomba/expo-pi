@@ -1,7 +1,6 @@
 import type { Credential, OAuthCredential } from '@earendil-works/pi-ai';
 
 // Protocol constants from Pi's openai ChatGPT OAuth provider (pi-ai 1.0.0).
-// Keep this flow separate from openai-codex: its clients, scopes and tokens differ.
 export const OPENAI_PROVIDER_ID = 'openai';
 export const OPENAI_DYNAMIC_CLIENT_ID = 'dynamic_agent_client';
 export const OPENAI_RESOURCE = 'https://api.openai.com/v1';
@@ -13,9 +12,7 @@ export const OPENAI_DISCOVERY = {
   tokenEndpoint: 'https://auth.openai.com/api/accounts/oauth/token',
 };
 
-const completedRefreshes = new WeakSet<object>();
-
-/** A stored modern OAuth grant must not be confused with legacy Codex tokens. */
+/** A stored grant must carry the issued client ID and the ChatGPT direct-use scope. */
 export function validateOpenAICredential(credential: Credential): void {
   if (credential.type !== 'oauth') return;
   if (typeof credential.clientId !== 'string' || !credential.clientId
@@ -24,9 +21,6 @@ export function validateOpenAICredential(credential: Credential): void {
     || !credential.scopes.includes(OPENAI_DIRECT_SCOPE)) {
     throw new Error('The saved ChatGPT sign-in is incomplete. Connect ChatGPT again.');
   }
-}
-export function isCompletedOpenAIRefresh(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && completedRefreshes.has(value);
 }
 
 /** Both browser callbacks and Pi manual_code input must pass the same checks. */
@@ -70,9 +64,13 @@ export function isPermanentOpenAIAuthError(error: unknown): boolean {
   return false;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function openAICredentialFromToken(value: unknown, clientId: string, previous?: OAuthCredential, now = Date.now()): OAuthCredential {
-  if (!value || typeof value !== 'object') throw new Error('OpenAI returned an invalid token response.');
-  const token = value as Record<string, unknown>;
+  if (!isRecord(value)) throw new Error('OpenAI returned an invalid token response.');
+  const token = value;
   const refresh = token.refresh_token === undefined ? previous?.refresh : token.refresh_token;
   const scopes = token.scope === undefined && previous ? previous.scopes
     : typeof token.scope === 'string' ? token.scope.trim().split(/\s+/).filter(Boolean) : undefined;
@@ -94,7 +92,7 @@ export function openAICredentialFromToken(value: unknown, clientId: string, prev
     clientId, scopes: [...scopes] };
 }
 
-/** Expo builds OAuth grants; cancellable fetch carries them, as in the legacy adapter. */
+/** Expo builds OAuth grants; a cancellable fetch carries them. */
 export async function requestOpenAIToken(
   request: { getQueryBody(): Record<string, string>; getHeaders(): Record<string, string> },
   clientId: string,
@@ -122,10 +120,9 @@ export async function requestOpenAIToken(
   let body: unknown;
   try { body = await response.json(); }
   catch { signal.throwIfAborted(); throw new Error('OpenAI returned an invalid token response.'); }
+  // A received rotation may already have spent the previous refresh token, so only login
+  // honors a late abort. Pi refreshes under its credential lock with a timeout signal and
+  // never forwards caller cancellation there, so the result always reaches storage.
   if (!previous) signal.throwIfAborted();
-  const credential = openAICredentialFromToken(body, clientId, previous);
-  // A fully received rotation must reach secure storage even if its caller
-  // stops waiting. Pi performs refresh under CredentialStore.modify's lock.
-  if (previous) completedRefreshes.add(credential);
-  return credential;
+  return openAICredentialFromToken(body, clientId, previous);
 }

@@ -9,7 +9,7 @@ const { projectChat } = await import('../src/pi/chat-projection.ts');
 function state() {
   return {
     metadata: { title: 'Tools', createdAt: 1, archived: false },
-    settings: { model: { provider: 'openai-codex', modelId: 'gpt-6-sol' }, thinkingLevel: 'off' },
+    settings: { model: { provider: 'openai', modelId: 'gpt-6-sol' }, thinkingLevel: 'off' },
     entries: new Map([[1, { id: 1, model: [{ role: 'assistant', timestamp: 1,
       content: [{ type: 'toolCall', id: 'edit-call', name: 'edit', arguments: { path: 'notes', edits: [{ oldText: 'old', newText: 'new' }] } }] }] }]]),
     live: { tools: [{ callId: 'edit-call', name: 'edit', status: 'running', details: { diff: '- old\n+ new', firstChangedLine: 2 } }] },

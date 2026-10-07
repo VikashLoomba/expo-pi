@@ -10,7 +10,7 @@ export default async function workspaceToolsProbe({ namespace, stage, platform }
     return globalThis.__r(matches[0][0]);
   };
   const ai = requireModule('@earendil-works/pi-ai/dist/index.js');
-  const { openaiCodexProvider } = requireModule('@earendil-works/pi-ai/dist/providers/openai-codex.js');
+  const { anthropicProvider } = requireModule('@earendil-works/pi-ai/dist/providers/anthropic.js');
   const { DurableChatService } = requireModule('src/pi/chat-service.ts');
   const { openExpoSqliteStorage } = requireModule('src/pi/storage/index.ts');
   const { openWorkspaceDatabase } = requireModule('src/pi/workspace/database.ts');
@@ -162,7 +162,7 @@ export default async function workspaceToolsProbe({ namespace, stage, platform }
     stream.push({ type: 'done', reason: message.stopReason, message });
     return stream;
   };
-  models.setProvider({ ...openaiCodexProvider(), auth: { apiKey: { name: 'Local verification',
+  models.setProvider({ ...anthropicProvider(), auth: { apiKey: { name: 'Local verification',
     check: async () => ({ type: 'api_key' }), resolve: async () => ({ auth: { apiKey: 'synthetic-no-network' } }) } },
     stream: dispatch, streamSimple: dispatch });
   const storage = await openExpoSqliteStorage(`${namespace}-chats.db`);

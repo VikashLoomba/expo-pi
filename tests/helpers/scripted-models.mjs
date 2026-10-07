@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createAssistantMessageEventStream, createModels, InMemoryCredentialStore } from '@earendil-works/pi-ai';
-import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
+import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 
 function assistant(model, content = [], stopReason = 'stop', errorMessage) {
   return {
@@ -60,7 +60,7 @@ export function scriptedModels(script, { authenticated = true } = {}) {
     credentials: new InMemoryCredentialStore(),
     authContext: { env: async () => undefined, fileExists: async () => false },
   });
-  const provider = openaiCodexProvider();
+  const provider = anthropicProvider();
   const dispatch = (model, context, options) => {
     const request = { model, context: structuredClone(context), options };
     requests.push(request);

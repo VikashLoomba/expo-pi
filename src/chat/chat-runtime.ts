@@ -6,23 +6,19 @@ import type { SqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite';
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
 import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { ExecutionComposition } from '../pi/execution/composition';
-import { CODEX_PROVIDER_ID } from '../pi/codex-auth/identity';
-import { buildModelCatalog, type ChatModelSettings } from '../pi/model-catalog';
+import { buildModelCatalog, type ChatModelSettings, type NewChatDefaults } from '../pi/model-catalog';
 import type { ProviderAccess } from '../pi/provider-credentials';
 import type { ChatConversation } from './types';
 
 export interface ChatRuntimeSnapshot extends ChatServiceSnapshot {
   ready: boolean;
-  authChecking: boolean;
   signOutPending: boolean;
   disconnectingProvider?: string;
-  authError?: string;
 }
 export type ChatConversationState = Omit<ChatConversation, 'messages'>;
 interface ObservableCredentials {
-  readonly getSnapshot: () => { ready: boolean; signedIn: boolean; error?: string };
   readonly subscribe: (listener: () => void) => () => void;
-  readonly getProviderSnapshot?: (providerId: string) => ProviderAccess;
+  readonly getProviderSnapshot: (providerId: string) => ProviderAccess;
   readonly replaceApiKey?: (providerId: string, key: string) => Promise<void>;
   readonly restoreProvider?: (providerId: string) => Promise<void>;
   restore(): Promise<void>;
@@ -36,12 +32,10 @@ export class ChatRuntime {
   private queue: Promise<unknown> = Promise.resolve();
   private unsubscribe = () => {};
   private listeners = new Set<() => void>();
-  private snapshot: ChatRuntimeSnapshot = { ready: false, chats: [], authChecking: false, signOutPending: false };
+  private snapshot: ChatRuntimeSnapshot = { ready: false, chats: [], signOutPending: false };
   private readonly conversationStates = new Map<string, ChatConversationState>();
   private runtimeError?: string;
   private closeFailure?: Error;
-  private authChecking = false;
-  private authError?: string;
   private authController?: AbortController;
   private loginController?: AbortController;
   private signOutRequested = false;
@@ -53,6 +47,7 @@ export class ChatRuntime {
     models: Models; openStorage: () => Promise<Storage>; platform: string; credentials?: ObservableCredentials;
     execution?: (local: ExecutionComposition) => ExecutionComposition;
     openWorkspaceDatabase?: () => Promise<SqliteDatabase>;
+    newChat?: NewChatDefaults;
   }) {}
 
   private serialize<T>(action: () => Promise<T>): Promise<T> {
@@ -78,11 +73,11 @@ export class ChatRuntime {
     const error = this.runtimeError ?? state?.error;
     const ready = this.opened && this.active;
     if (chats !== this.snapshot.chats || error !== this.snapshot.error || ready !== this.snapshot.ready ||
-        this.authChecking !== this.snapshot.authChecking || this.authError !== this.snapshot.authError ||
-        this.signOutRequested !== this.snapshot.signOutPending || this.disconnectingProvider !== this.snapshot.disconnectingProvider) {
-      this.snapshot = { chats, ready, authChecking: this.authChecking, signOutPending: this.signOutRequested,
+        this.signOutRequested !== this.snapshot.signOutPending ||
+        this.disconnectingProvider !== this.snapshot.disconnectingProvider) {
+      this.snapshot = { chats, ready, signOutPending: this.signOutRequested,
         ...(this.disconnectingProvider ? { disconnectingProvider: this.disconnectingProvider } : {}),
-        ...(error ? { error } : {}), ...(this.authError ? { authError: this.authError } : {}) };
+        ...(error ? { error } : {}) };
     }
     // A streaming update can change a conversation without changing the list.
     for (const listener of this.listeners) listener();
@@ -93,11 +88,7 @@ export class ChatRuntime {
   }
 
   private credentialAccess(providerId: string): ProviderAccess | undefined {
-    const credentials = this.options.credentials;
-    if (credentials?.getProviderSnapshot) return credentials.getProviderSnapshot(providerId);
-    if (!credentials || providerId !== CODEX_PROVIDER_ID) return undefined;
-    const state = credentials.getSnapshot();
-    return { ready: state.ready, connected: state.signedIn && !state.error, error: state.error };
+    return this.options.credentials?.getProviderSnapshot(providerId);
   }
 
   private observeCredentials() {
@@ -107,13 +98,9 @@ export class ChatRuntime {
       .filter((provider) => this.credentialAccess(provider.id)?.connected).map((provider) => provider.id));
     let previous = usableProviders();
     this.unsubscribeCredentials = credentials.subscribe(() => {
-      const current = credentials.getSnapshot();
       const usable = usableProviders();
       const lostProviders = [...previous].filter((providerId) => !usable.has(providerId));
       previous = usable;
-      if (current.error) this.authError = current.error;
-      else if (current.signedIn) this.authError = undefined;
-      this.publish();
       if (lostProviders.length && !this.signOutRequested) {
         // Stop every conversation after permanent invalidation or a failed
         // credential read. Reopening history itself requires no credentials.
@@ -131,30 +118,19 @@ export class ChatRuntime {
     if (!this.canRun()) return false;
     const controller = new AbortController();
     this.authController = controller;
-    this.authChecking = true;
-    this.publish();
     try {
       await this.credentialRestoration;
-      const credentials = this.credentialAccess(providerId);
-      if (credentials?.error) { if (providerId === CODEX_PROVIDER_ID) this.authError = credentials.error; return false; }
+      if (this.credentialAccess(providerId)?.error) return false;
       if (!this.active || this.signOutRequested) return false;
       const present = await this.options.models.checkAuth(providerId, { signal: controller.signal });
-      if (!present) { if (providerId === CODEX_PROVIDER_ID) this.authError = credentials?.error; return false; }
-      if (!this.canRun()) return false;
+      if (!present || !this.canRun()) return false;
       const resolved = await this.options.models.getAuth(providerId, { signal: controller.signal });
-      if (providerId === CODEX_PROVIDER_ID) this.authError = undefined;
       return !!resolved && this.canRun();
     } catch (error) {
-      if (!controller.signal.aborted) {
-        if (providerId !== CODEX_PROVIDER_ID) throw error;
-        this.authError = this.credentialAccess(providerId)?.error
-          ?? (error instanceof Error ? error.message : 'Could not connect to your ChatGPT account. Try again.');
-      }
+      if (!controller.signal.aborted) throw error;
       return false;
     } finally {
       if (this.authController === controller) this.authController = undefined;
-      this.authChecking = false;
-      this.publish();
     }
   }
 
@@ -163,7 +139,7 @@ export class ChatRuntime {
       if (!this.active) throw new Error('Return to the app to continue.');
       if (this.signOutRequested) throw new Error('Finish signing out before connecting again.');
       if (this.loginController) throw new Error('Finish or cancel sign-in before sending a message.');
-      throw new Error(this.credentialAccess(providerId)?.error || (providerId === CODEX_PROVIDER_ID ? this.authError : undefined)
+      throw new Error(this.credentialAccess(providerId)?.error
         || `Sign in or connect ${this.options.models.getProvider(providerId)?.name ?? providerId} in Account to send a message.`);
     }
   }
@@ -186,6 +162,7 @@ export class ChatRuntime {
       service = await DurableChatService.open({ storage, models: this.options.models, platform: this.options.platform,
         canRun: () => this.canRun(),
         execution: this.options.execution, openWorkspaceDatabase: this.options.openWorkspaceDatabase,
+        newChat: this.options.newChat,
       });
       this.service = service;
       this.opened = true;
@@ -241,10 +218,8 @@ export class ChatRuntime {
     // Auth initialization is independent of SQLite: even a database failure
     // must leave account settings able to restore or replace a saved sign-in.
     if (this.options.credentials && !this.credentialRestoration) {
-      this.credentialRestoration = this.options.credentials.restore().catch(() => {
-        this.authError = this.options.credentials?.getSnapshot().error;
-        this.publish();
-      });
+      // Each provider publishes its own restore error through the credential store.
+      this.credentialRestoration = this.options.credentials.restore().catch(() => {});
     }
     return this.serialize(async () => { this.observeCredentials(); await this.open(); this.publish(); });
   }
@@ -307,31 +282,11 @@ export class ChatRuntime {
     await service.resume();
   }); }
 
-  retryAuth(providerId = CODEX_PROVIDER_ID) {
+  retryAuth(providerId: string) {
     return this.serialize(async () => {
       if (this.signOutRequested) throw new Error('Finish signing out before connecting again.');
-      try {
-        if (this.options.credentials?.restoreProvider) await this.options.credentials.restoreProvider(providerId);
-        else await this.options.credentials?.restore();
-      }
-      catch (error) {
-        if (providerId === CODEX_PROVIDER_ID) this.authError = this.credentialAccess(providerId)?.error
-          ?? (error instanceof Error ? error.message : 'Could not restore your ChatGPT sign-in.');
-        this.publish();
-        throw error;
-      }
-      await this.open(false);
-      if (await this.authenticate(providerId) && await this.authenticateRecovery() && this.canRun()) await this.service?.resume();
-    });
-  }
-
-  signInCompleted(providerId = CODEX_PROVIDER_ID) {
-    return this.serialize(async () => {
-      // A login completion queued before sign-out must not override that newer
-      // intent. Only successful credential deletion releases the sign-out gate.
-      if (this.signOutRequested) return;
-      this.authError = undefined;
-      this.publish();
+      if (this.options.credentials?.restoreProvider) await this.options.credentials.restoreProvider(providerId);
+      else await this.options.credentials?.restore();
       await this.open(false);
       if (await this.authenticate(providerId) && await this.authenticateRecovery() && this.canRun()) await this.service?.resume();
     });
@@ -353,7 +308,6 @@ export class ChatRuntime {
       await this.serialize(() => this.close());
       controller.signal.throwIfAborted();
       await this.options.models.login(providerId, 'oauth', { ...interaction, signal: controller.signal }, options);
-      if (providerId === CODEX_PROVIDER_ID) this.authError = undefined;
     } finally {
       interaction.signal?.removeEventListener('abort', abort);
       await this.serialize(async () => {
@@ -399,7 +353,7 @@ export class ChatRuntime {
   }
 
   /** Close the global scheduler before deleting credentials; reopen with dispatch paused. */
-  signOut(providerId = CODEX_PROVIDER_ID): Promise<void> {
+  signOut(providerId: string): Promise<void> {
     if (this.disconnectingProvider && this.disconnectingProvider !== providerId) {
       return Promise.reject(new Error(`Finish disconnecting ${this.options.models.getProvider(this.disconnectingProvider)?.name ?? this.disconnectingProvider} before removing another provider.`));
     }
@@ -416,13 +370,11 @@ export class ChatRuntime {
         await this.options.models.logout(providerId);
         this.signOutRequested = false;
         this.disconnectingProvider = undefined;
-        if (providerId === CODEX_PROVIDER_ID) this.authError = undefined;
       } catch (error) {
         deletionError = error;
-        deletionMessage = providerId === CODEX_PROVIDER_ID
-          ? 'Could not remove your saved sign-in. Retry signing out. Model requests are paused.'
-          : `Could not remove the saved ${this.options.models.getProvider(providerId)?.name ?? providerId} key. Retry removal in Providers. Model requests are paused.`;
-        if (providerId === CODEX_PROVIDER_ID) this.authError = deletionMessage;
+        const name = this.options.models.getProvider(providerId)?.name ?? providerId;
+        deletionMessage = `Could not remove the saved ${name} key. Retry removal in Providers. `
+          + 'Model requests are paused.';
       }
       // History remains available even if secure deletion failed. The explicit
       // sign-out intent blocks future foreground activation and send/resume.
@@ -431,7 +383,7 @@ export class ChatRuntime {
         if (deletionError) throw new AggregateError([deletionError, error], 'Sign-out and reopening saved chats failed.');
         throw error;
       }
-      if (deletionMessage && providerId !== CODEX_PROVIDER_ID) this.runtimeError = deletionMessage;
+      if (deletionMessage) this.runtimeError = deletionMessage;
       this.publish();
       if (deletionError) throw new Error(deletionMessage, { cause: deletionError });
     });

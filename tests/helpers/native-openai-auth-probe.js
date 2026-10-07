@@ -27,11 +27,10 @@ export default async function nativeOpenAIAuthProbe({ stage, namespace }) {
     const { AuthRequest } = requireSuffix('expo-auth-session/build/AuthRequest.js');
     const { createModels } = requireSuffix('@earendil-works/pi-ai/dist/index.js');
     const { openaiProvider } = requireSuffix('@earendil-works/pi-ai/dist/providers/openai.js');
-    const { ObservableCredentialStore } = requireSuffix('src/pi/codex-auth/credential-store.ts');
     const { ProviderCredentialStore, providerCredentialKey } = requireSuffix('src/pi/provider-credentials.ts');
     const { createNativeOpenAIOAuth } = requireSuffix('src/pi/openai-auth/index.ts');
     const { OPENAI_PROVIDER_ID, OPENAI_DISCOVERY, OPENAI_DYNAMIC_CLIENT_ID, OPENAI_REDIRECT_URI,
-      OPENAI_RESOURCE, OPENAI_SCOPES, OPENAI_DIRECT_SCOPE, isCompletedOpenAIRefresh, isPermanentOpenAIAuthError,
+      OPENAI_RESOURCE, OPENAI_SCOPES, OPENAI_DIRECT_SCOPE, isPermanentOpenAIAuthError,
       validateOpenAICredential } = requireSuffix('src/pi/openai-auth/core.ts');
     checks.nativeSecureStoreAvailable = await SecureStore.isAvailableAsync();
     if (!checks.nativeSecureStoreAvailable) throw new Error('Native SecureStore is unavailable.');
@@ -52,13 +51,9 @@ export default async function nativeOpenAIAuthProbe({ stage, namespace }) {
       async setItemAsync(key, value) { guardKey(key); return native.write(value); },
       async deleteItemAsync(key) { guardKey(key); return native.remove(); },
     };
-    let legacyStorageAccess = 0;
-    const legacyBlocked = () => { legacyStorageAccess++; throw new Error('Legacy credentials must not be accessed.'); };
     const makeStore = () => {
-      const legacy = new ObservableCredentialStore({ getItemAsync: legacyBlocked, setItemAsync: legacyBlocked,
-        deleteItemAsync: legacyBlocked }, `${namespace}.legacy-never-access`);
-      const store = new ProviderCredentialStore(legacy, backend, { [OPENAI_PROVIDER_ID]: {
-        validate: validateOpenAICredential, isCompletedRefresh: isCompletedOpenAIRefresh, isPermanentAuthError: isPermanentOpenAIAuthError,
+      const store = new ProviderCredentialStore(backend, { [OPENAI_PROVIDER_ID]: {
+        validate: validateOpenAICredential, isPermanentAuthError: isPermanentOpenAIAuthError,
       } });
       store.registerProviders([OPENAI_PROVIDER_ID]);
       return store;
@@ -230,7 +225,6 @@ export default async function nativeOpenAIAuthProbe({ stage, namespace }) {
       checks.nativeKeyAbsent = await native.read() === null;
       delete globalThis[marker];
     }
-    checks.legacyCredentialsNeverAccessed = legacyStorageAccess === 0;
     checks.onlyIsolatedCredentialAccessed = unexpectedStorageAccess === 0;
     return { ok: Object.values(checks).every(Boolean), stage, namespace, checks };
   } catch {

@@ -10,7 +10,7 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
     return globalThis.__r(matches[0][0]);
   };
   const ai = requireModule('@earendil-works/pi-ai/dist/index.js');
-  const { openaiCodexProvider } = requireModule('@earendil-works/pi-ai/dist/providers/openai-codex.js');
+  const { anthropicProvider } = requireModule('@earendil-works/pi-ai/dist/providers/anthropic.js');
   const { DurableChatService } = requireModule('src/pi/chat-service.ts');
   const { openExpoSqliteStorage } = requireModule('src/pi/storage/index.ts');
   const { openWorkspaceDatabase } = requireModule('src/pi/workspace/database.ts');
@@ -39,7 +39,7 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
   }
   const models = ai.createModels({ credentials: new ai.InMemoryCredentialStore(),
     authContext: { env: async () => undefined, fileExists: async () => false } });
-  models.setProvider(openaiCodexProvider());
+  models.setProvider(anthropicProvider());
   const service = await DurableChatService.open({
     storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models, platform,
     openWorkspaceDatabase: () => openWorkspaceDatabase(`${namespace}-files.db`),
@@ -81,7 +81,7 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
       const app = original();
       delegate(app.runtime);
       return { ...app, ...service.getSnapshot(), ready: true, catalog: buildModelCatalog(models),
-        providerAccess: () => ({ ready: true, connected: true }), signedIn: true, signingIn: false, hasConnectedProvider: true };
+        providerAccess: () => ({ ready: true, connected: true }), signingIn: false, hasConnectedProvider: true };
     };
     restores.push(() => Object.defineProperty(providerModule, 'useChatApp', descriptor));
     router.push(`/chat/${id}`);

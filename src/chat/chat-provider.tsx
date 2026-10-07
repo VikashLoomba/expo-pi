@@ -4,9 +4,8 @@ import { AppState, Platform } from 'react-native';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/composition';
 import type { ChatExecutionSettings } from '../pi/execution/document';
-import { CODEX_PROVIDER_ID, openCodexDeviceBrowser } from '../pi/codex-auth';
 import { buildModelCatalog, type ChatModelSettings } from '../pi/model-catalog';
-import { createChatCredentialStore, createChatModels } from '../pi/models';
+import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
 import type { ProviderAccess } from '../pi/provider-credentials';
@@ -23,34 +22,20 @@ function useChatController() {
     return session;
   });
   const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
-  const [runtime] = useState(() => new ChatRuntime({ models, credentials, openStorage: openExpoSqliteStorage, platform: Platform.OS, execution: (local) => createRemoteExecution(local, remoteHosts) }));
+  const [runtime] = useState(() => new ChatRuntime({ models, credentials, openStorage: openExpoSqliteStorage,
+    platform: Platform.OS, execution: (local) => createRemoteExecution(local, remoteHosts), newChat: NEW_CHAT_DEFAULTS }));
   const snapshot = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
   const [signingInProvider, setSigningInProvider] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<{ providerId: string; message: string }>();
   const [prompts] = useState(() => new AuthPromptController());
   const authPrompt = useSyncExternalStore(prompts.subscribe, prompts.getSnapshot, prompts.getSnapshot);
-  const [deviceLogin, setDeviceLogin] = useState<{ userCode: string; verificationUri: string } | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
   const login = useRef<AbortController | null>(null);
   const browser = useRef<AbortController | null>(null);
   const authUrl = useRef<string | null>(null);
-  const authAction = useRef(0);
   const mounted = useRef(false);
-  const hasSavedSignIn = credentialState.signedIn;
-  const codexSignOutPending = snapshot.signOutPending && snapshot.disconnectingProvider === CODEX_PROVIDER_ID;
-  const signedIn = hasSavedSignIn && !credentialState.error && !codexSignOutPending;
-  const authReady = credentialState.ready;
-  const authError = snapshot.authError || credentialState.error;
   const signingIn = signingInProvider !== null;
-  const codexSigningIn = signingInProvider === CODEX_PROVIDER_ID;
-  const codexNotice = authNotice?.providerId === CODEX_PROVIDER_ID ? authNotice.message : undefined;
-  const authStatus = codexSigningIn ? codexNotice || 'Starting sign-in…'
-    : snapshot.signOutPending ? codexSignOutPending ? snapshot.authError || 'Signing out…'
-      : `Finish disconnecting ${catalog.find((provider) => provider.id === snapshot.disconnectingProvider)?.name ?? snapshot.disconnectingProvider} in Providers.`
-      : !authReady ? 'Restoring your saved sign-in…'
-        : snapshot.authChecking ? 'Checking the provider connection…'
-          : authError || codexNotice || (signedIn ? 'Connected to ChatGPT.' : 'Sign in to start a conversation.');
 
   useEffect(() => {
     mounted.current = true;
@@ -71,15 +56,13 @@ function useChatController() {
   }, [prompts, remoteHosts, runtime]);
 
   const cancelSignIn = useCallback(() => { login.current?.abort(); browser.current?.abort(); }, []);
-  const signIn = useCallback(async (providerId = CODEX_PROVIDER_ID) => {
+  const signIn = useCallback(async (providerId: string) => {
     if (login.current || snapshot.signOutPending || !credentials.getProviderSnapshot(providerId).ready) return;
     if (!models.getProvider(providerId)?.auth.oauth) return;
     const controller = new AbortController();
-    const attempt = ++authAction.current;
     login.current = controller;
     setSigningInProvider(providerId);
     setAuthNotice({ providerId, message: 'Starting sign-in…' });
-    setDeviceLogin(null);
     authUrl.current = null;
     try {
       const options = providerId === OPENAI_PROVIDER_ID ? await getOpenAILoginOptions() : undefined;
@@ -93,7 +76,6 @@ function useChatController() {
         },
         notify(event) {
           if (!mounted.current || controller.signal.aborted) return;
-          if (event.type === 'device_code') setDeviceLogin({ userCode: event.userCode, verificationUri: event.verificationUri });
           if (event.type === 'auth_url') authUrl.current = event.url;
           // OAuth diagnostics can include callback URLs or tokens. The account
           // screen uses public status copy and never renders raw server payloads.
@@ -102,12 +84,12 @@ function useChatController() {
           }
         },
       }, options);
-      if (mounted.current && !controller.signal.aborted && attempt === authAction.current) {
+      if (mounted.current && !controller.signal.aborted) {
         setAuthNotice(undefined);
         setCatalog(buildModelCatalog(models));
       }
     } catch {
-      if (mounted.current && attempt === authAction.current) {
+      if (mounted.current) {
         setAuthNotice({ providerId, message: controller.signal.aborted ? 'Sign-in cancelled.' : 'Sign-in could not be completed. Please try again.' });
       }
     } finally {
@@ -115,7 +97,7 @@ function useChatController() {
       browser.current?.abort();
       authUrl.current = null;
       prompts.cancel();
-      if (mounted.current) { setSigningInProvider(null); setDeviceLogin(null); }
+      if (mounted.current) setSigningInProvider(null);
     }
   }, [credentials, models, prompts, runtime, snapshot.signOutPending]);
   const openSignInPage = useCallback(async () => {
@@ -124,8 +106,9 @@ function useChatController() {
     browser.current = controller;
     setBrowserOpen(true);
     try {
-      if (signingInProvider === CODEX_PROVIDER_ID) await openCodexDeviceBrowser(controller.signal);
-      else if (signingInProvider === OPENAI_PROVIDER_ID && authUrl.current) await openOpenAIManualBrowser(authUrl.current, controller.signal);
+      if (signingInProvider === OPENAI_PROVIDER_ID && authUrl.current) {
+        await openOpenAIManualBrowser(authUrl.current, controller.signal);
+      }
     } catch {
       if (mounted.current && !controller.signal.aborted) setAuthNotice({ providerId: signingInProvider, message: 'Could not open the sign-in page. Please try again.' });
     } finally {
@@ -133,22 +116,14 @@ function useChatController() {
       if (mounted.current) setBrowserOpen(false);
     }
   }, [signingInProvider]);
-  const signOut = useCallback(async () => {
-    authAction.current++;
-    cancelSignIn();
-    await runtime.signOut();
-    if (mounted.current) setAuthNotice({ providerId: CODEX_PROVIDER_ID, message: 'Signed out. Your chats are saved on this device.' });
-  }, [cancelSignIn, runtime]);
-  const retryAuth = useCallback(async () => {
+  const retryAuth = useCallback(async (providerId: string) => {
     setAuthNotice(undefined);
-    await runtime.retryAuth();
+    await runtime.retryAuth(providerId);
   }, [runtime]);
   const providerAccess = useCallback((providerId: string): ProviderAccess => {
-    const state = providerId === CODEX_PROVIDER_ID
-      ? { ready: credentialState.ready, connected: signedIn, ...(signedIn ? { type: 'oauth' as const } : {}), ...(authError ? { error: authError } : {}) }
-      : credentialState.providers[providerId] ?? { ready: false, connected: false };
+    const state = credentialState.providers[providerId] ?? { ready: false, connected: false };
     return snapshot.signOutPending ? { ...state, ready: false, connected: false } : state;
-  }, [authError, credentialState, signedIn, snapshot.signOutPending]);
+  }, [credentialState, snapshot.signOutPending]);
   const hasConnectedProvider = catalog.some((provider) => providerAccess(provider.id).connected);
   const refreshCatalog = useCallback(async () => {
     const result = await models.refresh();
@@ -162,13 +137,12 @@ function useChatController() {
   }, [runtime, refreshCatalog]);
 
   return { ...snapshot, runtime, remoteHosts, catalog, refreshCatalog, providerAccess, hasConnectedProvider,
-    signedIn, hasSavedSignIn, authReady, authError, signingIn, signingInProvider, authStatus, authNotice, deviceLogin, browserOpen,
-    authPrompt, submitAuthPrompt: prompts.submit,
+    signingIn, signingInProvider, authNotice, browserOpen, authPrompt, submitAuthPrompt: prompts.submit,
     providerOAuth: useCallback((providerId: string) => {
       const oauth = models.getProvider(providerId)?.auth.oauth;
       return oauth ? { name: oauth.name, loginLabel: oauth.loginLabel, isSubscription: oauth.isSubscription } : undefined;
     }, [models]),
-    signIn, cancelSignIn, openSignInPage, signOut, retryAuth,
+    signIn, cancelSignIn, openSignInPage, retryAuth,
     saveProviderKey,
     disconnectProvider: useCallback(async (providerId: string) => {
       cancelSignIn();

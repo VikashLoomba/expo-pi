@@ -3,7 +3,7 @@
 export default async function nativeDurableProbe({ moduleIds, database, platform }) {
   const startedAt = Date.now();
   const ai = globalThis.__r(moduleIds.ai);
-  const { openaiCodexProvider } = globalThis.__r(moduleIds.codex);
+  const { anthropicProvider } = globalThis.__r(moduleIds.anthropic);
   const { openExpoSqliteStorage } = globalThis.__r(moduleIds.storage);
   const { DurableChatService } = globalThis.__r(moduleIds.service);
   const models = ai.createModels({
@@ -49,7 +49,7 @@ export default async function nativeDurableProbe({ moduleIds, database, platform
     return stream;
   };
   models.setProvider({
-    ...openaiCodexProvider(),
+    ...anthropicProvider(),
     auth: { apiKey: {
       name: 'Native validation only',
       check: async () => signedIn ? { type: 'api_key' } : undefined,
@@ -117,7 +117,7 @@ export default async function nativeDurableProbe({ moduleIds, database, platform
       'Cancelled work restarted on reopen');
     const secondId = await service.createChat();
     const unchangedSettings = JSON.stringify(service.getConversation(secondId).settings);
-    const base = models.getProvider('openai-codex');
+    const base = models.getProvider('anthropic');
     const customModel = { ...base.getModels()[0], provider: 'native-settings-provider', id: 'native-settings-model' };
     models.setProvider({ ...base, id: customModel.provider, name: 'Native settings provider', getModels: () => [customModel] });
     const settings = { model: { provider: customModel.provider, modelId: customModel.id }, thinkingLevel: 'high' };

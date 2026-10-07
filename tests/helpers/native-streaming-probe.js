@@ -12,7 +12,7 @@ export default async function nativeStreamingProbe({ database, durationMs = 8_00
     return globalThis.__r(matches[0][0]);
   }
   const ai = requireSuffix('@earendil-works/pi-ai/dist/index.js');
-  const { openaiCodexProvider } = requireSuffix('@earendil-works/pi-ai/dist/providers/openai-codex.js');
+  const { anthropicProvider } = requireSuffix('@earendil-works/pi-ai/dist/providers/anthropic.js');
   const { openExpoSqliteStorage } = requireSuffix('src/pi/storage/index.ts');
   const { DurableChatService } = requireSuffix('src/pi/chat-service.ts');
   const providerModule = requireSuffix('src/chat/chat-provider.tsx');
@@ -74,7 +74,7 @@ export default async function nativeStreamingProbe({ database, durationMs = 8_00
     })();
     return stream;
   };
-  models.setProvider({ ...openaiCodexProvider(),
+  models.setProvider({ ...anthropicProvider(),
     auth: { apiKey: { name: 'Streaming validation only', check: async () => ({ type: 'api_key' }),
       resolve: async () => ({ auth: { apiKey: 'synthetic-no-network' } }) } },
     stream: dispatch, streamSimple: dispatch });
@@ -187,7 +187,7 @@ export default async function nativeStreamingProbe({ database, durationMs = 8_00
       archiveChat: (chatId) => service.archiveChat(chatId), signIn: async () => {}, signOut: async () => {}, cancelSignIn: () => {} };
     const replacements = {
       useChatApp: () => ({ ...React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot),
-        ...actions, ready: true, signedIn: true, signingIn: false, authStatus: 'Scripted streaming validation' }),
+        ...actions, ready: true, signingIn: false }),
       useChatConversation: (chatId) => {
         const getConversation = React.useCallback(() => service.getConversation(chatId), [chatId]);
         const conversation = React.useSyncExternalStore(subscribe, getConversation, getConversation);

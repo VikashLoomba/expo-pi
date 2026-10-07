@@ -98,27 +98,28 @@ function logoutProvider(provider, action = () => {}) {
   };
 }
 
+/** Publishes the scripted provider's access like ProviderCredentialStore; `stored` controls Pi auth. */
 function observableCredentials(provider) {
-  let snapshot = { ready: false, signedIn: false };
+  let access = { ready: false, connected: false };
   const listeners = new Set();
   const credentials = {
     restores: 0,
-    restored: { ready: true, signedIn: provider.auth.authenticated },
+    restored: { ready: true, connected: provider.auth.authenticated },
     restoreError: undefined,
     beforeRestore: undefined,
-    getSnapshot: () => snapshot,
+    getProviderSnapshot: (providerId) => providerId === 'anthropic' ? access : { ready: true, connected: false },
     get listenerCount() { return listeners.size; },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    set(state) {
-      snapshot = { ...state };
-      provider.auth.authenticated = state.signedIn;
+    set(state, stored = state.connected) {
+      access = { ...state };
+      provider.auth.authenticated = stored;
       for (const listener of listeners) listener();
     },
     async restore() {
       credentials.restores++;
       await credentials.beforeRestore?.();
       if (credentials.restoreError) {
-        credentials.set({ ...snapshot, ready: true, error: credentials.restoreError });
+        credentials.set({ ...access, ready: true, connected: false, error: credentials.restoreError });
         throw new Error(credentials.restoreError);
       }
       credentials.set(credentials.restored);
@@ -128,7 +129,7 @@ function observableCredentials(provider) {
 }
 
 function addFutureProvider(provider, access = { connected: true }) {
-  const original = provider.models.getProvider('openai-codex');
+  const original = provider.models.getProvider('anthropic');
   const model = { ...original.getModels()[0], provider: 'future-provider', id: 'future-model', name: 'Future model' };
   provider.models.setProvider({ ...original, id: 'future-provider', name: 'Future provider', getModels: () => [model],
     auth: { apiKey: {
@@ -157,8 +158,7 @@ async function oauthProvider(script, { beforeMutation } = {}) {
     return next;
   }, options);
   const models = createModels({ credentials, authContext: { env: async () => undefined, fileExists: async () => false } });
-  const transport = scripted.models.getProvider('openai-codex');
-  models.setProvider(transport);
+  const transport = scripted.models.getProvider('anthropic');
   const base = openaiProvider();
   const entered = Promise.withResolvers();
   const release = Promise.withResolvers();
@@ -298,7 +298,7 @@ test('pending OAuth rejects another sign-in and API-key replacement without chan
   const controller = new AbortController();
   const signingIn = runtime.login('openai', loginInteraction(controller.signal));
   await provider.entered.promise;
-  await assert.rejects(runtime.login('openai-codex', loginInteraction()), /Finish or cancel the current sign-in/);
+  await assert.rejects(runtime.login('openai', loginInteraction()), /Finish or cancel the current sign-in/);
   await assert.rejects(runtime.saveProviderKey('openai', 'synthetic-unwanted-key'), /Finish or cancel sign-in/);
   assert.deepEqual(await provider.credentials.read('openai'), provider.previous);
   const cancelled = assert.rejects(signingIn, { name: 'AbortError' });
@@ -309,7 +309,7 @@ test('pending OAuth rejects another sign-in and API-key replacement without chan
   assert.equal((await provider.credentials.read('openai')).key, 'synthetic-intended-key');
 });
 
-test('selected provider works without ChatGPT sign-in and control settings survive foreground recovery', async (t) => {
+test('a selected provider works while another is disconnected and settings survive foreground recovery', async (t) => {
   const provider = scriptedModels([{ chunks: ['Answered through the selected provider.'] }], { authenticated: false });
   const settings = addFutureProvider(provider);
   const credentials = observableCredentials(provider);
@@ -324,11 +324,9 @@ test('selected provider works without ChatGPT sign-in and control settings survi
   await until(() => !runtime.getConversation(id).busy, 'the selected provider completes');
   assert.equal(provider.requests[0].model.provider, 'future-provider');
   assert.equal(provider.requests[0].options.reasoning, 'high');
-  assert.equal(credentials.getSnapshot().signedIn, false);
   await runtime.deactivate();
   await runtime.activate();
   assert.deepEqual(runtime.getConversationState(id).settings, settings);
-  assert.equal(runtime.getSnapshot().authError, undefined);
 });
 
 test('one disconnected pending provider prevents unrelated recovered work from dispatching', async (t) => {
@@ -336,17 +334,17 @@ test('one disconnected pending provider prevents unrelated recovered work from d
   const settings = addFutureProvider(provider);
   const { runtime } = await fixture(t, provider);
   await runtime.activate();
-  const codex = await runtime.createChat();
+  const primary = await runtime.createChat();
   const future = await runtime.createChat();
   await runtime.updateSettings(future, settings);
-  await runtime.send(codex, 'Codex pending input.');
+  await runtime.send(primary, 'Primary pending input.');
   await until(() => provider.requests.length === 1, 'the first provider starts');
   await runtime.send(future, 'Future provider pending input.');
   await until(() => provider.requests.length === 2, 'the second provider starts');
   await runtime.deactivate();
   provider.auth.authenticated = false;
   await runtime.activate();
-  assert.equal(runtime.getConversation(codex).pending, true);
+  assert.equal(runtime.getConversation(primary).pending, true);
   assert.equal(runtime.getConversation(future).pending, true);
   assert.equal(provider.requests.length, 2, 'opening does not dispatch any recovered provider');
   await assert.rejects(runtime.resume(future), /pending responses|Sign in/i);
@@ -369,8 +367,7 @@ test('failed provider removal cannot be bypassed by disconnecting another accoun
   await assert.rejects(runtime.signOut('future-provider'), /Could not remove.*Future provider/);
   assert.equal(runtime.getSnapshot().signOutPending, true);
   assert.equal(runtime.getSnapshot().disconnectingProvider, 'future-provider');
-  assert.equal(runtime.getSnapshot().authError, undefined, 'provider-key failures do not become ChatGPT account errors');
-  await assert.rejects(runtime.signOut(), /Finish disconnecting Future provider/);
+  await assert.rejects(runtime.signOut('anthropic'), /Finish disconnecting Future provider/);
   assert.deepEqual(attempts, ['future-provider']);
   fail = false;
   await runtime.signOut('future-provider');
@@ -394,7 +391,7 @@ test('signout closes the running durable session and transport before deleting c
   const id = await runtime.createChat();
   await runtime.send(id, 'Keep this task pending when I sign out.');
   await started.promise;
-  await runtime.signOut();
+  await runtime.signOut('anthropic');
   assert.deepEqual(metrics.events.slice(0, 2), ['database.closed', 'credentials.deleted']);
   assert.equal(metrics.active, 1, 'signed-out history reopens on one paused connection');
   assert.equal(runtime.getSnapshot().ready, true);
@@ -471,7 +468,7 @@ test('signed-out users can reopen and read existing chats without dispatching an
   await runtime.send(id, 'Save this conversation.');
   await until(() => !runtime.getConversation(id).busy, 'the first answer completes');
   const messages = structuredClone(runtime.getConversation(id).messages);
-  await runtime.signOut();
+  await runtime.signOut('anthropic');
   await runtime.deactivate();
   await runtime.activate();
   assert.equal(runtime.getSnapshot().ready, true);
@@ -591,7 +588,7 @@ test('a failed close blocks reopening or credential deletion and surfaces a pers
   assert.equal(runtime.getSnapshot().ready, false);
   assert.match(runtime.getSnapshot().error, /could not close/);
   await assert.rejects(runtime.activate(), /could not close/);
-  await assert.rejects(runtime.signOut(), /could not close/);
+  await assert.rejects(runtime.signOut('anthropic'), /could not close/);
   assert.equal(metrics.opens, 1, 'an uncertain previous owner is never replaced by another connection');
   assert.equal(logouts, 0);
   assert.match(runtime.getSnapshot().error, /could not close/);
@@ -673,10 +670,11 @@ test('credential restoration completes independently of failed SQLite startup an
   });
   await assert.rejects(runtime.activate(), /SQLite open failure/);
   assert.equal(credentials.restores, 1);
-  assert.equal(credentials.getSnapshot().ready, false);
+  assert.equal(credentials.getProviderSnapshot('anthropic').ready, false);
   release.resolve();
-  await until(() => credentials.getSnapshot().ready, 'account restoration finishes despite the database error');
-  assert.equal(credentials.getSnapshot().signedIn, true);
+  await until(() => credentials.getProviderSnapshot('anthropic').ready,
+    'account restoration finishes despite the database error');
+  assert.equal(credentials.getProviderSnapshot('anthropic').connected, true);
   await runtime.activate();
   assert.equal(runtime.getSnapshot().ready, true);
   assert.equal(credentials.listenerCount, 1, 'repeated activation adds no duplicate credential subscription');
@@ -690,14 +688,18 @@ test('credential restoration completes independently of failed SQLite startup an
 
 test('an initial secure-storage error keeps chat history available and explicit retry restores the connection', { timeout: 10_000 }, async (t) => {
   const provider = scriptedModels([{ chunks: ['Connected after unlocking.'] }]);
+  const modelId = provider.models.getModels('anthropic')[0].id;
+  const selected = { model: { provider: 'anthropic', modelId }, thinkingLevel: 'high' };
+  addFutureProvider(provider);
   const credentials = observableCredentials(provider);
-  credentials.restoreError = 'Could not restore your saved sign-in. Unlock this device and try again.';
+  credentials.restoreError = 'Could not restore your saved provider credentials. Unlock this device and try again.';
   const { runtime, submissions } = await fixture(t, provider, { credentials });
   await runtime.activate();
   assert.equal(runtime.getSnapshot().ready, true);
-  assert.equal(runtime.getSnapshot().authError, credentials.restoreError);
-  assert.equal(credentials.getSnapshot().ready, true);
+  assert.equal(credentials.getProviderSnapshot('anthropic').ready, true);
+  // The locked provider cannot start a chat; another connected provider can, and history stays editable.
   const id = await runtime.createChat();
+  await runtime.updateSettings(id, selected);
   await runtime.renameChat(id, 'Available while locked');
   await assert.rejects(runtime.send(id, 'Do not admit before authentication.'), /Unlock this device/);
   assert.deepEqual(runtime.getConversation(id).messages, []);
@@ -707,9 +709,8 @@ test('an initial secure-storage error keeps chat history available and explicit 
   assert.equal(runtime.getConversation(id).title, 'Available while locked');
   assert.equal(credentials.restores, 1, 'a failed read is retried explicitly, not on every foreground');
   credentials.restoreError = undefined;
-  await runtime.retryAuth();
+  await runtime.retryAuth('anthropic');
   assert.equal(credentials.restores, 2);
-  assert.equal(runtime.getSnapshot().authError, undefined);
   await runtime.send(id, 'Now authentication works.');
   await until(() => !runtime.getConversation(id).busy, 'the request after retry completes');
   assert.equal(provider.requests.length, 1);
@@ -729,8 +730,7 @@ test('a transient auth refresh failure occurs before durable admission and a ret
   };
   await assert.rejects(runtime.send(id, 'Do not create a failed durable input.'), /HTTP 503/);
   assert.equal(runtime.getSnapshot().ready, true);
-  assert.match(runtime.getSnapshot().authError, /HTTP 503/);
-  assert.equal(credentials.getSnapshot().signedIn, true);
+  assert.equal(credentials.getProviderSnapshot('anthropic').connected, true);
   assert.equal(provider.requests.length, 0);
   assert.deepEqual(runtime.getConversation(id).messages, []);
   await runtime.deactivate();
@@ -738,18 +738,18 @@ test('a transient auth refresh failure occurs before durable admission and a ret
   await runtime.activate();
   assert.equal(runtime.getSnapshot().ready, true, 'failed foreground refresh does not close readable history');
   failRefresh = false;
-  await runtime.retryAuth();
-  assert.equal(runtime.getSnapshot().authError, undefined);
+  await runtime.retryAuth('anthropic');
   await runtime.send(id, 'Send after the connection recovers.');
   await until(() => !runtime.getConversation(id).busy, 'the recovered connection completes a reply');
   assert.equal(provider.requests.length, 1);
 });
 
 for (const invalidation of [
-  { ready: true, signedIn: false, error: 'Your ChatGPT session expired. Sign in again.' },
-  { ready: true, signedIn: true, error: 'Could not save your saved sign-in. Unlock this device and try again.' },
+  { access: { ready: true, connected: false, error: 'Your provider session expired. Sign in again.' }, stored: false },
+  { access: { ready: true, connected: false, type: 'oauth',
+    error: 'Could not save your saved provider credentials. Unlock this device and try again.' }, stored: true },
 ]) {
-  test(`credential invalidation pauses an active generation while preserving readable history (credential ${invalidation.signedIn ? 'retained' : 'removed'})`, { timeout: 10_000 }, async (t) => {
+  test(`credential invalidation pauses an active generation while preserving readable history (credential ${invalidation.stored ? 'retained' : 'removed'})`, { timeout: 10_000 }, async (t) => {
     const started = Promise.withResolvers();
     let active;
     const provider = scriptedModels([
@@ -764,8 +764,7 @@ for (const invalidation of [
     await started.promise;
     active.text('Partial before credential invalidation.');
     await until(() => runtime.getConversation(id).messages.some(({ text }) => text.includes('Partial before')), 'the partial is persisted');
-    credentials.set(invalidation);
-    assert.equal(runtime.getSnapshot().authError, invalidation.error, 'the account error publishes synchronously');
+    credentials.set(invalidation.access, invalidation.stored);
     await until(() => metrics.opens === 2 && runtime.getSnapshot().ready, 'the scheduler closes and saved history reopens paused');
     assert.equal(active.signal.aborted, true);
     assert.equal(runtime.getConversation(id).pending, true);
@@ -773,17 +772,16 @@ for (const invalidation of [
     assert.equal(provider.requests.length, 1);
     await assert.rejects(runtime.resume(), /session expired|Unlock this device/);
     assert.equal(provider.requests.length, 1);
-    credentials.restored = { ready: true, signedIn: true };
-    await runtime.retryAuth();
+    credentials.restored = { ready: true, connected: true };
+    await runtime.retryAuth('anthropic');
     await until(() => !runtime.getConversation(id).busy && !runtime.getConversation(id).pending, 'the original input resumes after an explicit credential retry');
-    assert.equal(runtime.getSnapshot().authError, undefined);
     assert.equal(provider.requests.length, 2);
     assert.equal(runtime.getConversation(id).messages.filter(({ role }) => role === 'user').length, 1);
     assert.equal(metrics.maxActive, 1);
   });
 }
 
-test('failed secure deletion retains sign-out intent across login completion, foregrounding, and send attempts', { timeout: 10_000 }, async (t) => {
+test('failed secure deletion retains sign-out intent across foregrounding and send attempts', { timeout: 10_000 }, async (t) => {
   const started = Promise.withResolvers();
   let active;
   const provider = scriptedModels([(request) => {
@@ -797,33 +795,32 @@ test('failed secure deletion retains sign-out intent across login completion, fo
     assert.equal(metrics.active, 0);
     deletes++;
     if (deletes === 1) throw new Error('Injected secure-store deletion failure');
-    credentials.set({ ready: true, signedIn: false });
+    credentials.set({ ready: true, connected: false });
   });
   await runtime.activate();
   const id = await runtime.createChat();
   await runtime.send(id, 'Remain paused after a failed sign-out.');
   await started.promise;
-  const loginCompletion = runtime.signInCompleted();
-  const signingOut = runtime.signOut();
+  const signingOut = runtime.signOut('anthropic');
   assert.equal(runtime.getSnapshot().signOutPending, true, 'sign-out immediately prevents further dispatch');
-  await loginCompletion;
-  await assert.rejects(signingOut, /Retry signing out/);
-  assert.equal(runtime.getSnapshot().signOutPending, true, 'a queued earlier login completion cannot undo sign-out');
+  await assert.rejects(signingOut, /Retry removal/);
+  assert.equal(runtime.getSnapshot().signOutPending, true, 'failed deletion keeps the sign-out intent');
   assert.equal(runtime.getSnapshot().ready, true);
-  assert.equal(credentials.getSnapshot().signedIn, true, 'failed deletion leaves the stored credential intact');
+  assert.equal(credentials.getProviderSnapshot('anthropic').connected, true,
+    'failed deletion leaves the stored credential intact');
   assert.equal(runtime.getConversation(id).pending, true);
   assert.equal(provider.requests.length, 1);
   await runtime.deactivate();
   await runtime.activate();
   await assert.rejects(runtime.send(id, 'Still blocked.'), /Finish signing out/);
   await assert.rejects(runtime.resume(), /Finish signing out/);
-  await assert.rejects(runtime.retryAuth(), /Finish signing out/);
+  await assert.rejects(runtime.retryAuth('anthropic'), /Finish signing out/);
   assert.equal(provider.requests.length, 1);
   assert.equal(runtime.getSnapshot().ready, true);
-  await runtime.signOut();
+  await runtime.signOut('anthropic');
   assert.equal(runtime.getSnapshot().signOutPending, false);
-  assert.equal(runtime.getSnapshot().authError, undefined);
-  assert.equal(credentials.getSnapshot().signedIn, false);
+  assert.equal(runtime.getSnapshot().error, undefined, 'the removal failure notice clears after a successful retry');
+  assert.equal(credentials.getProviderSnapshot('anthropic').connected, false);
   await assert.rejects(runtime.resume(), /Sign in/);
   assert.equal(provider.requests.length, 1);
   assert.equal(metrics.maxActive, 1);

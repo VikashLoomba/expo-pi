@@ -1,22 +1,32 @@
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai';
 
-import type { CredentialBackend, CredentialSnapshot, ObservableCredentialStore } from './codex-auth/credential-store';
-import { CODEX_PROVIDER_ID } from './codex-auth/identity';
+import type { CredentialBackend } from './secure-storage';
 
-export interface ProviderAccess { ready: boolean; connected: boolean; type?: Credential['type']; error?: string }
-/** Protocol adapters identify completed token rotation and terminal authentication failures. */
+export interface ProviderAccess {
+  ready: boolean;
+  connected: boolean;
+  type?: Credential['type'];
+  error?: string;
+  /** The error came from device storage, so retrying can succeed once the device is unlocked. */
+  retryable?: boolean;
+}
+/** Protocol adapters validate stored grants and identify terminal authentication failures. */
 export interface ProviderCredentialPolicy {
   validate?(credential: Credential): void;
-  isCompletedRefresh?(value: unknown): boolean;
   isPermanentAuthError?(error: unknown): boolean;
 }
 interface ProviderRecord { credential?: Credential; pendingCredential?: Credential; loaded: boolean; access: ProviderAccess }
-interface ProviderCredentialSnapshot extends CredentialSnapshot { providers: Readonly<Record<string, ProviderAccess>> }
+interface ProviderCredentialSnapshot { providers: Readonly<Record<string, ProviderAccess>> }
 const EMPTY_ACCESS: ProviderAccess = { ready: false, connected: false };
 
 export function providerCredentialKey(providerId: string) {
   // Keep the existing key namespace so saved API keys remain available after upgrade.
-  return `pi.provider.api-key.v1.${Array.from(providerId, (character) => character.codePointAt(0)!.toString(16)).join('-')}`;
+  const codePoints = Array.from(providerId, (character) => (character.codePointAt(0) ?? 0).toString(16));
+  return `pi.provider.api-key.v1.${codePoints.join('-')}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function copyJson(value: unknown, parents = new Set<object>()): unknown {
@@ -35,21 +45,27 @@ function copyJson(value: unknown, parents = new Set<object>()): unknown {
 }
 
 function copyCredential(value: unknown): Credential {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid credential.');
-  const candidate = value as Record<string, unknown>;
-  if (candidate.type === 'api_key') {
-    if (candidate.key !== undefined && (typeof candidate.key !== 'string' || !candidate.key.trim())) throw new Error('Enter an API key.');
-    if (candidate.env !== undefined && (!candidate.env || typeof candidate.env !== 'object' || Array.isArray(candidate.env) ||
-        Object.values(candidate.env).some((item) => typeof item !== 'string'))) throw new Error('Invalid provider configuration.');
-    return { type: 'api_key', ...(candidate.key !== undefined ? { key: (candidate.key as string).trim() } : {}),
-      ...(candidate.env ? { env: { ...candidate.env as Record<string, string> } } : {}) };
+  if (!isRecord(value)) throw new Error('Invalid credential.');
+  if (value.type === 'api_key') {
+    const { key, env } = value;
+    if (key !== undefined && (typeof key !== 'string' || !key.trim())) throw new Error('Enter an API key.');
+    if (env !== undefined && (!isRecord(env) || Object.values(env).some((item) => typeof item !== 'string'))) {
+      throw new Error('Invalid provider configuration.');
+    }
+    const copiedEnv = isRecord(env) ? Object.fromEntries(Object.entries(env)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : undefined;
+    return { type: 'api_key', ...(typeof key === 'string' ? { key: key.trim() } : {}),
+      ...(copiedEnv ? { env: copiedEnv } : {}) };
   }
-  if (candidate.type !== 'oauth' || typeof candidate.access !== 'string' || !candidate.access.trim() ||
-      typeof candidate.refresh !== 'string' || !candidate.refresh.trim() || typeof candidate.expires !== 'number' ||
-      !Number.isFinite(candidate.expires) || candidate.expires <= 0) throw new Error('Invalid OAuth credential.');
+  const { access, refresh, expires } = value;
+  if (value.type !== 'oauth' || typeof access !== 'string' || !access.trim() ||
+      typeof refresh !== 'string' || !refresh.trim() || typeof expires !== 'number' ||
+      !Number.isFinite(expires) || expires <= 0) throw new Error('Invalid OAuth credential.');
   // Pi permits provider-specific fields (for example clientId and scopes). Keep
   // their JSON data intact without sharing nested references with SDK callers.
-  return copyJson(candidate) as Credential;
+  const fields = copyJson(value);
+  if (!isRecord(fields)) throw new Error('Invalid OAuth credential.');
+  return { ...fields, type: 'oauth', access, refresh, expires };
 }
 
 class InvalidSavedCredentialError extends Error {
@@ -61,13 +77,10 @@ export class ProviderCredentialStore implements CredentialStore {
   private readonly records = new Map<string, ProviderRecord>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly listeners = new Set<() => void>();
-  private snapshot: ProviderCredentialSnapshot;
+  private snapshot: ProviderCredentialSnapshot = { providers: {} };
 
-  constructor(private readonly codex: ObservableCredentialStore, private readonly backend: CredentialBackend,
-    private readonly policies: Readonly<Record<string, ProviderCredentialPolicy>> = {}) {
-    this.snapshot = { ...codex.getSnapshot(), providers: {} };
-    codex.subscribe(() => this.publish());
-  }
+  constructor(private readonly backend: CredentialBackend,
+    private readonly policies: Readonly<Record<string, ProviderCredentialPolicy>> = {}) {}
 
   private record(id: string): ProviderRecord {
     let record = this.records.get(id);
@@ -78,7 +91,7 @@ export class ProviderCredentialStore implements CredentialStore {
     return record;
   }
   registerProviders(providerIds: readonly string[]) {
-    for (const id of providerIds) if (id !== CODEX_PROVIDER_ID) this.record(id);
+    for (const id of providerIds) this.record(id);
     this.publish();
   }
   readonly subscribe = (listener: () => void) => {
@@ -86,33 +99,26 @@ export class ProviderCredentialStore implements CredentialStore {
     return () => { this.listeners.delete(listener); };
   };
   readonly getSnapshot = () => this.snapshot;
-  readonly getProviderSnapshot = (id: string): ProviderAccess => {
-    if (id === CODEX_PROVIDER_ID) {
-      const { ready, signedIn, error } = this.codex.getSnapshot();
-      return { ready, connected: signedIn && !error, ...(signedIn ? { type: 'oauth' as const } : {}), ...(error ? { error } : {}) };
-    }
-    return this.records.get(id)?.access ?? EMPTY_ACCESS;
-  };
+  readonly getProviderSnapshot = (id: string): ProviderAccess => this.records.get(id)?.access ?? EMPTY_ACCESS;
   private publish() {
-    const codex = this.codex.getSnapshot();
-    const providers = Object.fromEntries([...this.records].map(([id, record]) => [id, record.access]));
-    if (this.snapshot.ready === codex.ready && this.snapshot.signedIn === codex.signedIn && this.snapshot.error === codex.error &&
-        Object.keys(this.snapshot.providers).length === this.records.size &&
+    if (Object.keys(this.snapshot.providers).length === this.records.size &&
         [...this.records].every(([id, record]) => this.snapshot.providers[id] === record.access)) return;
-    this.snapshot = { ...codex, providers };
+    this.snapshot = { providers: Object.fromEntries([...this.records].map(([id, record]) => [id, record.access])) };
     for (const listener of this.listeners) listener();
   }
-  private setAccess(id: string, error?: string) {
+  private setAccess(id: string, error?: string, retryable = false) {
     const record = this.record(id);
     const next: ProviderAccess = { ready: true, connected: !!record.credential && !error,
-      ...(record.credential ? { type: record.credential.type } : {}), ...(error ? { error } : {}) };
+      ...(record.credential ? { type: record.credential.type } : {}),
+      ...(error ? { error, ...(retryable ? { retryable } : {}) } : {}) };
     if (record.access.ready !== next.ready || record.access.connected !== next.connected ||
-        record.access.type !== next.type || record.access.error !== next.error) record.access = next;
+        record.access.type !== next.type || record.access.error !== next.error ||
+        record.access.retryable !== next.retryable) record.access = next;
     this.publish();
   }
   private storageError(id: string, operation: string): Error {
     const error = new Error(`Could not ${operation} your saved provider credentials. Unlock this device and try again.`);
-    this.setAccess(id, error.message);
+    this.setAccess(id, error.message, true);
     return error;
   }
   private enqueue<T>(id: string, action: () => Promise<T>, options?: AuthOperationOptions): Promise<T> {
@@ -182,23 +188,21 @@ export class ProviderCredentialStore implements CredentialStore {
     this.setAccess(id);
   }
   async restore() {
-    const results = await Promise.allSettled([this.codex.restore(), ...[...this.records.keys()].map((id) => this.enqueue(id, () => this.load(id, true)))]);
+    const results = await Promise.allSettled([...this.records.keys()].map((id) => this.restoreProvider(id)));
     const failure = results.find((result) => result.status === 'rejected');
     if (failure?.status === 'rejected') throw failure.reason;
   }
   restoreProvider(id: string): Promise<void> {
-    return id === CODEX_PROVIDER_ID ? this.codex.restore() : this.enqueue(id, () => this.load(id, true));
+    return this.enqueue(id, () => this.load(id, true));
   }
   /** Explicit user replacement can recover a malformed or newer-format record. */
   replaceApiKey(id: string, key: string): Promise<void> {
-    if (id === CODEX_PROVIDER_ID) return Promise.reject(new Error('Use ChatGPT sign-in for this provider.'));
     return this.enqueue(id, async () => {
       const credential = copyCredential({ type: 'api_key', key });
       await this.save(id, credential);
     });
   }
   read(id: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
-    if (id === CODEX_PROVIDER_ID) return this.codex.read(id, options);
     return this.enqueue(id, async () => {
       await this.load(id);
       options?.signal?.throwIfAborted();
@@ -207,7 +211,7 @@ export class ProviderCredentialStore implements CredentialStore {
     }, options);
   }
   async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
-    const result = [...await this.codex.list(options)];
+    const result: CredentialInfo[] = [];
     for (const id of this.records.keys()) {
       const credential = await this.read(id, options);
       if (credential) result.push({ providerId: id, type: credential.type });
@@ -215,7 +219,6 @@ export class ProviderCredentialStore implements CredentialStore {
     return result;
   }
   modify(id: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>, options?: AuthOperationOptions): Promise<Credential | undefined> {
-    if (id === CODEX_PROVIDER_ID) return this.codex.modify(id, fn, options);
     return this.enqueue(id, async () => {
       try { await this.load(id); }
       catch (error) {
@@ -234,9 +237,9 @@ export class ProviderCredentialStore implements CredentialStore {
         }
         throw error;
       }
-      // A completed refresh can consume its predecessor even if the caller has
-      // cancelled. Commit its result under this lock; a queued logout still wins.
-      if (!this.policies[id]?.isCompletedRefresh?.(next)) options?.signal?.throwIfAborted();
+      // Pi passes refresh a lock-wait signal that it detaches before calling this
+      // modifier, so only abandoned logins and direct writes are discarded here.
+      options?.signal?.throwIfAborted();
       if (next === undefined) return current && copyCredential(current);
       const credential = copyCredential(next);
       await this.save(id, credential);
@@ -244,7 +247,6 @@ export class ProviderCredentialStore implements CredentialStore {
     }, options);
   }
   delete(id: string, options?: AuthOperationOptions): Promise<void> {
-    if (id === CODEX_PROVIDER_ID) return this.codex.delete(id, options);
     // Do not load here: logout must be able to discard a pending failed save.
     return this.enqueue(id, () => this.remove(id), options);
   }

@@ -56,7 +56,7 @@ const hooks = registerHooks({
       return { url: new URL(`${specifier}.js`, context.parentURL).href, shortCircuit: true };
     }
     const result = nextResolve(specifier, context);
-    assert.ok(!/\/auth\/oauth\/openai-(?:codex|chatgpt)\.js$/.test(result.url), 'Never load desktop Node OAuth in mobile');
+    assert.ok(!/\/auth\/oauth\/openai-chatgpt\.js$/.test(result.url), 'Never load desktop Node OAuth in mobile');
     return result;
   },
   load(url, context, nextLoad) {
@@ -71,7 +71,8 @@ test.after(() => hooks.deregister());
 const { native } = await import('test:modern-native');
 // eslint-disable-next-line import/no-unresolved -- Synthetic optional native module above.
 const { setCallbackModule } = await import('test:callback-module');
-const { createChatModels, createChatCredentialStore } = await import('../src/pi/models.ts');
+const { createChatModels, createChatCredentialStore, NEW_CHAT_DEFAULTS } = await import('../src/pi/models.ts');
+const { buildModelCatalog, findCatalogModel } = await import('../src/pi/model-catalog.ts');
 const { getOpenAILoginOptions } = await import('../src/pi/openai-auth/installation.ts');
 const { createNativeOpenAIOAuth, openOpenAIManualBrowser } = await import('../src/pi/openai-auth/index.ts');
 const { OPENAI_REDIRECT_URI, OPENAI_RESOURCE, OPENAI_DIRECT_SCOPE, OPENAI_DISCOVERY,
@@ -261,7 +262,7 @@ test('a native callback cannot start token exchange until Expo has released its 
   assert.equal(fetch.mock.callCount(), 1);
 });
 
-test('modern and legacy are separate providers; real Pi login persists an Expo PKCE grant with issued client ID', async (t) => {
+test('real Pi login persists an Expo PKCE grant with issued client ID and keeps API-key auth available', async (t) => {
   const { models, credentials } = fixture();
   let challenge;
   t.mock.method(native, 'browser', async (url, redirect) => {
@@ -289,9 +290,7 @@ test('modern and legacy are separate providers; real Pi login persists an Expo P
   });
   await models.login('openai', 'oauth', interaction(), options);
   assert.deepEqual(await models.checkAuth('openai'), { type: 'oauth', source: 'OAuth' });
-  assert.equal(await models.checkAuth('openai-codex'), undefined);
   assert.ok(models.getProvider('openai').auth.apiKey);
-  assert.ok(models.getProvider('openai-codex').auth.oauth);
   assert.equal((await credentials.read('openai')).clientId, 'oaiapp_synthetic');
   assert.equal((await fixture().models.getAuth('openai')).auth.apiKey, token().access_token);
 });
@@ -337,9 +336,9 @@ test('explicit cancellation dismisses native auth without entering manual fallba
   assert.deepEqual(await credentials.read('openai'), { type: 'api_key', key: 'previous-key' });
 });
 
-test('real Pi serializes modern refresh and persists new client/scopes while keeping legacy credentials', async (t) => {
+test('real Pi serializes modern refresh and persists new client/scopes while keeping other providers', async (t) => {
   const { models, credentials } = fixture();
-  await credentials.modify('openai-codex', async () => ({ type: 'oauth', access: 'legacy-access', refresh: 'legacy-refresh', expires: Date.now()+3600_000, accountId: 'legacy-account' }));
+  await credentials.replaceApiKey('anthropic', 'synthetic-anthropic-key');
   await credentials.modify('openai', async () => openAICredentialFromToken(token('old', 1), 'oaiapp_synthetic'));
   const fetch = t.mock.method(globalThis, 'fetch', async (url, init) => {
     assert.equal(url, OPENAI_DISCOVERY.tokenEndpoint);
@@ -351,7 +350,7 @@ test('real Pi serializes modern refresh and persists new client/scopes while kee
   assert.ok(results.every((result) => result.auth.apiKey === token('new').access_token));
   assert.equal((await fixture().credentials.read('openai')).refresh, token('new').refresh_token);
   await models.logout('openai');
-  assert.equal((await credentials.read('openai-codex')).access, 'legacy-access');
+  assert.equal((await credentials.read('anthropic')).key, 'synthetic-anthropic-key');
 });
 
 test('a completed modern refresh survives caller cancellation and the next request uses its rotation', async (t) => {
@@ -419,6 +418,28 @@ test('manual browser action accepts only the modern authorization endpoint and e
     await assert.rejects(openOpenAIManualBrowser(value,new AbortController().signal));
   }
   assert.equal(open.mock.callCount(),1);
+});
+
+test('registered providers ignore credentials in the process environment', async (t) => {
+  const names = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+  const saved = names.map((name) => [name, process.env[name]]);
+  t.after(() => {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  for (const name of names) process.env[name] = `synthetic-env-${name}`;
+  const { models } = fixture();
+  assert.equal(await models.checkAuth('anthropic'), undefined);
+  assert.equal(await models.getAuth('openai'), undefined);
+});
+
+test('every new-chat default is a registered model with a supported reasoning setting', () => {
+  const catalog = buildModelCatalog(fixture().models);
+  for (const [provider, modelId] of Object.entries(NEW_CHAT_DEFAULTS.models)) {
+    assert.ok(findCatalogModel(catalog, { provider, modelId })?.thinkingLevels.length, `${provider}/${modelId}`);
+  }
 });
 
 test('concurrent initialization returns one durably saved installation UUID', async () => {

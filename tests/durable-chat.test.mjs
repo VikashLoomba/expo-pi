@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { Harness, LiveDoc, createRegistry } from '@earendil-works/pi-durable';
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { createExpoSqliteDatabase } from '../src/pi/storage/expo-sqlite.ts';
@@ -49,9 +50,9 @@ async function fixture(t) {
   const openStorage = () => SqliteStorage.open(createExpoSqliteDatabase(createNodeSqliteConnection(filename)));
   return {
     openStorage,
-    async open(models) {
+    async open(models, options = {}) {
       const storage = await openStorage();
-      const service = await DurableChatService.open({ storage, models, platform: 'ios' });
+      const service = await DurableChatService.open({ storage, models, platform: 'ios', ...options });
       services.add(service);
       return service;
     },
@@ -228,11 +229,57 @@ test('provider failure is a persisted unanswered submission, not a completed ans
   assert.match(second.getConversation(id).error, /Scripted durable provider failure/);
 });
 
+test('new chats reuse the last-used model or a connected default and need a connection', { timeout: 10_000 }, async (t) => {
+  const file = await fixture(t);
+  const provider = scriptedModels([{ chunks: ['Answered through ChatGPT.'] }], { authenticated: false });
+  const transport = provider.models.getProvider('anthropic');
+  const openai = openaiProvider();
+  provider.models.setProvider({ ...openai, stream: transport.stream, streamSimple: transport.streamSimple,
+    auth: { apiKey: openai.auth.apiKey, oauth: {
+      name: 'Synthetic ChatGPT',
+      login: async () => ({ type: 'oauth', access: 'synthetic-access', refresh: 'synthetic-refresh',
+        expires: Date.now() + 3_600_000 }),
+      refresh: async () => { throw new Error('An unexpired test credential must not refresh.'); },
+      toAuth: async (credential) => ({ apiKey: credential.access }),
+    } } });
+  const newChat = { preferredProvider: 'openai', models: { openai: 'gpt-6-sol', anthropic: 'claude-sonnet-5-5' } };
+  const service = await file.open(provider.models, { newChat });
+  await assert.rejects(service.createChat(), /Connect a provider in Account/);
+  assert.deepEqual(service.getSnapshot().chats, []);
+
+  provider.auth.authenticated = true;
+  const keyOnly = await service.createChat();
+  assert.deepEqual(service.getConversation(keyOnly).settings,
+    { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'low' },
+    'an API-key-only user gets that provider default at its lowest supported effort');
+  await service.archiveChat(keyOnly);
+
+  await provider.models.login('openai', 'oauth', { prompt: async () => '', notify() {} });
+  const first = await service.createChat();
+  assert.deepEqual(service.getConversation(first).settings,
+    { model: { provider: 'openai', modelId: 'gpt-6-sol' }, thinkingLevel: 'off' },
+    'ChatGPT is preferred over a provider listed earlier, so native web search applies');
+  await service.waitForSubmission(await service.send(first, 'Answer on the first send.'));
+  assert.match(textOf(service.getConversation(first)), /Answered through ChatGPT/);
+  assert.equal(provider.requests[0].options.apiKey, 'synthetic-access');
+
+  const chosen = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'high' };
+  await service.updateSettings(first, chosen);
+  const second = await service.createChat();
+  assert.deepEqual(service.getConversation(second).settings, chosen, 'a new chat continues with the last-used model');
+
+  provider.auth.authenticated = false;
+  const third = await service.createChat();
+  assert.deepEqual(service.getConversation(third).settings.model, { provider: 'openai', modelId: 'gpt-6-sol' },
+    'a last-used model whose provider is disconnected falls back to a connected default');
+});
+
 test('signed-out sends cannot create failed model work or change the conversation transcript', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
-  const provider = scriptedModels([], { authenticated: false });
+  const provider = scriptedModels([]);
   const service = await file.open(provider.models);
   const id = await service.createChat();
+  provider.auth.authenticated = false;
   const before = service.getConversation(id).messages;
   await assert.rejects(service.send(id, 'Do not admit this while signed out.'), /sign in/i);
   assert.deepEqual(service.getConversation(id).messages, before);
@@ -419,7 +466,7 @@ test('a persisted queued input remains pending without a live run and can be dur
   let queuedId;
   try {
     const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' },
-      agent: { model: { provider: 'openai-codex', modelId: 'gpt-6-sol' } },
+      agent: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' } },
     }, BACKGROUND_CONTEXT);
     id = String(conversation.id);
     const first = await conversation.submit({ type: 'input', content: 'First attempt.' }, BACKGROUND_CONTEXT);
@@ -537,7 +584,7 @@ test('provider, model and supported effort persist per chat and control the next
   const other = await first.createChat();
   const otherSettings = first.getConversation(other).settings;
   await first.waitForSubmission(await first.send(id, 'Remember the earlier turn.'));
-  const original = initial.models.getProvider('openai-codex');
+  const original = initial.models.getProvider('anthropic');
   const customModel = { ...original.getModels()[0], provider: 'future-provider', id: 'future-model', name: 'Future Model' };
   initial.models.setProvider({ ...original, id: 'future-provider', name: 'Future Provider', getModels: () => [customModel] });
   const selected = { model: { provider: 'future-provider', modelId: 'future-model' }, thinkingLevel: 'high' };
@@ -552,7 +599,7 @@ test('provider, model and supported effort persist per chat and control the next
   await file.close(first);
 
   const next = scriptedModels([{ chunks: ['New provider remembered.'] }]);
-  next.models.setProvider({ ...next.models.getProvider('openai-codex'), id: 'future-provider', name: 'Future Provider', getModels: () => [customModel] });
+  next.models.setProvider({ ...next.models.getProvider('anthropic'), id: 'future-provider', name: 'Future Provider', getModels: () => [customModel] });
   const second = await file.open(next.models);
   assert.deepEqual(second.getConversation(id).settings, selected);
   assert.deepEqual(second.getConversation(other).settings, otherSettings);
@@ -570,7 +617,7 @@ test('settings reject unavailable models, unsupported effort and in-flight or re
   const first = await file.open(provider.models);
   const id = await first.createChat();
   const original = first.getConversation(id).settings;
-  const selected = { model: { provider: 'openai-codex', modelId: 'gpt-6-astra' }, thinkingLevel: 'high' };
+  const selected = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'high' };
   await assert.rejects(first.updateSettings(id, { ...selected, thinkingLevel: 'off' }), /reasoning|effort|support/i);
   await assert.rejects(first.updateSettings(id, { ...selected, model: { provider: 'missing', modelId: 'missing' } }), /available|provider/i);
   assert.deepEqual(first.getConversation(id).settings, original);
@@ -591,7 +638,7 @@ test('settings reject unavailable models, unsupported effort and in-flight or re
 test('unregistered saved providers survive reopening and block sends until explicitly changed', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const provider = scriptedModels([]);
-  const base = provider.models.getProvider('openai-codex');
+  const base = provider.models.getProvider('anthropic');
   provider.models.setProvider({ ...base, id: 'removed-provider', name: 'Removed provider',
     getModels: () => [{ ...base.getModels()[0], provider: 'removed-provider', id: 'saved-model' }] });
   const first = await file.open(provider.models);
@@ -615,19 +662,19 @@ test('updating existing SDK agent settings preserves unrelated fields and reads 
     async conversationCreated(tx, conversation) { (await tx.doc(ChatMetadataDoc, conversation.id)).createdAt = Date.now(); },
   }, BACKGROUND_CONTEXT);
   const chat = await harness.createConversation({ ownership: { kind: 'ownerless' },
-    agent: { model: { provider: 'openai-codex', modelId: 'gpt-6-sol' }, instructions: 'Preserve this instruction.' },
+    agent: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, instructions: 'Preserve this instruction.' },
   }, BACKGROUND_CONTEXT);
   const id = String(chat.id);
   await harness.close(BACKGROUND_CONTEXT);
   const service = await file.open(provider.models);
   assert.equal(service.getConversation(id).settings.thinkingLevel, 'off');
-  await service.updateSettings(id, { model: { provider: 'openai-codex', modelId: 'gpt-6-astra' }, thinkingLevel: 'max' });
+  await service.updateSettings(id, { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'max' });
   await file.close(service);
   const verify = await Harness.open(await file.openStorage(), { models: provider.models, registry: createRegistry() }, BACKGROUND_CONTEXT);
   try {
     const agent = await verify.snapshot(AgentDoc, chat.id, BACKGROUND_CONTEXT);
     assert.equal(agent.instructions, 'Preserve this instruction.');
-    assert.equal(agent.model.modelId, 'gpt-6-astra');
+    assert.equal(agent.model.modelId, 'claude-sonnet-5-5');
     assert.equal(agent.thinkingLevel, 'max');
   } finally { await verify.close(BACKGROUND_CONTEXT); }
 });
@@ -640,7 +687,7 @@ test('offline cancellation of a removed provider is durable and never dispatches
     signal.resolve(reply);
     return reply.stream;
   }));
-  const base = initial.models.getProvider('openai-codex');
+  const base = initial.models.getProvider('anthropic');
   initial.models.setProvider({ ...base, id: 'removed-provider', name: 'Removed provider',
     getModels: () => [{ ...base.getModels()[0], provider: 'removed-provider', id: 'saved-model' }] });
   const first = await file.open(initial.models);
@@ -666,7 +713,7 @@ test('offline cancellation of a removed provider is durable and never dispatches
   assert.equal(signedOut.requests.length, 0);
   assert.match(textOf(second.getConversation(cancelled)), /Keep this partial/);
   assert.ok(second.getConversation(cancelled).messages.find(({ text }) => text === 'Keep this partial.').interrupted);
-  const selection = { model: { provider: 'openai-codex', modelId: 'gpt-6-sol' }, thinkingLevel: 'high' };
+  const selection = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'high' };
   await second.updateSettings(cancelled, selection);
   await file.close(second);
 
@@ -695,18 +742,18 @@ test('settings cannot change the provider while send is awaiting its credential 
   const provider = scriptedModels([(request) => {
     const reply = controlledReply(request); started.resolve(reply); return reply.stream;
   }]);
+  const service = await file.open(provider.models);
+  const id = await service.createChat();
   const originalCheck = provider.models.checkAuth.bind(provider.models);
   let hold = true;
   provider.models.checkAuth = async (...args) => {
     if (hold) { hold = false; checking.resolve(); await release.promise; }
     return originalCheck(...args);
   };
-  const service = await file.open(provider.models);
-  const id = await service.createChat();
   const original = service.getConversation(id).settings;
   const sending = service.send(id, 'Use the admitted model.');
   await checking.promise;
-  const update = service.updateSettings(id, { model: { provider: 'openai-codex', modelId: 'gpt-6-astra' }, thinkingLevel: 'high' });
+  const update = service.updateSettings(id, { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'high' });
   const rejected = assert.rejects(update, /pending response/i);
   release.resolve();
   const submission = await sending;
@@ -721,7 +768,7 @@ test('settings cannot change the provider while send is awaiting its credential 
 test('credential-specific model availability is checked before creating durable model work', { timeout: 10_000 }, async (t) => {
   const file = await fixture(t);
   const provider = scriptedModels([]);
-  const base = provider.models.getProvider('openai-codex');
+  const base = provider.models.getProvider('anthropic');
   provider.models.setProvider({ ...base, filterModels: () => [] });
   const service = await file.open(provider.models);
   const id = await service.createChat();
@@ -745,11 +792,11 @@ test('a new send drains an offline cancellation before using changed model setti
   const next = scriptedModels([{ chunks: ['The replacement model answered.'] }]);
   const second = await file.open(next.models);
   await second.cancel(id);
-  await second.updateSettings(id, { model: { provider: 'openai-codex', modelId: 'gpt-6-astra' }, thinkingLevel: 'max' });
+  await second.updateSettings(id, { model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' }, thinkingLevel: 'max' });
   await second.waitForSubmission(await second.send(id, 'Use the replacement model.'));
   assert.equal((await second.waitForSubmission(stoppedSubmission)).reason, 'aborted');
   assert.equal(next.requests.length, 1);
-  assert.equal(next.requests[0].model.id, 'gpt-6-astra');
+  assert.equal(next.requests[0].model.id, 'claude-sonnet-5-5');
   assert.equal(next.requests[0].options.reasoning, 'max');
 });
 
@@ -758,14 +805,14 @@ test('cancellation submitted during credential admission cannot miss the pending
   const checking = Promise.withResolvers();
   const release = Promise.withResolvers();
   const provider = scriptedModels([(request) => controlledReply(request).stream]);
+  const service = await file.open(provider.models);
+  const id = await service.createChat();
   const originalCheck = provider.models.checkAuth.bind(provider.models);
   let hold = true;
   provider.models.checkAuth = async (...args) => {
     if (hold) { hold = false; checking.resolve(); await release.promise; }
     return originalCheck(...args);
   };
-  const service = await file.open(provider.models);
-  const id = await service.createChat();
   const sending = service.send(id, 'Cancel this pending admission.');
   await checking.promise;
   const cancel = service.cancel(id);

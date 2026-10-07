@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { BACKGROUND_CONTEXT as context, withAbortSignal } from '@earendil-works/chord/context';
 import * as ai from '@earendil-works/pi-ai';
-import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
+import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { AgentDoc, defineExtension, defineTask } from '@earendil-works/pi-durable';
 import { getOrThrow } from '@earendil-works/pi-durable/env';
 import { createEnvConformance } from '@earendil-works/pi-durable/testing';
@@ -78,7 +78,7 @@ export default async function probe({ platform, signal, config }) {
       const stream = ai.createAssistantMessageEventStream();
       stream.push({ type: 'start', partial: message }); stream.push({ type: 'done', reason: message.stopReason, message }); return stream;
     };
-    models.setProvider({ ...openaiCodexProvider(), auth: { apiKey: { name: 'Remote verification',
+    models.setProvider({ ...anthropicProvider(), auth: { apiKey: { name: 'Remote verification',
       check: async () => ({ type: 'api_key' }), resolve: async () => ({ auth: { apiKey: 'synthetic-no-network' } }) } }, stream: dispatch, streamSimple: dispatch });
     const openService = async () => DurableChatService.open({ storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models, platform,
       openWorkspaceDatabase: openLocal, execution: (local) => { const execution = createRemoteExecution(local, hosts); return { ...execution,

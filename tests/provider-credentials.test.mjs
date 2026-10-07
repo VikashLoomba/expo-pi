@@ -22,7 +22,6 @@ const hooks = registerHooks({
   },
 });
 const { ProviderCredentialStore, providerCredentialKey } = await import('../src/pi/provider-credentials.ts');
-const { ObservableCredentialStore } = await import('../src/pi/codex-auth/credential-store.ts');
 hooks.deregister();
 
 function backend() {
@@ -35,7 +34,7 @@ function backend() {
   };
 }
 function store(native, policies = {}) {
-  const result = new ProviderCredentialStore(new ObservableCredentialStore(native, 'codex-test'), native, policies);
+  const result = new ProviderCredentialStore(native, policies);
   result.registerProviders(['openai', 'google']);
   return result;
 }
@@ -46,7 +45,6 @@ test('provider credentials persist independently, resolve through Pi, and publis
   await credentials.restore();
   await credentials.replaceApiKey('openai', 'synthetic-openai-key');
   await credentials.replaceApiKey('google', 'synthetic-google-key');
-  assert.equal(credentials.getSnapshot().signedIn, false, 'API keys do not claim a ChatGPT subscription sign-in');
   assert.deepEqual(credentials.getProviderSnapshot('google'), { ready: true, connected: true, type: 'api_key' });
   assert.doesNotMatch(JSON.stringify(credentials.getSnapshot()), /synthetic/);
   const reopened = store(native);
@@ -60,15 +58,20 @@ test('provider credentials persist independently, resolve through Pi, and publis
   assert.equal((await models.getAuth('google')).auth.apiKey, 'synthetic-google-key');
 });
 
-test('a failed Codex restore leaves another provider available', async () => {
+test('a failed restore of one provider leaves another provider available', async () => {
   const native = backend();
   await store(native).replaceApiKey('google', 'synthetic-google-key');
   const get = native.getItemAsync;
-  native.getItemAsync = async (key) => { if (key === 'codex-test') throw new Error('synthetic-secret native read'); return get(key); };
+  native.getItemAsync = async (key) => {
+    if (key === providerCredentialKey('openai')) throw new Error('synthetic-secret native read');
+    return get(key);
+  };
   const credentials = store(native);
   await assert.rejects(credentials.restore(), /Could not restore/);
   assert.deepEqual(credentials.getProviderSnapshot('google'), { ready: true, connected: true, type: 'api_key' });
   assert.equal((await credentials.read('google')).key, 'synthetic-google-key');
+  assert.match(credentials.getProviderSnapshot('openai').error, /Could not restore/);
+  assert.equal(credentials.getProviderSnapshot('openai').retryable, true, 'a storage failure can succeed on retry');
   assert.doesNotMatch(JSON.stringify(credentials.getSnapshot()), /synthetic-secret/);
 });
 
@@ -78,6 +81,7 @@ test('malformed and newer-format keys are preserved on read and can be explicitl
     native.values.set(providerCredentialKey('google'), raw);
     const credentials = store(native);
     await assert.rejects(credentials.restore(), /could not be restored/);
+    assert.equal(credentials.getProviderSnapshot('google').retryable, undefined, 'only replacement fixes invalid data');
     assert.equal(native.values.get(providerCredentialKey('google')), raw);
     assert.doesNotMatch(JSON.stringify(credentials.getSnapshot()), /synthetic-secret/);
     await credentials.replaceApiKey('google', 'synthetic-replacement');
@@ -175,12 +179,11 @@ function oauthModels(credentials, overrides = {}) {
   return models;
 }
 
-test('modern OAuth login through Pi persists SDK extension fields and coexists with legacy login', async () => {
+test('OAuth login persists SDK extension fields across restart; logout removes only that provider', async () => {
   const native = backend();
   const credentials = store(native);
+  await credentials.replaceApiKey('google', 'synthetic-google-key');
   const modern = oauthCredential('modern');
-  const legacy = { ...oauthCredential('legacy'), accountId: 'legacy-account' };
-  await credentials.modify('openai-codex', async () => legacy);
   const models = oauthModels(credentials, { login: async () => modern });
   await models.login('openai', 'oauth', { prompt: async () => '', notify() {} });
   const reopened = store(native);
@@ -188,13 +191,12 @@ test('modern OAuth login through Pi persists SDK extension fields and coexists w
   assert.deepEqual(await reopened.read('openai'), modern);
   assert.deepEqual(reopened.getProviderSnapshot('openai'), { ready: true, connected: true, type: 'oauth' });
   assert.deepEqual(await reopened.list(), [
-    { providerId: 'openai-codex', type: 'oauth' }, { providerId: 'openai', type: 'oauth' },
+    { providerId: 'openai', type: 'oauth' }, { providerId: 'google', type: 'api_key' },
   ]);
-  assert.equal((await reopened.read('openai-codex')).access, legacy.access);
   assert.doesNotMatch(JSON.stringify(reopened.getSnapshot()), /synthetic|clientId|scopes/);
   await models.logout('openai');
   assert.equal(await store(native).read('openai'), undefined);
-  assert.equal((await store(native).read('openai-codex')).access, legacy.access);
+  assert.equal((await store(native).read('google')).key, 'synthetic-google-key');
 });
 
 test('existing version1 API keys remain compatible and OpenAI can switch authentication methods', async () => {
@@ -315,33 +317,6 @@ test('logout clears a pending OAuth save without first retrying it', async () =>
   assert.equal(await store(native).read('openai'), undefined);
 });
 
-test('completed refresh is persisted after cancellation and queued logout still wins', { timeout: 3_000 }, async (t) => {
-  const native = backend();
-  const completed = new WeakSet();
-  const credentials = store(native, { openai: { isCompletedRefresh: (value) => completed.has(value) } });
-  await credentials.modify('openai', async () => oauthCredential('expired', Date.now() - 1_000));
-  const gate = Promise.withResolvers();
-  const started = Promise.withResolvers();
-  t.after(() => gate.resolve());
-  const controller = new AbortController();
-  const refreshing = credentials.modify('openai', async () => {
-    started.resolve(); await gate.promise;
-    const rotated = oauthCredential('rotated-after-abort');
-    completed.add(rotated);
-    return rotated;
-  }, { signal: controller.signal });
-  const rejected = assert.rejects(refreshing, isAbort);
-  await started.promise;
-  controller.abort();
-  await rejected;
-  const observed = credentials.read('openai');
-  const logout = credentials.delete('openai');
-  gate.resolve();
-  assert.equal((await observed).refresh, 'synthetic-refresh-rotated-after-abort');
-  await logout;
-  assert.equal(await store(native).read('openai'), undefined);
-});
-
 test('cancelled ordinary modifiers do not persist results and retain their locks until completion', { timeout: 3_000 }, async (t) => {
   const native = backend();
   const credentials = store(native);
@@ -411,6 +386,7 @@ test('only typed policy-approved terminal failures invalidate credentials withou
   await assert.rejects(models.getAuth('openai'), (error) => error.cause === permanent);
   assert.equal(credentials.getProviderSnapshot('openai').connected, false);
   assert.match(credentials.getProviderSnapshot('openai').error, /session expired/);
+  assert.equal(credentials.getProviderSnapshot('openai').retryable, undefined, 'an expired session needs a new sign-in');
   assert.equal(await store(native).read('openai'), undefined);
   assert.equal(await models.getAuth('openai'), undefined);
 });

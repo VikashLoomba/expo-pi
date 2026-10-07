@@ -26,6 +26,14 @@ export interface ProviderOption {
 
 export type ModelCatalog = readonly ProviderOption[];
 
+/** Registration-time choices for a new chat when no recently used chat applies. */
+export interface NewChatDefaults {
+  /** Tried before the other connected providers, which follow in catalog order. */
+  readonly preferredProvider?: string;
+  /** Default model ID for each provider. */
+  readonly models: Readonly<Record<string, string>>;
+}
+
 /**
  * Read the registered SDK providers, including dynamic providers with an empty
  * last-known catalog. Credentials affect availability, not catalog identity.
@@ -64,8 +72,9 @@ export function getModelSettingsError(catalog: ModelCatalog, settings: ChatModel
 
 export function assertModelSettings(catalog: ModelCatalog, settings: ChatModelSettings): ModelOption {
   const error = getModelSettingsError(catalog, settings);
-  if (error) throw new Error(error);
-  return findCatalogModel(catalog, settings.model)!;
+  const model = findCatalogModel(catalog, settings.model);
+  if (error || !model) throw new Error(error ?? `The model ${settings.model.modelId} is unavailable.`);
+  return model;
 }
 
 /**
@@ -80,7 +89,10 @@ export function createModelSettings(model: ModelOption, preferredThinkingLevel: 
   return { model: { provider: model.provider, modelId: model.id }, thinkingLevel };
 }
 
-/** Default selection for new chats only; persisted chats must use validation. */
+/**
+ * Default selection for new chats only: the preferred model when it has a supported reasoning
+ * setting, otherwise the catalog's first model that has one. Persisted chats must use validation.
+ */
 export function getDefaultModelSettings(catalog: ModelCatalog, preferred?: ModelRef): ChatModelSettings | undefined {
   const preferredModel = preferred ? findCatalogModel(catalog, preferred) : undefined;
   const model = preferredModel?.thinkingLevels.length ? preferredModel

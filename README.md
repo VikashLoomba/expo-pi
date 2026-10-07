@@ -1,8 +1,8 @@
 # Pi Chat on Expo / iOS
 
-An on-device chat app built with Pi's **durable `Harness`**, Expo SQLite, and Pi's provider registry. Connect OpenAI with ChatGPT or an API key, retain the separate legacy Codex connection, or use Anthropic, Google, OpenRouter, or xAI. Continue independent conversations across app restarts, each with its own provider, model, and reasoning effort. New chats initially use `gpt-6-sol` from the pinned Pi catalog; the `add_numbers` tool executes locally on the device.
+An on-device chat app built with Pi's **durable `Harness`**, Expo SQLite, and Pi's provider registry. Connect OpenAI with ChatGPT or an API key, or use Anthropic, Google, OpenRouter, or xAI with an API key. Continue independent conversations across app restarts, each with its own provider, model, and reasoning effort. A new chat uses the first connected provider in the catalog and that provider's first model with a supported reasoning setting; the `add_numbers` tool executes locally on the device.
 
-The app exact-pins `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord` to **1.0.0**. The previous one-prompt Agent Core runner has been replaced by a shared durable session with separate conversations. [`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge needed to run Pi in Expo on iOS and Android.
+The app exact-pins `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord` to **1.0.4**. The previous one-prompt Agent Core runner has been replaced by a shared durable session with separate conversations. [`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge needed to run Pi in Expo on iOS and Android.
 
 ## Run
 
@@ -15,11 +15,10 @@ Use a development build for the app's OAuth integration. Rebuild an existing dev
 
 1. Open **Providers**. In **OpenAI**, choose **Continue with ChatGPT** for the modern browser flow or **Use API key**. Each replaces the other authentication method for this provider.
 2. Complete browser sign-in. On iOS, a local Swift Expo module receives Pi's localhost callback and the app closes the authentication browser automatically. If the listener or browser is unavailable, the same PKCE/state attempt can finish through **Open in browser** and the full callback URL field. See the [modern OAuth adapter](src/pi/openai-auth/README.md) for the callback lifecycle and validation boundaries.
-3. For the existing device-code connection, use the separate **OpenAI Codex (legacy)** card. It requests and copies a one-time code; choose **Open sign-in page** and enter it. Keep the app in the foreground while it polls for approval. Modern and legacy connections can coexist.
-4. Return to **Chats**, choose the connected provider in the chat's **Model settings**, and send a message. Asking it to add 19 and 23 exercises the on-device `add_numbers` tool.
-5. Use **Stop** to cancel a response. Rename or archive conversations from their chat actions; archived chats are hidden from the list, while their durable records remain stored.
+3. Return to **Chats** and start a chat. It uses a connected provider; change the provider, model or effort in the chat's **Model settings**. Asking it to add 19 and 23 exercises the on-device `add_numbers` tool.
+4. Use **Stop** to cancel a response. Rename or archive conversations from their chat actions; archived chats are hidden from the list, while their durable records remain stored.
 
-Existing chats remain readable without a provider connection. Sending or resuming model work requires credentials for the selected provider. Legacy Codex device-code login requires the account or workspace to permit it; see [OpenAI's device-code instructions](https://learn.chatgpt.com/docs/auth#login-on-headless-devices). Pi's modern `openai` OAuth provider has no device-code route in either the installed 1.0.0 or published 1.0.1 SDK checked on October 3, 2026.
+Existing chats remain readable without a provider connection. Starting a chat, sending, or resuming model work requires credentials for a provider. Pi's `openai` OAuth provider has no device-code route in the installed `pi-ai` 1.0.4.
 
 ## Per-chat model settings
 
@@ -29,11 +28,11 @@ The model catalog comes from the registered Pi `Models` instance. Display names 
 
 Settings are stored in Pi's existing conversation-scoped **`AgentDoc` (`pi.agent`)**, using its public `configure()` mutation in one durable transaction. They are projected from committed revisions through `useSyncExternalStore`, just like the transcript. No second preferences database, AsyncStorage copy, or custom schema migration is needed. Existing chats keep their agent settings, and omitted effort follows Pi's `off` default.
 
-Open **Providers** to connect accounts or API keys. Credentials are saved separately from conversations using Expo SecureStore on native platforms and session storage on web. Modern OpenAI credentials are stored under `openai`; the legacy ChatGPT credential retains its existing client-specific storage key under `openai-codex`. `src/pi/models.ts` is the provider-registration boundary: add a mobile-compatible SDK provider there to expose its catalog through the same settings UI. No provider or model union needs to be edited in chat state.
+Open **Providers** to connect accounts or API keys. Credentials are saved separately from conversations in Expo SecureStore, one record per provider; ChatGPT sign-in and an API key are alternative credentials for `openai`. `src/pi/models.ts` is the provider-registration boundary: add a mobile-compatible SDK provider there to expose its catalog through the same settings UI. No provider or model union needs to be edited in chat state.
 
 ## Native OpenAI web search
 
-The modern **OpenAI** provider makes Responses' hosted `web_search` tool available alongside local function tools. Pi and OpenAI decide when to call it. Search activity appears within the assistant response, with expandable queries/page actions, clickable inline citations, and a source list. Stopping a request keeps received search activity visible as interrupted. Model and account support are determined by OpenAI; the legacy Codex provider and other providers keep their existing behavior.
+The modern **OpenAI** provider makes Responses' hosted `web_search` tool available alongside local function tools. Pi and OpenAI decide when to call it. Search activity appears within the assistant response, with expandable queries/page actions, clickable inline citations, and a source list. Stopping a request keeps received search activity visible as interrupted. Model and account support are determined by OpenAI; other providers keep their existing behavior.
 
 `withNativeWebSearch(openaiProvider())` decorates Pi's registered provider. Pi still owns authentication, HTTP/SSE transport, retries, response parsing, text streaming, and local tool execution. The wrapper composes the public `onPayload` and `onProviderStreamEvent` callbacks to add the hosted tool, request native results/sources/encrypted reasoning, and preserve the provider's structural events. A caller's payload callback receives the assembled native request and retains the final say over its contents.
 
@@ -57,23 +56,24 @@ Streaming follows the bottom of the transcript until you drag to read earlier me
 
 When the app enters the background, the runtime requests a harness close and closes its storage. On foreground activation, it reopens the database and resumes unfinished work when credentials are available. This is foreground recovery of committed state; the app does **not** promise model execution while iOS or Android suspends it. A recovered unfinished generation can start a new provider request. Native suspend/resume and process-termination checks are tracked separately in the [verification record](docs/ios-compatibility.md).
 
-**Native OAuth credentials persist in Expo SecureStore.** Records contain the access token, refresh token, expiry, and provider-specific metadata: the issued client ID and scopes for modern OpenAI, or the account ID for legacy Codex. Storage uses iOS Keychain / Android Keystore-backed storage with asynchronous reads and writes. Credentials are restored on startup; Pi refreshes tokens near expiry and commits any replacement refresh token before authenticating requests. Tokens are never stored in the chat SQLite database. The web adapter retains credentials in session storage for the current browser tab. System authentication-browser cookies are managed separately.
+**Credentials persist in Expo SecureStore** (iOS Keychain / Android Keystore), one record per provider: an API key, or for ChatGPT the access token, refresh token, expiry, issued client ID and scopes. They are restored on startup and never stored in the chat SQLite database. Pi refreshes OAuth tokens near expiry and saves the replacement before authenticating the request. System authentication-browser cookies are managed separately.
 
 Signing out first stops the active scheduler, then removes saved credentials. Saved chats remain available. Failed credential deletion leaves requests paused and offers a retry; a temporary network or Keychain error preserves the stored session. A token-endpoint `invalid_grant` removes the rejected credential and asks for sign-in again. Authentication restoration and retry errors do not close readable chat history.
 
 ## Pi and Expo authentication
 
-See the [modern OpenAI OAuth adapter](src/pi/openai-auth/README.md) and [legacy Codex OAuth adapter](src/pi/codex-auth/README.md) for their separate protocols, public APIs, and browser lifecycle requirements.
+The app has one credential store and one OAuth adapter. `src/pi/models.ts` builds Pi's `Models` with `createModels()`, backed by `ProviderCredentialStore`, and registers:
 
-The app replaces only the registered providers' `login`, `refresh`, and `toAuth` methods through Pi's public `Provider.auth.oauth` interface. Expo supplies native browser presentation, PKCE, cryptography, and secure storage. Pi's `Models.login()` persists credentials; its request path serializes refresh through the credential-store lock. The durable harness receives that same `Models` instance and uses `settings.stream.transport = 'sse'`, zero provider retries, and a 60-second request timeout. Pi's provider catalogs and inference transports remain in use.
+- **OpenAI** (`openai`): Sign in with ChatGPT or an API key. The provider is wrapped for native web search, and only its `auth.oauth` is replaced by the app's Expo adapter in [`src/pi/openai-auth/`](src/pi/openai-auth/README.md), because Pi's own login flows import `node:http` and cannot run on Hermes.
+- **Anthropic, Google, OpenRouter and xAI**: API keys.
 
-Modern OpenAI uses a local, Swift-only Expo Modules 2.0 callback receiver backed by Apple's Network framework. It binds only `127.0.0.1:1455` during the current sign-in; there is no desktop credential import or remote callback proxy. The authentication choices are:
+Pi-ai's README marks `openai-codex` as legacy, superseded by Sign in with ChatGPT on `openai`. The app does not register it; chats saved with an `openai-codex` model show the model as unavailable until another is chosen in chat settings.
 
-- **OpenAI: modern Sign in with ChatGPT or API key.** The browser adapter follows Pi's dynamic public-client registration and authorization-code/PKCE protocol for the public Responses API. It retains Pi's HTTP loopback redirect and offers full-URL manual return when native browser capture does not complete. `LoginOptions.getDeviceId` identifies the installation; it does not enable device-code authorization. Pi 1.0.0 and 1.0.1 expose no modern device-code login route. See the [versioned SDK implementation](https://github.com/earendil-works/pi/blob/83692682f095528f8b71652ddacff7075e36e893/packages/ai/src/auth/oauth/openai-chatgpt.ts#L233).
-- **OpenAI Codex (legacy): public client and device-code login.** The app implements the legacy device-code protocol originally adapted from Pi 0.87.1. OpenAI returns the authorization code and verifier through polling. Token exchange uses OpenAI's server-side device callback, which never calls back into the app. Closing the sign-in browser leaves approval pending; cancelling sign-in stops polling and dismisses the browser. The code expires after fifteen minutes.
-- **Legacy registered mobile client: Expo authorization-code login.** If OpenAI issues your app a public client with Codex access and registers `piagent://auth/callback`, set `EXPO_PUBLIC_CODEX_OAUTH_CLIENT_ID` and restart Metro. Expo generates PKCE/state; the adapter validates the exact callback and rejects duplicate state/code parameters. The same client is used for exchange and refresh. This setting affects only `openai-codex`; it does not register a mobile redirect or configure modern OpenAI sign-in.
+The adapter follows Pi's browser authorization-code + PKCE protocol with dynamic client registration. On iOS, a Swift-only Expo module ([`modules/pi-oauth-callback/`](modules/pi-oauth-callback/README.md)) receives the `http://127.0.0.1:1455/auth/callback` loopback redirect. If the port is busy or the browser does not return, the same attempt finishes by pasting the full callback URL; PKCE and state make a stolen callback unusable.
 
-Automated protocol tests use synthetic credentials and do not establish live consent or model entitlement. The initial browser-only implementation could not capture Pi's HTTP loopback redirect. The native receiver now handles that redirect and returns it to the existing Pi/Expo OAuth flow. Browser failure, listener unavailability, and unsupported platforms retain manual callback entry. Live OpenAI consent, token exchange, and authenticated inference remain separate checks. The registered legacy mobile-client flow likewise requires an appropriately registered client. Legacy device-code browser presentation currently supports iOS. References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/), [Expo SDK 58 SQLite](https://docs.expo.dev/versions/v58.0.0/sdk/sqlite/).
+`Models.login()` persists credentials. `Models.getAuth()` and request paths refresh OAuth tokens under the store's per-provider lock, with Pi's own timeout and without the caller's cancellation, so a received token rotation is always saved. `ProviderCredentialStore` keeps one versioned SecureStore record per provider, serializes each provider's operations, retries saving a rotated token whose first write failed before the old token can be used again, and removes the credential when OpenAI rejects its refresh token (`invalid_grant`). The durable harness uses the same `Models` instance.
+
+Automated tests use synthetic credentials; live consent, token exchange and authenticated inference are separate checks. References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/), [Expo SDK 58 SecureStore](https://docs.expo.dev/versions/v58.0.0/sdk/securestore/).
 
 ## Validation
 
@@ -131,7 +131,7 @@ Native integration, background/foreground behavior, and live authenticated ChatG
 - `src/app/index.tsx`: saved chat list, search, creation, and chat actions.
 - `src/app/chat/[id].tsx`: conversation transcript, composer, streaming, tool output, and cancellation.
 - `src/app/chat-settings/[id].tsx`: staged per-chat provider, model, and reasoning settings.
-- `src/app/account.tsx`: provider API keys, ChatGPT sign-in, device code, browser actions, and disconnecting accounts.
+- `src/app/account.tsx`: provider API keys, ChatGPT sign-in, browser actions, connection retry, and disconnecting accounts.
 - `src/chat/chat-provider.tsx`: shared Models instance, account state, and React subscriptions.
 - `src/chat/chat-runtime.ts`: serialized foreground/background, storage, and account lifecycle.
 - `src/components/chat/transcript.tsx` and `src/hooks/use-transcript-scroll.ts`: transcript-only subscriptions and UI-thread following that yields to the reader.
@@ -141,9 +141,8 @@ Native integration, background/foreground behavior, and live authenticated ChatG
 - `src/pi/native-web-search/`: OpenAI provider wrapper, native archive/replay, durable documents, and safe presentation projection.
 - `src/components/chat/web-search.tsx`: native search activity and sources, with citation source maps in the existing Markdown renderer.
 - `src/pi/model-catalog.ts`: SDK-derived provider/model choices, effort capabilities, and selection validation.
-- `src/pi/models.ts` and `provider-credentials.ts`: mobile provider registration and provider-scoped credential persistence.
+- `src/pi/models.ts`, `provider-credentials.ts` and `secure-storage.ts`: mobile provider registration and provider-scoped SecureStore persistence.
 - `src/pi/storage/`: custom Expo `SqliteDatabase` adapter and portable `SqliteStorage` factory.
-- `src/pi/codex-auth/`: native OAuth adapter, callback validation, token exchange, and device polling.
 - `src/pi/openai-auth/`: modern OpenAI `OAuthAuth` adapter, installation identity, issued-client token exchange, callback/browser coordination, and same-attempt manual fallback.
 - `modules/pi-oauth-callback/`: Swift-only Expo Modules 2.0 loopback receiver using Apple Network; local module autolinking keeps native code outside generated projects.
 - `packages/expo-pi/`: Metro compatibility transform and secure-random bridge; also usable with Pi's in-memory `Agent` API.

@@ -156,7 +156,7 @@ export default async function nativeWebSearchProbe({ database, platform, holdMs 
       delegateRuntime(app.runtime);
       return { ...app, ...service.getSnapshot(), ready: true,
         catalog: buildModelCatalog(models), providerAccess: () => ({ ready: true, connected: true }),
-        signedIn: true, signingIn: false, hasConnectedProvider: true };
+        signingIn: false, hasConnectedProvider: true };
     };
     restores.push(() => Object.defineProperty(providerModule, 'useChatApp', appDescriptor));
     const probeDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__PI_NATIVE_SEARCH_PROBE__');
