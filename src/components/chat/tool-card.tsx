@@ -8,7 +8,8 @@ import { ChatIcon } from './icon';
 export function ToolCard({ message }: { message: ChatMessage }) {
   const colors = useChatColors();
   const [expanded, setExpanded] = useState(false);
-  const tool = message.tool!;
+  const tool = message.tool;
+  if (!tool) return null;
   const file = tool.file;
   const label = tool.name.replace(/_/g, ' ');
   const status = tool.status === 'running' ? 'Working' : tool.status === 'error' ? 'Failed' : 'Complete';
@@ -43,7 +44,6 @@ export function ToolCard({ message }: { message: ChatMessage }) {
         <Text selectable testID={`tool-diff-${message.id}`} style={[styles.output, { color: colors.text }]}>{file.diff}</Text>
         {file.diffTruncated ? <Text style={[styles.summary, { color: colors.muted }]}>Diff preview truncated.</Text> : null}
       </> : null}
-      {file?.patchPath ? <Text selectable testID={`tool-patch-${message.id}`} style={[styles.output, { color: colors.secondary }]}>Full patch: {file.patchPath}</Text> : null}
     </View> : null}
   </View>;
 }

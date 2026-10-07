@@ -59,7 +59,6 @@ test('committed execution choice and cwd project atomically, reopen, rewind on f
   await reopened.updateExecution(id, local);
   assert.deepEqual(await reopened.harness.snapshot(ExecutionTargetDoc, id, context), { target: local.target },
     'switching local removes machineId');
-  assert.equal(file.metrics.opened, 0, 'configuration never opens a filesystem');
 });
 
 test('a selection saved by the version 1 document reads as the same machine and switches back to local cleanly', async (t) => {

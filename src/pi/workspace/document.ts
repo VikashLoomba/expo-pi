@@ -4,7 +4,7 @@ import { defineDoc, type ConversationId, type Tx } from '@earendil-works/pi-dura
 export const WORKSPACE_EXTENSION = 'local-bash';
 export type WorkspaceState = { id: string; origin: 'new' | 'fork' };
 
-/** Identity belongs to the conversation; file bytes belong to the workspace database. */
+/** Identity belongs to the conversation; file bytes belong to the workspace directory it names. */
 export const WorkspaceDoc = defineDoc<WorkspaceState>({
   kind: 'app.bash.workspace', version: 2, scope: 'conversation', history: 'latest', fork: 'initial',
   // Reads of a missing document must not invent an uncommitted identity.

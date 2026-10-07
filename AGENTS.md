@@ -31,6 +31,8 @@ Run lint and typecheck before declaring any task done.
 - Before inventing a pattern for a pi-durable, pi-ai or pi-env integration, find the matching upstream example or source at the installed version tag (github.com/earendil-works/pi, `packages/*/test/examples`, tag `v<installed version>`) and follow it, or state why none applies.
 - Tests assert behavior a user or an upstream contract cares about. Never assert object identity, memoization, lock ownership, call counts or internal ordering, and never keep a test only because the current code makes it pass.
 - Specs in `docs/` that carry a "Superseded" banner are historical. Don't implement from them.
+- Idiomatic first; no speculative performance work. Use Expo and pi-durable the way their docs and examples do and assume it is fast enough. Don't add caches, batching, budgets or other optimization layers without a measured problem on a real device.
+- No app-added limits by default; use library defaults. Never construct stress or adversarial scenarios (huge files, runaway loops, enormous outputs) to justify a limit or an optimization. Only ordinary, realistic use counts as evidence.
 
 ## Upstream contracts and integration review
 

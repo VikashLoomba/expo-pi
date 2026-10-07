@@ -1,11 +1,11 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { AuthInteraction, LoginOptions, Models } from '@earendil-works/pi-ai';
 import type { ConversationId, Storage } from '@earendil-works/pi-durable';
-import type { SqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite';
 
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
 import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { ExecutionComposition } from '../pi/execution/composition';
+import type { Workspaces } from '../pi/workspace/storage';
 import { buildModelCatalog, type ChatModelSettings, type NewChatDefaults } from '../pi/model-catalog';
 import type { ProviderAccess } from '../pi/provider-credentials';
 
@@ -44,7 +44,7 @@ export class ChatRuntime {
   constructor(private readonly options: {
     models: Models; openStorage: () => Promise<Storage>; credentials?: Credentials;
     execution?: (local: ExecutionComposition) => ExecutionComposition;
-    openWorkspaceDatabase?: () => Promise<SqliteDatabase>;
+    workspaces: Workspaces;
     newChat?: NewChatDefaults;
   }) {}
 
@@ -108,7 +108,7 @@ export class ChatRuntime {
       try {
         storage = await this.options.openStorage();
         const service = await DurableChatService.open({ storage, models: this.options.models,
-          execution: this.options.execution, openWorkspaceDatabase: this.options.openWorkspaceDatabase,
+          execution: this.options.execution, workspaces: this.options.workspaces,
           newChat: this.options.newChat,
           authError: (providerId) => this.options.credentials?.getProviderSnapshot(providerId).error,
         });

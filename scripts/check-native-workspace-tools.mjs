@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
-  console.log('Usage: node scripts/check-native-workspace-tools.mjs --namespace pi-workspace-tools-UNIQUE --stage seed|verify|performance|ui [--platform ios|android] [--port PORT] [--hold-ms MS]\n'
+  console.log('Usage: node scripts/check-native-workspace-tools.mjs --namespace pi-workspace-tools-UNIQUE --stage seed|verify|ui [--platform ios|android] [--port PORT] [--hold-ms MS]\n'
     + 'Requires a connected development build. Run seed, terminate/relaunch the process, then verify with the same namespace.\n'
-    + 'Uses isolated SQLite databases and scripted model transport. Does not read credentials or use model HTTP.');
+    + 'Each namespace gets its own chat database and workspace directory (expo-file-system). verify and ui delete\n'
+    + 'them when they finish; seed keeps them for verify. Scripted model transport; no credentials or model HTTP.');
   process.exit(0);
 }
 const options = { platform: 'ios' };
@@ -19,7 +20,7 @@ for (let i = 0; i < args.length; i += 2) {
   options[flag.slice(2)] = value;
 }
 if (!/^pi-workspace-tools-[a-zA-Z0-9-]+$/.test(options.namespace ?? '')
-  || !['seed', 'verify', 'performance', 'ui'].includes(options.stage) || !['ios', 'android'].includes(options.platform)
+  || !['seed', 'verify', 'ui'].includes(options.stage) || !['ios', 'android'].includes(options.platform)
   || (options.port && !/^\d+$/.test(options.port))
   || (options['hold-ms'] && (!/^\d+$/.test(options['hold-ms']) || Number(options['hold-ms']) > 45000))) throw new Error('Invalid validation options; see --help');
 if (options['hold-ms']) options.holdMs = Number(options['hold-ms']);

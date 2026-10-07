@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
@@ -8,6 +8,7 @@ import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { createExpoSqliteDatabase } from '../../src/pi/storage/expo-sqlite.ts';
 import { readChat } from './chat-view.mjs';
 import { createNodeSqliteConnection } from './node-sqlite.mjs';
+import { nodeWorkspaces } from './node-workspaces.mjs';
 
 /** Deterministic model transport, never evidence of a real provider run. */
 export function bashReply(command, args = {}) {
@@ -35,34 +36,24 @@ export function toolRound(calls) {
   };
 }
 
+/** A chat database and a directory of workspaces, both in one temporary directory. */
 export async function integrationDatabase(t, Service) {
   const directory = await mkdtemp(join(tmpdir(), 'pi-bash-integration-'));
   const chatPath = join(directory, 'chats.sqlite');
-  const workspacePath = join(directory, 'workspaces.sqlite');
+  const workspaceRoot = join(directory, 'workspaces');
+  const workspaces = nodeWorkspaces(workspaceRoot);
   const services = new Set();
   const storageByService = new Map();
-  const metrics = { opened: 0, closed: 0 };
   t.after(async () => {
     await Promise.allSettled([...services].map((service) => service.close()));
     await rm(directory, { recursive: true, force: true });
   });
   const openStorage = () => SqliteStorage.open(createExpoSqliteDatabase(createNodeSqliteConnection(chatPath)));
-  const openWorkspaceDatabase = async () => {
-    const native = createNodeSqliteConnection(workspacePath);
-    const close = native.closeAsync.bind(native);
-    native.closeAsync = async () => { await close(); metrics.closed++; };
-    metrics.opened++;
-    const db = createExpoSqliteDatabase(native);
-    await db.exec('PRAGMA journal_mode = WAL');
-    await db.exec('PRAGMA foreign_keys = ON');
-    await db.exec('PRAGMA busy_timeout = 5000');
-    return db;
-  };
   return {
-    directory, workspacePath, metrics, openStorage, openWorkspaceDatabase,
+    directory, workspaceRoot, workspaces, openStorage,
     async open(models, options = {}) {
       const storage = await openStorage();
-      const service = await Service.open({ storage, models, openWorkspaceDatabase, ...options });
+      const service = await Service.open({ storage, models, workspaces, ...options });
       services.add(service);
       storageByService.set(service, storage);
       return service;
@@ -74,6 +65,13 @@ export async function integrationDatabase(t, Service) {
         scope: { kind: 'conversation', conversationId: Number(id) } }, 'current', BACKGROUND_CONTEXT);
       assert.ok(record, 'conversation has a committed workspace identity');
       return (await storage.document(record.id, 'current', BACKGROUND_CONTEXT)).value;
+    },
+    /** A file in a workspace directory, read straight from disk. */
+    async file(workspaceId, path) {
+      return readFile(join(workspaceRoot, workspaceId, path), 'utf8').catch((error) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
     },
   };
 }

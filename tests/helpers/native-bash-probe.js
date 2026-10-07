@@ -13,12 +13,12 @@ export default async function nativeBashProbe({ namespace, stage, platform }) {
   const { anthropicProvider } = requireModule('@earendil-works/pi-ai/dist/providers/anthropic.js');
   const { DurableChatService } = requireModule('src/pi/chat-service.ts');
   const { openExpoSqliteStorage } = requireModule('src/pi/storage/index.ts');
-  // The production native factory is a lazy Metro chunk. Reuse its installed
-  // connection/driver boundary so the probe can name an isolated validation DB.
-  const { openDatabaseAsync } = requireModule('expo-sqlite/build/index.js');
-  const { createExpoSqliteDatabase } = requireModule('src/pi/storage/expo-sqlite.ts');
-  const openWorkspaceDatabase = async (name) => createExpoSqliteDatabase(
-    await openDatabaseAsync(name, { useNewConnection: true }));
+  const { createDeviceWorkspaces } = requireModule('src/pi/workspace/device-storage.ts');
+  const { Directory, File, Paths } = requireModule('expo-file-system/build/index.js');
+  const { deleteDatabaseAsync } = requireModule('expo-sqlite/build/index.js');
+  const databaseName = `${namespace}-chats.db`;
+  const rootName = `${namespace}-workspaces`;
+  const root = new Directory(Paths.document, rootName);
   const models = ai.createModels({ credentials: new ai.InMemoryCredentialStore(),
     authContext: { env: async () => undefined, fileExists: async () => false } });
   const command = stage === 'seed' ? [
@@ -26,35 +26,28 @@ export default async function nativeBashProbe({ namespace, stage, platform }) {
     'mkdir -p one/sub two',
     "printf 'héllo 世界\\n' > one/value",
     'printf AP9B | base64 -d > binary',
-    'ln binary alias',
-    'ln -s /workspace/one/value absolute',
-    'ln -s ../one/sub two/link',
-    'chmod 640 binary',
-    'gzip -c binary > bytes.gz',
     'printf session > /tmp/ephemeral',
-    'sha256sum binary',
+    'cp -r one two/copy',
+    "printf '{\"value\":42}' > data.json",
+    'md5sum binary',
     'echo SEEDED',
   ].join('\n') : [
     'set -e',
     'if test -e /tmp/ephemeral; then echo TEMP_LEAK; exit 91; fi',
-    'cat absolute two/link/../value',
-    'readlink absolute',
-    'od -An -tu1 binary',
-    'gzip -dc bytes.gz | base64',
-    'sha256sum alias',
-    'printf Z >> alias',
+    'cat one/value two/copy/value',
+    'base64 binary',
+    'md5sum binary',
+    'for hash in sha1sum sha256sum; do if $hash binary 2>/dev/null; then echo HASH_OFFERED; exit 93; fi; done',
+    'mktemp /workspace/tmp.XXXXXX | grep -c tmp',
+    'printf Z >> binary',
     'test "$(base64 binary)" = AP9BWg==',
-    'printf AP9B | base64 -d > alias',
-    'stat -c %a binary',
+    'mv two/copy two/moved && test ! -e two/copy',
+    'ls two | sort | tr "\\n" " "; echo',
+    'grep -rl héllo . | sort',
+    "sed -n 's/héllo/bonjour/p' one/value",
+    'jq -r .value data.json',
     'test -f /bin/cat',
-    'test -f /proc/self/status',
-    'rm -f dangling dangling-copy dangling-moved',
-    'ln -s missing-for-link-test dangling',
-    'cp dangling dangling-copy',
-    'mv dangling-copy dangling-moved',
-    'test "$(readlink dangling-moved)" = missing-for-link-test',
-    'rm dangling dangling-moved',
-    "printf '{\"value\":42}' | jq -r .value",
+    'rm -r two',
     'echo VERIFIED',
   ].join('\n');
   let providerCalls = 0;
@@ -91,8 +84,8 @@ export default async function nativeBashProbe({ namespace, stage, platform }) {
     } finally { stop(); }
   };
   const service = await DurableChatService.open({ models,
-    storage: await openExpoSqliteStorage(`${namespace}-chats.db`),
-    openWorkspaceDatabase: () => openWorkspaceDatabase(`${namespace}-files.db`) });
+    storage: await openExpoSqliteStorage(databaseName), workspaces: createDeviceWorkspaces(rootName) });
+  let finished = false;
   try {
     const id = stage === 'seed' ? await service.createChat() : service.getSnapshot().chats[0]?.id;
     if (!id) throw new Error('The seed conversation did not survive restart.');
@@ -100,13 +93,28 @@ export default async function nativeBashProbe({ namespace, stage, platform }) {
     const rows = (await readChat(service, id)).messages.filter((row) => row.tool?.name === 'bash');
     const output = rows[rows.length - 1]?.tool.output ?? '';
     const expected = stage === 'seed' ? ['SEEDED']
-      : ['héllo 世界', '/workspace/one/value', 'AP9B', '640', '42', 'VERIFIED'];
-    if (receipt.status !== 'done' || !offered || !output.includes('Exit code: 0')
+      : ['héllo 世界\nhéllo 世界', 'AP9B', 'd396e6af3f0989f28c5be42adadb290f  binary', 'moved',
+        'one/value\ntwo/moved/value', 'bonjour 世界', '42', 'VERIFIED'];
+    const status = rows[rows.length - 1]?.tool.status;
+    if (receipt.status !== 'done' || !offered || status !== 'completed'
       || expected.some((value) => !output.includes(value))) {
-      throw new Error(`Shell validation failed: ${JSON.stringify({ receipt, offered, output })}`);
+      throw new Error(`Shell validation failed: ${JSON.stringify({ receipt, offered, status, output })}`);
     }
+    // The seeded files are real files in the chat's workspace directory.
+    const workspaceDirectory = root.list().find((entry) => entry instanceof Directory);
+    const binary = workspaceDirectory && new File(workspaceDirectory, 'binary');
+    const onDisk = binary?.exists ? [...await binary.bytes()] : undefined;
+    if (stage === 'seed' && JSON.stringify(onDisk) !== '[0,255,65]') throw new Error(`Workspace bytes on disk: ${onDisk}`);
+    finished = true;
     return { ok: true, stage, namespace, conversationId: id, platform,
-      hermes: typeof globalThis.HermesInternal === 'object', providerCalls, output,
+      hermes: typeof globalThis.HermesInternal === 'object', providerCalls, output, onDisk,
       network: 'Scripted provider transport; no model HTTP request' };
-  } finally { await service.close(); }
+  } finally {
+    await service.close();
+    // Seeded fixtures stay for the verify stage; every other outcome removes them.
+    if (stage !== 'seed' || !finished) {
+      if (root.exists) root.delete();
+      await deleteDatabaseAsync(databaseName).catch(() => {});
+    }
+  }
 }

@@ -1,5 +1,5 @@
 import type { DaemonChannel, DaemonChannelFactory } from './channel';
-import { getRandomValues } from '../../bash/engine/native-crypto';
+import { getRandomValues } from 'expo-crypto';
 import { encodeFrame, FrameDecoder, FrameType, type Frame, type Json } from './protocol';
 
 export type { Json } from './protocol';

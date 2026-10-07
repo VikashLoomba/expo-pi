@@ -20,7 +20,7 @@ test('a draining cancellation does not hold another chat, and closing the app wa
     toolReply('bash', { command: 'printf RUNTIME_LOCAL_PROGRESS' }), { chunks: ['Done.'] },
   ]);
   const runtime = new ChatRuntime({ models: provider.models,
-    openStorage: file.openStorage, openWorkspaceDatabase: file.openWorkspaceDatabase,
+    openStorage: file.openStorage, workspaces: file.workspaces,
     execution: independent.decorate });
   t.after(async () => { independent.releaseDrain(); await runtime.close(); });
   await runtime.open();

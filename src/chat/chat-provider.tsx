@@ -14,6 +14,7 @@ import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
 import type { ProviderAccess, ProviderCredentialStore } from '../pi/provider-credentials';
 import { openExpoSqliteStorage } from '../pi/storage';
+import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
 import { AuthPromptController } from './auth-prompt-controller';
 import { ChatRuntime } from './chat-runtime';
 import type { ChatControls, ChatMessage } from './types';
@@ -28,7 +29,8 @@ function useChatRuntime() {
     return session;
   });
   const [runtime] = useState(() => new ChatRuntime({ models, credentials, openStorage: openExpoSqliteStorage,
-    execution: (local) => createRemoteExecution(local, remoteHosts), newChat: NEW_CHAT_DEFAULTS }));
+    workspaces: createDeviceWorkspaces(), execution: (local) => createRemoteExecution(local, remoteHosts),
+    newChat: NEW_CHAT_DEFAULTS }));
   useEffect(() => {
     void remoteHosts.restore().catch((error) => runtime.report(error));
     // The runtime reports a failed open. Returning to the app retries it; an open runtime ignores the call.

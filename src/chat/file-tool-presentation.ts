@@ -6,12 +6,12 @@ export type FileToolPresentation = {
   diff?: string;
   diffTruncated?: boolean;
   firstChangedLine?: number;
-  patchPath?: string;
 };
 
 function record(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown> : undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries: [string, unknown][] = Object.entries(value);
+  return Object.fromEntries(entries);
 }
 const positiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
@@ -55,12 +55,11 @@ export function withFileToolDetails(presentation: FileToolPresentation | undefin
   const diff = typeof value.diff === 'string' ? value.diff : undefined;
   const maxUnits = 24 * 1024;
   let preview = diff?.slice(0, maxUnits);
-  // A historical diff can exceed today's byte bound; don't end its preview inside a surrogate pair.
+  // A historical diff can exceed today's bound; don't end its preview inside a surrogate pair.
   if (preview && /[\uD800-\uDBFF]$/.test(preview)) preview = preview.slice(0, -1);
   return { ...presentation,
-    ...(preview !== undefined ? { diff: preview, diffTruncated: diff!.length > preview.length || value.diffTruncated === true } : {}),
+    ...(diff !== undefined && preview !== undefined
+      ? { diff: preview, diffTruncated: diff.length > preview.length || value.diffTruncated === true } : {}),
     ...(positiveInteger(value.firstChangedLine) ? { firstChangedLine: value.firstChangedLine } : {}),
-    ...(typeof value.patchPath === 'string' && value.patchPath.startsWith('/workspace/') && value.patchPath.length <= 4096
-      ? { patchPath: value.patchPath } : {}),
   };
 }

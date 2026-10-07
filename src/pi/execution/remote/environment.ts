@@ -3,7 +3,7 @@ import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { posix, resolveRemotePath } from "./paths";
-import { MobileUtf8Decoder } from "./utf8";
+import { decodeStrictUtf8 } from "../strict-utf8";
 import type { Context } from "@earendil-works/chord";
 import {
 	type BinaryReader,
@@ -140,8 +140,8 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		}
 	}
 
-	/** Node's `readFile`, with or without UTF-8 decoding, over a file opened like `open(path, "r")`. */
-	async #readFile(path: string, encoding: boolean, context: Context): Promise<Result<Uint8Array | string, FileError>> {
+	/** Node's `readFile` without decoding, over a file opened like `open(path, "r")`. */
+	async #readFile(path: string, context: Context): Promise<Result<Uint8Array, FileError>> {
 		const signal = context.abortSignal;
 		return this.#fileOp(path, context, async (resolved) => {
 			const { handle, json } = await this.#open(resolved, { mode: "read" }, context.abortSignal);
@@ -157,60 +157,47 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 				}
 				if (size === 0) {
 					// Unknown size: sequential reads until the end, as for FIFOs and devices.
-					const decoder = new MobileUtf8Decoder();
 					const chunks: Uint8Array[] = [];
 					let total = 0;
-					let text = "";
 					while (true) {
 						if (aborted()) throw abort();
 						const bytes = await handle.pread(undefined, READ_FILE_UNKNOWN_CHUNK);
 						if (bytes.length === 0) break;
 						total += bytes.length;
 						chunks.push(bytes);
-						if (encoding) text += decoder.write(bytes);
 					}
-					if (!encoding) return Buffer.concat(chunks, total);
-					return total === 0 ? "" : text + decoder.end();
+					return Buffer.concat(chunks, total);
 				}
-				if (!encoding) {
-					// A single read of the whole size, or reads of 512 KiB until the size or the end of the file.
-					if (size <= READ_FILE_CHUNK) return Buffer.from(await handle.pread(0, size));
-					const read = await readRange(
-						(at, length) => handle.pread(at, length),
-						0,
-						size,
-						READ_FILE_CHUNK,
-						aborted,
-					);
-					if (read === undefined) throw abort();
-					return Buffer.concat(read.chunks, read.total);
-				}
-				// Cap every read at the size observed on open. A concurrent append must
-				// neither expand this whole-file read nor cause an unbounded phone allocation.
-				const decoder = new MobileUtf8Decoder();
-				let text = "";
-				let total = 0;
-				while (total < size) {
-					const length = Math.min(size - total, READ_FILE_CHUNK);
-					const bytes = await handle.pread(total, length);
-					if (aborted()) throw abort();
-					total += bytes.length;
-					text += decoder.write(bytes);
-					if (bytes.length < length) break;
-				}
-				return text + decoder.end();
+				// A single read of the whole size, or reads of 512 KiB until the size or the end of the file.
+				if (size <= READ_FILE_CHUNK) return Buffer.from(await handle.pread(0, size));
+				const read = await readRange(
+					(at, length) => handle.pread(at, length),
+					0,
+					size,
+					READ_FILE_CHUNK,
+					aborted,
+				);
+				if (read === undefined) throw abort();
+				return Buffer.concat(read.chunks, read.total);
 			} finally {
 				await handle.close();
 			}
 		});
 	}
 
+	/** Strict like the local workspace, so `edit` refuses a file that is not UTF-8 instead of corrupting it. */
 	async readTextFile(path: string, context: Context): Promise<Result<string, FileError>> {
-		return (await this.#readFile(path, true, context)) as Result<string, FileError>;
+		const bytes = await this.readBinaryFile(path, context);
+		if (!bytes.ok) return bytes;
+		try {
+			return ok(decodeStrictUtf8(bytes.value, path));
+		} catch (error) {
+			return err(toFileError(error, path));
+		}
 	}
 
 	async readBinaryFile(path: string, context: Context): Promise<Result<Uint8Array, FileError>> {
-		return (await this.#readFile(path, false, context)) as Result<Uint8Array, FileError>;
+		return this.#readFile(path, context);
 	}
 
 	async openBinaryReader(

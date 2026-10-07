@@ -1,83 +1,45 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { createBashTool, createPowerShellTool } from '@earendil-works/pi-durable/tools';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
-import { createNodeSqliteConnection } from './helpers/node-sqlite.mjs';
+import { nodeWorkspaces } from './helpers/node-workspaces.mjs';
 
 const hooks = installBashBrowserHooks();
 test.after(() => hooks.deregister());
-const { createExpoSqliteDatabase } = await import('../src/pi/storage/expo-sqlite.ts');
-const { WorkspaceRuntime } = await import('../src/pi/workspace/runtime.ts');
-const { createWorkspaceExecutionEnv } = await import('../src/pi/workspace/execution-env.ts');
+const { WorkspaceExecutionEnv } = await import('../src/pi/workspace/execution-env.ts');
 const context = BACKGROUND_CONTEXT;
-const command = "printf once >> marker; printf '%1048576s' x";
-function value(result) { assert.equal(result.ok, true, result.error?.message); return result.value; }
+const command = 'printf once >> marker';
 
-async function environment(t) {
-  const runtime = new WorkspaceRuntime(async () => createExpoSqliteDatabase(createNodeSqliteConnection()));
-  const env = createWorkspaceExecutionEnv(runtime, 'spill-failure');
-  t.after(() => runtime.close());
-  value(await env.writeFile('/tmp/fill', new Uint8Array(3500 * 1024), context));
-  return env;
-}
-
-test('spill storage failure after execution reports a completed command and leaves no incomplete artifact', async (t) => {
-  const env = await environment(t);
-  let outputBytes = 0;
-  const result = await env.exec(command, {
-    spill: { afterBytes: 1, afterLines: 1 },
-    onOutput(text) { outputBytes += Buffer.byteLength(text); },
-  }, context);
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, 'unknown');
-  assert.match(result.error.message, /completed with exit code 0.*output could not be preserved.*ENOSPC/);
-  assert.equal(result.error.spillPath, undefined);
-  assert.equal(outputBytes, 1024 * 1024);
-  assert.equal(value(await env.readTextFile('marker', context)), 'once');
-  assert.equal(value(await env.listDir('/tmp', context)).some(({ name }) => name.startsWith('bash-')), false);
-});
-
-test('stock bash retains streamed output and reports spill failure without claiming a launch failure', async (t) => {
-  const env = await environment(t);
-  let received = 0;
-  const diagnostics = [];
-  await assert.rejects(createBashTool().execute({ command }, {
-    env, output(text) { received += Buffer.byteLength(text); }, diagnostic(value) { diagnostics.push(value); },
-  }, context), (error) => error.code === 'unknown' && /completed with exit code 0/.test(error.message));
-  assert.equal(received, 1024 * 1024);
-  assert.deepEqual(diagnostics, [], 'an incomplete spill is never advertised as full output');
-  assert.equal(value(await env.readTextFile('marker', context)), 'once');
-});
-
-test('stock alternate-command fallback never retries after a command completed but could not spill', async (t) => {
-  const env = await environment(t);
-  const attempted = [];
-  // Adapt the stock multi-form tool to this local shell so its public fallback
-  // decision is tested with a real completed mutation and a real storage error.
-  const selected = {
-    cwd: env.cwd,
-    async exec(form, options, current) {
-      attempted.push(form[0]);
-      return env.exec(command, options, current);
-    },
-  };
-  await assert.rejects(createPowerShellTool({ programs: ['first', 'fallback'] }).execute({ command }, {
-    env: selected, output() {}, diagnostic() {},
-  }, context), (error) => error.code === 'unknown');
-  assert.deepEqual(attempted, ['first']);
-  assert.equal(value(await env.readTextFile('marker', context)), 'once');
-});
-
-test('actual command admission failures retain spawn_error and do not execute a mutation', async (t) => {
-  const env = await environment(t);
-  for (const [program, options] of [
-    [[], undefined], [['not-a-supported-program'], undefined],
-    [command, { cwd: '/workspace/missing' }], [command, { timeout: 0 }],
+test('commands that cannot start fail with typed errors before running anything', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-shell-errors-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const env = new WorkspaceExecutionEnv(nodeWorkspaces(root).workspace('errors'), 'errors');
+  for (const [program, options, code] of [
+    [[], undefined, 'spawn_error'],
+    [['not-a-supported-program'], undefined, 'spawn_error'],
+    [command, { cwd: '/workspace/missing' }, 'spawn_error'],
+    [command, { timeout: 0 }, 'timeout'],
   ]) {
     const result = await env.exec(program, options, context);
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, 'spawn_error');
+    assert.equal(result.error.code, code, JSON.stringify(program));
   }
-  assert.equal(value(await env.exists('marker', context)), false);
+  const marker = await env.exists('marker', context);
+  assert.equal(marker.ok && marker.value, false);
+});
+
+test('an output callback failure is reported as a callback error after the command ran', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-shell-errors-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const env = new WorkspaceExecutionEnv(nodeWorkspaces(root).workspace('errors'), 'errors');
+  const result = await env.exec(`${command}; printf out`, {
+    onOutput() { throw new Error('consumer failed'); },
+  }, context);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'callback_error');
+  const marker = await env.readTextFile('marker', context);
+  assert.equal(marker.ok && marker.value, 'once');
 });

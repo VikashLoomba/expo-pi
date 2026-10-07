@@ -7,7 +7,7 @@ import { getOrThrow } from '@earendil-works/pi-durable/env';
 import { createEnvConformance } from '@earendil-works/pi-durable/testing';
 import { DurableChatService } from '../../src/pi/chat-service';
 import { openExpoSqliteStorage } from '../../src/pi/storage';
-import { openWorkspaceDatabase } from '../../src/pi/workspace/database';
+import { createDeviceWorkspaces } from '../../src/pi/workspace/device-storage';
 import { createLocalExecution } from '../../src/pi/execution/composition';
 import { createRemoteExecution } from '../../src/pi/execution/remote/composition';
 import { RemoteHostRepository } from '../../src/pi/execution/remote/hosts';
@@ -29,8 +29,9 @@ export default async function probe({ platform, signal, config }) {
   check(!('defaultCwd' in host), 'machine metadata has no working directory');
   const fixtureCwd = config.host.defaultCwd;
   let workspaceOpens = 0;
-  const openLocal = () => { workspaceOpens++; return openWorkspaceDatabase(`${namespace}-files.db`); };
-  const composition = createRemoteExecution(createLocalExecution(openLocal), hosts);
+  const deviceWorkspaces = createDeviceWorkspaces(`${namespace}-workspaces`);
+  const workspaces = { ...deviceWorkspaces, workspace: (id) => { workspaceOpens++; return deviceWorkspaces.workspace(id); } };
+  const composition = createRemoteExecution(createLocalExecution(workspaces), hosts);
   const resolve = (cwd) => composition.resolve({ conversationId: 1, cwd,
     read: { snapshot: async () => ({ kind: 'ssh', machineId: host.id }) } }, context);
   const base = await resolve(fixtureCwd);
@@ -44,7 +45,7 @@ export default async function probe({ platform, signal, config }) {
       signal.throwIfAborted();
       const cwd = `${root}/case-${conformanceIndex++}`;
       getOrThrow(await base.createDir(cwd, { recursive: true }, context));
-      const owner = createRemoteExecution(createLocalExecution(openLocal), hosts);
+      const owner = createRemoteExecution(createLocalExecution(workspaces), hosts);
       try {
         const env = await owner.resolve({ conversationId: 1, cwd,
           read: { snapshot: async () => ({ kind: 'ssh', machineId: host.id }) } }, context);
@@ -94,7 +95,7 @@ export default async function probe({ platform, signal, config }) {
       } finally { stop(); }
     };
     const openService = async () => DurableChatService.open({ storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models,
-      openWorkspaceDatabase: openLocal, execution: (local) => { const execution = createRemoteExecution(local, hosts); return { ...execution,
+      workspaces, execution: (local) => { const execution = createRemoteExecution(local, hosts); return { ...execution,
         extensions: [defineExtension({ name: 'test.remote-tasks', tasks: [Direct] })] }; } });
     service = await openService();
     const id = await service.createChat();
@@ -118,7 +119,7 @@ export default async function probe({ platform, signal, config }) {
     await service.close(); service = await openService();
     const reopened = await readChat(service, id);
     check(reopened.execution.cwd === root && reopened.execution.target.machineId === host.id, 'remote selection and cwd reopen from native SQLite');
-    check(workspaceOpens === 0, 'remote harness and metadata never open local workspace database');
+    check(workspaceOpens === 0, 'remote harness and metadata never open a local workspace');
     const cancelled = await resolve(root);
     const controller = new AbortController();
     const result = await cancelled.exec("printf started; sleep 20; printf unexpected", { onOutput: () => controller.abort() }, withAbortSignal(controller.signal, context));

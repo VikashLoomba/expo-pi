@@ -93,7 +93,6 @@ for (const scenario of [
   assert.equal(updates, 1, 'terminal task receipts do not permanently prevent configuration');
   assert.equal((await service.harness.snapshot(AgentDoc, Number(id), context)).cwd, '/workspace');
   assert.equal((await service.harness.snapshot(TestExecutionDoc, Number(id), context)).kind, 'local');
-  assert.equal(file.metrics.opened, 0, 'changing execution metadata does not initialize the local backend');
   await file.close(service);
   assert.ok(independent.metrics.cleaned > 0, 'service shutdown closes the environment owner');
 });

@@ -5,15 +5,14 @@ import {
   type ConversationId, type Cursor, type DocumentState, type Extension, type SettledSubmissionRecord, type Storage,
   type SubmissionId, type SubmissionRecord, type Tx,
 } from '@earendil-works/pi-durable';
-import type { SqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite';
 
 import type { ChatSummary } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { isBusy, oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
-import { openWorkspaceDatabase } from './workspace/database';
 import { createWorkspaceExtension } from './workspace/extension';
 import { ensureWorkspaceDoc } from './workspace/document';
+import type { Workspaces } from './workspace/storage';
 import { createLocalExecution, type ExecutionComposition } from './execution/composition';
 import {
   ExecutionTargetDoc, executionSettings, validateExecution, type ChatExecutionSettings,
@@ -62,7 +61,8 @@ export class DurableChatService {
 
   static async open(options: {
     storage: Storage; models: Models; now?: () => number;
-    openWorkspaceDatabase?: () => Promise<SqliteDatabase>;
+    /** Where chats' workspace directories live; without it chats have no local execution environment. */
+    workspaces?: Workspaces;
     /** One authoritative resolver and resource owner, shared by tools, prompts and tasks. */
     execution?: (local: ExecutionComposition) => ExecutionComposition;
     newChat?: NewChatDefaults;
@@ -72,7 +72,7 @@ export class DurableChatService {
     extensions?: readonly Extension[];
   }): Promise<DurableChatService> {
     const registry = createRegistry();
-    const local = createLocalExecution(options.openWorkspaceDatabase ?? openWorkspaceDatabase);
+    const local = createLocalExecution(options.workspaces);
     const execution = options.execution?.(local) ?? local;
     registry.install(createWorkspaceExtension(execution.toolPolicy));
     for (const extension of execution.extensions ?? []) registry.install(extension);

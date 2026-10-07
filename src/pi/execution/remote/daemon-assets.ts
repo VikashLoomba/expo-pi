@@ -1,4 +1,4 @@
-import { digest } from '../../bash/engine/native-crypto';
+import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
 import { PI_DAEMON_MANIFEST } from './daemon-manifest';
 import { BootstrapError } from './bootstrap-errors';
 
@@ -33,7 +33,7 @@ async function readBundled(target: Target): Promise<DaemonBinary> {
   const bytes = await new File(asset.localUri).bytes();
   const expected = PI_DAEMON_MANIFEST[target];
   if (bytes.byteLength !== expected.size) throw new Error('The bundled Pi daemon asset is incomplete. Reinstall the app.');
-  const hash = await digest('SHA-256', bytes);
+  const hash = await digest(CryptoDigestAlgorithm.SHA256, bytes);
   const sha256 = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('');
   if (sha256 !== expected.sha256) throw new Error('The bundled Pi daemon asset failed verification. Reinstall the app.');
   return { bytes, sha256 };

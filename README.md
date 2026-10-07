@@ -46,7 +46,7 @@ Pi owns native reasoning signatures, request conversion, and local tool pairing.
 
 ## Persistent chats and lifecycle
 
-Chats receive local `read`, `write`, `edit`, and `bash` tools sharing a private, persistent `/workspace` stored in Expo SQLite. The file tools use Pi's SDK factories for paged text, complete UTF-8 writes, and targeted replacements; edit cards show bounded diffs and larger patches can persist as workspace files. Bash runs just-bash's interpreted shell with text tools, jq, checksums and gzip, with JavaScript/Python/network execution disabled. Shell state and `/tmp` reset each call. See the [workspace tools architecture, limits and maintenance guide](docs/bash-tool.md) for storage, edit limits, interruption, fork behavior and platform verification.
+Chats receive Pi's own `read`, `write`, `edit`, and `bash` tools. Each chat has a private, persistent `/workspace`: a real directory in the app's documents (`workspaces/<id>`), accessed through `expo-file-system`. The app adds no size limits of its own; Pi's tools and just-bash apply their defaults. Edit cards keep a bounded diff. Bash runs just-bash's interpreted shell with text tools, jq and checksums; JavaScript, Python, network commands, gzip, links and chmod are not offered. Each command starts with fresh shell state and an empty in-memory `/tmp`. Workspace files from the earlier SQLite-backed workspace (`pi-workspaces.db`) are not carried over; that database is left in place.
 
 One `SqliteStorage` instance backs the app's durable session and all conversations. The custom Expo driver opens **`pi-chats.db`** and supplies the asynchronous database interface expected by Pi's portable `SqliteStorage`. Pi owns the schema, migrations, records, document revisions, task checkpoints, and atomic commits. The adapter serializes native operations and transactions, rolls failed transactions back, and waits for admitted work before closing.
 
@@ -144,6 +144,7 @@ Native integration, background/foreground behavior, and live authenticated ChatG
 - `src/pi/model-catalog.ts`: SDK-derived provider/model choices, effort capabilities, and selection validation.
 - `src/pi/models.ts`, `provider-credentials.ts` and `secure-storage.ts`: mobile provider registration and provider-scoped SecureStore persistence.
 - `src/pi/storage/`: custom Expo `SqliteDatabase` adapter and portable `SqliteStorage` factory.
+- `src/pi/workspace/`: each chat's workspace directory (`device-storage.ts`), the execution environment over it (`execution-env.ts`), the shell's view of it (`files.ts`), and Pi's coding tools (`tools.ts`).
 - `src/pi/openai-auth/`: modern OpenAI `OAuthAuth` adapter, installation identity, issued-client token exchange, callback/browser coordination, and same-attempt manual fallback.
 - `modules/pi-oauth-callback/`: Swift-only Expo Modules 2.0 loopback receiver using Apple Network; local module autolinking keeps native code outside generated projects.
 - `packages/expo-pi/`: Metro compatibility transform and secure-random bridge; also usable with Pi's in-memory `Agent` API.

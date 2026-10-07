@@ -119,5 +119,4 @@ for (const transport of transports) test(`${transport.name}: stable through turn
   await parent.reset('Start fresh context while preserving the conversation.', context);
   await send(reopened, id, 'Answer after resetting the transcript.');
   assert.equal(transport.identity(after.requests[3]), identity, 'transcript reset keeps the same conversation session');
-  assert.equal(file.metrics.opened, 0, 'provider identity work acquires no execution filesystem');
 });

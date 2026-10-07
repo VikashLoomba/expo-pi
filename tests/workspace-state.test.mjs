@@ -39,7 +39,6 @@ test('fresh chats use Pi registry defaults without storing redundant capability 
   assert.deepEqual(workspace, { id: workspace.id, origin: 'new' });
   await run(service, id);
   assert.deepEqual(offeredTools(provider.requests[0]), ['add_numbers', ...sharedTools].sort());
-  assert.equal(file.metrics.opened, 0, 'configuration and prompt metadata acquire no execution storage');
 });
 
 for (const selection of [
@@ -67,7 +66,6 @@ for (const selection of [
     assert.deepEqual(offeredTools(provider.requests[0]), [...selection.expected].sort());
     await file.close(service);
   }
-  assert.equal(file.metrics.opened, 0);
 });
 
 test('service-created historical forks start with empty workspaces while parent bytes survive reopening', { timeout: 15_000 }, async (t) => {
@@ -158,7 +156,6 @@ test('Pi preserves historical fork settings and task-owned inheritance while eac
   for (const [conversationId, agent] of [[firstFork.id, firstAgent], [currentFork.id, currentAgent], [owned.result.id, currentAgent]]) {
     assert.deepEqual(await reopened.harness.snapshot(AgentDoc, conversationId, context), agent);
   }
-  assert.equal(file.metrics.opened, 0, 'history and ownership metadata never initialize workspace files');
 });
 
 test('execution configuration atomically commits cwd with app state and preserves unrelated agent settings', async (t) => {
@@ -179,5 +176,4 @@ test('execution configuration atomically commits cwd with app state and preserve
   }), /Selection validation failed/);
   assert.equal((await service.harness.snapshot(AgentDoc, Number(id), context)).cwd, '/workspace/new');
   assert.equal((await service.harness.snapshot(Selector, Number(id), context)).target, 'selected');
-  assert.equal(file.metrics.opened, 0);
 });

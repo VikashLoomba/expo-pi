@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
@@ -67,12 +67,10 @@ test('production remote composition runs all shared tools through the real daemo
   assert.deepEqual((await readChat(f.service, id)).execution, { target: { kind: 'local' }, cwd: '/workspace' });
   await select(f, id);
   assert.equal(f.remote.metrics.sessions, 0);
-  assert.equal(f.file.metrics.opened, 0);
   const tools = await run(f.service, id);
   assert.deepEqual(tools.map(({ tool }) => [tool.name, tool.status]), [['write', 'completed'], ['bash', 'completed'], ['edit', 'completed'], ['read', 'completed']]);
   assert.equal(tools.at(-1).tool.output, 'edited\nsecond\nshell\n');
   assert.equal(await readFile(join(f.remote.directory, 'nested/note'), 'utf8'), 'edited\nsecond\nshell\n');
-  assert.equal(f.file.metrics.opened, 0);
   assert.equal(f.remote.metrics.sessions, 1, 'successive shared tools reuse the service-owned session');
   assert.equal(f.remote.children.size, 1, 'the service retains its session between tools');
   assert.equal(f.remote.metrics.closes, 0);
@@ -88,6 +86,18 @@ test('production remote composition runs all shared tools through the real daemo
   assert.equal(f.remote.metrics.closes, 1, 'service shutdown disposes the shared session once');
 });
 
+test('a remote edit refuses a file that is not UTF-8 and leaves its bytes unchanged', real, async (t) => {
+  const f = await fixture(t, [toolReply('edit', { path: 'latin1.txt', edits: [{ oldText: 'alpha', newText: 'beta' }] }), answer]);
+  const id = await f.service.createChat();
+  await select(f, id);
+  const original = Buffer.from('caf\xe9 alpha\n', 'latin1');
+  await writeFile(join(f.remote.directory, 'latin1.txt'), original);
+  const tools = await run(f.service, id);
+  assert.equal(tools[0].tool.status, 'error');
+  assert.match(tools[0].tool.output, /Error code: invalid/);
+  assert.deepEqual(await readFile(join(f.remote.directory, 'latin1.txt')), original);
+});
+
 test('production remote metadata prompting opens neither SSH nor local filesystem storage', real, async (t) => {
   const f = await fixture(t, [answer]);
   const id = await f.service.createChat();
@@ -95,7 +105,6 @@ test('production remote metadata prompting opens neither SSH nor local filesyste
   await run(f.service, id);
   assert.equal(f.remote.metrics.sessions, 0);
   assert.equal(f.admissions.length, 0, 'prompt resolver never loads SSH secrets');
-  assert.equal(f.file.metrics.opened, 0);
 });
 
 test('prompt sections, tools and tasks borrow one environment without closing sibling resources', real, async (t) => {
@@ -227,7 +236,6 @@ test('two chats on one remote machine keep independent committed directories thr
   assert.deepEqual((await readChat(reopened, second)).execution, { target: remoteTarget, cwd: secondDirectory });
   assert.equal((await run(reopened, first)).at(-1).tool.output, 'first chat');
   assert.equal((await run(reopened, second)).at(-1).tool.output, 'second chat');
-  assert.equal(f.file.metrics.opened, 0);
 });
 
 test('remote resolution without a committed chat directory fails before SSH or secret admission', real, async (t) => {
@@ -239,7 +247,6 @@ test('remote resolution without a committed chat directory fails before SSH or s
   }
   assert.equal(f.remote.metrics.sessions, 0);
   assert.equal(f.admissions.length, 0);
-  assert.equal(f.file.metrics.opened, 0);
 });
 
 test('production local and remote selections keep same-named files isolated', real, async (t) => {
@@ -249,9 +256,7 @@ test('production local and remote selections keep same-named files isolated', re
   const remote = await f.service.createChat(), local = await f.service.createChat();
   await select(f, remote);
   await run(f.service, remote);
-  assert.equal(f.file.metrics.opened, 0);
   await run(f.service, local);
-  assert.ok(f.file.metrics.opened > 0);
   assert.equal((await run(f.service, remote)).at(-1).tool.output, 'remote');
   assert.equal((await run(f.service, local)).at(-1).tool.output, 'local');
   assert.equal(await readFile(join(f.remote.directory, 'same-name'), 'utf8'), 'remote');
@@ -283,7 +288,6 @@ test('production selection/cwd survive reopen, historical fork, and direct task-
   assert.deepEqual(owned.outcome.result.direct, { status: 'completed', result: { text: 'written through runtime.env()', cwd: f.remote.directory } });
   assert.equal(f.remote.children.size, 1, 'the direct task and inherited child borrow the retained environment');
   assert.equal(f.remote.metrics.sessions, before + 1);
-  assert.equal(f.file.metrics.opened, 0);
 });
 
 test('production resolver preserves already admitted snapshots and rejects stale unadmitted facades after host edits', real, async (t) => {
@@ -309,7 +313,6 @@ test('production resolver preserves already admitted snapshots and rejects stale
   assert.notEqual(subsequent, admitted);
   await f.file.close(f.service);
   assert.equal(f.remote.children.size, 0);
-  assert.equal(f.file.metrics.opened, 0);
 });
 
 test('removed production hosts retain chat selection and fail without local fallback', real, async (t) => {
@@ -324,7 +327,6 @@ test('removed production hosts retain chat selection and fail without local fall
   const observable = JSON.stringify({ result, conversation });
   assert.match(observable, /removed|execution environment/i);
   assert.equal(f.remote.metrics.sessions, 0);
-  assert.equal(f.file.metrics.opened, 0);
 });
 
 test('name-only edits preserve lazy admission and reuse an already connected environment', real, async (t) => {

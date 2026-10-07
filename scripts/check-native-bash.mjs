@@ -7,7 +7,8 @@ const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log('Usage: node scripts/check-native-bash.mjs --namespace pi-bash-UNIQUE --stage seed|verify [--platform ios|android] [--port PORT]\n'
     + 'Requires a connected development build. Run seed, terminate/relaunch the process, then verify with the same namespace.\n'
-    + 'Uses isolated SQLite databases and scripted model transport. Does not read credentials or use model HTTP.');
+    + 'Each namespace gets its own chat database and workspace directory; verify deletes them when it finishes.\n'
+    + 'Scripted model transport; does not read credentials or use model HTTP.');
   process.exit(0);
 }
 const options = { platform: 'ios' };

@@ -18,7 +18,7 @@ export const DirectEnvTask = defineTask({
       const env = await runtime.env(context);
       if (!env) throw new Error('Task has no selected environment.');
       let result;
-      const directory = getOrThrow(await env.createTempDir('pi-env-task-', context));
+      const directory = getOrThrow(await env.absolutePath(`direct-task-${task.id}`, context));
       try {
         const path = getOrThrow(await env.joinPath([directory, 'result'], context));
         getOrThrow(await env.writeFile(path, 'written through runtime.env()', context));
@@ -73,7 +73,7 @@ export async function independentExecution(directory) {
   const operations = [];
   const environments = new WeakSet();
   const owners = new Set();
-  const metrics = { resolutions: 0, scopes: 0, released: 0, cleaned: 0, emittedBytes: 0, active: 0, aborted: 0 };
+  const metrics = { cleaned: 0, emittedBytes: 0, active: 0, aborted: 0 };
   const behavior = { holdCancelledDrain: false };
   const drain = Promise.withResolvers();
   const extension = defineExtension({ name: 'test.execution', tasks: [DirectEnvTask, OwnedConversationTask] });
@@ -145,7 +145,6 @@ export async function independentExecution(directory) {
         }
       },
       async resolve(target, context) {
-        metrics.resolutions++;
         if (stopped) throw new Error('Independent execution admission is stopped.');
         const selected = await target.read.snapshot(TestExecutionDoc, target.conversationId, context);
         if (selected?.kind === 'local' || !selected) return local.resolve(target, context);
@@ -156,13 +155,6 @@ export async function independentExecution(directory) {
         return environment(target.cwd);
       },
       toolPolicy: {
-        async scope(env, context) {
-          if (!environments.has(env)) return local.toolPolicy.scope(env, context);
-          metrics.scopes++;
-          let released = false;
-          return { env, context, async release() { if (!released) { released = true; metrics.released++; } } };
-        },
-        artifacts(env) { return environments.has(env) ? undefined : local.toolPolicy.artifacts?.(env); },
         promptFacts(input, context) {
           return environments.has(input.env)
             ? ['The selected execution environment is an independent test host. Files are stored in its isolated namespace; no local virtual shell is used.']

@@ -1,524 +1,478 @@
 import type { Context } from '@earendil-works/chord';
-import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
-import { uuidv7 } from '@earendil-works/pi-ai';
 import {
-  ExecutionError, FileError, LineScanner, err, ok, toError,
+  ExecutionError, FileError, LineScanner, StreamDecoder, err, ok, toError,
   type BinaryReader, type DirReader, type ExecutionEnv, type FileErrorCode, type FileInfo, type FileWatcher,
-  type Result, type ShellExecOptions, type ShellExecResult, type TextLineReader, type WatchChange, type WatchTarget,
+  type LineScan, type Result, type ShellExecOptions, type ShellExecResult, type TextLine, type TextLineReader,
 } from '@earendil-works/pi-durable/env';
-import type { FsStat } from 'just-bash';
-import { executeWorkspaceCommand } from '../bash/execution';
-import type { BoundedSystemFs } from './bounded-system-fs';
-import { createPathResolver, joinVirtualPath, validateVirtualPath } from './mounted-paths';
-import type { WorkspaceInvocation, WorkspaceRuntime } from './runtime';
+import { InMemoryFs, MountableFs } from 'just-bash/browser';
 
-const HOME = '/workspace';
+import { createBashEngine, isBashCommand } from '../bash/engine/index';
+import { decodeStrictUtf8 } from '../execution/strict-utf8';
+import { WorkspaceFs, WorkspaceFsError, normalizePath, resolvePath } from './files';
+import type { ByteReader, WorkspaceStorage } from './storage';
+
+const WORKSPACE_ROOT = '/workspace';
 const READ_CHUNK = 64 * 1024;
-const MAX_READERS = 64;
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-type Invocation = Pick<WorkspaceInvocation, 'mounted' | 'signal'> & Partial<WorkspaceInvocation>;
-type Owner = { runtime: WorkspaceRuntime; workspaceId: string };
+/** Largest single read of a binary reader, so a huge `length` allocates only what the file yields. */
+const BINARY_READ_CHUNK = 1024 * 1024;
 
-function fileError(cause: unknown, path?: string): FileError {
+/** Node's mapping of the same errno codes; the rest are `unknown` with a readable message. */
+const FILE_ERROR_CODES: Partial<Record<WorkspaceFsError['code'], FileErrorCode>> = {
+  ENOENT: 'not_found', ENOTDIR: 'not_directory', EISDIR: 'is_directory', EINVAL: 'invalid', ENOTSUP: 'not_supported',
+};
+
+function fileError(cause: unknown, path: string): FileError {
   if (cause instanceof FileError) return cause;
   const error = toError(cause);
-  const errno = (cause as { code?: string } | null)?.code ?? /^([A-Z_]+):/.exec(error.message)?.[1];
-  const codes: Record<string, FileErrorCode> = {
-    ABORT_ERR: 'aborted', ENOENT: 'not_found', EACCES: 'permission_denied', EPERM: 'permission_denied',
-    ENOTDIR: 'not_directory', EISDIR: 'is_directory', EINVAL: 'invalid', ENAMETOOLONG: 'invalid',
-    ELOOP: 'invalid', EEXIST: 'invalid', ENOTEMPTY: 'invalid', EBUSY: 'invalid',
-    ENOSYS: 'not_supported', ENOTSUP: 'not_supported', EXDEV: 'not_supported',
-  };
-  return new FileError(codes[errno ?? ''] ?? 'unknown', error.message, path, error);
+  const code = cause instanceof WorkspaceFsError ? FILE_ERROR_CODES[cause.code] ?? 'unknown' : 'unknown';
+  return new FileError(code, error.message, path, error);
 }
 
-/** Preserve every leading BOM; edits require valid UTF-8 rather than lossy decoding. */
-function strictText(bytes: Uint8Array, path: string): string {
-  let prefix = 0;
-  while (bytes[prefix] === 0xef && bytes[prefix + 1] === 0xbb && bytes[prefix + 2] === 0xbf) prefix += 3;
-  const body = bytes.subarray(prefix);
-  const text = decoder.decode(body);
-  const encoded = encoder.encode(text);
-  if (encoded.length !== body.length || encoded.some((byte, index) => byte !== body[index])) {
-    throw new FileError('invalid', 'File is not valid UTF-8 text.', path);
-  }
-  return '\ufeff'.repeat(prefix / 3) + text;
+function aborted(context: Context, path?: string): FileError | undefined {
+  return context.abortSignal?.aborted ? new FileError('aborted', 'aborted', path) : undefined;
 }
 
-function joinParts(parts: string[]): string {
-  for (const part of parts) if (part) validateVirtualPath(part);
-  const joined = parts.filter(Boolean).join('/');
-  if (!joined) return '.';
-  validateVirtualPath(joined);
-  const absolute = joined.startsWith('/');
-  const result: string[] = [];
-  for (const part of joined.split('/')) {
-    if (!part || part === '.') continue;
-    if (part === '..' && result.length && result[result.length - 1] !== '..') result.pop();
-    else if (part !== '..' || !absolute) result.push(part);
-  }
-  return `${absolute ? '/' : ''}${result.join('/')}` || '.';
+function nameOf(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
 }
 
-function parentPath(path: string): string {
-  const withoutTrailingSlash = path.replace(/\/+$/, '');
-  return withoutTrailingSlash.slice(0, withoutTrailingSlash.lastIndexOf('/')) || '/';
+function closedReader(what: string, path: string): Result<never, FileError> {
+  return err(new FileError('invalid', `${what} is closed`, path));
 }
 
-function infoFor(path: string, stat: FsStat): FileInfo {
-  return {
-    name: path.replace(/\/+$/, '').split('/').pop() ?? '', path,
-    kind: stat.isSymbolicLink ? 'symlink' : stat.isDirectory ? 'directory' : 'file',
-    size: stat.size, mtimeMs: stat.mtime.getTime(),
-  };
-}
+class WorkspaceBinaryReader implements BinaryReader {
+  #closed = false;
 
-/**
- * A cwd view of runtime-owned workspace files. Direct operations take short leases;
- * tool scopes hold one lease across their compound filesystem operations.
- */
-export class WorkspaceExecutionEnv implements ExecutionEnv {
-  readonly id: string;
-  readonly cwd: string;
-  private closed = false;
-  private readonly lifetime = new AbortController();
-  private readonly readers = new Set<() => Promise<void>>();
-  private readonly scopes = new Set<() => Promise<void>>();
-  private readonly pending = new Set<Promise<unknown>>();
-  private disown?: () => void;
-  private closing?: Promise<void>;
-  private readonly invocation?: Invocation;
-  private readonly owner?: Owner;
+  /** `mtimeMs` is the opened file's at open time: the platform handle reports only its size. */
+  constructor(private readonly reader: ByteReader, private readonly path: string, private readonly mtimeMs: number) {}
 
-  constructor(source: Invocation | Owner, cwd = HOME) {
-    if ('runtime' in source) this.owner = source;
-    else this.invocation = source;
-    this.id = 'runtime' in source ? source.runtime.namespaceId(source.workspaceId) : source.id ?? `workspace-env:${uuidv7()}`;
-    this.cwd = cwd;
+  async info(context: Context): Promise<Result<FileInfo, FileError>> {
+    const failure = aborted(context, this.path);
+    if (failure) return err(failure);
+    if (this.#closed) return closedReader('Binary reader', this.path);
+    const size = await this.reader.size();
+    return ok({ name: nameOf(this.path), path: this.path, kind: 'file', size, mtimeMs: this.mtimeMs });
   }
 
-  private active(context: Context, path?: string): void {
-    if (this.closed || this.owner?.runtime.isStopped || this.lifetime.signal.aborted || context.abortSignal?.aborted || this.invocation?.signal.aborted) {
-      const reason = context.abortSignal?.reason ?? this.invocation?.signal.reason ?? this.lifetime.signal.reason;
-      throw new FileError('aborted', 'Workspace operation was aborted or its environment is closed.', path, reason instanceof Error ? reason : undefined);
+  async read(offset: number, length: number, context: Context): Promise<Result<Uint8Array, FileError>> {
+    const failure = aborted(context, this.path);
+    if (failure) return err(failure);
+    if (this.#closed) return closedReader('Binary reader', this.path);
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 0) {
+      return err(new FileError('invalid', 'Offset and length must be non-negative safe integers', this.path));
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      while (total < length) {
+        const chunk = await this.reader.read(offset + total, Math.min(length - total, BINARY_READ_CHUNK));
+        if (chunk.length === 0) break;
+        chunks.push(chunk);
+        total += chunk.length;
+      }
+    } catch (cause) {
+      return err(fileError(cause, this.path));
+    }
+    const bytes = new Uint8Array(total);
+    let position = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, position);
+      position += chunk.length;
+    }
+    return ok(bytes);
+  }
+
+  async scanLines(options: { startLine: number; endLine?: number }, context: Context,
+  ): Promise<Result<LineScan, FileError>> {
+    const failure = aborted(context, this.path);
+    if (failure) return err(failure);
+    if (this.#closed) return closedReader('Binary reader', this.path);
+    let scanner: LineScanner;
+    try {
+      scanner = new LineScanner(options.startLine, options.endLine);
+    } catch {
+      return err(new FileError('invalid', 'Invalid line range', this.path));
+    }
+    try {
+      for (let position = 0; ;) {
+        const chunk = await this.reader.read(position, READ_CHUNK);
+        const stopped = aborted(context, this.path);
+        if (stopped) return err(stopped);
+        if (chunk.length === 0) return ok(scanner.finish());
+        scanner.push(chunk);
+        position += chunk.length;
+      }
+    } catch (cause) {
+      return err(fileError(cause, this.path));
     }
   }
 
-  private own(): void {
-    if (!this.owner || this.disown) return;
-    this.disown = this.owner.runtime.own({
-      stop: (reason) => { this.closed = true; this.lifetime.abort(reason); },
-      close: () => this.cleanup(BACKGROUND_CONTEXT),
-    });
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    await this.reader.close().catch(() => undefined);
   }
+}
 
-  private track<T>(operation: Promise<T>): Promise<T> {
-    this.pending.add(operation);
-    const finished = () => { this.pending.delete(operation); };
-    operation.then(finished, finished);
-    return operation;
-  }
+/** LF-terminated lines decoded like the whole file, as `NodeExecutionEnv`'s line reader does. */
+class WorkspaceTextLineReader implements TextLineReader {
+  readonly #decoder = new StreamDecoder();
+  #position = 0;
+  #buffered = '';
+  #ended = false;
+  #closed = false;
 
-  private resolve(path: string): string {
-    const expanded = path === '~' ? HOME : path.startsWith('~/') ? `${HOME}/${path.slice(2)}` : path;
-    return joinVirtualPath(this.cwd, expanded);
-  }
+  constructor(private readonly reader: ByteReader, private readonly path: string) {}
 
-  /** The subscription lives until its operation or acquired scope has drained. */
-  private cancellation(context: Context): { signal: AbortSignal; dispose(): void } {
-    const controller = new AbortController();
-    const signals = [context.abortSignal, this.lifetime.signal].filter((signal): signal is AbortSignal => !!signal);
-    const forward = () => {
-      const aborted = signals.find((signal) => signal.aborted);
-      if (aborted) controller.abort(aborted.reason);
-    };
-    for (const signal of signals) signal.addEventListener('abort', forward, { once: true });
-    forward();
-    return {
-      signal: controller.signal,
-      dispose: () => { for (const signal of signals) signal.removeEventListener('abort', forward); },
-    };
-  }
-
-  private async lease<T>(context: Context, work: (invocation: Invocation) => Promise<T>): Promise<T> {
-    this.active(context);
-    if (this.invocation) return work(this.invocation);
-    this.own();
-    const cancellation = this.cancellation(context);
+  async readLine(context: Context): Promise<Result<TextLine | undefined, FileError>> {
+    const failure = aborted(context, this.path);
+    if (failure) return err(failure);
+    if (this.#closed) return closedReader('Text line reader', this.path);
     try {
-      return await this.owner!.runtime.run(this.owner!.workspaceId, cancellation.signal, work);
-    } finally { cancellation.dispose(); }
-  }
-
-  private operation<T>(path: string | undefined, context: Context, work: (invocation: Invocation) => T | Promise<T>): Promise<Result<T, FileError>> {
-    return this.track((async () => {
-      try {
-        const value = await this.lease(context, async (invocation) => {
-          this.active(context, path);
-          const result = await work(invocation);
-          this.active(context, path);
-          return result;
-        });
-        return ok(value);
-      } catch (cause) {
-        try { this.active(context, path); } catch (aborted) { return err(fileError(aborted, path)); }
-        return err(fileError(cause, path));
-      }
-    })());
-  }
-
-  /** Until a handle is delivered, every admitted allocation still belongs to the opener. */
-  private resourceOperation<T>(path: string, context: Context,
-    work: (invocation: Invocation, rollback: (dispose: () => Promise<void>) => void) => Promise<T>): Promise<Result<T, FileError>> {
-    return this.track((async () => {
-      const disposals: (() => Promise<void>)[] = [];
-      let result = await this.operation(path, context, (invocation) => work(invocation, (dispose) => disposals.push(dispose)));
-      if (result.ok) {
-        try { this.active(context, path); }
-        catch (cause) { result = err(fileError(cause, path)); }
-      }
-      if (!result.ok) {
-        // Cleanup is independent of the cancelled operation context and remains
-        // part of this tracked open until all pins and reader slots are released.
-        await Promise.allSettled(disposals.reverse().map((dispose) => dispose()));
-      }
-      return result;
-    })());
-  }
-
-  /** Metadata methods do not acquire a database, a queue, or a temporary tree. */
-  private async metadata<T>(path: string | undefined, context: Context, work: () => T): Promise<Result<T, FileError>> {
-    try { this.active(context, path); return ok(work()); }
-    catch (cause) { return err(fileError(cause, path)); }
-  }
-  absolutePath(path: string, context: Context) { return this.metadata(path, context, () => this.resolve(path)); }
-  joinPath(parts: string[], context: Context) { return this.metadata(undefined, context, () => joinParts(parts)); }
-  readBinaryFile(path: string, context: Context) {
-    return this.operation(path, context, ({ mounted }) => mounted.readFileBuffer(this.resolve(path)));
-  }
-  readTextFile(path: string, context: Context) {
-    return this.operation(path, context, async ({ mounted }) => strictText(await mounted.readFileBuffer(this.resolve(path)), path));
-  }
-
-  private readerClose(dispose: () => void | Promise<void>): () => Promise<void> {
-    if (this.readers.size >= MAX_READERS) throw new FileError('invalid', `An environment may own at most ${MAX_READERS} open readers.`);
-    let closing: Promise<void> | undefined;
-    const close = () => {
-      if (!closing) {
-        this.readers.delete(close);
-        closing = this.track(Promise.resolve().then(dispose));
-      }
-      return closing;
-    };
-    this.readers.add(close);
-    return close;
-  }
-
-  openBinaryReader(path: string, options: { noFollow?: boolean } | undefined, context: Context): Promise<Result<BinaryReader, FileError>> {
-    return this.resourceOperation(path, context, async (invocation, rollback) => {
-      const lexical = this.resolve(path);
-      const stat = await invocation.mounted.lstat(lexical);
-      if (options?.noFollow && stat.isSymbolicLink) throw new FileError('invalid', 'The final component is a symbolic link.', path);
-      const physical = await invocation.mounted.realpath(lexical);
-      const original = await invocation.mounted.stat(physical);
-      if (original.isDirectory) throw new FileError('is_directory', 'Cannot open a directory as a binary file.', path);
-      if (!original.isFile) throw new FileError('invalid', 'Only regular files can be opened.', path);
-      const inode = physical.startsWith(`${HOME}/`) && invocation.files && original.ino !== undefined ? Number(original.ino) : undefined;
-      let releaseInode: (() => Promise<void>) | undefined;
-      let temporary: Awaited<ReturnType<BoundedSystemFs['openReadHandle']>> | undefined;
-      let close: (() => Promise<void>) | undefined;
-      let closed = false;
-      const dispose = async () => {
-        closed = true;
-        try { await temporary?.close(); }
-        finally { await releaseInode?.(); }
-      };
-      rollback(async () => { if (close) await close(); else await dispose(); });
-      releaseInode = inode !== undefined ? await invocation.files!.retainOpenedInode(inode) : undefined;
-      temporary = !physical.startsWith(`${HOME}/`) ? await invocation.system?.openReadHandle(physical) : undefined;
-      close = this.readerClose(dispose);
-      const check = () => { if (closed) throw new FileError('invalid', 'Binary reader is closed.', path); };
-      const locate = async (current: Invocation) => {
-        // Legacy mounted-only callers still retain identity through rename.
-        for (const candidate of [physical, ...current.mounted.getAllPaths()]) {
-          try { if ((await current.mounted.lstat(candidate)).identity === original.identity) return candidate; }
-          catch (cause) { if (fileError(cause).code !== 'not_found') throw cause; }
+      while (true) {
+        const newline = this.#buffered.indexOf('\n');
+        if (newline !== -1) {
+          const text = this.#buffered.slice(0, newline);
+          this.#buffered = this.#buffered.slice(newline + 1);
+          return ok({ text, terminated: true });
         }
-        throw new FileError('not_found', 'The opened file is no longer available.', path);
-      };
-      const read = async (current: Invocation, offset: number, length: number) => {
-        if (inode !== undefined) return current.files!.readInodeRange(inode, offset, length);
-        if (temporary) return temporary.read(offset, length);
-        return (await current.mounted.readFileBuffer(await locate(current))).slice(offset, offset + length);
-      };
-      return {
-        info: (readContext) => this.operation(path, readContext, async (current) => {
-          check();
-          const stat = inode !== undefined ? await current.files!.statInode(inode)
-            : temporary ? await temporary.info() : await current.mounted.stat(await locate(current));
-          return infoFor(lexical, stat);
-        }),
-        read: (offset, length, readContext) => this.operation(path, readContext, async (current) => {
-          check();
-          if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 0) {
-            throw new FileError('invalid', 'Read offset and length must be non-negative safe integers.', path);
-          }
-          return read(current, offset, length);
-        }),
-        scanLines: (scan, readContext) => this.operation(path, readContext, async (current) => {
-          check();
-          let scanner: LineScanner;
-          try { scanner = new LineScanner(scan.startLine, scan.endLine); }
-          catch (cause) { throw new FileError('invalid', toError(cause).message, path); }
-          for (let offset = 0; ; offset += READ_CHUNK) {
-            this.active(readContext, path);
-            const chunk = await read(current, offset, READ_CHUNK);
-            if (!chunk.length) break;
-            scanner.push(chunk);
-          }
-          return scanner.finish();
-        }),
-        close: async () => { await close!(); },
-      } satisfies BinaryReader;
+        if (this.#ended) {
+          if (this.#buffered.length === 0) return ok(undefined);
+          const text = this.#buffered;
+          this.#buffered = '';
+          return ok({ text, terminated: false });
+        }
+        const chunk = await this.reader.read(this.#position, READ_CHUNK);
+        this.#position += chunk.length;
+        if (chunk.length === 0) {
+          this.#buffered += this.#decoder.decode();
+          this.#ended = true;
+        } else {
+          this.#buffered += this.#decoder.decode(chunk);
+        }
+      }
+    } catch (cause) {
+      return err(fileError(cause, this.path));
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#buffered = '';
+    await this.reader.close().catch(() => undefined);
+  }
+}
+
+/** Pages a directory's entries as they were when it was opened; entries removed since are skipped. */
+class WorkspaceDirReader implements DirReader {
+  #next = 0;
+  #closed = false;
+
+  constructor(private readonly storage: WorkspaceStorage, private readonly local: string,
+    private readonly path: string, private readonly names: readonly string[]) {}
+
+  async next(maxEntries: number, context: Context): Promise<Result<{ entries: FileInfo[]; done: boolean }, FileError>> {
+    const failure = aborted(context, this.path);
+    if (failure) return err(failure);
+    if (this.#closed) return closedReader('Directory reader', this.path);
+    if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+      return err(new FileError('invalid', 'maxEntries must be a positive safe integer', this.path));
+    }
+    const entries: FileInfo[] = [];
+    try {
+      while (this.#next < this.names.length && entries.length < maxEntries) {
+        const name = this.names[this.#next++];
+        const entry = await this.storage.info(this.local === '/' ? `/${name}` : `${this.local}/${name}`);
+        const path = this.path === '/' ? `/${name}` : `${this.path}/${name}`;
+        if (entry) entries.push({ name, path, kind: entry.kind, size: entry.size, mtimeMs: entry.mtimeMs });
+      }
+    } catch (cause) {
+      return err(fileError(cause, this.path));
+    }
+    return ok({ entries, done: this.#next >= this.names.length });
+  }
+
+  async close(): Promise<void> {
+    this.#closed = true;
+  }
+}
+
+/**
+ * One chat's workspace directory as Pi's execution environment. File methods see `/workspace` only; `exec` runs
+ * just-bash with `/workspace` mounted over the same files and an in-memory `/tmp` that lives for one command.
+ * The environment owns no storage handles, so a fresh one per call is fine; `cleanup()` aborts its running commands.
+ */
+export class WorkspaceExecutionEnv implements ExecutionEnv {
+  readonly #files: WorkspaceFs;
+  readonly #running = new Set<AbortController>();
+
+  constructor(private readonly storage: WorkspaceStorage, readonly id: string, public cwd = WORKSPACE_ROOT) {
+    this.#files = new WorkspaceFs(storage, WORKSPACE_ROOT);
+  }
+
+  #absolute(path: string): string {
+    if (path === '~') return WORKSPACE_ROOT;
+    if (path.startsWith('~/')) return resolvePath(WORKSPACE_ROOT, path.slice(2));
+    return resolvePath(this.cwd, path);
+  }
+
+  /** The path inside the workspace directory; nothing outside `/workspace` is reachable through file methods. */
+  #local(absolute: string): string {
+    if (absolute === WORKSPACE_ROOT) return '/';
+    if (absolute.startsWith(`${WORKSPACE_ROOT}/`)) return absolute.slice(WORKSPACE_ROOT.length);
+    throw new FileError('permission_denied', `Only ${WORKSPACE_ROOT} is available to file tools.`, absolute);
+  }
+
+  async #run<T>(path: string, context: Context, work: (local: string, absolute: string) => Promise<T>,
+  ): Promise<Result<T, FileError>> {
+    const absolute = this.#absolute(path);
+    const failure = aborted(context, absolute);
+    if (failure) return err(failure);
+    try {
+      return ok(await work(this.#local(absolute), absolute));
+    } catch (cause) {
+      return err(fileError(cause, absolute));
+    }
+  }
+
+  async #openFile(local: string, absolute: string): Promise<{ reader: ByteReader; mtimeMs: number }> {
+    const entry = await this.storage.info(local);
+    if (!entry) throw new FileError('not_found', `ENOENT: no such file or directory, open '${absolute}'`, absolute);
+    if (entry.kind === 'directory') {
+      throw new FileError('is_directory', `EISDIR: illegal operation on a directory, read '${absolute}'`, absolute);
+    }
+    return { reader: await this.storage.open(local), mtimeMs: entry.mtimeMs };
+  }
+
+  async absolutePath(path: string): Promise<Result<string, FileError>> {
+    return ok(this.#absolute(path));
+  }
+
+  async joinPath(parts: string[]): Promise<Result<string, FileError>> {
+    return ok(normalizePath(parts.filter((part) => part !== '').join('/')));
+  }
+
+  readTextFile(path: string, context: Context): Promise<Result<string, FileError>> {
+    return this.#run(path, context, async (local, absolute) => {
+      return decodeStrictUtf8(await this.#files.readFileBuffer(local), absolute);
     });
   }
 
   openTextLineReader(path: string, context: Context): Promise<Result<TextLineReader, FileError>> {
-    return this.track((async () => {
-      const opened = await this.openBinaryReader(path, undefined, context);
-      if (!opened.ok) return opened;
-      try { this.active(context, path); }
-      catch (cause) { await opened.value.close(BACKGROUND_CONTEXT); return err(fileError(cause, path)); }
-      let offset = 0;
-      let closed = false;
-      return ok({
-        readLine: async (readContext) => {
-          if (closed) return err(new FileError('invalid', 'Text line reader is closed.', path));
-          // A single line can reach the local file ceiling, but no whole-file copy is retained.
-          const chunks: Uint8Array[] = [];
-          let size = 0;
-          let terminated = false;
-          while (true) {
-            const result = await opened.value.read(offset, READ_CHUNK, readContext);
-            if (!result.ok) return result;
-            const bytes = result.value;
-            const newline = bytes.indexOf(10);
-            const end = newline < 0 ? bytes.length : newline;
-            if (end) { chunks.push(bytes.slice(0, end)); size += end; }
-            offset += end;
-            if (newline >= 0) { offset++; terminated = true; break; }
-            if (bytes.length < READ_CHUNK) break;
-          }
-          if (!size && !terminated) return ok(undefined);
-          const bytes = new Uint8Array(size);
-          let cursor = 0;
-          for (const chunk of chunks) { bytes.set(chunk, cursor); cursor += chunk.length; }
-          try { return ok({ text: strictText(bytes, path), terminated }); }
-          catch (cause) { return err(fileError(cause, path)); }
-        },
-        close: async (closeContext) => { closed = true; await opened.value.close(closeContext); },
-      });
-    })());
+    return this.#run(path, context, async (local, absolute) => {
+      const { reader } = await this.#openFile(local, absolute);
+      return new WorkspaceTextLineReader(reader, absolute);
+    });
   }
 
-  async readTextLines(path: string, options: { maxLines?: number } | undefined, context: Context): Promise<Result<string[], FileError>> {
-    const maximum = options?.maxLines;
-    if (maximum !== undefined && (!Number.isSafeInteger(maximum) || maximum < 0)) return err(new FileError('invalid', 'maxLines must be a non-negative safe integer.', path));
+  async readTextLines(path: string, options: { maxLines?: number } | undefined, context: Context,
+  ): Promise<Result<string[], FileError>> {
+    if (options?.maxLines !== undefined && options.maxLines <= 0) return ok([]);
     const opened = await this.openTextLineReader(path, context);
     if (!opened.ok) return opened;
     const lines: string[] = [];
     try {
-      while (maximum === undefined || lines.length < maximum) {
+      while (options?.maxLines === undefined || lines.length < options.maxLines) {
         const line = await opened.value.readLine(context);
         if (!line.ok) return line;
         if (line.value === undefined) break;
         lines.push(line.value.text);
       }
       return ok(lines);
-    } finally { await opened.value.close(context); }
+    } finally {
+      await opened.value.close(context);
+    }
   }
 
-  private write(path: string, content: string | Uint8Array, append: boolean, context: Context) {
-    return this.operation(path, context, async ({ mounted }) => {
-      const resolved = this.resolve(path);
-      await mounted.mkdir(parentPath(resolved), { recursive: true });
-      this.active(context, path);
-      if (append) await mounted.appendFile(resolved, content);
-      else await mounted.writeFile(resolved, content);
+  readBinaryFile(path: string, context: Context): Promise<Result<Uint8Array, FileError>> {
+    return this.#run(path, context, (local) => this.#files.readFileBuffer(local));
+  }
+
+  /** The workspace has no symbolic links, so `noFollow` changes nothing. */
+  openBinaryReader(path: string, _options: { noFollow?: boolean } | undefined, context: Context,
+  ): Promise<Result<BinaryReader, FileError>> {
+    return this.#run(path, context, async (local, absolute) => {
+      const { reader, mtimeMs } = await this.#openFile(local, absolute);
+      return new WorkspaceBinaryReader(reader, absolute, mtimeMs);
     });
   }
-  writeFile(path: string, content: string | Uint8Array, context: Context) { return this.write(path, content, false, context); }
-  appendFile(path: string, content: string | Uint8Array, context: Context) { return this.write(path, content, true, context); }
-  truncateFile(path: string, size: number, context: Context) {
-    return this.operation(path, context, async ({ mounted }) => {
-      if (!Number.isSafeInteger(size) || size < 0 || size > 8 * 1024 * 1024) throw new FileError('invalid', 'Truncate size exceeds the local file limit.', path);
-      const resolved = this.resolve(path);
-      const bytes = await mounted.readFileBuffer(resolved);
-      const replacement = new Uint8Array(size);
-      replacement.set(bytes.subarray(0, size));
-      await mounted.writeFile(resolved, replacement);
+
+  /** Like `NodeExecutionEnv`, creates missing parent directories. */
+  writeFile(path: string, content: string | Uint8Array, context: Context): Promise<Result<void, FileError>> {
+    return this.#run(path, context, async (local) => {
+      await this.#files.mkdir(local.slice(0, local.lastIndexOf('/')) || '/', { recursive: true });
+      await this.#files.writeFile(local, content);
     });
   }
-  flushFile(path: string, context: Context) {
-    return this.operation(path, context, async ({ mounted, files }) => {
-      const stat = await mounted.stat(this.resolve(path));
-      if (!stat.isFile) throw new FileError('is_directory', 'Cannot flush a directory.', path);
-      // Every SQLite mutation commits before its promise resolves; temporary memory has no disk cache.
-      await files?.drain();
+
+  appendFile(path: string, content: string | Uint8Array, context: Context): Promise<Result<void, FileError>> {
+    return this.#run(path, context, async (local) => {
+      await this.#files.mkdir(local.slice(0, local.lastIndexOf('/')) || '/', { recursive: true });
+      await this.#files.appendFile(local, content);
     });
   }
-  renameFile(sourcePath: string, destinationPath: string, context: Context) {
-    return this.operation(sourcePath, context, async ({ mounted, signal }) => {
-      const paths = createPathResolver(mounted, signal);
-      const source = await paths.physical(this.resolve(sourcePath), { followFinal: false });
-      const destination = await paths.physical(this.resolve(destinationPath), { followFinal: false, missing: true });
-      const persistent = (path: string) => path === HOME || path.startsWith(`${HOME}/`);
-      if (persistent(source) !== persistent(destination)) throw new FileError('not_supported', 'Cannot rename across virtual filesystem mounts.', destinationPath);
-      await mounted.mv(source, destination);
+
+  truncateFile(path: string, size: number, context: Context): Promise<Result<void, FileError>> {
+    return this.#run(path, context, async (local, absolute) => {
+      if (!Number.isSafeInteger(size) || size < 0) {
+        throw new FileError('invalid', 'File size must be a non-negative safe integer', absolute);
+      }
+      const bytes = await this.#files.readFileBuffer(local);
+      const resized = new Uint8Array(size);
+      resized.set(bytes.subarray(0, size));
+      await this.#files.writeFile(local, resized);
     });
   }
-  fileInfo(path: string, context: Context) {
-    return this.operation(path, context, async ({ mounted }) => {
-      const resolved = this.resolve(path);
-      return infoFor(resolved, await mounted.lstat(resolved));
+
+  /** Every write completes before its promise resolves; no handle holds unwritten data. */
+  flushFile(path: string, context: Context): Promise<Result<void, FileError>> {
+    return this.#run(path, context, async (local, absolute) => {
+      if ((await this.#files.stat(local)).isDirectory) throw new FileError('is_directory', 'Is a directory', absolute);
     });
   }
-  openDirReader(path: string, context: Context): Promise<Result<DirReader, FileError>> {
-    return this.resourceOperation(path, context, async ({ mounted }, rollback) => {
-      const resolved = await mounted.realpath(this.resolve(path));
-      let names = await mounted.readdir(resolved); // Namespace itself is bounded (4096 workspace entries).
-      let offset = 0;
-      let closed = false;
-      const close = this.readerClose(() => { closed = true; names = []; });
-      rollback(close);
-      return {
-        next: (maxEntries, readContext) => this.operation(path, readContext, async ({ mounted: current }) => {
-          if (closed) throw new FileError('invalid', 'Directory reader is closed.', path);
-          if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) throw new FileError('invalid', 'maxEntries must be a positive safe integer.', path);
-          const entries: FileInfo[] = [];
-          while (offset < names.length && entries.length < maxEntries) {
-            const child = joinVirtualPath(resolved, names[offset++]);
-            try { entries.push(infoFor(child, await current.lstat(child))); }
-            catch (cause) { if (fileError(cause).code !== 'not_found') throw cause; }
-          }
-          return { entries, done: offset === names.length };
-        }),
-        close: async () => { await close(); },
-      } satisfies DirReader;
+
+  renameFile(sourcePath: string, destinationPath: string, context: Context): Promise<Result<void, FileError>> {
+    return this.#run(sourcePath, context, async (source) => {
+      await this.#files.mv(source, this.#local(this.#absolute(destinationPath)));
     });
   }
+
+  fileInfo(path: string, context: Context): Promise<Result<FileInfo, FileError>> {
+    return this.#run(path, context, async (local, absolute) => {
+      const entry = await this.storage.info(local);
+      if (!entry) throw new FileError('not_found', `ENOENT: no such file or directory, lstat '${absolute}'`, absolute);
+      return { name: nameOf(absolute), path: absolute, kind: entry.kind, size: entry.size, mtimeMs: entry.mtimeMs };
+    });
+  }
+
   async listDir(path: string, context: Context): Promise<Result<FileInfo[], FileError>> {
     const opened = await this.openDirReader(path, context);
     if (!opened.ok) return opened;
     const entries: FileInfo[] = [];
     try {
       while (true) {
-        const page = await opened.value.next(128, context);
+        const page = await opened.value.next(256, context);
         if (!page.ok) return page;
         entries.push(...page.value.entries);
         if (page.value.done) return ok(entries);
       }
-    } finally { await opened.value.close(context); }
+    } finally {
+      await opened.value.close(context);
+    }
   }
-  watch(_targets: readonly WatchTarget[], _onChange: (change: WatchChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
-    return this.metadata(undefined, context, () => { throw new FileError('not_supported', 'The local virtual filesystem does not provide reliable change notifications.'); });
-  }
-  canonicalPath(path: string, context: Context) { return this.operation(path, context, ({ mounted }) => mounted.realpath(this.resolve(path))); }
-  async exists(path: string, context: Context): Promise<Result<boolean, FileError>> {
-    const result = await this.fileInfo(path, context);
-    return result.ok ? ok(true) : result.error.code === 'not_found' ? ok(false) : result;
-  }
-  createDir(path: string, options: { recursive?: boolean } | undefined, context: Context) {
-    return this.operation(path, context, ({ mounted }) => mounted.mkdir(this.resolve(path), { recursive: options?.recursive ?? true }));
-  }
-  remove(path: string, options: { recursive?: boolean; force?: boolean } | undefined, context: Context) {
-    return this.operation(path, context, ({ mounted }) => mounted.rm(this.resolve(path), options));
-  }
-  private createTemp(prefix: string, suffix: string, directory: boolean, context: Context) {
-    return this.operation('/tmp', context, async ({ mounted }) => {
-      if (/[\/\\\0]/.test(prefix + suffix)) throw new FileError('invalid', 'Temporary names must be single path components.');
-      const path = `/tmp/${prefix}${uuidv7()}${suffix}`;
-      validateVirtualPath(path);
-      if (!mounted.createExclusive) throw new FileError('not_supported', 'The virtual filesystem has no exclusive-create primitive.', path);
-      await mounted.createExclusive(path, { directory, mode: directory ? 0o700 : 0o600 });
-      return path;
+
+  openDirReader(path: string, context: Context): Promise<Result<DirReader, FileError>> {
+    return this.#run(path, context, async (local, absolute) => {
+      const names = await this.#files.readdir(local);
+      return new WorkspaceDirReader(this.storage, local, absolute, names);
     });
   }
-  createTempDir(prefix: string | undefined, context: Context) { return this.createTemp(prefix ?? 'tmp-', '', true, context); }
-  createTempFile(options: { prefix?: string; suffix?: string } | undefined, context: Context) { return this.createTemp(options?.prefix ?? 'tmp-', options?.suffix ?? '', false, context); }
 
-  exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
-    return this.track((async () => {
-      try { return await this.lease(context, (invocation) => executeWorkspaceCommand(invocation, this.cwd, command, options, context)); }
-      catch (cause) {
-        try { this.active(context); } catch { return err(new ExecutionError('aborted', 'Workspace shell execution was aborted.', toError(cause))); }
-        return err(cause instanceof ExecutionError ? cause : new ExecutionError('unknown', toError(cause).message, toError(cause)));
-      }
-    })());
+  async watch(): Promise<Result<FileWatcher, FileError>> {
+    return err(new FileError('not_supported', 'The workspace does not report file changes.'));
   }
 
-  /** Acquisition and delivered scopes remain owned by this facade until release. */
-  acquire(context: Context): Promise<{ env: WorkspaceExecutionEnv; context: Context; release(): Promise<void> }> {
-    return this.track((async () => {
-      context.abortSignal?.throwIfAborted();
-      this.active(context);
-      if (!this.owner) throw new Error('Only an owned workspace facade can acquire a separate tool scope.');
-      this.own();
-      const cancellation = this.cancellation(context);
-      let lease: Awaited<ReturnType<WorkspaceRuntime['acquire']>>;
-      try { lease = await this.owner.runtime.acquire(this.owner.workspaceId, cancellation.signal); }
-      catch (cause) { cancellation.dispose(); throw cause; }
-      const env = new WorkspaceExecutionEnv(lease.invocation, this.cwd);
-      const scopedContext = withAbortSignal(lease.invocation.signal, context);
-      let released: Promise<void> | undefined;
-      const release = () => released ??= this.track((async () => {
-        try {
-          try { await env.cleanup(BACKGROUND_CONTEXT); }
-          finally { await lease.release(); }
-        } finally {
-          cancellation.dispose();
-          this.scopes.delete(release);
-        }
-      })());
-      this.scopes.add(release);
-      try {
-        context.abortSignal?.throwIfAborted();
-        this.active(context);
-        return { env, context: scopedContext, release };
-      } catch (cause) {
-        // A cancellation may arrive after runtime admission but before delivery.
-        // Never leave that acquired lease waiting for a caller who got no scope.
-        await release().catch(() => {});
-        throw cause;
-      }
-    })());
+  canonicalPath(path: string, context: Context): Promise<Result<string, FileError>> {
+    return this.#run(path, context, async (local, absolute) => {
+      await this.#files.realpath(local);
+      return absolute;
+    });
   }
 
-  async cleanup(_context: Context): Promise<void> {
-    if (!this.closing) {
-      this.closed = true;
-      this.lifetime.abort(new Error('Workspace environment is closed.'));
-      this.invocation?.abort?.(new Error('Workspace environment is closed.'));
-      this.closing = (async () => {
-        // Pending direct work/acquisitions may be queued behind one of our
-        // delivered scopes. Start releasing those leases before awaiting either.
-        const releasing = [...this.scopes].map((release) => release());
-        await Promise.allSettled([...this.pending, ...releasing]);
-        await Promise.allSettled([...this.readers].map((close) => close()));
-        this.disown?.();
-        this.disown = undefined;
-      })();
+  async exists(path: string, context: Context): Promise<Result<boolean, FileError>> {
+    const result = await this.fileInfo(path, context);
+    if (result.ok) return ok(true);
+    if (result.error.code === 'not_found') return ok(false);
+    return err(result.error);
+  }
+
+  createDir(path: string, options: { recursive?: boolean } | undefined, context: Context,
+  ): Promise<Result<void, FileError>> {
+    return this.#run(path, context, (local) => this.#files.mkdir(local, { recursive: options?.recursive ?? true }));
+  }
+
+  remove(path: string, options: { recursive?: boolean; force?: boolean } | undefined, context: Context,
+  ): Promise<Result<void, FileError>> {
+    return this.#run(path, context, (local) => this.#files.rm(local, options));
+  }
+
+  /** Nothing in the app asks for these, and `/tmp` lasts only one command, so the environment offers none. */
+  async createTempDir(): Promise<Result<string, FileError>> {
+    return err(new FileError('not_supported', 'Temporary directories are not available; use /workspace.'));
+  }
+
+  async createTempFile(): Promise<Result<string, FileError>> {
+    return err(new FileError('not_supported', 'Temporary files are not available; use /workspace.'));
+  }
+
+  /**
+   * Runs a script, or an available command with arguments that bypass shell parsing. The shell buffers output, so
+   * each stream arrives in one piece after the command ends, and output is never spilled to a file.
+   */
+  async exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context,
+  ): Promise<Result<ShellExecResult, ExecutionError>> {
+    if (context.abortSignal?.aborted) return err(new ExecutionError('aborted', 'aborted'));
+    const program = typeof command === 'string' ? command : command[0];
+    if (typeof command !== 'string' && (program === undefined || !isBashCommand(program))) {
+      const name = program ?? '(empty argv)';
+      return err(new ExecutionError('spawn_error', `Program is not available in this shell: ${name}`));
     }
-    await this.closing;
+    const timeout = options?.timeout;
+    if (timeout !== undefined && (!Number.isFinite(timeout) || timeout <= 0)) {
+      return err(new ExecutionError('timeout', 'Invalid timeout: must be a finite number of seconds'));
+    }
+    const temporary = new InMemoryFs();
+    temporary.mkdirSync('/tmp', { recursive: true });
+    const fs = new MountableFs({ base: temporary, mounts: [{ mountPoint: WORKSPACE_ROOT, filesystem: this.#files }] });
+    const cwd = resolvePath(this.cwd, options?.cwd ?? this.cwd);
+    const directory = await fs.stat(cwd).catch(() => undefined);
+    if (!directory?.isDirectory) {
+      return err(new ExecutionError('spawn_error', `Working directory does not exist: ${cwd}`));
+    }
+
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    context.abortSignal?.addEventListener('abort', abort, { once: true });
+    this.#running.add(controller);
+    let timedOut = false;
+    // Like a killed process, an aborted script stops at its next statement or sleep.
+    const timer = timeout === undefined ? undefined : setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeout * 1000);
+    const interrupted = () => {
+      if (timedOut) return new ExecutionError('timeout', `timeout:${timeout}`);
+      return controller.signal.aborted ? new ExecutionError('aborted', 'aborted') : undefined;
+    };
+    try {
+      const result = await createBashEngine(fs).exec(program ?? '', {
+        signal: controller.signal, rawScript: true, cwd,
+        // The phone's process variables never reach the shell; `inheritEnv` only keeps the shell's own defaults.
+        replaceEnv: options?.inheritEnv === false,
+        ...(options?.env === undefined ? {} : { env: options.env }),
+        ...(typeof command === 'string' ? {} : { args: command.slice(1) }),
+      });
+      const stopped = interrupted();
+      if (stopped) return err(stopped);
+      try {
+        if (result.stdout) options?.onOutput?.(result.stdout, context, { stream: 'stdout' });
+        if (result.stderr) options?.onOutput?.(result.stderr, context, { stream: 'stderr' });
+      } catch (cause) {
+        return err(new ExecutionError('callback_error', toError(cause).message, toError(cause)));
+      }
+      return ok({ exitCode: result.exitCode });
+    } catch (cause) {
+      return err(interrupted() ?? new ExecutionError('unknown', toError(cause).message, toError(cause)));
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      context.abortSignal?.removeEventListener('abort', abort);
+      this.#running.delete(controller);
+    }
   }
 
-  /** Local composition-only capability, absent on a direct metadata facade. */
-  boundInvocation(): WorkspaceInvocation | undefined { return this.invocation as WorkspaceInvocation | undefined; }
+  async cleanup(): Promise<void> {
+    for (const controller of this.#running) controller.abort();
+    this.#running.clear();
+  }
 }
-
-export function createWorkspaceExecutionEnv(runtime: WorkspaceRuntime, workspaceId: string, cwd = HOME): WorkspaceExecutionEnv {
-  return new WorkspaceExecutionEnv({ runtime, workspaceId }, cwd);
-}
-export function acquireWorkspaceExecutionScope(env: WorkspaceExecutionEnv, context: Context) { return env.acquire(context); }
-export function workspaceInvocation(env: WorkspaceExecutionEnv): WorkspaceInvocation | undefined { return env.boundInvocation(); }

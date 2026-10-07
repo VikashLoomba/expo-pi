@@ -57,7 +57,7 @@ test('live details and details-only updates reach the tool row without changing 
   assert.equal(row.tool.file.diff, '- old\n+ new', 'an earlier projection is not mutated');
 });
 
-test('committed result details survive a fresh projection and retain the patch artifact path', () => {
+test('committed result details survive a fresh projection, and an old patch path is not shown', () => {
   const cached = state();
   cached.live = {};
   cached.entries.push({ id: 2, model: [{ role: 'toolResult', toolCallId: 'edit-call', toolName: 'edit', timestamp: 2,
@@ -68,5 +68,6 @@ test('committed result details survive a fresh projection and retain the patch a
   const reopened = projectMessages(copy, copy.entries);
   assert.deepEqual(reopened, first);
   assert.equal(reopened[0].tool.status, 'completed');
-  assert.equal(reopened[0].tool.file.patchPath, '/workspace/.tool-output/full.patch');
+  assert.equal(reopened[0].tool.file.diffTruncated, true);
+  assert.equal('patchPath' in reopened[0].tool.file, false);
 });

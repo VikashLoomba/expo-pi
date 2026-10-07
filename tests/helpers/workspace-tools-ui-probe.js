@@ -1,4 +1,4 @@
-// Mounts the real native transcript with a previously committed isolated fixture.
+// Mounts the real native transcript with an isolated fixture it commits first, and removes the fixture afterwards.
 export default async function workspaceToolsUiProbe({ namespace, platform, holdMs = 0 }) {
   const check = (value, message) => { if (!value) throw new Error(message); };
   const requireModule = (suffix) => {
@@ -13,7 +13,9 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
   const { anthropicProvider } = requireModule('@earendil-works/pi-ai/dist/providers/anthropic.js');
   const { DurableChatService } = requireModule('src/pi/chat-service.ts');
   const { openExpoSqliteStorage } = requireModule('src/pi/storage/index.ts');
-  const { openWorkspaceDatabase } = requireModule('src/pi/workspace/database.ts');
+  const { createDeviceWorkspaces } = requireModule('src/pi/workspace/device-storage.ts');
+  const { Directory, Paths } = requireModule('expo-file-system/build/index.js');
+  const { deleteDatabaseAsync } = requireModule('expo-sqlite/build/index.js');
   const { buildModelCatalog } = requireModule('src/pi/model-catalog.ts');
   const providerModule = requireModule('src/chat/chat-provider.tsx');
   const { router } = requireModule('expo-router/build/exports.js');
@@ -39,7 +41,24 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
   }
   const models = ai.createModels({ credentials: new ai.InMemoryCredentialStore(),
     authContext: { env: async () => undefined, fileExists: async () => false } });
-  models.setProvider(anthropicProvider());
+  // The fixture's one tool round: write a file and edit it, so the transcript has a committed edit card.
+  let providerCalls = 0;
+  const dispatch = (model) => {
+    const first = providerCalls++ === 0;
+    const calls = [{ type: 'toolCall', id: 'ui-write', name: 'write', arguments: { path: 'notes.txt', content: 'alpha\nbeta\n' } },
+      { type: 'toolCall', id: 'ui-edit', name: 'edit', arguments: { path: 'notes.txt', edits: [{ oldText: 'alpha', newText: 'edited' }] } }];
+    const message = { role: 'assistant', api: model.api, provider: model.provider, model: model.id,
+      content: first ? calls : [{ type: 'text', text: 'Fixture ready.' }],
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: first ? 'toolUse' : 'stop', timestamp: Date.now() };
+    const stream = ai.createAssistantMessageEventStream();
+    stream.push({ type: 'start', partial: message });
+    stream.push({ type: 'done', reason: message.stopReason, message });
+    return stream;
+  };
+  models.setProvider({ ...anthropicProvider(), auth: { apiKey: { name: 'Local verification',
+    check: async () => ({ type: 'api_key' }), resolve: async () => ({ auth: { apiKey: 'synthetic-no-network' } }) } },
+    stream: dispatch, streamSimple: dispatch });
   // Read a chat the way the chat screen does: subscribe to its view until it has loaded.
   const readChat = async (chatService, chatId) => {
     const view = chatService.chat(chatId, { transcript: true });
@@ -53,9 +72,10 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
       return view.getSnapshot().conversation;
     } finally { stop(); }
   };
+  const databaseName = `${namespace}-chats.db`;
+  const rootName = `${namespace}-workspaces`;
   const service = await DurableChatService.open({
-    storage: await openExpoSqliteStorage(`${namespace}-chats.db`), models,
-    openWorkspaceDatabase: () => openWorkspaceDatabase(`${namespace}-files.db`),
+    storage: await openExpoSqliteStorage(databaseName), models, workspaces: createDeviceWorkspaces(rootName),
   });
   // The route resolves its chat before any screen calls the hook, so bind the mounted runtime up front.
   function mountedRuntime(devtoolsHook) {
@@ -78,8 +98,9 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
   }
   let row;
   try {
-    const id = service.getSnapshot().chats[0]?.id;
-    check(id, 'Persisted fixture conversation required');
+    const id = await service.createChat();
+    const receipt = await service.waitForSubmission(await service.send(id, 'Prepare the edit card fixture.'));
+    check(receipt.status === 'done', 'Fixture tool round must complete');
     const messages = (await readChat(service, id)).messages;
     row = messages.find((message) => message.tool?.name === 'edit' && message.tool.file?.diff?.includes('edited'));
     check(row, 'Persisted successful edit diff required');
@@ -119,7 +140,7 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
     const diff = mountedProps().find((props) => props.testID === `tool-diff-${row.id}`);
     check(diff.children === row.tool.file.diff, 'Mounted diff differs from persisted projection');
     const expanded = mountedProps().find((props) => props.testID === `tool-${row.id}` && props.onPress);
-    check(expanded.accessibilityState.expanded && expanded.accessibilityLabel.includes('linked'), 'Expanded path-aware accessible card missing');
+    check(expanded.accessibilityState.expanded && expanded.accessibilityLabel.includes('notes.txt'), 'Expanded path-aware accessible card missing');
     if (holdMs) {
       // Use the mounted FlatList's public method to bring the observed row into
       // the screenshot after its expanded height has settled.
@@ -138,6 +159,11 @@ export default async function workspaceToolsUiProbe({ namespace, platform, holdM
       router.replace('/');
       if (row) await until(() => !mountedProps().some((props) => props.testID === `tool-${row.id}`), 'Fixture did not unmount');
       await sleep(100);
-    } finally { await service.close(); }
+    } finally {
+      await service.close();
+      const root = new Directory(Paths.document, rootName);
+      if (root.exists) root.delete();
+      await deleteDatabaseAsync(databaseName).catch(() => {});
+    }
   }
 }
