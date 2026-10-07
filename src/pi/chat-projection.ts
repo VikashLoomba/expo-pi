@@ -1,3 +1,4 @@
+import type { ChatExecutionSettings } from './execution/document';
 import type { Message } from '@earendil-works/pi-ai';
 import type { EntryRecord, LiveState, SubmissionId, SubmissionRecord } from '@earendil-works/pi-durable';
 
@@ -23,6 +24,7 @@ export type CommittedProjection = {
 export type ChatProjectionState = {
   metadata: ChatMetadata;
   settings: ChatModelSettings;
+  execution: ChatExecutionSettings;
   entries: Map<number, EntryRecord>;
   live: LiveState;
   native: NativeResponsesState;
@@ -210,8 +212,8 @@ export function projectChat(id: string, cached: ChatProjectionState, previous: C
   const pending = unfinished && !scheduling;
   let conversation = previous;
   if (!previous || previous.title !== title || previous.messages !== sharedMessages ||
-      previous.settings !== cached.settings || previous.busy !== busy || previous.pending !== pending || previous.error !== error) {
-    conversation = { id, title, settings: cached.settings, messages: sharedMessages, busy, pending, ...(error ? { error } : {}) };
+      previous.settings !== cached.settings || previous.execution !== cached.execution || previous.busy !== busy || previous.pending !== pending || previous.error !== error) {
+    conversation = { id, title, settings: cached.settings, execution: cached.execution, messages: sharedMessages, busy, pending, ...(error ? { error } : {}) };
   }
   const summary = cached.metadata.archived ? undefined : { id, title,
     preview: committed.preview || 'Start a conversation',

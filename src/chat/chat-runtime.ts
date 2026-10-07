@@ -4,6 +4,7 @@ import type { Storage } from '@earendil-works/pi-durable';
 import type { SqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite';
 
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
+import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { ExecutionComposition } from '../pi/execution/composition';
 import { CODEX_PROVIDER_ID } from '../pi/codex-auth/identity';
 import { buildModelCatalog, type ChatModelSettings } from '../pi/model-catalog';
@@ -66,9 +67,9 @@ export class ChatRuntime {
       present.add(current.id);
       const previous = this.conversationStates.get(current.id);
       if (!previous || previous.title !== current.title || previous.busy !== current.busy ||
-          previous.settings !== current.settings || previous.pending !== current.pending || previous.error !== current.error) {
+          previous.settings !== current.settings || previous.execution !== current.execution || previous.pending !== current.pending || previous.error !== current.error) {
         this.conversationStates.set(current.id, { id: current.id, title: current.title,
-          settings: current.settings, busy: current.busy, pending: current.pending, ...(current.error ? { error: current.error } : {}) });
+          settings: current.settings, execution: current.execution, busy: current.busy, pending: current.pending, ...(current.error ? { error: current.error } : {}) });
       }
     }
     for (const id of this.conversationStates.keys()) if (!present.has(id)) this.conversationStates.delete(id);
@@ -277,6 +278,10 @@ export class ChatRuntime {
   archiveChat(id: string) { return this.operate((service) => service.archiveChat(id)); }
   async updateSettings(id: string, settings: ChatModelSettings) {
     const { pending } = await this.operate(async (service) => ({ pending: service.updateSettings(id, settings) }));
+    await pending;
+  }
+  async updateExecution(id: string, execution: ChatExecutionSettings, modelSettings?: ChatModelSettings) {
+    const { pending } = await this.operate(async (service) => ({ pending: service.updateExecution(id, execution, modelSettings) }));
     await pending;
   }
   async send(id: string, text: string) {

@@ -1,3 +1,4 @@
+import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { FileToolPresentation } from './file-tool-presentation';
 import type { ChatModelSettings } from '../pi/model-catalog';
 import type { WebSearchPresentation } from './web-search-types';
@@ -26,6 +27,7 @@ export interface ChatConversation {
   id: string;
   title: string;
   settings: ChatModelSettings;
+  execution: ChatExecutionSettings;
   messages: ChatMessage[];
   busy: boolean;
   pending: boolean;

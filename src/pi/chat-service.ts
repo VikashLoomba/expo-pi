@@ -12,6 +12,7 @@ import { openWorkspaceDatabase } from './workspace/database';
 import { createWorkspaceExtension } from './workspace/extension';
 import { ensureWorkspaceDoc } from './workspace/document';
 import { createLocalExecution, type ExecutionComposition } from './execution/composition';
+import { ExecutionTargetDoc, executionSettings, sameExecution, validateExecution, type ChatExecutionSettings, type ExecutionTarget } from './execution/document';
 import { CODEX_PROVIDER_ID, MODEL_ID } from './codex-auth/identity';
 import { assertModelSettings, buildModelCatalog, getDefaultModelSettings, type ChatModelSettings } from './model-catalog';
 import { createNativeWebSearchBridge, NativeLiveDoc, NativeResponsesDoc, type NativeLiveState, type NativeResponsesState } from './native-web-search/durable';
@@ -110,6 +111,8 @@ export class DurableChatService {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
         metadata.createdAt = now();
         await ensureWorkspaceDoc(tx, conversation.id, conversation.parent ? 'fork' : 'new');
+        const selection = await tx.doc(ExecutionTargetDoc, conversation.id);
+        if (conversation.owner && !conversation.parent) Object.assign(selection, await tx.doc(ExecutionTargetDoc, conversation.owner.conversationId));
         await execution.conversationCreated?.(tx, conversation);
       },
       onReport: (error) => service?.report(error),
@@ -136,9 +139,10 @@ export class DurableChatService {
         await migrateSearchObservations(this.harness, record.id, context);
         const agent = await this.harness.snapshot(AgentDoc, record.id, context);
         if (record.owner) continue;
+        const target = await this.harness.snapshot(ExecutionTargetDoc, record.id, context);
         const native = await this.harness.snapshot(NativeResponsesDoc, record.id, context);
         const nativeLive = await this.harness.snapshot(NativeLiveDoc, record.id, context);
-        const cached: CachedChat = { revision: 0, metadata: { ...metadata }, settings: settingsOf(agent), entries: new Map(), live: {},
+        const cached: CachedChat = { revision: 0, metadata: { ...metadata }, settings: settingsOf(agent), execution: executionSettings(target, agent), entries: new Map(), live: {},
           native: native ?? { responses: {} }, nativeLive: nativeLive ?? {}, unsettled: new Set(), abortRequested: new Set() };
         let entryCursor: Cursor | undefined;
         do {
@@ -170,7 +174,7 @@ export class DurableChatService {
         if (change.type === 'conversation' && !change.value.owner) {
           const id = String(change.value.id);
           if (!this.cache.has(id)) {
-            this.cache.set(id, { revision: 0, metadata: { title: '', createdAt: 0, archived: false }, settings: settingsOf(), entries: new Map(), live: {},
+            this.cache.set(id, { revision: 0, metadata: { title: '', createdAt: 0, archived: false }, settings: settingsOf(), execution: executionSettings(), entries: new Map(), live: {},
               native: { responses: {} }, nativeLive: {}, unsettled: new Set(), abortRequested: new Set() });
             affected.add(id);
             if (change.value.parent) this.scheduleForkHydration(id);
@@ -201,6 +205,13 @@ export class DurableChatService {
           if (change.record.kind === 'pi.agent') {
             const settings = settingsOf(change.value as AgentState);
             if (!sameSettings(cached.settings, settings)) cached.settings = settings;
+            const execution = executionSettings(cached.execution.target, change.value as AgentState);
+            if (!sameExecution(cached.execution, execution)) cached.execution = execution;
+            affected.add(id);
+          }
+          if (change.record.kind === ExecutionTargetDoc.definition.kind) {
+            const execution = { ...cached.execution, target: change.value as ExecutionTarget };
+            if (!sameExecution(cached.execution, execution)) cached.execution = execution;
             affected.add(id);
           }
           if (change.record.kind === 'app.chat') {
@@ -245,12 +256,13 @@ export class DurableChatService {
           const cached = this.cache.get(id);
           if (!cached) return;
           const revision = cached.revision;
-          const [metadata, agent, live, native, nativeLive] = await Promise.all([
+          const [metadata, agent, live, native, nativeLive, target] = await Promise.all([
             this.harness.snapshot(ChatMetadataDoc, cid, context),
             this.harness.snapshot(AgentDoc, cid, context),
             this.harness.snapshot(LiveDoc, cid, context),
             this.harness.snapshot(NativeResponsesDoc, cid, context),
             this.harness.snapshot(NativeLiveDoc, cid, context),
+            this.harness.snapshot(ExecutionTargetDoc, cid, context),
           ]);
           const entries = new Map<number, EntryRecord>();
           let cursor: Cursor | undefined;
@@ -264,6 +276,7 @@ export class DurableChatService {
           if (cached.revision !== revision) continue;
           if (metadata) cached.metadata = { ...metadata };
           cached.settings = settingsOf(agent);
+          cached.execution = executionSettings(target, agent);
           cached.live = live ?? {};
           cached.native = native ?? { responses: {} };
           cached.nativeLive = nativeLive ?? {};
@@ -399,6 +412,18 @@ export class DurableChatService {
         // unrelated agent fields. Model and effort commit in the same transaction.
         await configure(tx, conversation.id, selected);
       }, context);
+    });
+  }
+  updateExecution(id: string, settings: ChatExecutionSettings, modelSettings?: ChatModelSettings): Promise<void> {
+    const selected = structuredClone(settings);
+    validateExecution(selected);
+    const selectedModel = modelSettings && { model: { ...modelSettings.model }, thinkingLevel: modelSettings.thinkingLevel };
+    return this.configureExecution(id, { cwd: selected.cwd }, async (tx, cid) => {
+      if (selectedModel) assertModelSettings(this.getCatalog(), selectedModel);
+      const target = await tx.doc(ExecutionTargetDoc, cid);
+      if ('machineId' in target) delete (target as Partial<Extract<ExecutionTarget, { kind: 'ssh' }>>).machineId;
+      Object.assign(target, selected.target);
+      if (selectedModel) await configure(tx, cid, selectedModel);
     });
   }
   /** Commit cwd and application-owned selection state together after old work settles. */

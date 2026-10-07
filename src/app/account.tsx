@@ -120,6 +120,11 @@ export default function AccountScreen() {
         <Text style={[styles.title, { color: colors.text }]}>Your providers.</Text>
         <Text style={[styles.subtitle, { color: colors.secondary }]}>Connect accounts here, then choose a provider, model, and reasoning effort in each chat.</Text>
       </View>
+      <View style={[styles.connection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.providerName, { color: colors.text }]}>Execution environments</Text>
+        <Text style={[styles.privacyText, { color: colors.secondary }]}>Configure remote machines using SSH over Tailscale, then choose an environment in each chat’s settings.</Text>
+        <ActionButton testID="manage-remote-hosts" title="Remote machines" secondary onPress={() => router.push('/remote-hosts')} />
+      </View>
       {focusedProvider && <ProviderAccountCard key={focusedProvider.id} provider={focusedProvider} />}
       <View style={[styles.connection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.connectionHeader}>

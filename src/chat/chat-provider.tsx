@@ -1,6 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, Platform } from 'react-native';
 
+import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
+import { createRemoteExecution } from '../pi/execution/remote/composition';
+import type { ChatExecutionSettings } from '../pi/execution/document';
 import { CODEX_PROVIDER_ID, openCodexDeviceBrowser } from '../pi/codex-auth';
 import { buildModelCatalog, type ChatModelSettings } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels } from '../pi/models';
@@ -12,6 +15,7 @@ import { AuthPromptController } from './auth-prompt-controller';
 import { ChatRuntime } from './chat-runtime';
 
 function useChatController() {
+  const [remoteHosts] = useState(createRemoteHostRepository);
   const [credentials] = useState(createChatCredentialStore);
   const [models] = useState(() => {
     const session = createChatModels(credentials);
@@ -19,7 +23,7 @@ function useChatController() {
     return session;
   });
   const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
-  const [runtime] = useState(() => new ChatRuntime({ models, credentials, openStorage: openExpoSqliteStorage, platform: Platform.OS }));
+  const [runtime] = useState(() => new ChatRuntime({ models, credentials, openStorage: openExpoSqliteStorage, platform: Platform.OS, execution: (local) => createRemoteExecution(local, remoteHosts) }));
   const snapshot = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
   const [signingInProvider, setSigningInProvider] = useState<string | null>(null);
@@ -50,6 +54,7 @@ function useChatController() {
 
   useEffect(() => {
     mounted.current = true;
+    void remoteHosts.restore().catch((error) => runtime.report(error));
     if (AppState.currentState !== 'background') void runtime.activate().catch((error) => runtime.report(error));
     const subscription = AppState.addEventListener('change', (state) => {
       const operation = state === 'background' ? runtime.deactivate() : state === 'active' ? runtime.activate() : undefined;
@@ -63,7 +68,7 @@ function useChatController() {
       prompts.cancel();
       void runtime.deactivate().catch((error) => runtime.report(error));
     };
-  }, [prompts, runtime]);
+  }, [prompts, remoteHosts, runtime]);
 
   const cancelSignIn = useCallback(() => { login.current?.abort(); browser.current?.abort(); }, []);
   const signIn = useCallback(async (providerId = CODEX_PROVIDER_ID) => {
@@ -156,7 +161,7 @@ function useChatController() {
     await refreshCatalog();
   }, [runtime, refreshCatalog]);
 
-  return { ...snapshot, runtime, catalog, refreshCatalog, providerAccess, hasConnectedProvider,
+  return { ...snapshot, runtime, remoteHosts, catalog, refreshCatalog, providerAccess, hasConnectedProvider,
     signedIn, hasSavedSignIn, authReady, authError, signingIn, signingInProvider, authStatus, authNotice, deviceLogin, browserOpen,
     authPrompt, submitAuthPrompt: prompts.submit,
     providerOAuth: useCallback((providerId: string) => {
@@ -193,6 +198,7 @@ export function useChatConversation(id: string) {
     send: useCallback((text: string) => runtime.send(id, text), [runtime, id]),
     cancel: useCallback(() => runtime.cancel(id), [runtime, id]),
     resume: useCallback(() => runtime.resume(id), [runtime, id]),
+    updateExecution: useCallback((execution: ChatExecutionSettings, settings?: ChatModelSettings) => runtime.updateExecution(id, execution, settings), [runtime, id]),
     updateSettings: useCallback((settings: ChatModelSettings) => runtime.updateSettings(id, settings), [runtime, id]),
   };
 }
@@ -206,6 +212,7 @@ export function useChatConversationState(id: string) {
     send: useCallback((text: string) => runtime.send(id, text), [runtime, id]),
     cancel: useCallback(() => runtime.cancel(id), [runtime, id]),
     resume: useCallback(() => runtime.resume(id), [runtime, id]),
+    updateExecution: useCallback((execution: ChatExecutionSettings, settings?: ChatModelSettings) => runtime.updateExecution(id, execution, settings), [runtime, id]),
     updateSettings: useCallback((settings: ChatModelSettings) => runtime.updateSettings(id, settings), [runtime, id]),
   };
 }

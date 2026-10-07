@@ -22,6 +22,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ title: 'Chats' }} />
           <Stack.Screen name="chat/[id]" options={{ title: 'New chat' }} />
           <Stack.Screen name="chat-settings/[id]" options={{ title: 'Chat settings', presentation: 'modal' }} />
+          <Stack.Screen name="remote-hosts" options={{ title: 'Remote machines', presentation: 'modal' }} />
           <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
         </Stack>
       </ChatProvider>
