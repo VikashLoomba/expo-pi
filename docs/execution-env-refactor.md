@@ -2,7 +2,7 @@
 
 Refactor the mobile application's execution layer so a future custom `ExecutionEnv` plugs into Pi Durable's environment factory and works with the same tools as local execution. Upgrade Pi first, complete the local integration and lifecycle ownership, use Pi's native durable configuration, and prove the boundary with an independent test environment. Production execution remains on the device during this work.
 
-The deliverable is integrated application code and behavioral evidence. Moving files or adding interfaces while retaining tool-local backend selection does not meet the objective. Use the [orchestrator goal prompt](/Users/vikashloomba/pi-react-native/pi-agent/docs/execution-env-refactor-goal.md) with this specification. The [SSH investigation](/Users/vikashloomba/pi-react-native/pi-agent/docs/remote-ssh-execution.md) supplies later feature context; this document defines the prerequisite refactor.
+The deliverable is integrated application code and behavioral evidence. Moving files or adding interfaces while retaining tool-local backend selection does not meet the objective. Use the [orchestrator goal prompt](/Users/vikashloomba/pi-react-native/pi-agent/docs/execution-env-refactor-goal.md) with this specification. The [SSH over Tailscale investigation](/Users/vikashloomba/pi-react-native/pi-agent/docs/remote-ssh-execution.md) supplies later feature context: an ordinary SSH connection to a configured Tailscale hostname through the phone's existing VPN. This document defines the prerequisite refactor.
 
 ## Upgrade and scope
 

@@ -3,7 +3,7 @@
 Copy this prompt into the orchestrator chat. The specification contains the architecture, source references, scope, sequence and acceptance matrix.
 
 ```text
-/goal Complete the execution environment architecture refactor end to end in /Users/vikashloomba/pi-react-native/pi-agent, following /Users/vikashloomba/pi-react-native/pi-agent/docs/execution-env-refactor.md. Treat that document as the implementation specification and completion criteria. docs/remote-ssh-execution.md is later-feature background, not additional implementation scope.
+/goal Complete the execution environment architecture refactor end to end in /Users/vikashloomba/pi-react-native/pi-agent, following /Users/vikashloomba/pi-react-native/pi-agent/docs/execution-env-refactor.md. Treat that document as the implementation specification and completion criteria. docs/remote-ssh-execution.md describes later SSH over Tailscale work using the phone's existing VPN, not additional implementation scope for this refactor.
 
 Upgrade Pi Durable, Pi AI, Chord and the relevant workspace compatibility-package dependencies from 1.0.0 to the verified stable 1.0.4 release, update the lockfile, and resolve compatibility issues as the first phase. Use the newer public environment interfaces, bounded reader/scanner helpers, stream metadata, and exported environment conformance suite. Do not work around an outdated installed version to avoid upgrading. Read the pinned docs/examples/interfaces and compare installed declarations after installation. Follow AGENTS.md and Expo agent CLI guidance.
 
