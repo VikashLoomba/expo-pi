@@ -33,6 +33,15 @@ Run lint and typecheck before declaring any task done.
 - Specs in `docs/` that carry a "Superseded" banner are historical. Don't implement from them.
 - Idiomatic first; no speculative performance work. Use Expo and pi-durable the way their docs and examples do and assume it is fast enough. Don't add caches, batching, budgets or other optimization layers without a measured problem on a real device.
 - No app-added limits by default; use library defaults. Never construct stress or adversarial scenarios (huge files, runaway loops, enormous outputs) to justify a limit or an optimization. Only ordinary, realistic use counts as evidence.
+- Upstream decides how; the product decides what. A missing upstream feature is never a reason to drop a product feature: build it in the simplest way consistent with upstream's mechanics. Any deviation from upstream's pattern needs the owner's approval.
+- Don't re-create what pi-durable, pi-ai, chord, just-bash or Expo already provide.
+- Expo packages should just work: no app-written polyfills and no patches to third-party bundles. If something is missing, report it instead of patching around it.
+- Never mint SDK-branded ids; look them up among the records the SDK returned.
+- Deletion is the default: no mechanism or API without a production caller or a stated product requirement. No production code that exists only for tests.
+- Don't delete user data in code, and don't add migrations unless the owner decides to.
+- Stay on the latest pi releases: check npm before starting work, and upgrade as its own step.
+- Keep lines under about 120 characters, no multi-statement one-liners, and comments that explain why, not what.
+- Design before code: for non-trivial work, propose which upstream example you start from, any deviations, and the rough size compared with upstream's equivalent, and get approval before implementing. Size is a signal: a feature several times larger than upstream's equivalent means the design is wrong.
 
 ## Upstream contracts and integration review
 
