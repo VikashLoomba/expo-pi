@@ -54,8 +54,6 @@ export interface MobileRemoteExecutionEnvOptions {
 	shellEnv?: Record<string, string>;
 	/** How the daemon watches, like `NodeExecutionEnv`'s `watch` option. */
 	watch?: RemoteWatchOptions;
-	onActivate?: (env: MobileRemoteExecutionEnv) => void;
-	onRelease?: (env: MobileRemoteExecutionEnv) => void;
 }
 
 /**
@@ -64,19 +62,16 @@ export interface MobileRemoteExecutionEnvOptions {
  */
 export class MobileRemoteExecutionEnv implements ExecutionEnv {
 	readonly id: string;
-	cwd: string;
+	readonly cwd: string;
 	readonly connection: Connection;
 	readonly #shellPath: string | undefined;
 	readonly #shellEnv: Record<string, string> | undefined;
 	readonly #watchOptions: RemoteWatchOptions;
-	readonly #onActivate?: (env: MobileRemoteExecutionEnv) => void;
-	readonly #onRelease?: (env: MobileRemoteExecutionEnv) => void;
 	readonly #lifetime = new AbortController();
 	readonly #pending = new Set<Promise<unknown>>();
 	readonly #handles = new Set<Handle>();
 	readonly #watchers = new Set<FileWatcher>();
-	readonly #temporary = new Map<string, number>();
-	#active = false;
+	readonly #temporary = new Set<string>();
 	#closed = false;
 	#closing?: Promise<void>;
 	/** Running commands this environment started, for `cleanup()`. */
@@ -89,8 +84,6 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		this.#shellPath = options.shellPath;
 		this.#shellEnv = options.shellEnv ? { ...options.shellEnv } : undefined;
 		this.#watchOptions = { ...options.watch };
-		this.#onActivate = options.onActivate;
-		this.#onRelease = options.onRelease;
 	}
 
 	/** POSIX lexical paths are available before opening SSH; home expansion needs remote hello. */
@@ -460,6 +453,14 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 				recursive: options?.recursive ?? false,
 				force: options?.force ?? false,
 			}, { signal: context.abortSignal });
+			// A removed temporary root no longer belongs to us. In particular, do
+			// not remove someone else's replacement at this path during shutdown.
+			const prefix = resolved === "/" ? "/" : `${resolved}/`;
+			for (const temporary of this.#temporary) {
+				if (temporary === resolved || (options?.recursive && temporary.startsWith(prefix))) {
+					this.#temporary.delete(temporary);
+				}
+			}
 		});
 	}
 
@@ -469,8 +470,8 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		try {
 			const { tmpdir } = await this.#info(context.abortSignal);
 			const paths = posix;
-			const { json, session } = await this.request("mkdtemp", { path: paths.join(tmpdir, prefix ?? "tmp-") }, { signal: context.abortSignal });
-			this.#temporary.set(json.path as string, session);
+			const { json } = await this.request("mkdtemp", { path: paths.join(tmpdir, prefix ?? "tmp-") }, { signal: context.abortSignal });
+			this.#temporary.add(json.path as string);
 			return ok(json.path as string);
 		} catch (error) {
 			return err(toFileError(error));
@@ -512,13 +513,16 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 			);
 			const afterResolve = abortResult<FileWatcher>(context.abortSignal);
 			if (afterResolve) return afterResolve;
-			const watcher = await RemoteWatcher.open(this, resolved, onChange, this.#watchOptions, context.abortSignal);
+			const watcher = await RemoteWatcher.open(this, resolved, onChange, this.#watchOptions, context.abortSignal,
+				(closed) => this.#watchers.delete(closed));
 			const afterOpen = this.#closed ? err<FileWatcher, FileError>(new FileError("aborted", "Remote environment is closed.")) : abortResult<FileWatcher>(context.abortSignal);
 			if (afterOpen) {
 				await watcher.close(context);
 				return afterOpen;
 			}
-			this.#watchers.add(watcher);
+			// A terminal event may arrive immediately after coverage, before open()
+			// returns. Such a watcher has already released its owner registration.
+			if (!watcher.isClosed) this.#watchers.add(watcher);
 			return ok(watcher);
 		} catch (error) {
 			return err(toFileError(error));
@@ -558,7 +562,6 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		let callbackError: ExecutionError | undefined;
 		let settled = false;
 		let running: number | undefined;
-		let runningSession: number | undefined;
 		const controller = new AbortController();
 		const onAbort = () => controller.abort();
 		signal?.addEventListener("abort", onAbort, { once: true });
@@ -579,7 +582,6 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 					signal: controller.signal,
 					onStart: (requestId, session) => {
 						running = requestId;
-						runningSession = session;
 						this.#running.set(requestId, session);
 						if (this.#closed) this.connection.kill(requestId, session);
 					},
@@ -599,15 +601,15 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 					},
 				},
 			);
-			if (typeof json.spillPath === "string" && runningSession !== undefined) this.trackSpill(json.spillPath, runningSession);
+			if (typeof json.spillPath === "string") this.trackSpill(json.spillPath);
 			if (callbackError) return err(callbackError);
 			return ok({
 				exitCode: json.exitCode as number,
 				...(typeof json.spillPath === "string" ? { spillPath: json.spillPath } : {}),
 			});
 		} catch (error) {
-			if (error instanceof RemoteError && typeof error.fields.spillPath === "string" && runningSession !== undefined) {
-				this.trackSpill(error.fields.spillPath, runningSession);
+			if (error instanceof RemoteError && typeof error.fields.spillPath === "string") {
+				this.trackSpill(error.fields.spillPath);
 			}
 			if (callbackError) return err(callbackError);
 			if (error instanceof FileError && error.code === "aborted") return err(new ExecutionError("aborted", error.message));
@@ -624,7 +626,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 							: new ExecutionError("unknown", error.message);
 			if (typeof error.fields.spillPath === "string") {
 				failure.spillPath = error.fields.spillPath;
-				if (runningSession !== undefined) this.trackSpill(failure.spillPath, runningSession);
+				this.trackSpill(failure.spillPath);
 			}
 			return err(failure);
 		} finally {
@@ -634,8 +636,8 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		}
 	}
 
-	private trackSpill(path: string, session: number): void {
-		this.#temporary.set(path.slice(0, path.lastIndexOf("/")), session);
+	private trackSpill(path: string): void {
+		this.#temporary.add(path.slice(0, path.lastIndexOf("/")));
 	}
 
 	get isClosed(): boolean { return this.#closed; }
@@ -646,13 +648,12 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		this.#lifetime.abort();
 	}
 
-	private activate(): void {
+	private assertOpen(): void {
 		if (this.#closed) throw new FileError("aborted", "Remote environment is closed.");
-		if (!this.#active) { this.#active = true; this.#onActivate?.(this); }
 	}
 
 	async #info(signal?: AbortSignal): Promise<RemoteInfo> {
-		this.activate();
+		this.assertOpen();
 		const { json } = await this.request("hello", { protocol: 1 }, { signal });
 		return json as unknown as RemoteInfo;
 	}
@@ -662,7 +663,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 	releaseHandle(handle: Handle): void { this.#handles.delete(handle); }
 
 	request(...args: Parameters<Connection["request"]>): ReturnType<Connection["request"]> {
-		try { this.activate(); } catch (error) { return Promise.reject(error); }
+		try { this.assertOpen(); } catch (error) { return Promise.reject(error); }
 		const [op, json, options = {}] = args;
 		const controller = new AbortController();
 		const abort = () => controller.abort();
@@ -699,21 +700,24 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 			// must eventually close its channel rather than wait forever for a result.
 			const timer = setTimeout(() => { void this.connection.close(); }, CLEANUP_GRACE_MS);
 			try {
-			await Promise.all([...this.#watchers].map((watcher) => watcher.close(BACKGROUND_CONTEXT)));
-			await Promise.allSettled([...this.#pending]);
-			await Promise.all([...this.#handles].map((handle) => handle.close()));
-			// Temporary paths survive a daemon restart, unlike opened handles. Use
-			// an already connected replacement session for the same immutable host;
-			// cleanup alone must not reconnect an unreachable host.
-			const session = this.connection.currentSession;
-			if (session !== undefined) await Promise.allSettled([...this.#temporary.keys()].map((path) =>
-				this.connection.request("rm", { path, recursive: true, force: true }, { session })));
-			this.#temporary.clear();
-			await this.connection.close();
-			} finally { clearTimeout(timer); }
-			this.#lifetime.abort();
-			this.#watchers.clear();
-			if (this.#active) this.#onRelease?.(this);
+				await Promise.allSettled([...this.#watchers].map((watcher) => watcher.close(BACKGROUND_CONTEXT)));
+				await Promise.allSettled([...this.#pending]);
+				await Promise.allSettled([...this.#handles].map((handle) => handle.close()));
+				// Temporary paths survive a daemon restart, unlike opened handles. Use
+				// an already connected replacement session for the same immutable host;
+				// cleanup alone must not reconnect an unreachable host.
+				const session = this.connection.currentSession;
+				if (session !== undefined) await Promise.allSettled([...this.#temporary].map((path) =>
+					this.connection.request("rm", { path, recursive: true, force: true }, { session })));
+			} finally {
+				try { await this.connection.close(); }
+				finally {
+					clearTimeout(timer);
+					this.#lifetime.abort();
+					this.#watchers.clear();
+					this.#temporary.clear();
+				}
+			}
 		})();
 		return this.#closing;
 	}

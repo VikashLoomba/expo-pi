@@ -48,14 +48,13 @@ test('POSIX paths use remote cwd and match Node lexical normalization without co
   assert.equal(resolveRemotePath('/remote/cwd', 'file:///a%20b'), '/a b');
   assert.equal(resolveRemotePath('/remote/cwd', 'file://bad/a'), '/remote/cwd/file:/bad/a');
   assert.equal(resolveRemotePath('/remote/cwd', '~/x', '/remote/home'), '/remote/home/x');
-  let connections = 0; let activations = 0;
+  let connections = 0;
   const env = new MobileRemoteExecutionEnv({ id: 'same-host', cwd: '/remote/cwd',
     connection: new Connection({ openChannel: async () => { connections++; throw new Error('should remain lazy'); } }),
-    onActivate: () => activations++,
   });
   assert.equal(getOrThrow(await env.absolutePath('../file', C)), '/remote/file');
   assert.equal(getOrThrow(await env.joinPath(['a', 'b'], C)), 'a/b');
-  assert.equal(connections, 0); assert.equal(activations, 0);
+  assert.equal(connections, 0);
   await env.cleanup(C);
   assert.equal((await env.writeFile('stale', '', C)).error.code, 'aborted');
   assert.equal(connections, 0);
@@ -96,8 +95,7 @@ test('lost session invalidates handles; later requests reconnect without replayi
 });
 
 test('normal cleanup kills only owned command groups and awaits readers and session closure', real, async (t) => {
-  let active = 0; let released = 0;
-  const { env } = await fixture(t, { onActivate: () => active++, onRelease: () => released++ });
+  const { env, metrics } = await fixture(t);
   const other = await fixture(t);
   let started;
   const ready = new Promise((resolve) => { started = resolve; });
@@ -106,7 +104,7 @@ test('normal cleanup kills only owned command groups and awaits readers and sess
   await env.cleanup(C);
   const result = getOrThrow(await command);
   assert.equal(result.exitCode, 137);
-  assert.equal(active, 1); assert.equal(released, 1);
+  assert.equal(metrics.sessions, 1); assert.equal(metrics.closes, 1);
   assert.equal(getOrThrow(await other.env.exec('printf alive', undefined, C)).exitCode, 0);
 });
 
@@ -153,6 +151,59 @@ test('watch recovers coverage with overflow after session loss and stops before 
   await watcher.close(C);
   assert.equal(changes.length, count);
   assert.equal(metrics.closes, 2);
+});
+
+test('a reused owner forgets explicitly closed and terminal watchers, including terminal admission races', async () => {
+  for (const ending of ['close', 'terminal', 'during-admission']) {
+    let event; let settle; let closes = 0;
+    const connection = {
+      async info() { return { os: 'linux' }; },
+      request(op, _json, options) {
+        assert.equal(op, 'watch');
+        event = options.onEvent;
+        const pending = new Promise((resolve) => { settle = () => resolve({ json: {}, session: 1 }); });
+        options.signal.addEventListener('abort', settle, { once: true });
+        event({ kind: 'ready', mode: 'native' });
+        if (ending === 'during-admission') {
+          event({ kind: 'error', code: 'invalid', message: 'Coverage limit reached.' });
+          settle();
+        }
+        return pending;
+      },
+      async close() { settle(); },
+    };
+    const env = new MobileRemoteExecutionEnv({ connection, id: 'watch-owner', cwd: '/project' });
+    const watcher = getOrThrow(await env.watch([{ path: '.' }], () => {}, C));
+    const close = watcher.close.bind(watcher);
+    watcher.close = async (...args) => { closes++; return close(...args); };
+    if (ending === 'close') await watcher.close(C);
+    if (ending === 'terminal') {
+      event({ kind: 'error', code: 'invalid', message: 'Coverage limit reached.' });
+      settle();
+    }
+    await env.cleanup(C);
+    assert.equal(closes, ending === 'close' ? 1 : 0, `owner retained a finished ${ending} watcher`);
+  }
+});
+
+test('owner shutdown still closes the daemon when a watcher disposer rejects', real, async (t) => {
+  const { env, metrics } = await fixture(t);
+  const watcher = getOrThrow(await env.watch([{ path: '.' }], () => {}, C));
+  watcher.close = async () => { throw new Error('watch disposer failed'); };
+  await env.cleanup(C);
+  assert.equal(metrics.closes, 1);
+  assert.equal((await env.fileInfo('.', C)).error.code, 'aborted');
+});
+
+test('removing an owned temporary root relinquishes its path before shutdown', real, async (t) => {
+  const { env } = await fixture(t);
+  const temporary = getOrThrow(await env.createTempDir('pi-mobile-removed-', C));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  getOrThrow(await env.remove(temporary, { recursive: true }, C));
+  getOrThrow(await env.createDir(temporary, undefined, C));
+  getOrThrow(await env.writeFile(`${temporary}/replacement`, 'belongs to the replacement directory', C));
+  await env.cleanup(C);
+  assert.equal(await readFile(`${temporary}/replacement`, 'utf8'), 'belongs to the replacement directory');
 });
 
 test('stop seals active work, closes watch admission and does not reconnect during cleanup', real, async (t) => {

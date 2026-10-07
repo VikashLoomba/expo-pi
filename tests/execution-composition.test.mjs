@@ -3,7 +3,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { AgentDoc } from '@earendil-works/pi-durable';
+import { AgentDoc, defineExtension, defineTask, section } from '@earendil-works/pi-durable';
+import { getOrThrow } from '@earendil-works/pi-durable/env';
 import { integrationDatabase, toolReply, toolRound, until } from './helpers/bash-integration.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 import { scriptedModels } from './helpers/scripted-models.mjs';
@@ -109,7 +110,7 @@ test('metadata-only prompting does not acquire scopes or perform backend operati
   assert.equal(file.metrics.opened, 0);
 });
 
-test('a custom task uses the actual local runtime.env for successive temporary methods and owner cleanup', { timeout: 10_000 }, async (t) => {
+test('a custom task borrows the actual local runtime.env for successive temporary methods', { timeout: 10_000 }, async (t) => {
   const { file, independent, provider, service } = await fixture(t, []);
   const id = await service.createChat();
   const direct = await task(service, id, DirectEnvTask);
@@ -117,6 +118,60 @@ test('a custom task uses the actual local runtime.env for successive temporary m
   assert.ok(file.metrics.opened > 0, 'local direct task materialized its actual workspace');
   assert.equal(independent.operations.length, 0);
   assert.equal(provider.requests.length, 0, 'custom tasks do not require a model turn');
+});
+
+test('local tasks, prompt sections, tools and cwd views share runtime-owned temporary files', { timeout: 10_000 }, async (t) => {
+  const borrowed = [];
+  const prompted = [];
+  let temporary;
+  const Direct = defineTask({ name: 'test.local-owner', version: 1, initial: () => ({ phase: 'run' }),
+    phases: { async run(_task, runtime, ctx) {
+      const env = await runtime.env(ctx);
+      assert.equal(await runtime.env(ctx), env);
+      borrowed.push(env);
+      if (!temporary) {
+        temporary = getOrThrow(await env.createTempFile(undefined, ctx));
+        getOrThrow(await env.writeFile(temporary, 'context before tool', ctx));
+      } else {
+        assert.equal(getOrThrow(await env.readTextFile(temporary, ctx)), 'context after tool');
+      }
+      await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'completed', result: {} } }), ctx);
+    } },
+  });
+  const file = await integrationDatabase(t, DurableChatService);
+  const provider = scriptedModels([(request) => toolRound([
+    { name: 'read', arguments: { path: temporary } },
+    { name: 'edit', arguments: { path: temporary, edits: [{ oldText: 'before tool', newText: 'after tool' }] } },
+    { name: 'write', arguments: { path: 'tool-file', content: 'written by tool' } },
+  ])(request), answer]);
+  const service = await file.open(provider.models, { execution: (local) => ({ ...local,
+    extensions: [...local.extensions ?? [], defineExtension({ name: 'test.local-owner', tasks: [Direct], sections: [
+      section('temporary_context', async (input, ctx) => {
+        prompted.push(input.env);
+        return getOrThrow(await input.env.readTextFile(temporary, ctx));
+      }),
+    ] })],
+  }) });
+  const id = await service.createChat();
+  assert.equal((await task(service, id, Direct)).outcome.status, 'completed');
+  const tools = await run(service, id);
+  assert.ok(tools.every(({ tool }) => tool.status === 'completed'));
+  assert.equal(tools[0].tool.output, 'context before tool');
+  assert.match(JSON.stringify(provider.requests[0].context.messages), /context before tool/);
+  assert.match(JSON.stringify(provider.requests[1].context.messages), /context after tool/);
+  assert.equal((await task(service, id, Direct)).outcome.status, 'completed');
+  assert.equal(borrowed[0], borrowed[1]);
+  assert.ok(prompted.length >= 2);
+  assert.ok(prompted.every((env) => env === borrowed[0]));
+  assert.equal(getOrThrow(await borrowed[0].readTextFile('tool-file', context)), 'written by tool');
+  getOrThrow(await borrowed[0].createDir('project', undefined, context));
+  await service.configureExecution(id, { cwd: '/workspace/project' });
+  assert.equal((await task(service, id, Direct)).outcome.status, 'completed');
+  assert.notEqual(borrowed[2], borrowed[0], 'a cwd view remains immutable');
+  assert.equal(borrowed[2].id, borrowed[0].id, 'cwd views identify the same complete filesystem');
+  assert.equal(borrowed[2].cwd, '/workspace/project');
+  await file.close(service);
+  assert.equal((await borrowed[0].readTextFile('tool-file', context)).ok, false);
 });
 
 test('test selector and cwd commit atomically, survive reopen, rewind at forks, and inherit into owned conversations', { timeout: 20_000 }, async (t) => {

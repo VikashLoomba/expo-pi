@@ -94,20 +94,22 @@ test('real workspace quota failures preserve the original file through registere
   assert.equal(tools[2].tool.output, 'original');
 });
 
-test('temporary paths and persistent links into tmp resolve in each invocation fresh view', { timeout: 15_000 }, async (t) => {
+test('temporary paths and links share state across tools and reset only when the service reopens', { timeout: 15_000 }, async (t) => {
   const file = await integrationDatabase(t, DurableChatService);
   const provider = scriptedModels([toolRound([
-    { name: 'write', arguments: { path: '/tmp/transient', content: 'one invocation' } },
+    { name: 'write', arguments: { path: '/tmp/transient', content: 'shared temporary file' } },
     { name: 'read', arguments: { path: '/tmp/transient' } },
     { name: 'bash', arguments: { command: 'ln -s /tmp/through-link /workspace/temp-link' } },
-    { name: 'write', arguments: { path: 'temp-link', content: 'another invocation' } },
+    { name: 'write', arguments: { path: 'temp-link', content: 'shared through link' } },
     { name: 'read', arguments: { path: 'temp-link' } },
     { name: 'write', arguments: { path: 'persistent', content: 'retained' } },
   ]), answer]);
   const first = await file.open(provider.models);
   const id = await first.createChat();
   const tools = await run(first, id);
-  assert.deepEqual(tools.map(({ tool }) => tool.status), ['completed', 'error', 'completed', 'completed', 'error', 'completed']);
+  assert.ok(tools.every(({ tool }) => tool.status === 'completed'));
+  assert.equal(tools[1].tool.output, 'shared temporary file');
+  assert.equal(tools[4].tool.output, 'shared through link');
   await file.close(first);
   const second = await file.open(scriptedModels([toolRound([
     { name: 'read', arguments: { path: 'persistent' } },

@@ -26,6 +26,7 @@ export class RemoteWatcher implements FileWatcher {
 	readonly #targets: readonly WatchTarget[];
 	readonly #onChange: (change: WatchChange) => void;
 	readonly #options: RemoteWatchOptions;
+	#onClose: ((watcher: RemoteWatcher) => void) | undefined;
 	#mode: "native" | "polling" = "native";
 	#closed = false;
 	#controller: AbortController | undefined;
@@ -37,11 +38,13 @@ export class RemoteWatcher implements FileWatcher {
 		targets: readonly WatchTarget[],
 		onChange: (change: WatchChange) => void,
 		options: RemoteWatchOptions,
+		onClose?: (watcher: RemoteWatcher) => void,
 	) {
 		this.#connection = connection;
 		this.#targets = targets;
 		this.#onChange = onChange;
 		this.#options = options;
+		this.#onClose = onClose;
 	}
 
 	/** Watch `targets` (resolved paths); fails like `NodeFileWatcher.open` if coverage cannot be established. */
@@ -51,8 +54,9 @@ export class RemoteWatcher implements FileWatcher {
 		onChange: (change: WatchChange) => void,
 		options: RemoteWatchOptions = {},
 		signal?: AbortSignal,
+		onClose?: (watcher: RemoteWatcher) => void,
 	): Promise<RemoteWatcher> {
-		const watcher = new RemoteWatcher(connection, targets, onChange, options);
+		const watcher = new RemoteWatcher(connection, targets, onChange, options, onClose);
 		const abort = () => watcher.#controller?.abort();
 		signal?.addEventListener("abort", abort, { once: true });
 		try {
@@ -60,6 +64,9 @@ export class RemoteWatcher implements FileWatcher {
 			await watcher.#start();
 			if (signal?.aborted) { await watcher.close({} as Context); throw new FileError("aborted", "Watch admission was aborted."); }
 			return watcher;
+		} catch (error) {
+			await watcher.close({} as Context);
+			throw error;
 		} finally { signal?.removeEventListener("abort", abort); }
 	}
 
@@ -67,9 +74,17 @@ export class RemoteWatcher implements FileWatcher {
 		return this.#mode;
 	}
 
-	async close(_context: Context): Promise<void> {
-		if (this.#closed) return;
+	get isClosed(): boolean { return this.#closed; }
+
+	#markClosed(): void {
 		this.#closed = true;
+		const onClose = this.#onClose;
+		this.#onClose = undefined;
+		onClose?.(this);
+	}
+
+	async close(_context: Context): Promise<void> {
+		this.#markClosed();
 		this.#wake?.();
 		this.#controller?.abort();
 		await this.#request;
@@ -114,13 +129,16 @@ export class RemoteWatcher implements FileWatcher {
 						} else if (event.kind === "error") {
 							const code = event.code === "permission_denied" ? "permission_denied" : "invalid";
 							this.#deliver({ error: new FileError(code, String(event.message)) });
-							this.#closed = true;
+							this.#markClosed();
 						}
 					},
 				},
 			);
 			this.#request = request.then(
-				() => { if (!ready) reject(new FileError("aborted", "Watch closed before coverage was established.")); },
+				() => {
+					this.#markClosed();
+					if (!ready) reject(new FileError("aborted", "Watch closed before coverage was established."));
+				},
 				(error: unknown) => {
 					if (!ready) {
 						reject(error);
@@ -132,7 +150,7 @@ export class RemoteWatcher implements FileWatcher {
 						return;
 					}
 					this.#deliver({ error: toFileError(error) });
-					this.#closed = true;
+					this.#markClosed();
 				},
 			);
 		});
@@ -157,7 +175,7 @@ export class RemoteWatcher implements FileWatcher {
 			} catch (error) {
 				if (isConnectionLost(error)) continue;
 				this.#deliver({ error: toFileError(error) });
-				this.#closed = true;
+				this.#markClosed();
 				return;
 			}
 		}

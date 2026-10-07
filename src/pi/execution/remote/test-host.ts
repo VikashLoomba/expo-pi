@@ -2,7 +2,7 @@ import type { SshHostKey } from '@osuki-dev/react-native-ssh';
 
 import { createSshChannelFactory, type SshChannelDependencies, type SshSetupStage } from './channel';
 import { Connection, type RemoteInfo } from './connection';
-import { matchesHostKey, type RemoteHost, type RemoteHostRepository } from './hosts';
+import { matchesHostKey, sameRemoteConnection, type RemoteHost, type RemoteHostRepository } from './hosts';
 
 export interface HostKeyChallenge {
   readonly host: RemoteHost;
@@ -17,7 +17,7 @@ export interface RemoteHostTestOptions {
 }
 export interface RemoteHostTestResult { version: string; os: string; arch: string; home: string }
 export type RemoteDirectoryOptions = Pick<RemoteHostTestOptions, 'signal' | 'onProgress'>;
-export interface RemoteDirectoryResult { cwd: string; hostRevision: number }
+export interface RemoteDirectoryResult { cwd: string; host: RemoteHost }
 
 /** Stable, sanitized user feedback. Never display native errors containing secret input or remote stderr. */
 export function remoteHostConnectionMessage(error: unknown): string {
@@ -70,7 +70,7 @@ async function withRemoteHost<T>(repository: RemoteHostRepository, id: string, o
         const approved = await options.onHostKey(Object.freeze({ host, observed: key, ...(trustedHostKey ? { trusted: trustedHostKey } : {}) }));
         if (!approved || options.signal.aborted) return false;
         try {
-          await repository.acceptHostKey(host.id, host.revision, key);
+          await repository.acceptHostKey(host, key);
           accepted = key;
           return !options.signal.aborted;
         } catch (error) {
@@ -107,7 +107,7 @@ export function testRemoteHost(repository: RemoteHostRepository, id: string, opt
 
 /**
  * Resolve a chat's directory using an already trusted machine. Empty input uses
- * the remote account's home. The caller must recheck hostRevision immediately
+ * the remote account's home. The caller must recheck the connection settings immediately
  * before committing the chat selection, since host edits can follow this return.
  */
 export async function resolveRemoteWorkingDirectory(repository: RemoteHostRepository, id: string, path: string,
@@ -127,9 +127,9 @@ export async function resolveRemoteWorkingDirectory(repository: RemoteHostReposi
       }
       const directory = await connection.request('lstat', { path: cwd }, { signal: options.signal, session });
       if (directory.json.kind !== 'directory') throw Object.assign(new Error('The working directory is not a directory.'), { code: 'not_directory' });
-      return { cwd, hostRevision: host.revision };
+      return { cwd, host };
     }, dependencies);
   options.signal.throwIfAborted();
-  if (repository.get(id)?.revision !== result.hostRevision) throw new Error('This machine changed. Select it again and retry saving the chat settings.');
+  if (!sameRemoteConnection(repository.get(id), result.host)) throw new Error('This machine changed. Select it again and retry saving the chat settings.');
   return result;
 }

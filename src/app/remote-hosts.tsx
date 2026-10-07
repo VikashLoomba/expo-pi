@@ -65,7 +65,7 @@ export default function RemoteHostsScreen() {
   const remove = async (host: RemoteHost) => {
     setBusy(host.id); setNotice(undefined);
     try {
-      await remoteHosts.remove(host.id, host.revision);
+      await remoteHosts.remove(host.id, host);
       setRemoving(undefined);
       setNotice({ message: 'Machine removed. Chats that selected it keep their selection until you choose another environment.' });
     } catch (error) { setNotice({ message: error instanceof Error ? error.message : 'Could not remove this machine.', error: true }); }
@@ -73,7 +73,7 @@ export default function RemoteHostsScreen() {
   };
   const forget = async (host: RemoteHost) => {
     setBusy(host.id); setNotice(undefined);
-    try { await remoteHosts.forgetHostKey(host.id, host.revision); setNotice({ message: 'Accepted SSH key removed. Test this machine and verify its fingerprint before using it again.' }); }
+    try { await remoteHosts.forgetHostKey(host); setNotice({ message: 'Accepted SSH key removed. Test this machine and verify its fingerprint before using it again.' }); }
     catch (error) { setNotice({ message: error instanceof Error ? error.message : 'Could not reset SSH host trust.', error: true }); }
     finally { setBusy(undefined); }
   };
@@ -89,9 +89,9 @@ export default function RemoteHostsScreen() {
       {snapshot.cleanupError && <InlineNotice message={snapshot.cleanupError} action="Retry cleanup" onAction={() => { void remoteHosts.restore().catch(() => {}); }} />}
       {notice && <InlineNotice testID="remote-host-notice" message={notice.message} tone={notice.error ? 'error' : 'neutral'} />}
       {Platform.OS === 'web' ? <InlineNotice tone="neutral" message="Remote SSH execution is available in the native mobile app." />
-        : editing ? <RemoteHostForm key={editing === 'new' ? 'new' : `${editing.id}:${editing.revision}`} host={editing === 'new' ? undefined : editing}
+        : editing ? <RemoteHostForm key={editing === 'new' ? 'new' : editing.id} host={editing === 'new' ? undefined : editing}
           onCancel={() => { setEditing(undefined); setNotice(undefined); }} onSave={async (input, auth) => {
-            const host = await remoteHosts.save(input, auth);
+            const host = await remoteHosts.save(input, auth, editing === 'new' ? undefined : editing);
             setEditing(undefined); setNotice({ message: `${host.name} saved. Test the connection to verify the server and prepare remote execution.` });
           }} />
           : <>

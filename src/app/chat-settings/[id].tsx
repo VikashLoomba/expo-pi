@@ -10,6 +10,7 @@ import { useChatColors } from '@/hooks/use-chat-colors';
 import { createModelSettings, findCatalogModel, getModelSettingsError, type ChatModelSettings, type ModelThinkingLevel } from '@/pi/model-catalog';
 
 import { sameExecution, validateExecution, type ChatExecutionSettings } from '@/pi/execution/document';
+import { sameRemoteConnection } from '@/pi/execution/remote/hosts';
 import { resolveRemoteWorkingDirectory } from '@/pi/execution/remote/test-host';
 
 type Picker = 'provider' | 'model' | 'effort' | 'environment';
@@ -99,10 +100,10 @@ function ChatSettingsEditor({ id, initialSettings, initialExecution }: { id: str
           const controller = new AbortController();
           directoryCheck.current = controller;
           setCheckingDirectory(true);
-          const { cwd, hostRevision } = await resolveRemoteWorkingDirectory(remoteHosts, execution.target.machineId, execution.cwd,
+          const { cwd, host } = await resolveRemoteWorkingDirectory(remoteHosts, execution.target.machineId, execution.cwd,
             { signal: controller.signal });
           controller.signal.throwIfAborted();
-          if (remoteHosts.get(execution.target.machineId)?.revision !== hostRevision) {
+          if (!sameRemoteConnection(remoteHosts.get(execution.target.machineId), host)) {
             throw new Error('This machine changed while its directory was being checked. Save again to use its updated settings.');
           }
           selected = { ...execution, cwd };

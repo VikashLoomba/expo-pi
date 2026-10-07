@@ -89,12 +89,12 @@ Names and file counts are flexible; dependency direction is the requirement. Sha
 
 Resolve metadata cheaply. Rendering `env.cwd` must not open the workspace database, acquire a lock, or leave resources needing disposal. Slow backend initialization belongs to operations that require it.
 
-Preserve one local scope around the whole tool call: read, edit matching, write, formatting, artifact publication, and cleanup. Pi's [file mutation queue][file-queue] covers write/edit, not exclusion against bash. Local `exec` must reuse the bound invocation; entering the same workspace queue again can deadlock. Keep the persistent workspace coordination key distinct from env identity: separate temporary trees are not identical file namespaces just because `/workspace` is shared.
+Preserve one local scope around the whole tool call: read, edit matching, write, formatting, artifact publication, and cleanup. Pi's [file mutation queue][file-queue] covers write/edit, not exclusion against bash. Local `exec` must reuse the bound invocation; entering the same workspace queue again can deadlock. All cwd views and tool scopes in one runtime share the workspace filesystem identity, including its bounded temporary tree.
 
 Resolve direct-access lifetime during implementation, before calling the resolver complete:
 
 - Successive methods on one env can create, write, and read a temporary file until its documented cleanup boundary. A fresh temporary tree for every method is invalid.
-- Separate local tool invocations retain today's fresh temporary filesystem and shell state.
+- Separate local tool invocations get fresh shell state while sharing the workspace filesystem, including `/tmp`, until runtime shutdown.
 - Direct host code and custom Pi tasks using `runtime.env()` can use the interface without being one of the wrapped tools. Compound operations may use a documented application scope helper.
 - Text/binary/directory readers and watchers have defined ownership and independent close paths. They must not retain an unbounded workspace queue lease. Respect the upgraded reader consistency contract rather than silently treating every reader as a stale snapshot.
 - Cleanup is idempotent, seals resources, and awaits admitted work before shared storage closes. State who owns cleanup for tools, direct callers, task callers, and shared backend resources. A cancelled invocation signal is not an awaited cleanup operation.

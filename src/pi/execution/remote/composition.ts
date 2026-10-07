@@ -15,10 +15,10 @@ export function admittedSshChannel(admission: RemoteHostAdmission): DaemonChanne
     verifyHostKey: (observed) => matchesHostKey(trustedHostKey, observed) });
 }
 
-/** Each admitted environment owns its own session. Prompt-only facades own no resources. */
+/** Service-owned environments are borrowed by tools, prompt sections and tasks. SSH opens lazily. */
 export function createRemoteExecution(local: ExecutionComposition, hosts: RemoteHostRepository,
   channel: (admission: RemoteHostAdmission) => DaemonChannelFactory = admittedSshChannel): ExecutionComposition {
-  const owners = new Set<MobileRemoteExecutionEnv>();
+  const environments = new Map<string, MobileRemoteExecutionEnv>();
   let stopped = false;
   let closing: Promise<void> | undefined;
   const assertOpen = () => { if (stopped) throw new Error('Execution admission is stopped. Return to the app to continue.'); };
@@ -37,6 +37,11 @@ export function createRemoteExecution(local: ExecutionComposition, hosts: Remote
       assertOpen();
       const host = hosts.get(selection.machineId);
       if (!host) throw new Error('This remote machine was removed. Choose another execution environment in chat settings.');
+      // Reuse actual connection settings, excluding display metadata. Previously
+      // admitted environments keep their captured settings until owner shutdown.
+      const key = JSON.stringify([host.id, host.namespaceId, host.hostname, host.port, host.username, host.credentialRef, target.cwd]);
+      const existing = environments.get(key);
+      if (existing) return existing;
       // Metadata is captured now; secrets only at admission. A concurrent settings
       // edit fails admission instead of silently redirecting this resolved facade.
       let factory: Promise<DaemonChannelFactory> | undefined;
@@ -44,44 +49,51 @@ export function createRemoteExecution(local: ExecutionComposition, hosts: Remote
       const connection = new Connection({ startTimeoutMs: 420_000, openChannel: async (options) => {
         assertOpen();
         options.signal.throwIfAborted();
-        factory ??= hosts.admit(host.id, host.revision).then(channel);
+        factory ??= hosts.admit(host.id, host).then(channel).catch((cause) => {
+          // Failed admission owns no usable configuration. A later operation can
+          // retry (for example after the device's credential store is unlocked).
+          factory = undefined;
+          throw cause;
+        });
         const open = await factory;
         assertOpen();
         options.signal.throwIfAborted();
         return open(options);
       } });
-      return new MobileRemoteExecutionEnv({ connection,
+      const env = new MobileRemoteExecutionEnv({ connection,
         id: `ssh:${host.namespaceId}`,
         cwd: target.cwd,
-        onActivate(env) { assertOpen(); owners.add(env); },
-        onRelease(env) { owners.delete(env); },
       });
+      environments.set(key, env);
+      return env;
     },
     toolPolicy: {
-      async scope(env, context) {
-        if (!(env instanceof MobileRemoteExecutionEnv)) return local.toolPolicy.scope(env, context);
-        assertOpen();
-        context.abortSignal?.throwIfAborted();
-        return { env, context, release: () => env.cleanup(BACKGROUND_CONTEXT) };
-      },
-      artifacts(env) { return env instanceof MobileRemoteExecutionEnv ? undefined : local.toolPolicy.artifacts?.(env); },
+      ...local.toolPolicy,
       promptFacts(input, context) {
         if (!(input.env instanceof MobileRemoteExecutionEnv)) return local.toolPolicy.promptFacts(input, context);
         return [
           'The read, write, edit and bash tools execute on the selected remote machine through SSH over Tailscale. Files and installed programs belong to that machine; its working directory is not a filesystem sandbox.',
-          'Each tool starts its own SSH/Pi session. Shell variables do not persist between tools. Ordinary remote files persist and may be shared with other chats. Environment-created temporary files are cleaned up when their owner closes while connected; files a shell creates in /tmp follow the host’s ordinary lifetime.',
+          'Each bash invocation starts a separate command, so shell variables do not persist between tools. Ordinary remote files persist and may be shared with other chats. Environment-created temporary files are cleaned up when the chat service closes while connected; files a shell creates in /tmp follow the host’s ordinary lifetime.',
           'Switching environments does not copy files. Forked conversations see the remote machine’s current files, not a historical filesystem snapshot.',
           'Output previews are bounded. This remote environment does not save complete output artifacts. Connection loss or interruption can leave mutations applied; inspect the remote state before retrying.',
           'Execution requires the phone’s active Tailscale VPN, working tailnet DNS, and a reachable SSH server. Background execution is not guaranteed.',
         ];
       },
     },
-    stop() { stopped = true; local.stop(); for (const env of owners) env.stop(); },
+    stop() { stopped = true; local.stop(); for (const env of environments.values()) env.stop(); },
     close() {
       stopped = true;
       local.stop();
-      for (const env of owners) env.stop();
-      return closing ??= Promise.all([local.close(), ...[...owners].map((env) => env.cleanup(BACKGROUND_CONTEXT))]).then(() => undefined);
+      for (const env of environments.values()) env.stop();
+      return closing ??= (async () => {
+        // Await every owner even if one fails; shutdown must not leave siblings
+        // using storage or transport after the service has finished closing.
+        const results = await Promise.allSettled([local.close(),
+          ...[...environments.values()].map((env) => env.cleanup(BACKGROUND_CONTEXT))]);
+        environments.clear();
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+      })();
     },
   };
 }

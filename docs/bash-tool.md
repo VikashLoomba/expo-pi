@@ -1,6 +1,6 @@
 # Local tools and persistent workspaces
 
-Every ordinary Pi chat receives `bash`, `read`, `write`, and `edit` through one shared extension in `DurableChatService`. Pi Durable 1.0.4 selects their environment through `HarnessOptions.env`. In production the local environment runs the pinned `just-bash@3.6.0` interpreter on the device and exposes the same mounted filesystem to the SDK file tools. See [execution environment ownership](execution-environments.md) for the custom-environment seam and lifetime rules. There is no native process, remote sandbox, JavaScript runtime, Python runtime, or shell network capability. The same extension works with the app's registered model providers.
+Every ordinary Pi chat receives `bash`, `read`, `write`, and `edit` through one shared extension in `DurableChatService`. Pi Durable 1.0.4 selects their environment through `HarnessOptions.env`. In production the local environment runs the pinned `just-bash@3.6.0` interpreter on the device and exposes the same mounted filesystem to the SDK file tools. See [execution environment ownership](execution-environments.md) for the composition-owned registry and lifetime rules. The local backend has no native process, JavaScript runtime, Python runtime, or shell network capability; the same tools can instead use a chat's selected [remote machine](remote-ssh-execution.md). The same extension works with the app's registered model providers.
 
 ```mermaid
 flowchart TD
@@ -18,7 +18,7 @@ flowchart TD
 
 ## User-visible behavior
 
-The default directory and `HOME` are `/workspace`. Its bytes and metadata persist across calls, service shutdown, app backgrounding and process restart. Each tool invocation gets fresh shell variables, functions, system files and `/tmp`; its starting directory is the selected agent cwd, defaulting to `/workspace`. Put anything needed by a later call in `/workspace`.
+The default directory and `HOME` are `/workspace`. Its bytes and metadata persist across calls, service shutdown, app backgrounding and process restart. Each tool invocation gets fresh shell variables and functions and starts in the selected agent cwd, defaulting to `/workspace`. Files in `/tmp` are shared across tools and tasks in the same workspace until the runtime closes. Use `/workspace` for files that must survive service or app restarts.
 
 For example, one invocation can run `printf 'hello\n' > notes.txt`, and a later invocation can run `cat notes.txt`. Pipelines, redirection, shell control flow, text processing, jq, SHA/MD5 checksums, base64, gzip/gunzip/zcat, and compressed `rg -z` searches are available. The exact reviewed command list is `BASH_CAPABILITIES` in `src/pi/bash/engine/index.ts`. Shell builtins are provided by the interpreter. This is a useful interpreted shell, not a promise of full GNU Bash or installed Unix software.
 
@@ -74,7 +74,7 @@ There is no new delete/reset UI. `deleteWorkspace` is an explicit storage operat
 | `write` | `path`, `content` | Creates missing parent directories, creates or overwrites UTF-8 file contents, and follows final symlinks. |
 | `edit` | `path`, `edits: [{ oldText, newText }]` | Applies unique non-overlapping replacements against the original file, then commits one final file replacement. Pi's argument repair also accepts its legacy forms. |
 
-Relative paths start at the selected agent cwd, which defaults to `/workspace`; local `~` remains `/workspace`. Absolute paths remain virtual paths. All four tools use the same physical symlink and `..` resolution. Hard-link aliases share bytes. A trailing slash still requires a directory. Absolute `/tmp` paths and persistent symlinks into `/tmp` refer to the current invocation's fresh temporary view, so writing one does not make its bytes available to the next call.
+Relative paths start at the selected agent cwd, which defaults to `/workspace`; local `~` remains `/workspace`. Absolute paths remain virtual paths. All four tools use the same physical symlink and `..` resolution. Hard-link aliases share bytes. A trailing slash still requires a directory. Absolute `/tmp` paths and symlinks into `/tmp` refer to the same workspace temporary tree across calls; those files disappear when the runtime closes.
 
 The SDK also repairs tool paths before the adapter sees them: a leading `@` is removed and several Unicode space characters become ASCII spaces. `read` tries additional decomposed-Unicode, quote and date-space filename variants. These are Pi’s conventions, so a literal unusual filename created by bash may need an absolute path (for a leading `@`) or access through bash; the shared filesystem does not remove those SDK repairs.
 
@@ -84,7 +84,9 @@ Editing requires valid UTF-8. The shared policy reads bounded chunks through one
 
 The typed `ExecutionEnv` adapter returns filesystem and shell failures as `Result` values. Shell execution lives behind `env.exec`, including literal argv, stream metadata, cwd, virtual environment variables and deadlines. The shared wrapper binds the already selected environment for one tool execution. Lock acquisition does not live in `HarnessOptions.env`, which also runs during prompt preparation and has no automatic cleanup hook.
 
-The stable workspace UUID owns the shared queue/storage; an environment ID identifies one invocation's mounted view, including fresh temporary files. Every workspace tool is sequential, and the queue covers the entire SDK edit read/compute/write sequence. Pi's internal per-file mutation queue alone does not coordinate with bash. Shutdown seals and drains that shared invocation before releasing it.
+The local composition retains an environment for each workspace ID and cwd. All views borrow the workspace runtime's filesystem, including `/tmp`. Local tools acquire a scope only to hold the whole-tool workspace lease and bind cancellation; releasing it closes caller-owned handles without resetting files or closing the shared environment. Remote tools borrow their registry entry and reuse its session. The composition owns final cleanup for both backends.
+
+The stable workspace UUID identifies the shared queue/storage. All cwd views and bound tool scopes share one filesystem ID within a runtime, because they see the same persistent and temporary files. Every workspace tool is sequential, and the queue covers the entire SDK edit read/compute/write sequence. Pi's internal per-file mutation queue alone does not coordinate with bash. Shutdown seals and drains admitted work before closing shared storage.
 
 Edit computation and presentation have separate limits. `EDIT_BUDGET` is the authoritative policy: up to 32 replacements and 1 MiB aggregate edit arguments; source/result line ceilings; weighted normalization and matching budgets; occurrence-allocation limits; and a public `diff@8.0.4` preflight with an adaptive maximum line-edit distance before mutation. Summed scalar NFKD lengths conservatively bound normalization allocation. A separate native-search admission counts first-unit frequencies in the original and NFKC/folded text, bounding repeated-prefix `indexOf`/`split` comparisons before Pi's matcher sees the source. Its small normalization correspondence is pinned to Pi 1.0; Pi still owns all actual matching and replacements. The diff preflight reconstructs the exact normalized strings Pi will diff, removing only an originally preserved BOM so a newly inserted BOM remains part of the comparison. Storage still permits 8 MiB files: sufficiently small edits with adequate distinctive surrounding context can operate on the full file. Rejections request a smaller targeted edit, more context, or `write` for a complete replacement.
 
@@ -128,7 +130,7 @@ One BLOB per file keeps the implementation reviewable and matches just-bash's wh
 | Persistent workspace | 64 MiB and 4,096 entries including root |
 | Database logical content / namespaces | 256 MiB, 1,024 workspaces and 16,384 entries including roots |
 | Queued write allocations per owned store | 16 MiB |
-| System filesystem | 4 MiB, 1,024 entries, 64 levels; fresh each call |
+| System filesystem | 4 MiB, 1,024 entries, 64 levels; shared until runtime close |
 | Virtual paths | 4,096 characters, 128 components, 40 followed links |
 | Compression | 128 concatenated members, 16 KiB metadata headers |
 

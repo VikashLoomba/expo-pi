@@ -55,17 +55,17 @@ test('real shell binary writes, links and Unicode names survive service and SQLi
   assert.match(result.tool.output, /AP9BWg==/, 'hard links preserve shared bytes across a restart');
 });
 
-test('shell state and temporary files reset each call while workspace files persist', { timeout: 15_000 }, async (t) => {
+test('shell state resets each call while temporary files survive until service restart', { timeout: 15_000 }, async (t) => {
   const file = await integrationDatabase(t, DurableChatService);
   const provider = scriptedModels([
     bashReply('printf saved > /workspace/keep; export TOKEN=sticky; cd /tmp; printf temporary > session'), answer,
-    bashReply('test ! -e /tmp/session && printf TEMP_EMPTY; printf "%s:%s:" "$PWD" "${TOKEN-unset}"; cat /workspace/keep'), answer,
+    bashReply('cat /tmp/session; printf "%s:%s:" "$PWD" "${TOKEN-unset}"; cat /workspace/keep'), answer,
   ]);
   const service = await file.open(provider.models);
   const id = await service.createChat();
   await run(service, id);
   const row = await run(service, id);
-  assert.match(row.tool.output, /TEMP_EMPTY\/workspace:unset:saved/);
+  assert.match(row.tool.output, /temporary\/workspace:unset:saved/);
   await file.close(service);
   const reopened = await file.open(scriptedModels([
     bashReply('test ! -e /tmp/session && printf TEMP_EMPTY; cat /workspace/keep'), answer,

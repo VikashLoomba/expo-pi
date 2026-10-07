@@ -127,7 +127,7 @@ export default async function workspaceToolsProbe({ namespace, stage, platform }
       report.policy = EDIT_BUDGET;
       report.ok = true;
       return report;
-    } finally { await env.cleanup(context); await execution.close(); }
+    } finally { await execution.close(); }
   }
 
   const models = ai.createModels({ credentials: new ai.InMemoryCredentialStore(),
@@ -141,7 +141,7 @@ export default async function workspaceToolsProbe({ namespace, stage, platform }
     call('edit', { path: 'alias', edits: [{ oldText: 'edited', newText: 'incorrect' }, { oldText: 'absent', newText: 'invalid' }] }),
     call('read', { path: 'alias' }),
     call('edit', { path: 'binary', edits: [{ oldText: 'A', newText: 'B' }] }),
-    call('bash', { command: 'test ! -e /tmp/session && echo FRESH_TMP; base64 binary; base64 alias' }),
+    call('bash', { command: 'test "$(cat /tmp/session)" = temporary && echo SHARED_TMP; base64 binary; base64 alias' }),
   ] : [
     call('read', { path: 'linked' }),
     call('bash', { command: 'test ! -e /tmp/session && echo FRESH_TMP; base64 binary; base64 alias' }),
@@ -179,7 +179,7 @@ export default async function workspaceToolsProbe({ namespace, stage, platform }
     record('expected tool outcomes', rows.length === calls.length && rows.every((row, index) => row.tool.status === (stage === 'seed' && [4, 6].includes(index) ? 'error' : 'completed')));
     const output = rows.map((row) => row.tool.output).join('\n');
     record('Unicode shared across all tools', output.includes('世界 😀'));
-    record('temporary state resets and binary bytes survive', output.includes('FRESH_TMP') && output.includes('AP9B'));
+    record('temporary state lasts until service restart and binary bytes survive', output.includes(stage === 'seed' ? 'SHARED_TMP' : 'FRESH_TMP') && output.includes('AP9B'));
     if (stage === 'seed') {
       record('failed edit batch preserves original bytes', rows[5].tool.output.includes('edited') && !rows[5].tool.output.includes('incorrect'));
       record('typed edit details projected', rows[2].tool.file.diff.includes('edited'));

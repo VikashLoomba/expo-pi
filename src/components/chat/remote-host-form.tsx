@@ -28,7 +28,7 @@ export function RemoteHostForm({ host, onSave, onCancel }: {
         : privateKey.trim() ? { type: 'privateKey' as const, privateKey, ...(passphrase ? { passphrase } : {}) } : undefined;
       if ((!host || credentialType !== host.credentialType) && !replacement) throw new Error('Enter the selected SSH credential.');
       if (!/^\d+$/.test(port.trim())) throw new Error('SSH port must be a number from 1 to 65535.');
-      await onSave({ ...(host ? { id: host.id, revision: host.revision } : {}), name, hostname, port: Number(port), username }, replacement);
+      await onSave({ ...(host ? { id: host.id } : {}), name, hostname, port: Number(port), username }, replacement);
       setPassword(''); setPrivateKey(''); setPassphrase('');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save this machine.'); }
     finally { setSaving(false); }

@@ -27,12 +27,10 @@ for (const scenario of [
       async run(_task, runtime, ctx) {
         const env = await runtime.env(ctx);
         if (!env) throw new Error('Missing selected environment.');
-        try {
-          started.resolve();
-          await release.promise;
-          ctx.abortSignal?.throwIfAborted();
-          getOrThrow(await env.writeFile('before-switch', 'old target finished before switching', ctx));
-        } finally { await env.cleanup(context); }
+        started.resolve();
+        await release.promise;
+        ctx.abortSignal?.throwIfAborted();
+        getOrThrow(await env.writeFile('before-switch', 'old target finished before switching', ctx));
         await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'completed', result: {} } }), ctx);
       },
     },
@@ -89,7 +87,7 @@ for (const scenario of [
   }
   const settled = await service.harness.waitForTask(taskId, context);
   assert.equal(settled.state.outcome.status, scenario.abort ? 'aborted' : 'completed');
-  assert.ok(independent.metrics.cleaned > 0, 'the direct task awaited owner cleanup');
+  assert.equal(independent.metrics.cleaned, 0, 'a completed task does not close its borrowed environment');
   if (scenario.abort) await assert.rejects(readFile(join(independent.root, 'before-switch')), { code: 'ENOENT' });
   else assert.equal(await readFile(join(independent.root, 'before-switch'), 'utf8'), 'old target finished before switching');
   await switchTarget();
@@ -97,4 +95,6 @@ for (const scenario of [
   assert.equal((await service.harness.snapshot(AgentDoc, Number(id), context)).cwd, '/workspace');
   assert.equal((await service.harness.snapshot(TestExecutionDoc, Number(id), context)).kind, 'local');
   assert.equal(file.metrics.opened, 0, 'changing execution metadata does not initialize the local backend');
+  await file.close(service);
+  assert.ok(independent.metrics.cleaned > 0, 'service shutdown closes the environment owner');
 });

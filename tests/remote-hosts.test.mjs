@@ -10,7 +10,7 @@ const hooks = registerHooks({
     return nextLoad(url, context);
   },
 });
-const { RemoteHostRepository, matchesHostKey } = await import('../src/pi/execution/remote/hosts.ts');
+const { RemoteHostRepository, matchesHostKey, sameRemoteConnection } = await import('../src/pi/execution/remote/hosts.ts');
 hooks.deregister();
 function backend() {
   const values = new Map();
@@ -33,10 +33,11 @@ test('machine settings and secure host trust survive reopen without publishing s
   const host = await repo.save(settings, password);
   assert.equal(repo.getSnapshot().ready, true);
   assert.equal(repo.get(host.id), host);
-  const accepted = await repo.acceptHostKey(host.id, host.revision, key);
+  assert.equal('revision' in host, false);
+  const accepted = await repo.acceptHostKey(host, key);
   const reopened = open();
   await reopened.restore();
-  assert.equal(reopened.get(host.id).revision, accepted.revision);
+  assert.deepEqual(reopened.get(host.id), accepted);
   const admission = await reopened.admit(host.id);
   assert.deepEqual(admission.auth, password);
   assert.deepEqual(admission.trustedHostKey, key);
@@ -45,11 +46,30 @@ test('machine settings and secure host trust survive reopen without publishing s
   assert.equal(secrets.values.size, 1);
 });
 
+test('name changes preserve connection settings without reading or replacing secure records', async () => {
+  const { repo, secrets } = fixture();
+  const created = await repo.save(settings, password);
+  const host = await repo.acceptHostKey(created, key);
+  const before = new Map(secrets.values);
+  const read = secrets.getItemAsync;
+  secrets.getItemAsync = async () => { throw new Error('Credential store temporarily locked'); };
+  const renamed = await repo.save({ ...host, name: 'New display name' }, undefined, host);
+  assert.equal(renamed.name, 'New display name');
+  assert.equal(renamed.namespaceId, host.namespaceId);
+  assert.equal(renamed.credentialRef, host.credentialRef);
+  assert.equal(sameRemoteConnection(renamed, host), true);
+  assert.deepEqual(secrets.values, before);
+  secrets.getItemAsync = read;
+  assert.equal((await repo.admit(host.id, host)).host, renamed, 'old display metadata does not make admission stale');
+  assert.equal(await repo.acceptHostKey(host, key), renamed, 'accepting the same key does not rewrite the saved secret');
+  assert.deepEqual(secrets.values, before);
+});
+
 test('admitted sessions retain immutable endpoint, credentials, and trust across edits and removal', async () => {
   const { repo } = fixture();
   const original = await repo.save(settings, password);
-  const host = await repo.acceptHostKey(original.id, original.revision, key);
-  const admitted = await repo.admit(host.id, host.revision);
+  const host = await repo.acceptHostKey(original, key);
+  const admitted = await repo.admit(host.id, host);
   const edited = await repo.save({ ...host, hostname: 'another.tailnet.ts.net', username: 'other' }, { type: 'password', password: 'replacement' });
   assert.equal(admitted.host.hostname, settings.hostname);
   assert.equal(admitted.auth.password, password.password);
@@ -57,9 +77,10 @@ test('admitted sessions retain immutable endpoint, credentials, and trust across
   assert.throws(() => { admitted.host.hostname = 'injected'; }, TypeError);
   assert.throws(() => { admitted.auth.password = 'injected'; }, TypeError);
   assert.equal((await repo.admit(host.id)).trustedHostKey, undefined, 'new endpoint requires new trust');
-  await assert.rejects(repo.admit(host.id, host.revision), /changed/);
-  await assert.rejects(repo.acceptHostKey(host.id, host.revision, key), /changed/);
-  await repo.remove(edited.id, edited.revision);
+  await assert.rejects(repo.admit(host.id, host), /changed/);
+  await assert.rejects(repo.acceptHostKey(host, key), /changed/);
+  await assert.rejects(repo.save({ ...host, name: 'Stale edit' }, undefined, host), /changed/);
+  await repo.remove(edited.id, edited);
   await assert.rejects(repo.admit(edited.id), /removed/);
   assert.equal(admitted.auth.password, password.password);
   assert.deepEqual(repo.getSnapshot().hosts, []);
@@ -68,7 +89,7 @@ test('admitted sessions retain immutable endpoint, credentials, and trust across
 test('same-endpoint account changes retain host trust; trust reset and changed key are explicit', async () => {
   const { repo } = fixture();
   const first = await repo.save(settings, password);
-  const trusted = await repo.acceptHostKey(first.id, first.revision, key);
+  const trusted = await repo.acceptHostKey(first, key);
   const edited = await repo.save({ ...trusted, username: 'another' });
   assert.deepEqual((await repo.admit(edited.id)).trustedHostKey, key);
   assert.equal(matchesHostKey(key, { ...key, publicKey: 'efgh' }), false);
@@ -76,7 +97,7 @@ test('same-endpoint account changes retain host trust; trust reset and changed k
   assert.equal(matchesHostKey(key, { ...key, algorithm: 'ssh-rsa' }), false);
   assert.equal(matchesHostKey(undefined, key), false);
   assert.equal(matchesHostKey(key, key), true);
-  await repo.forgetHostKey(edited.id, edited.revision);
+  await repo.forgetHostKey(edited);
   assert.equal((await repo.admit(edited.id)).trustedHostKey, undefined);
 });
 
@@ -91,6 +112,21 @@ test('failed metadata publication preserves the prior secret and settings and re
   };
   await assert.rejects(repo.save({ ...host, username: 'replacement' }, { type: 'password', password: 'new-secret' }), /Could not save remote machine/);
   assert.equal(repo.get(host.id).username, settings.username);
+  assert.equal((await repo.admit(host.id)).auth.password, password.password);
+  assert.equal(secrets.values.size, 1);
+});
+
+test('failed name save and failed credential replacement leave the published host and secret intact', async () => {
+  const { repo, metadata, secrets } = fixture();
+  const host = await repo.save(settings, password);
+  const setMetadata = metadata.setItemAsync;
+  metadata.setItemAsync = async () => { throw new Error('metadata unavailable'); };
+  await assert.rejects(repo.save({ ...host, name: 'Not saved' }), /Could not save remote machine/);
+  assert.equal(repo.get(host.id), host);
+  metadata.setItemAsync = setMetadata;
+  secrets.setItemAsync = async () => { throw new Error('secure store unavailable'); };
+  await assert.rejects(repo.save(host, { type: 'password', password: 'not-saved' }), /Could not save SSH credentials securely/);
+  assert.equal(repo.get(host.id), host);
   assert.equal((await repo.admit(host.id)).auth.password, password.password);
   assert.equal(secrets.values.size, 1);
 });
@@ -152,13 +188,13 @@ test('a crash after a secure write but before publication is cleaned from the pe
 test('opaque namespace follows endpoint, account, and server identity without disclosing key material', async () => {
   const { repo } = fixture();
   let host = await repo.save(settings, password);
-  host = await repo.acceptHostKey(host.id, host.revision, key);
+  host = await repo.acceptHostKey(host, key);
   const namespace = host.namespaceId;
   host = await repo.save({ ...host, name: 'Renamed' }, { type: 'password', password: 'replacement' });
   assert.equal(host.namespaceId, namespace, 'label and credential rotation preserve remote filesystem identity');
-  host = await repo.acceptHostKey(host.id, host.revision, key);
+  host = await repo.acceptHostKey(host, key);
   assert.equal(host.namespaceId, namespace, 'accepting the same verified key preserves filesystem identity');
-  host = await repo.acceptHostKey(host.id, host.revision, { ...key, fingerprint: 'SHA256:defg', publicKey: 'defg' });
+  host = await repo.acceptHostKey(host, { ...key, fingerprint: 'SHA256:defg', publicKey: 'defg' });
   assert.notEqual(host.namespaceId, namespace, 'a replacement server at the same hostname gets a new identity');
   let previous = host.namespaceId;
   host = await repo.save({ ...host, username: 'new-account' });
@@ -169,14 +205,15 @@ test('opaque namespace follows endpoint, account, and server identity without di
   assert.doesNotMatch(JSON.stringify(repo.getSnapshot()), /SHA256|publicKey|abcd|defg/);
 });
 
-test('saved machines ignore obsolete working-directory and daemon fields while retaining identity, credentials, and trust', async () => {
+test('saved machines ignore obsolete directory, daemon and revision fields while retaining identity, credentials, and trust', async () => {
   const { repo, open, metadata, secrets } = fixture();
   const created = await repo.save(settings, password);
-  const host = await repo.acceptHostKey(created.id, created.revision, key);
+  const host = await repo.acceptHostKey(created, key);
   const oldIndex = JSON.parse(metadata.values.get('pi.remote-hosts.v1'));
   // Invalid old input must have no bearing on automatic setup or host recovery.
   oldIndex.hosts[0].daemonPath = 'obsolete relative path';
   oldIndex.hosts[0].defaultCwd = { obsolete: 'invalid old directory input' };
+  oldIndex.hosts[0].revision = 17;
   metadata.values.set('pi.remote-hosts.v1', JSON.stringify(oldIndex));
   const savedSecrets = new Map(secrets.values);
   const reopened = open();
@@ -184,7 +221,8 @@ test('saved machines ignore obsolete working-directory and daemon fields while r
   assert.deepEqual(reopened.get(host.id), host);
   assert.equal('daemonPath' in reopened.get(host.id), false);
   assert.equal('defaultCwd' in reopened.get(host.id), false);
-  const admitted = await reopened.admit(host.id, host.revision);
+  assert.equal('revision' in reopened.get(host.id), false);
+  const admitted = await reopened.admit(host.id, host);
   assert.equal(admitted.host.namespaceId, host.namespaceId);
   assert.equal(admitted.host.credentialRef, host.credentialRef);
   assert.deepEqual(admitted.auth, password);
@@ -196,8 +234,8 @@ test('saved machines ignore obsolete working-directory and daemon fields while r
   assert.equal(edited.namespaceId, host.namespaceId);
   assert.deepEqual((await reopened.admit(host.id)).auth, password);
   assert.deepEqual((await reopened.admit(host.id)).trustedHostKey, key);
-  assert.doesNotMatch(JSON.stringify(reopened.getSnapshot()), /daemonPath|defaultCwd|invalid old directory/);
-  assert.doesNotMatch(metadata.values.get('pi.remote-hosts.v1'), /daemonPath|defaultCwd|invalid old directory/);
+  assert.doesNotMatch(JSON.stringify(reopened.getSnapshot()), /daemonPath|defaultCwd|revision|invalid old directory/);
+  assert.doesNotMatch(metadata.values.get('pi.remote-hosts.v1'), /daemonPath|defaultCwd|revision|invalid old directory/);
   const saved = open();
   await saved.restore();
   assert.deepEqual(saved.get(host.id), edited);

@@ -18,15 +18,14 @@ export const DirectEnvTask = defineTask({
       const env = await runtime.env(context);
       if (!env) throw new Error('Task has no selected environment.');
       let result;
+      const directory = getOrThrow(await env.createTempDir('pi-env-task-', context));
       try {
-        const path = getOrThrow(await env.createTempFile({ prefix: 'pi-env-task-' }, context));
-        try {
-          getOrThrow(await env.writeFile(path, 'written through runtime.env()', context));
-          const reader = getOrThrow(await env.openBinaryReader(path, undefined, context));
-          try { result = new TextDecoder().decode(getOrThrow(await reader.read(0, 100, context))); }
-          finally { await reader.close(BACKGROUND_CONTEXT); }
-        } finally { getOrThrow(await env.remove(path, { force: true }, BACKGROUND_CONTEXT)); }
-      } finally { await env.cleanup(BACKGROUND_CONTEXT); }
+        const path = getOrThrow(await env.joinPath([directory, 'result'], context));
+        getOrThrow(await env.writeFile(path, 'written through runtime.env()', context));
+        const reader = getOrThrow(await env.openBinaryReader(path, undefined, context));
+        try { result = new TextDecoder().decode(getOrThrow(await reader.read(0, 100, context))); }
+        finally { await reader.close(BACKGROUND_CONTEXT); }
+      } finally { getOrThrow(await env.remove(directory, { recursive: true, force: true }, BACKGROUND_CONTEXT)); }
       await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'completed', result: { text: result, cwd: env.cwd } } }), context);
     },
   },

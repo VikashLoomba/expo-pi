@@ -23,6 +23,14 @@ npx @expo/agent-cli install --fix      # fix incompatible package versions
 
 Run lint and typecheck before declaring any task done.
 
+## Upstream contracts and integration review
+
+- Before implementing or reviewing a dependency integration, inspect the installed package's public contracts and the current canonical upstream example. Record the package version and source revision used; an existing app abstraction or test is not evidence of the upstream contract.
+- State who creates, borrows, cancels and closes each resource, including its lifetime across calls and application shutdown. Distinguish operation cancellation and caller-owned handles from shared-owner cleanup.
+- Choose the smallest integration that follows the upstream ownership and usage pattern. Any additional policy, reset boundary, counter or ownership layer needs a concrete product requirement or demonstrated correctness need. Existing code and tests are not requirements: remove unnecessary behavior rather than preserving it by default. Keep operation cancellation separate from filesystem lifetime.
+- Verify user-visible behavior and upstream semantics with behavioral tests, including relevant sharing, cancellation and shutdown boundaries. Tests must not preserve an incidental implementation choice merely because the current code makes it pass.
+- Review the final implementation against those contracts and update affected guidance. Report source assessment, automated tests, native/device checks and unverified behavior separately; passing tests do not establish guarantees they did not exercise.
+
 ## Navigation & Routing
 
 - Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.

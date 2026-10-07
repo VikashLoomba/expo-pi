@@ -33,7 +33,8 @@ test('a generic invocation seals its persistent and temporary files after return
   await manager.run('seal', undefined, async ({ files, mounted }) => {
     assert.equal(await files.readFile('/saved'), 'persistent');
     assert.equal(await files.exists('/late'), false);
-    assert.equal(await mounted.exists('/tmp/temporary'), false);
+    assert.equal(await mounted.readFile('/tmp/temporary'), 'temporary');
+    assert.equal(await mounted.exists('/tmp/late'), false);
   });
 });
 
@@ -91,23 +92,62 @@ test('metadata-only local environment resolution acquires no execution resources
   assert.equal(opens, 0);
 });
 
-test('direct methods retain temporary state while tool scopes have independent namespaces', async (t) => {
+test('direct methods, cwd views and successive tool scopes share one temporary namespace', async (t) => {
   const manager = runtime(t);
   const env = createWorkspaceExecutionEnv(manager, 'retained');
   const temp = value(await env.createTempFile(undefined, context));
   value(await env.writeFile(temp, 'direct state', context));
   assert.equal(value(await env.readTextFile(temp, context)), 'direct state');
+  const reader = value(await env.openBinaryReader(temp, undefined, context));
   const scope = await acquireWorkspaceExecutionScope(env, context);
-  assert.notEqual(scope.env.id, env.id);
-  assert.equal(value(await scope.env.exists(temp, scope.context)), false);
+  assert.equal(scope.env.id, env.id);
+  assert.equal(value(await scope.env.readTextFile(temp, scope.context)), 'direct state');
+  value(await scope.env.writeFile(temp, 'updated by tool', scope.context));
   value(await scope.env.writeFile('/tmp/tool-only', 'one tool', scope.context));
   await scope.release();
-  assert.equal(value(await env.readTextFile(temp, context)), 'direct state');
+  assert.equal(value(await env.readTextFile(temp, context)), 'updated by tool');
+  assert.equal(new TextDecoder().decode(value(await reader.read(0, 100, context))), 'updated by tool');
+  await reader.close(context);
   const next = await acquireWorkspaceExecutionScope(env, context);
-  assert.equal(value(await next.env.exists('/tmp/tool-only', next.context)), false);
+  assert.equal(value(await next.env.readTextFile('/tmp/tool-only', next.context)), 'one tool');
   await next.release();
+  const otherCwd = createWorkspaceExecutionEnv(manager, 'retained', '/workspace/project');
+  assert.equal(otherCwd.id, env.id);
+  assert.equal(value(await otherCwd.readTextFile(temp, context)), 'updated by tool');
+  value(await otherCwd.writeFile('/tmp/from-other-cwd', 'same namespace', context));
+  assert.equal(value(await env.readTextFile('/tmp/from-other-cwd', context)), 'same namespace');
   await env.cleanup(context);
   assert.equal((await env.readTextFile(temp, context)).error.code, 'aborted');
+  assert.equal(value(await otherCwd.readTextFile(temp, context)), 'updated by tool');
+});
+
+test('temporary namespaces are isolated between workspaces and runtime owners', async (t) => {
+  const manager = runtime(t);
+  const first = createWorkspaceExecutionEnv(manager, 'first');
+  const second = createWorkspaceExecutionEnv(manager, 'second');
+  const anotherOwner = createWorkspaceExecutionEnv(runtime(t), 'first');
+  assert.notEqual(first.id, second.id);
+  assert.notEqual(first.id, anotherOwner.id);
+  value(await first.writeFile('/tmp/same-name', 'first workspace', context));
+  assert.equal(value(await second.exists('/tmp/same-name', context)), false);
+  assert.equal(value(await anotherOwner.exists('/tmp/same-name', context)), false);
+  value(await second.writeFile('/tmp/same-name', 'second workspace', context));
+  assert.equal(value(await first.readTextFile('/tmp/same-name', context)), 'first workspace');
+});
+
+test('the temporary byte limit is shared across tool scopes and released by removal', async (t) => {
+  const env = createWorkspaceExecutionEnv(runtime(t), 'temporary-quota');
+  const first = await env.acquire(context);
+  value(await first.env.writeFile('/tmp/retained', new Uint8Array(3 * 1024 * 1024), first.context));
+  await first.release();
+  const second = await env.acquire(context);
+  const rejected = await second.env.writeFile('/tmp/over-budget', new Uint8Array(2 * 1024 * 1024), second.context);
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error.message, /memory|storage|limit/i);
+  value(await second.env.remove('/tmp/retained', undefined, second.context));
+  value(await second.env.writeFile('/tmp/over-budget', new Uint8Array(2 * 1024 * 1024), second.context));
+  await second.release();
+  assert.equal(value(await env.fileInfo('/tmp/over-budget', context)).size, 2 * 1024 * 1024);
 });
 
 test('whole-tool scope excludes other workspace work and exec reuses the lease', async (t) => {
@@ -182,7 +222,7 @@ test('cleanup of one direct consumer does not stop another environment', async (
   const first = value(await one.createTempFile(undefined, context));
   await one.cleanup(context);
   assert.equal(value(await two.readTextFile('saved', context)), 'shared persistent file');
-  assert.equal(value(await two.exists(first, context)), false);
+  assert.equal(value(await two.exists(first, context)), true);
   assert.equal(value(await two.exec(['printf', '%s', 'still alive'], undefined, context)).exitCode, 0);
 });
 

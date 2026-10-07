@@ -10,8 +10,8 @@ export const SYSTEM_FS_LIMITS = Object.freeze({
 type SystemLimits = typeof SYSTEM_FS_LIMITS;
 
 /**
- * A fresh instance belongs to one bash call. Upstream bounds file bodies but
- * not empty files, directory entries or link targets; bound that metadata too.
+ * One instance belongs to a workspace for its runtime's lifetime. Upstream bounds
+ * file bodies but not empty files, directory entries or link targets; bound that metadata too.
  * Synchronous methods are necessary for Bash's /bin and /proc initialization.
  */
 export class BoundedSystemFs extends InMemoryFs {

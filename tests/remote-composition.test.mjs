@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { AgentDoc, defineExtension } from '@earendil-works/pi-durable';
+import { AgentDoc, defineExtension, defineTask, section } from '@earendil-works/pi-durable';
 import { getOrThrow } from '@earendil-works/pi-durable/env';
-import { integrationDatabase, toolReply, toolRound } from './helpers/bash-integration.mjs';
+import { integrationDatabase, toolReply, toolRound, until } from './helpers/bash-integration.mjs';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { DirectEnvTask, OwnedConversationTask } from './helpers/independent-env.mjs';
@@ -25,19 +25,19 @@ function backend() {
   const data = new Map();
   return { getItemAsync: async (key) => data.get(key) ?? null, setItemAsync: async (key, value) => { data.set(key, value); }, deleteItemAsync: async (key) => { data.delete(key); } };
 }
-async function fixture(t, script) {
+async function fixture(t, script, extensions = []) {
   const remote = await remoteDaemonFixture(t);
   const file = await integrationDatabase(t, DurableChatService);
   const provider = scriptedModels(script);
   let sequence = 0;
   const hosts = new RemoteHostRepository(backend(), backend(), () => `fixture-${++sequence}`);
   let host = await hosts.save({ name: 'Daemon fixture', hostname: 'fixture.tailnet.ts.net', port: 22, username: 'fixture' }, { type: 'password', password: 'synthetic-secret' });
-  host = await hosts.acceptHostKey(host.id, host.revision, { algorithm: 'ssh-ed25519', fingerprint: 'SHA256:abc', publicKey: 'abc' });
+  host = await hosts.acceptHostKey(host, { algorithm: 'ssh-ed25519', fingerprint: 'SHA256:abc', publicKey: 'abc' });
   const admissions = [];
   let composition;
   const decorate = (local) => {
     const combined = createRemoteExecution(local, hosts, (admission) => { admissions.push(admission); return remote.openChannel; });
-    composition = { ...combined, extensions: [...combined.extensions ?? [], defineExtension({ name: 'test.remote-direct', tasks: [DirectEnvTask, OwnedConversationTask] })] };
+    composition = { ...combined, extensions: [...combined.extensions ?? [], defineExtension({ name: 'test.remote-direct', tasks: [DirectEnvTask, OwnedConversationTask] }), ...extensions] };
     return composition;
   };
   const service = await file.open(provider.models, { execution: decorate });
@@ -73,9 +73,9 @@ test('production remote composition runs all shared tools through the real daemo
   assert.equal(tools.at(-1).tool.output, 'edited\nsecond\nshell\n');
   assert.equal(await readFile(join(f.remote.directory, 'nested/note'), 'utf8'), 'edited\nsecond\nshell\n');
   assert.equal(f.file.metrics.opened, 0);
-  assert.equal(f.remote.metrics.sessions, 4, 'each shared tool owns one remote session');
-  assert.equal(f.remote.children.size, 0, 'all tool sessions are drained before completion');
-  assert.equal(f.remote.metrics.closes, 4);
+  assert.equal(f.remote.metrics.sessions, 1, 'successive shared tools reuse the service-owned session');
+  assert.equal(f.remote.children.size, 1, 'the service retains its session between tools');
+  assert.equal(f.remote.metrics.closes, 0);
   const prompt = JSON.stringify(f.provider.requests[0].context.messages.filter(({ role }) => role === 'system'));
   assert.match(prompt, /SSH over Tailscale/);
   assert.ok(prompt.includes(f.remote.directory));
@@ -83,6 +83,9 @@ test('production remote composition runs all shared tools through the real daemo
   const results = f.provider.requests[1].context.messages.filter(({ role }) => role === 'toolResult');
   assert.equal(results.length, 4);
   assert.match(JSON.stringify(results.at(-1)), /edited\\nsecond\\nshell/);
+  await f.file.close(f.service);
+  assert.equal(f.remote.children.size, 0);
+  assert.equal(f.remote.metrics.closes, 1, 'service shutdown disposes the shared session once');
 });
 
 test('production remote metadata prompting opens neither SSH nor local filesystem storage', real, async (t) => {
@@ -93,6 +96,106 @@ test('production remote metadata prompting opens neither SSH nor local filesyste
   assert.equal(f.remote.metrics.sessions, 0);
   assert.equal(f.admissions.length, 0, 'prompt resolver never loads SSH secrets');
   assert.equal(f.file.metrics.opened, 0);
+});
+
+test('prompt sections, tools and tasks borrow one environment without closing sibling resources', real, async (t) => {
+  const promptEnvironments = [];
+  const contextExtension = defineExtension({ name: 'test.remote-context', sections: [
+    section('remote_context', async (input, context) => {
+      promptEnvironments.push(input.env);
+      return getOrThrow(await input.env.readTextFile('AGENTS.md', context));
+    }),
+  ] });
+  const f = await fixture(t, [toolReply('write', { path: 'watched', content: 'changed by tool' }), answer], [contextExtension]);
+  const id = await f.service.createChat();
+  await select(f, id);
+  const env = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  getOrThrow(await env.writeFile('AGENTS.md', 'Use the retained project environment.', C));
+  getOrThrow(await env.writeFile('watched', '', C));
+  const reader = getOrThrow(await env.openBinaryReader('AGENTS.md', undefined, C));
+  const temporary = getOrThrow(await env.createTempFile({ prefix: 'shared-owner-' }, C));
+  const changes = [];
+  const watcher = getOrThrow(await env.watch([{ path: 'watched' }], (change) => changes.push(change), C));
+  await run(f.service, id);
+  const direct = await task(f.service, id, DirectEnvTask);
+  assert.equal(direct.outcome.status, 'completed');
+  assert.ok(promptEnvironments.length >= 2);
+  assert.ok(promptEnvironments.every((value) => value === env), 'each prompt borrows the resolver-owned instance');
+  assert.match(JSON.stringify(f.provider.requests[0]), /Use the retained project environment/);
+  assert.equal(Buffer.from(getOrThrow(await reader.read(0, 100, C))).toString(), 'Use the retained project environment.');
+  await access(temporary);
+  await until(() => changes.length > 0, 'the tool write reaches the retained watcher');
+  assert.equal(getOrThrow(await env.readTextFile('watched', C)), 'changed by tool');
+  assert.equal(f.remote.metrics.sessions, 1);
+  assert.equal(f.remote.metrics.closes, 0);
+  await f.file.close(f.service);
+  assert.equal(f.remote.metrics.closes, 1);
+  assert.equal(f.remote.children.size, 0);
+  await assert.rejects(access(temporary), { code: 'ENOENT' });
+  assert.equal((await reader.read(0, 1, C)).ok, false);
+  await watcher.close(C);
+});
+
+test('cancelling one chat task leaves another chat using the same remote environment alive', real, async (t) => {
+  const started = [Promise.withResolvers(), Promise.withResolvers()];
+  const borrowed = [];
+  const tasks = started.map((ready, index) => defineTask({
+    name: `test.remote-shared-cancel-${index}`, version: 1, initial: () => ({ phase: 'run' }),
+    phases: { async run(_task, runtime, context) {
+      const env = await runtime.env(context);
+      borrowed[index] = env;
+      assert.equal(await runtime.env(context), env, 'successive task resolution borrows the same environment');
+      const result = getOrThrow(await env.exec(`printf ready; while [ ! -f done-${index} ]; do sleep 0.02; done`,
+        { onOutput: (text) => { if (text.includes('ready')) ready.resolve(); } }, context));
+      await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'completed', result } }), context);
+    } },
+    async abort(_task, runtime, context) {
+      await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'aborted' } }), context);
+    },
+  }));
+  const f = await fixture(t, [], [defineExtension({ name: 'test.remote-shared-cancel', tasks })]);
+  const chats = [await f.service.createChat(), await f.service.createChat()];
+  for (const id of chats) await select(f, id);
+  const taskIds = await f.service.harness.commit(async (tx) => {
+    const ids = [];
+    for (const [index, definition] of tasks.entries()) ids.push(await tx.createTask(definition, {}, {
+      conversationId: Number(chats[index]), ownership: { kind: 'conversation' },
+    }));
+    return ids;
+  }, C);
+  await f.service.resume();
+  await Promise.all(started.map((ready) => ready.promise));
+  assert.equal(borrowed[0], borrowed[1], 'same connection settings and cwd share the owner across chats');
+  await f.service.harness.abortTask(taskIds[0], C);
+  assert.equal((await f.service.harness.waitForTask(taskIds[0], C)).state.outcome.status, 'aborted');
+  assert.equal((await f.service.harness.getTask(taskIds[1], C)).state.status, 'running');
+  getOrThrow(await borrowed[1].writeFile('done-1', '', C));
+  assert.equal((await f.service.harness.waitForTask(taskIds[1], C)).state.outcome.status, 'completed');
+  assert.equal(f.remote.metrics.sessions, 1);
+  assert.equal(f.remote.metrics.closes, 0, 'request cancellation does not terminate the shared connection');
+  await f.file.close(f.service);
+  assert.equal(f.remote.metrics.closes, 1);
+});
+
+test('a retained remote environment retries a failed first credential admission', real, async (t) => {
+  const f = await fixture(t, []);
+  const id = await f.service.createChat();
+  await select(f, id);
+  const env = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  const admit = f.hosts.admit.bind(f.hosts);
+  let attempts = 0;
+  f.hosts.admit = async (...args) => {
+    if (++attempts === 1) throw new Error('Credential store temporarily unavailable.');
+    return admit(...args);
+  };
+  const first = await env.fileInfo('.', C);
+  assert.equal(first.ok, false);
+  assert.match(first.error.message, /temporarily unavailable/);
+  const retried = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  assert.equal(retried, env);
+  assert.equal(getOrThrow(await retried.fileInfo('.', C)).kind, 'directory');
+  assert.equal(attempts, 2);
+  assert.equal(f.remote.metrics.sessions, 1);
 });
 
 test('two chats on one remote machine keep independent committed directories through tools and reopen', real, async (t) => {
@@ -179,7 +282,8 @@ test('production selection/cwd survive reopen, historical fork, and direct task-
   assert.deepEqual(await reopened.harness.snapshot(ExecutionTargetDoc, child, C), { kind: 'ssh', machineId: f.host.id });
   assert.equal((await reopened.harness.snapshot(AgentDoc, child, C)).cwd, f.remote.directory);
   assert.deepEqual(owned.outcome.result.direct, { status: 'completed', result: { text: 'written through runtime.env()', cwd: f.remote.directory } });
-  assert.equal(f.remote.children.size, 0);
+  assert.equal(f.remote.children.size, 1, 'the direct task and inherited child borrow the retained environment');
+  assert.equal(f.remote.metrics.sessions, before + 1);
   assert.equal(f.file.metrics.opened, 0);
 });
 
@@ -188,7 +292,7 @@ test('production resolver preserves already admitted snapshots and rejects stale
   const id = await f.service.createChat();
   await select(f, id);
   const admitted = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
-  const stale = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  const stale = await f.composition.resolve(target(f.service, id, join(f.remote.directory, 'unadmitted')), C);
   getOrThrow(await admitted.writeFile('snapshot', 'before', C));
   assert.equal(f.admissions.length, 1);
   const next = await f.hosts.save({ ...f.host, hostname: 'edited.tailnet.ts.net' }, { type: 'password', password: 'replacement-secret' });
@@ -201,9 +305,10 @@ test('production resolver preserves already admitted snapshots and rejects stale
   assert.equal(f.admissions[0].auth.password, 'synthetic-secret');
   const subsequent = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
   getOrThrow(await subsequent.writeFile('new-admission', 'new', C));
-  assert.equal(f.admissions.at(-1).host.revision, next.revision);
+  assert.equal(f.admissions.at(-1).host, next);
   assert.equal(f.admissions.at(-1).auth.password, 'replacement-secret');
-  await Promise.all([admitted, stale, subsequent].map((env) => env.cleanup(C)));
+  assert.notEqual(subsequent, admitted);
+  await f.file.close(f.service);
   assert.equal(f.remote.children.size, 0);
   assert.equal(f.file.metrics.opened, 0);
 });
@@ -222,15 +327,77 @@ test('removed production hosts retain chat selection and fail without local fall
   assert.equal(f.file.metrics.opened, 0);
 });
 
+test('name-only edits preserve lazy admission and reuse an already connected environment', real, async (t) => {
+  const f = await fixture(t, []);
+  const id = await f.service.createChat();
+  await select(f, id);
+  const original = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  const renamed = await f.hosts.save({ ...f.host, name: 'Renamed before admission' });
+  assert.equal(await f.composition.resolve(target(f.service, id, f.remote.directory), C), original);
+  getOrThrow(await original.writeFile('after-rename', 'unchanged connection', C));
+  await f.hosts.save({ ...renamed, name: 'Renamed after admission' });
+  const borrowed = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  assert.equal(borrowed, original);
+  assert.equal(getOrThrow(await borrowed.readTextFile('after-rename', C)), 'unchanged connection');
+  assert.equal(f.remote.metrics.sessions, 1);
+  assert.equal(f.admissions.length, 1);
+});
+
+test('changing accounts and returning to the original account keeps current cwd views in one filesystem namespace', real, async (t) => {
+  const f = await fixture(t, []);
+  const id = await f.service.createChat();
+  await select(f, id);
+  const original = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  const otherAccount = await f.hosts.save({ ...f.host, username: 'another-account' });
+  const restoredAccount = await f.hosts.save({ ...otherAccount, username: f.host.username });
+  assert.equal(restoredAccount.credentialRef, f.host.credentialRef, 'account edits preserve unchanged authentication and server trust');
+  const current = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  const otherCwd = await f.composition.resolve(target(f.service, id, '/different/project'), C);
+  assert.notEqual(current, original);
+  assert.equal(current.id, `ssh:${restoredAccount.namespaceId}`);
+  assert.equal(otherCwd.id, current.id, 'cwd views cannot mix a cached old namespace with the currently selected one');
+  assert.equal(f.remote.metrics.sessions, 0);
+});
+
+test('credential and trust changes replace cached resolution even when the filesystem namespace is unchanged', real, async (t) => {
+  const f = await fixture(t, []);
+  const id = await f.service.createChat();
+  await select(f, id);
+  const original = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  getOrThrow(await original.writeFile('connection-settings', 'original', C));
+  const changed = await f.hosts.save(f.host, { type: 'password', password: 'new-credential' });
+  const replacement = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  assert.notEqual(replacement, original);
+  assert.equal(replacement.id, original.id, 'credential changes preserve file namespace');
+  getOrThrow(await replacement.writeFile('connection-settings', 'replacement', C));
+  assert.equal(f.admissions.at(-1).auth.password, 'new-credential');
+  assert.equal(f.admissions.at(-1).host, changed);
+  assert.equal(getOrThrow(await original.readTextFile('connection-settings', C)), 'replacement', 'admitted old work retains its original connection');
+  await f.hosts.forgetHostKey(changed);
+  const untrusted = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  assert.notEqual(untrusted, replacement);
+  assert.equal(untrusted.id, replacement.id);
+  await f.hosts.remove(f.host.id);
+  await assert.rejects(f.composition.resolve(target(f.service, id, f.remote.directory), C), /removed/);
+  assert.equal(getOrThrow(await original.readTextFile('connection-settings', C)), 'replacement',
+    'removal blocks new borrowing without revoking work admitted before the change');
+  assert.equal(f.remote.metrics.sessions, 2, 'unadmitted replacement resolution is still lazy');
+  await f.file.close(f.service);
+  assert.equal(f.remote.children.size, 0);
+  assert.equal(f.remote.metrics.closes, 2, 'shutdown closes both admitted connections');
+});
+
 test('production composition shutdown seals direct owners and drains real daemon sessions', real, async (t) => {
   const f = await fixture(t, []);
   const id = await f.service.createChat();
   await select(f, id);
   const env = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
+  const dormant = await f.composition.resolve(target(f.service, id, '/unused/project'), C);
   getOrThrow(await env.writeFile('owner', 'active', C));
   assert.equal(f.remote.children.size, 1);
   f.composition.stop();
   assert.equal((await env.writeFile('stale', '', C)).ok, false);
+  assert.equal((await dormant.fileInfo('.', C)).ok, false, 'shutdown seals unresolved connection owners too');
   await f.composition.close();
   assert.equal(f.remote.children.size, 0);
   await assert.rejects(f.composition.resolve(target(f.service, id, f.remote.directory), C), /stopped/);
@@ -270,9 +437,10 @@ test('production remote filesystem identity follows accepted server identity and
   const before = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
   const otherCwd = await f.composition.resolve(target(f.service, id, '/different/project'), C);
   assert.equal(before.id, otherCwd.id);
-  await f.hosts.acceptHostKey(f.host.id, f.host.revision, { algorithm: 'ssh-ed25519', fingerprint: 'SHA256:replacement', publicKey: 'replacement' });
+  await f.hosts.acceptHostKey(f.host, { algorithm: 'ssh-ed25519', fingerprint: 'SHA256:replacement', publicKey: 'replacement' });
   const replaced = await f.composition.resolve(target(f.service, id, f.remote.directory), C);
   assert.notEqual(before.id, replaced.id);
   assert.equal(f.remote.metrics.sessions, 0, 'checking namespace and cwd performs no SSH admission');
-  await Promise.all([before, otherCwd, replaced].map((env) => env.cleanup(C)));
+  assert.notEqual(before, otherCwd, 'cwd is part of environment identity, without changing filesystem identity');
+  await f.file.close(f.service);
 });

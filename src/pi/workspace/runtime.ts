@@ -1,12 +1,14 @@
 import type { SqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite';
+import { uuidv7 } from '@earendil-works/pi-ai';
 import type { IFileSystem } from 'just-bash/browser';
 import { BoundedSystemFs } from './bounded-system-fs';
 import { WorkspaceFileSystem } from './filesystem/index';
 import { createMountedFileSystem } from './mounted-filesystem';
 
-type Workspace = { files: WorkspaceFileSystem };
+type Workspace = { files: WorkspaceFileSystem; system: BoundedSystemFs };
 export type WorkspaceResource = { stop(reason: unknown): void; close(): Promise<void> };
 export type WorkspaceInvocation = {
+  id: string;
   files: WorkspaceFileSystem;
   mounted: IFileSystem;
   system: BoundedSystemFs;
@@ -19,8 +21,9 @@ export type WorkspaceInvocation = {
 // must share the same invocation boundary even when they own different DB connections.
 const workspaceQueues = new Map<string, Promise<unknown>>();
 
-/** Owns a lazy database and an invocation queue per workspace; system files live for one call. */
+/** Owns a lazy database, bounded system tree and invocation queue per workspace. */
 export class WorkspaceRuntime {
+  private readonly namespace = uuidv7();
   private database?: Promise<SqliteDatabase>;
   private readonly workspaces = new Map<string, Promise<Workspace>>();
   private readonly queues = new Map<string, Promise<unknown>>();
@@ -33,6 +36,9 @@ export class WorkspaceRuntime {
   constructor(private readonly openDatabase: () => Promise<SqliteDatabase>) {}
 
   get isStopped(): boolean { return this.stopped; }
+
+  /** Cwd views and scopes share files; a new runtime starts a new temporary namespace. */
+  namespaceId(workspaceId: string): string { return `workspace:${this.namespace}:${workspaceId}`; }
 
   private connection(): Promise<SqliteDatabase> {
     if (!this.database) {
@@ -48,7 +54,9 @@ export class WorkspaceRuntime {
     if (!pending) {
       pending = (async () => {
         const files = await WorkspaceFileSystem.open(await this.connection(), id, { mountPath: '/workspace' });
-        return { files };
+        const system = new BoundedSystemFs();
+        system.mkdirSync('/tmp', { recursive: true });
+        return { files, system };
       })();
       this.workspaces.set(id, pending);
       // A failed initialization can be retried; the database owner still closes any opened connection.
@@ -64,8 +72,8 @@ export class WorkspaceRuntime {
     return () => { this.resources.delete(resource); };
   }
 
-  /** Retained system trees belong to direct envs; omitted trees are fresh per tool call. */
-  run<T>(id: string, signal: AbortSignal | undefined, execute: (invocation: WorkspaceInvocation) => Promise<T>, retainedSystem?: BoundedSystemFs): Promise<T> {
+  /** Each operation gets its own cancellation facade over the workspace's shared files. */
+  run<T>(id: string, signal: AbortSignal | undefined, execute: (invocation: WorkspaceInvocation) => Promise<T>): Promise<T> {
     if (this.stopped) return Promise.reject(new Error('Workspace runtime is closing.'));
     const controller = new AbortController();
     const forwardAbort = () => controller.abort(signal?.reason);
@@ -80,11 +88,11 @@ export class WorkspaceRuntime {
       await workspace.files.refresh();
       controller.signal.throwIfAborted();
       const files = workspace.files.forInvocation(controller.signal);
-      const system = retainedSystem ?? new BoundedSystemFs();
-      system.mkdirSync('/tmp', { recursive: true });
+      const { system } = workspace;
       const mounted = createMountedFileSystem(system, files, controller.signal);
       try {
-        const result = await execute({ files, mounted, system, signal: controller.signal, abort: (reason) => controller.abort(reason) });
+        const result = await execute({ id: this.namespaceId(id), files, mounted, system,
+          signal: controller.signal, abort: (reason) => controller.abort(reason) });
         // An invocation may handle its local cancellation and return a result.
         // Caller cancellation and app closure always retain cancellation identity.
         signal?.throwIfAborted();

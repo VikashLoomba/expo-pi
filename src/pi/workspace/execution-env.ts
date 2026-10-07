@@ -8,7 +8,7 @@ import {
 } from '@earendil-works/pi-durable/env';
 import type { FsStat } from 'just-bash';
 import { executeWorkspaceCommand } from '../bash/execution';
-import { BoundedSystemFs } from './bounded-system-fs';
+import type { BoundedSystemFs } from './bounded-system-fs';
 import { createPathResolver, joinVirtualPath, validateVirtualPath } from './mounted-paths';
 import type { WorkspaceInvocation, WorkspaceRuntime } from './runtime';
 
@@ -75,18 +75,17 @@ function infoFor(path: string, stat: FsStat): FileInfo {
 }
 
 /**
- * A cheap namespace facade. Direct operations take short workspace leases and retain
- * their temporary tree until cleanup. Tool scopes use a separate fresh bound facade.
+ * A cwd view of runtime-owned workspace files. Direct operations take short leases;
+ * tool scopes hold one lease across their compound filesystem operations.
  */
 export class WorkspaceExecutionEnv implements ExecutionEnv {
-  readonly id = `workspace-env:${uuidv7()}`;
-  cwd = HOME;
+  readonly id: string;
+  readonly cwd: string;
   private closed = false;
   private readonly lifetime = new AbortController();
   private readonly readers = new Set<() => Promise<void>>();
   private readonly scopes = new Set<() => Promise<void>>();
   private readonly pending = new Set<Promise<unknown>>();
-  private system?: BoundedSystemFs;
   private disown?: () => void;
   private closing?: Promise<void>;
   private readonly invocation?: Invocation;
@@ -95,6 +94,7 @@ export class WorkspaceExecutionEnv implements ExecutionEnv {
   constructor(source: Invocation | Owner, cwd = HOME) {
     if ('runtime' in source) this.owner = source;
     else this.invocation = source;
+    this.id = 'runtime' in source ? source.runtime.namespaceId(source.workspaceId) : source.id ?? `workspace-env:${uuidv7()}`;
     this.cwd = cwd;
   }
 
@@ -115,15 +115,7 @@ export class WorkspaceExecutionEnv implements ExecutionEnv {
 
   private track<T>(operation: Promise<T>): Promise<T> {
     this.pending.add(operation);
-    const finished = () => {
-      this.pending.delete(operation);
-      // Tool-only facades stop needing owner retention once their last scope has
-      // drained. Direct facades retain their temporary tree until explicit cleanup.
-      if (!this.system && !this.scopes.size && !this.pending.size) {
-        this.disown?.();
-        this.disown = undefined;
-      }
-    };
+    const finished = () => { this.pending.delete(operation); };
     operation.then(finished, finished);
     return operation;
   }
@@ -153,10 +145,9 @@ export class WorkspaceExecutionEnv implements ExecutionEnv {
     this.active(context);
     if (this.invocation) return work(this.invocation);
     this.own();
-    this.system ??= new BoundedSystemFs();
     const cancellation = this.cancellation(context);
     try {
-      return await this.owner!.runtime.run(this.owner!.workspaceId, cancellation.signal, work, this.system);
+      return await this.owner!.runtime.run(this.owner!.workspaceId, cancellation.signal, work);
     } finally { cancellation.dispose(); }
   }
 
@@ -515,7 +506,6 @@ export class WorkspaceExecutionEnv implements ExecutionEnv {
         const releasing = [...this.scopes].map((release) => release());
         await Promise.allSettled([...this.pending, ...releasing]);
         await Promise.allSettled([...this.readers].map((close) => close()));
-        this.system = undefined;
         this.disown?.();
         this.disown = undefined;
       })();

@@ -124,7 +124,7 @@ test('explicit verified-key acceptance persists trust, validates only the daemon
 
 test('a changed key is rejected without replacing the trusted key', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh({ ...key, fingerprint: 'SHA256:def', publicKey: 'def' });
   await assert.rejects(testRemoteHost(repo, host.id, { signal: new AbortController().signal, onHostKey: async (challenge) => {
     assert.deepEqual(challenge.trusted, key);
@@ -145,6 +145,18 @@ test('host edits during a trust decision cannot pin the observed key onto the ne
   assert.equal(remote.calls.opened, 0);
   assert.deepEqual(remote.calls.setup, [], 'trust rejection or cancellation occurs before remote setup');
   assert.equal((await repo.admit(host.id)).trustedHostKey, undefined);
+});
+
+test('renaming a machine during a trust decision does not reject the unchanged connection', async () => {
+  const { repo, host } = await fixture();
+  const remote = ssh();
+  await testRemoteHost(repo, host.id, { signal: new AbortController().signal, onHostKey: async () => {
+    await repo.save({ ...host, name: 'New display name' });
+    return true;
+  } }, remote.dependencies);
+  assert.equal(repo.get(host.id).name, 'New display name');
+  assert.deepEqual((await repo.admit(host.id)).trustedHostKey, key);
+  assert.equal(remote.calls.opened, 1);
 });
 
 test('cancellation during explicit trust approval does not persist trust or start the daemon', async () => {
@@ -170,7 +182,7 @@ test('error feedback distinguishes DNS, reachability, credentials, and trust wit
 
 for (const code of ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM']) test(`chat directory validation explains actual daemon failure ${code}`, async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key, { cwdError: code });
   await assert.rejects(resolveRemoteWorkingDirectory(repo, host.id, '/project', { signal: new AbortController().signal }, remote.dependencies),
     code === 'EACCES' || code === 'EPERM' ? /cannot access this working directory/ : /does not exist or is not a directory/);
@@ -180,7 +192,7 @@ for (const code of ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM']) test(`chat director
 
 test('connection tests identify unsupported remote OS without claiming the daemon is missing', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key, { os: 'windows' });
   await assert.rejects(testRemoteHost(repo, host.id, { signal: new AbortController().signal }, remote.dependencies), /operating system is not supported/);
   assert.deepEqual(remote.calls.requests, ['hello']);
@@ -190,7 +202,7 @@ test('connection tests identify unsupported remote OS without claiming the daemo
 
 test('connection testing prepares a fresh remote automatically and reports bounded setup stages', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key, { fresh: true });
   const progress = [];
   const result = await testRemoteHost(repo, host.id, { signal: new AbortController().signal, onProgress: (stage) => progress.push(stage) }, remote.dependencies);
@@ -213,7 +225,7 @@ test('automatic setup errors provide actionable fixed feedback without installat
 
 test('unavailable or damaged bundled assets direct recovery to the app without exposing native diagnostics', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key);
   await assert.rejects(testRemoteHost(repo, host.id, { signal: new AbortController().signal }, {
     ...remote.dependencies,
@@ -229,7 +241,7 @@ test('unavailable or damaged bundled assets direct recovery to the app without e
 
 test('cancelling automatic setup does not start the daemon or lose accepted SSH trust', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key, { fresh: true });
   const controller = new AbortController();
   await assert.rejects(testRemoteHost(repo, host.id, { signal: controller.signal,
@@ -245,7 +257,7 @@ for (const [behavior, expected] of [[{ cacheState: 'nohash' }, /software could n
   [{ fresh: true, uploadFailure: true }, /software could not be transferred/]]) {
   test(`connection test explains automatic setup failure ${JSON.stringify(behavior)}`, async () => {
     const { repo, host } = await fixture();
-    await repo.acceptHostKey(host.id, host.revision, key);
+    await repo.acceptHostKey(host, key);
     const remote = ssh(key, behavior);
     await assert.rejects(testRemoteHost(repo, host.id, { signal: new AbortController().signal }, remote.dependencies), expected);
     assert.equal(remote.calls.opened, 0, 'failed setup never starts the daemon');
@@ -255,7 +267,7 @@ for (const [behavior, expected] of [[{ cacheState: 'nohash' }, /software could n
 
 test('machine connection testing succeeds without making any working-directory request', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key, { cwdError: 'ENOENT' });
   assert.equal((await testRemoteHost(repo, host.id, { signal: new AbortController().signal }, remote.dependencies)).home, '/home/test');
   assert.deepEqual(remote.calls.requests, ['hello']);
@@ -263,12 +275,12 @@ test('machine connection testing succeeds without making any working-directory r
   assert.equal(remote.calls.disconnected, 1);
 });
 
-test('chat directory validation resolves the entered absolute path and returns its admitted host revision', async () => {
+test('chat directory validation resolves the entered absolute path and returns its admitted host settings', async () => {
   const { repo, host } = await fixture();
-  const trusted = await repo.acceptHostKey(host.id, host.revision, key);
+  const trusted = await repo.acceptHostKey(host, key);
   const remote = ssh(key, { resolvedPath: '/real/project' });
   const result = await resolveRemoteWorkingDirectory(repo, host.id, '/home/test/project-link', { signal: new AbortController().signal }, remote.dependencies);
-  assert.deepEqual(result, { cwd: '/real/project', hostRevision: trusted.revision });
+  assert.deepEqual(result, { cwd: '/real/project', host: trusted });
   assert.deepEqual(remote.calls.requests, ['hello', 'realpath', 'lstat']);
   assert.equal(remote.calls.messages[1].path, '/home/test/project-link');
   assert.equal(remote.calls.messages[2].path, '/real/project');
@@ -278,10 +290,10 @@ test('chat directory validation resolves the entered absolute path and returns i
 
 test('empty chat directory uses the authenticated remote home and validates it as a directory', async () => {
   const { repo, host } = await fixture();
-  const trusted = await repo.acceptHostKey(host.id, host.revision, key);
+  const trusted = await repo.acceptHostKey(host, key);
   const remote = ssh(key, { home: '/Users/Remote Person', resolvedPath: '/Users/Remote Person' });
   assert.deepEqual(await resolveRemoteWorkingDirectory(repo, host.id, '', { signal: new AbortController().signal }, remote.dependencies),
-    { cwd: '/Users/Remote Person', hostRevision: trusted.revision });
+    { cwd: '/Users/Remote Person', host: trusted });
   assert.equal(remote.calls.messages[1].path, '/Users/Remote Person');
   assert.deepEqual(remote.calls.requests, ['hello', 'realpath', 'lstat']);
 });
@@ -297,7 +309,7 @@ test('invalid chat directory input is rejected before SSH admission', async () =
 
 test('explicit absolute directory input preserves trailing spaces as part of the remote filename', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key, { resolvedPath: '/project ' });
   const result = await resolveRemoteWorkingDirectory(repo, host.id, '/project ', { signal: new AbortController().signal }, remote.dependencies);
   assert.equal(remote.calls.messages[1].path, '/project ');
@@ -313,7 +325,7 @@ test('chat directory selection cannot accept an unknown or changed SSH key', asy
   assert.equal(unknown.calls.opened, 0);
   assert.equal(challenges, 0, 'Directory selection must ignore interactive trust handlers even if passed from JavaScript.');
   assert.equal((await repo.admit(host.id)).trustedHostKey, undefined);
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const changed = ssh({ ...key, fingerprint: 'SHA256:def', publicKey: 'def' });
   await assert.rejects(resolveRemoteWorkingDirectory(repo, host.id, '/project', options, changed.dependencies), /SSH server key was not accepted/);
   assert.deepEqual((await repo.admit(host.id)).trustedHostKey, key);
@@ -322,7 +334,7 @@ test('chat directory selection cannot accept an unknown or changed SSH key', asy
 
 test('chat directory validation rejects a regular file and a malformed resolved path, closing each session', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   for (const [behavior, message] of [[{ kind: 'file' }, /not a directory/], [{ resolvedPath: 'relative' }, /could not be prepared or verified/]]) {
     const remote = ssh(key, behavior);
     await assert.rejects(resolveRemoteWorkingDirectory(repo, host.id, '/project', { signal: new AbortController().signal }, remote.dependencies), message);
@@ -333,7 +345,7 @@ test('chat directory validation rejects a regular file and a malformed resolved 
 
 test('cancelling a pending directory request closes its owned connection even without daemon cancellation acknowledgement', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const controller = new AbortController();
   const remote = ssh(key, { onRequest(request) {
     if (request.op === 'realpath') { controller.abort(); return true; }
@@ -344,12 +356,12 @@ test('cancelling a pending directory request closes its owned connection even wi
   assert.equal(remote.calls.disconnected, 1);
 });
 
-test('editing the machine while its chat directory is being resolved rejects the stale selection', async () => {
+test('changing connection settings while a chat directory is being resolved rejects the stale selection', async () => {
   const { repo, host } = await fixture();
-  const trusted = await repo.acceptHostKey(host.id, host.revision, key);
+  const trusted = await repo.acceptHostKey(host, key);
   const remote = ssh(key, { onRequest(request, { emit, id }) {
     if (request.op !== 'realpath') return false;
-    void repo.save({ ...trusted, name: 'Changed machine' }).then(() => emit(encodeFrame(FrameType.result, id, { path: '/real/project' })));
+    void repo.save({ ...trusted, username: 'new-account' }).then(() => emit(encodeFrame(FrameType.result, id, { path: '/real/project' })));
     return true;
   } });
   await assert.rejects(resolveRemoteWorkingDirectory(repo, host.id, '/project', { signal: new AbortController().signal }, remote.dependencies), /machine changed/);
@@ -357,9 +369,23 @@ test('editing the machine while its chat directory is being resolved rejects the
   assert.equal(remote.calls.disconnected, 1);
 });
 
+test('renaming a machine during directory validation preserves the checked connection', async () => {
+  const { repo, host } = await fixture();
+  const trusted = await repo.acceptHostKey(host, key);
+  const remote = ssh(key, { onRequest(request, { emit, id }) {
+    if (request.op !== 'realpath') return false;
+    void repo.save({ ...trusted, name: 'Renamed machine' }).then(() => emit(encodeFrame(FrameType.result, id, { path: '/real/project' })));
+    return true;
+  } });
+  const result = await resolveRemoteWorkingDirectory(repo, host.id, '/project', { signal: new AbortController().signal }, remote.dependencies);
+  assert.deepEqual(result, { cwd: '/real/project', host: trusted });
+  assert.equal(repo.get(host.id).name, 'Renamed machine');
+  assert.equal(remote.calls.closed, 1);
+});
+
 test('directory validation never reconnects between path resolution and directory inspection', async () => {
   const { repo, host } = await fixture();
-  await repo.acceptHostKey(host.id, host.revision, key);
+  await repo.acceptHostKey(host, key);
   const remote = ssh(key, { onRequest(request, { emit, events, id }) {
     if (request.op !== 'realpath') return false;
     emit(encodeFrame(FrameType.result, id, { path: '/real/project' }));

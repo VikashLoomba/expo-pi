@@ -64,17 +64,17 @@ test('path strings, symlink targets and file bodies are independently bounded', 
   await fs.writeFile('/more', '123');
 });
 
-test('each invocation builds working system directories and discards its temporary files', async (t) => {
+test('successive shells share bounded system files while resetting shell variables and cwd', async (t) => {
   const manager = new WorkspaceRuntime(async () => createExpoSqliteDatabase(createNodeSqliteConnection()));
   t.after(() => manager.close());
   await manager.run('ephemeral', undefined, async ({ mounted, signal }) => {
     const result = await createBashEngine(mounted, 2000).exec(
-      'printf saved > /workspace/keep; printf temporary > /tmp/session; test -f /bin/cat && test -d /proc && test -d /dev', { signal });
+      'printf saved > /workspace/keep; printf temporary > /tmp/session; export PREVIOUS=old; cd /tmp; test -f /bin/cat && test -d /proc && test -d /dev', { signal });
     assert.equal(result.exitCode, 0, result.stderr);
   });
   await manager.run('ephemeral', undefined, async ({ mounted, signal }) => {
-    const result = await createBashEngine(mounted, 2000).exec('test ! -e /tmp/session && cat /workspace/keep', { signal });
+    const result = await createBashEngine(mounted, 2000).exec('test -z "$PREVIOUS" && test "$PWD" = /workspace && cat /tmp/session /workspace/keep', { signal });
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.equal(result.stdout, 'saved');
+    assert.equal(result.stdout, 'temporarysaved');
   });
 });

@@ -8,7 +8,6 @@ export type RemoteCredential = Readonly<{ type: 'password'; password: string } |
 /** Public machine settings. Credentials and accepted keys never enter this record. */
 export interface RemoteHost {
   readonly id: string;
-  readonly revision: number;
   /** Opaque filesystem identity; changes when the endpoint, account, or accepted server changes. */
   readonly namespaceId: string;
   readonly name: string;
@@ -18,8 +17,7 @@ export interface RemoteHost {
   readonly credentialRef: string;
   readonly credentialType: RemoteCredential['type'];
 }
-export type RemoteHostInput = Omit<RemoteHost, 'id' | 'revision' | 'namespaceId' | 'credentialRef' | 'credentialType'> &
-  { id?: string; revision?: number };
+export type RemoteHostInput = Omit<RemoteHost, 'id' | 'namespaceId' | 'credentialRef' | 'credentialType'> & { id?: string };
 export interface RemoteHostAdmission {
   readonly host: RemoteHost;
   readonly auth: RemoteCredential;
@@ -39,7 +37,7 @@ function text(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`Enter a valid ${label}.`);
   return value.trim();
 }
-export function validateRemoteHost(input: RemoteHostInput): Omit<RemoteHostInput, 'id' | 'revision'> {
+export function validateRemoteHost(input: RemoteHostInput): Omit<RemoteHostInput, 'id'> {
   const hostname = text(input.hostname, 'Tailscale hostname or address').toLowerCase();
   if (/[\s/@?#\\]/.test(hostname)) throw new Error('Enter a Tailscale hostname or address without a URL prefix, username, or port.');
   if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) throw new Error('SSH port must be a number from 1 to 65535.');
@@ -65,6 +63,12 @@ function hostKey(value: SshHostKey): Readonly<SshHostKey> {
 }
 export function matchesHostKey(trusted: Readonly<SshHostKey> | undefined, observed: SshHostKey): boolean {
   return !!trusted && trusted.algorithm === observed.algorithm && trusted.fingerprint === observed.fingerprint && trusted.publicKey === observed.publicKey;
+}
+
+/** Display metadata does not change an admitted connection; saved secret records are immutable. */
+export function sameRemoteConnection(a: RemoteHost | undefined, b: RemoteHost): boolean {
+  return !!a && a.id === b.id && a.hostname === b.hostname && a.port === b.port &&
+    a.username === b.username && a.credentialRef === b.credentialRef;
 }
 
 /**
@@ -101,14 +105,14 @@ export class RemoteHostRepository {
       if (parsed.version !== 1 || !Array.isArray(parsed.hosts) || !Array.isArray(parsed.pendingDelete)) throw new Error();
       const ids = new Set<string>();
       const hosts = parsed.hosts.map((host: RemoteHost) => {
-        if (typeof host.id !== 'string' || !host.id || ids.has(host.id) || !Number.isSafeInteger(host.revision) || host.revision < 1 ||
+        if (typeof host.id !== 'string' || !host.id || ids.has(host.id) ||
             typeof host.namespaceId !== 'string' || !host.namespaceId ||
             typeof host.credentialRef !== 'string' || !/^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/.test(host.credentialRef) ||
             !['password', 'privateKey'].includes(host.credentialType)) throw new Error();
         ids.add(host.id);
-        // Project connection settings explicitly; obsolete working-directory
-        // and daemon-path fields have no effect on restored machines.
-        return Object.freeze({ ...validateRemoteHost(host), id: host.id, revision: host.revision,
+        // Project connection settings explicitly; obsolete working-directory,
+        // daemon-path and revision fields have no effect on restored machines.
+        return Object.freeze({ ...validateRemoteHost(host), id: host.id,
           namespaceId: host.namespaceId, credentialRef: host.credentialRef, credentialType: host.credentialType });
       });
       if (parsed.pendingDelete.some((ref: unknown) => typeof ref !== 'string' || !/^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/.test(ref) ||
@@ -122,10 +126,10 @@ export class RemoteHostRepository {
     }
   }
   restore(): Promise<void> { return this.enqueue(async () => { await this.load(); await this.retireSecrets(); }); }
-  private requireHost(id: string, expectedRevision?: number): RemoteHost {
+  private requireHost(id: string, expected?: RemoteHost): RemoteHost {
     const host = this.get(id);
     if (!host) throw new Error('This remote machine was removed. Choose another execution environment in chat settings.');
-    if (expectedRevision !== undefined && host.revision !== expectedRevision) throw new Error('This machine changed. Reopen its settings and try again.');
+    if (expected && !sameRemoteConnection(host, expected)) throw new Error('This machine changed. Reopen its settings and try again.');
     return host;
   }
   private async readSecret(host: RemoteHost): Promise<SecretRecord> {
@@ -139,10 +143,11 @@ export class RemoteHostRepository {
       return { version: 1, auth, ...(parsed.trustedHostKey ? { trustedHostKey: hostKey(parsed.trustedHostKey) } : {}) };
     } catch { throw new Error('Could not restore this machine’s SSH credentials. Unlock this device, or replace its credentials in Remote machines.'); }
   }
-  admit(id: string, expectedRevision?: number): Promise<RemoteHostAdmission> {
+  admit(id: string, expectedHost?: RemoteHost): Promise<RemoteHostAdmission> {
+    const expected = expectedHost && { ...expectedHost };
     return this.enqueue(async () => {
       await this.load();
-      const host = this.requireHost(id, expectedRevision);
+      const host = this.requireHost(id, expected);
       const secret = await this.readSecret(host);
       return Object.freeze({ host, auth: secret.auth, ...(secret.trustedHostKey ? { trustedHostKey: secret.trustedHostKey } : {}) });
     });
@@ -184,15 +189,24 @@ export class RemoteHostRepository {
     await this.retireSecrets();
     return next;
   }
-  save(input: RemoteHostInput, replacement?: RemoteCredential): Promise<RemoteHost> {
+  save(input: RemoteHostInput, replacement?: RemoteCredential, expectedHost?: RemoteHost): Promise<RemoteHost> {
     // Capture mutable form data before enqueueing behind native storage I/O.
     const settings = validateRemoteHost(input);
     const id = input.id;
-    const expectedRevision = input.revision;
+    const expected = expectedHost && { ...expectedHost };
     const auth = replacement && credential(replacement);
     return this.enqueue(async () => {
       await this.load();
-      const previous = id ? this.requireHost(id, expectedRevision) : undefined;
+      const previous = id ? this.requireHost(id, expected) : undefined;
+      const sameEndpoint = previous?.hostname === settings.hostname && previous?.port === settings.port;
+      if (previous && sameEndpoint && !auth) {
+        // Name/account edits do not rewrite unchanged credentials or server trust.
+        const next = Object.freeze({ ...previous, ...settings,
+          namespaceId: previous.username === settings.username ? previous.namespaceId : this.createId() });
+        await this.commit({ ...this.index, hosts: this.index.hosts.map((host) => host.id === id ? next : host) });
+        await this.retireSecrets();
+        return next;
+      }
       let current: SecretRecord | undefined;
       if (previous) {
         try { current = await this.readSecret(previous); }
@@ -200,35 +214,37 @@ export class RemoteHostRepository {
       }
       const nextAuth = auth ?? current?.auth;
       if (!nextAuth) throw new Error('Enter an SSH password or private key.');
-      const sameEndpoint = previous?.hostname === settings.hostname && previous?.port === settings.port;
-      return this.replace({ ...settings, id: previous?.id ?? this.createId(), revision: (previous?.revision ?? 0) + 1,
+      return this.replace({ ...settings, id: previous?.id ?? this.createId(),
         namespaceId: sameEndpoint && previous?.username === settings.username ? previous.namespaceId : this.createId(),
         credentialRef: '', credentialType: nextAuth.type }, { version: 1, auth: nextAuth,
         ...(sameEndpoint && current?.trustedHostKey ? { trustedHostKey: current.trustedHostKey } : {}) });
     });
   }
-  acceptHostKey(id: string, expectedRevision: number, observed: SshHostKey): Promise<RemoteHost> {
+  acceptHostKey(expectedHost: RemoteHost, observed: SshHostKey): Promise<RemoteHost> {
+    const expected = { ...expectedHost };
     const accepted = hostKey(observed);
     return this.enqueue(async () => {
       await this.load();
-      const host = this.requireHost(id, expectedRevision);
+      const host = this.requireHost(expected.id, expected);
       const secret = await this.readSecret(host);
-      return this.replace({ ...host, revision: host.revision + 1,
-        namespaceId: matchesHostKey(secret.trustedHostKey, accepted) ? host.namespaceId : this.createId() }, { ...secret, trustedHostKey: accepted });
+      if (matchesHostKey(secret.trustedHostKey, accepted)) return host;
+      return this.replace({ ...host, namespaceId: this.createId() }, { ...secret, trustedHostKey: accepted });
     });
   }
-  forgetHostKey(id: string, expectedRevision: number): Promise<RemoteHost> {
+  forgetHostKey(expectedHost: RemoteHost): Promise<RemoteHost> {
+    const expected = { ...expectedHost };
     return this.enqueue(async () => {
       await this.load();
-      const host = this.requireHost(id, expectedRevision);
-      const { auth } = await this.readSecret(host);
-      return this.replace({ ...host, revision: host.revision + 1 }, { version: 1, auth });
+      const host = this.requireHost(expected.id, expected);
+      const { auth, trustedHostKey } = await this.readSecret(host);
+      return trustedHostKey ? this.replace(host, { version: 1, auth }) : host;
     });
   }
-  remove(id: string, expectedRevision?: number): Promise<void> {
+  remove(id: string, expectedHost?: RemoteHost): Promise<void> {
+    const expected = expectedHost && { ...expectedHost };
     return this.enqueue(async () => {
       await this.load();
-      const host = this.requireHost(id, expectedRevision);
+      const host = this.requireHost(id, expected);
       await this.commit({ version: 1, hosts: this.index.hosts.filter((item) => item.id !== id),
         pendingDelete: [...this.index.pendingDelete, host.credentialRef] });
       await this.retireSecrets();

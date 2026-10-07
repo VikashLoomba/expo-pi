@@ -25,7 +25,7 @@ export default async function probe({ platform, signal, config }) {
   const hosts = new RemoteHostRepository(memory(), memory(), () => ai.uuidv7());
   const { name, hostname, port, username } = config.host;
   let host = await hosts.save({ name, hostname, port, username }, { type: 'privateKey', privateKey: config.privateKey });
-  host = await hosts.acceptHostKey(host.id, host.revision, config.trustedHostKey);
+  host = await hosts.acceptHostKey(host, config.trustedHostKey);
   check(!('defaultCwd' in host), 'machine metadata has no working directory');
   const fixtureCwd = config.host.defaultCwd;
   let workspaceOpens = 0;
@@ -44,18 +44,19 @@ export default async function probe({ platform, signal, config }) {
       signal.throwIfAborted();
       const cwd = `${root}/case-${conformanceIndex++}`;
       getOrThrow(await base.createDir(cwd, { recursive: true }, context));
-      const env = await resolve(cwd);
-      try { await use(env); } finally { await env.cleanup(context); }
+      const owner = createRemoteExecution(createLocalExecution(openLocal), hosts);
+      try {
+        const env = await owner.resolve({ conversationId: 1, cwd,
+          read: { snapshot: async () => ({ kind: 'ssh', machineId: host.id }) } }, context);
+        await use(env);
+      } finally { await owner.close(); }
     } });
     for (const entry of cases) { await entry.run(); checks.push(`Pi conformance: ${entry.name}`); }
     const Direct = defineTask({ name: 'test.remote-direct', version: 1, initial: () => ({ phase: 'run' }), phases: {
       async run(_task, runtime, ctx) {
         const env = await runtime.env(ctx);
-        let text;
-        try {
-          getOrThrow(await env.writeFile('direct.txt', 'DIRECT_TASK', ctx));
-          text = getOrThrow(await env.readTextFile('direct.txt', ctx));
-        } finally { await env.cleanup(context); }
+        getOrThrow(await env.writeFile('direct.txt', 'DIRECT_TASK', ctx));
+        const text = getOrThrow(await env.readTextFile('direct.txt', ctx));
         await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'completed', result: { text } } }), ctx);
       },
     }, async abort(_task, runtime, ctx) { await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'aborted' } }), ctx); } });
@@ -96,7 +97,7 @@ export default async function probe({ platform, signal, config }) {
     const conversation = await service.harness.conversation(Number(id), context);
     const taskId = await conversation.commit((tx) => tx.createTask(Direct, {}, { ownership: { kind: 'conversation' } }), context);
     const task = await service.harness.waitForTask(taskId, context);
-    check(task.state.outcome.status === 'completed' && task.state.outcome.result.text === 'DIRECT_TASK', 'direct TaskRuntime.env uses remote selection and awaited cleanup');
+    check(task.state.outcome.status === 'completed' && task.state.outcome.result.text === 'DIRECT_TASK', 'direct TaskRuntime.env borrows the selected remote environment');
     const at = await conversation.commit((tx) => tx.appendEntry(conversation.id, { kind: 'test.remote', data: {} }), context);
     const fork = await conversation.fork(at.id, { ownership: { kind: 'ownerless' } }, context);
     check((await service.harness.snapshot(ExecutionTargetDoc, fork.id, context)).machineId === host.id &&
@@ -108,8 +109,8 @@ export default async function probe({ platform, signal, config }) {
     const controller = new AbortController();
     const result = await cancelled.exec("printf started; sleep 20; printf unexpected", { onOutput: () => controller.abort() }, withAbortSignal(controller.signal, context));
     check(!result.ok && result.error.code === 'aborted', 'remote execution cancellation settles');
-    await cancelled.cleanup(context);
     const lost = await resolve(root);
+    check(lost === cancelled, 'successive callers reuse the environment after operation cancellation');
     const oldReader = getOrThrow(await lost.openBinaryReader('production.txt', undefined, context));
     const pid = (await lost.connection.info()).pid;
     const uncertain = await lost.exec(`printf applied >> loss.txt; kill -9 ${pid}`, undefined, context);
@@ -117,7 +118,7 @@ export default async function probe({ platform, signal, config }) {
     check(getOrThrow(await lost.readTextFile('loss.txt', context)) === 'applied', 'subsequent operation reconnects without replaying mutation');
     const stale = await oldReader.read(0, 20, context);
     check(!stale.ok, 'old handles cannot address replacement session');
-    await oldReader.close(context); await lost.cleanup(context);
+    await oldReader.close(context);
     await hosts.remove(host.id);
     let removed = false;
     try { await resolve(root); } catch { removed = true; }
@@ -127,6 +128,6 @@ export default async function probe({ platform, signal, config }) {
   } finally {
     if (service) await service.close();
     // Keep only these small side-effect files for independent Mac-side inspection.
-    await base.cleanup(context); await composition.close();
+    await composition.close();
   }
 }
