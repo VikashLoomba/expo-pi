@@ -4,7 +4,7 @@ import type { ConversationId, Storage } from '@earendil-works/pi-durable';
 
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
 import type { ChatExecutionSettings } from '../pi/execution/document';
-import type { ExecutionComposition } from '../pi/execution/composition';
+import type { RemoteExecution } from '../pi/execution/remote/composition';
 import type { Workspaces } from '../pi/workspace/storage';
 import { buildModelCatalog, type ChatModelSettings, type NewChatDefaults } from '../pi/model-catalog';
 import type { ProviderAccess } from '../pi/provider-credentials';
@@ -43,7 +43,7 @@ export class ChatRuntime {
 
   constructor(private readonly options: {
     models: Models; openStorage: () => Promise<Storage>; credentials?: Credentials;
-    execution?: (local: ExecutionComposition) => ExecutionComposition;
+    remote: RemoteExecution;
     workspaces: Workspaces;
     newChat?: NewChatDefaults;
   }) {}
@@ -108,7 +108,7 @@ export class ChatRuntime {
       try {
         storage = await this.options.openStorage();
         const service = await DurableChatService.open({ storage, models: this.options.models,
-          execution: this.options.execution, workspaces: this.options.workspaces,
+          remote: this.options.remote, workspaces: this.options.workspaces,
           newChat: this.options.newChat,
           authError: (providerId) => this.options.credentials?.getProviderSnapshot(providerId).error,
         });

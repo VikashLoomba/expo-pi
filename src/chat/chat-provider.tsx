@@ -22,6 +22,7 @@ import type { ChatControls, ChatMessage } from './types';
 /** App-lifetime objects. Chats open at launch and stay open in the background until the provider unmounts. */
 function useChatRuntime() {
   const [remoteHosts] = useState(createRemoteHostRepository);
+  const [remote] = useState(() => createRemoteExecution(remoteHosts));
   const [credentials] = useState(createChatCredentialStore);
   const [models] = useState(() => {
     const session = createChatModels(credentials);
@@ -29,7 +30,7 @@ function useChatRuntime() {
     return session;
   });
   const [runtime] = useState(() => new ChatRuntime({ models, credentials, openStorage: openExpoSqliteStorage,
-    workspaces: createDeviceWorkspaces(), execution: (local) => createRemoteExecution(local, remoteHosts),
+    workspaces: createDeviceWorkspaces(), remote,
     newChat: NEW_CHAT_DEFAULTS }));
   useEffect(() => {
     void remoteHosts.restore().catch((error) => runtime.report(error));

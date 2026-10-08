@@ -11,13 +11,14 @@ import type { ChatSummary } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { isBusy, oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
-import { createWorkspaceExtension } from './workspace/extension';
+import { WorkspaceExtension } from './workspace/extension';
 import { WorkspaceDoc } from './workspace/document';
+import { WorkspaceExecutionEnv } from './workspace/execution-env';
 import type { Workspaces } from './workspace/storage';
-import { createLocalExecution, type ExecutionComposition } from './execution/composition';
 import {
   ExecutionTargetDoc, validateExecution, type ChatExecutionSettings,
 } from './execution/document';
+import { RemoteExecutionExtension, type RemoteExecution } from './execution/remote/composition';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
   type ChatModelSettings, type NewChatDefaults,
@@ -52,7 +53,7 @@ export class DurableChatService {
     private readonly harness: Harness,
     private readonly storage: Storage,
     private readonly models: Models,
-    private readonly execution: ExecutionComposition,
+    private readonly remote: RemoteExecution,
     private readonly options: {
       now: () => number;
       newChat: NewChatDefaults;
@@ -64,20 +65,19 @@ export class DurableChatService {
     storage: Storage; models: Models; now?: () => number;
     /** Where chats' workspace directories live; without it chats have no local execution environment. */
     workspaces?: Workspaces;
-    /** One authoritative resolver and resource owner, shared by tools, prompts and tasks. */
-    execution?: (local: ExecutionComposition) => ExecutionComposition;
+    /** Holds the SSH connections of chats that run on a remote machine; the service closes it with the Harness. */
+    remote: RemoteExecution;
     newChat?: NewChatDefaults;
     /** Why a provider has no usable credential, for example a locked keychain. */
     authError?: (providerId: string) => string | undefined;
     /** Installed beside the app's own extensions; tests and probes register their tools here. */
     extensions?: readonly Extension[];
   }): Promise<DurableChatService> {
+    const { workspaces, remote } = options;
     const registry = createRegistry();
-    const local = createLocalExecution(options.workspaces);
-    const execution = options.execution?.(local) ?? local;
     registry.install(CodingTools);
-    registry.install(createWorkspaceExtension(execution.toolPolicy));
-    for (const extension of execution.extensions ?? []) registry.install(extension);
+    registry.install(RemoteExecutionExtension);
+    registry.install(WorkspaceExtension);
     const nativeSearch = createNativeWebSearchBridge(options.models);
     registry.install(nativeSearch.extension);
     registry.install(defineExtension({
@@ -89,7 +89,18 @@ export class DurableChatService {
     const now = options.now ?? Date.now;
     let service: DurableChatService | undefined;
     const harness = await Harness.open(options.storage, {
-      models: nativeSearch.models, registry, now, env: execution.resolve,
+      models: nativeSearch.models, registry, now,
+      // Each use reads the chat's committed selection, like pi's sandbox-per-conversation example.
+      env: async ({ conversationId, cwd, read }, envContext) => {
+        const target = (await read.snapshot(ExecutionTargetDoc, conversationId, envContext))?.target;
+        if (target?.kind === 'ssh') return remote.environment(target.machineId, cwd);
+        // Without workspaces there is no local environment, and the tools fail with Pi's ordinary error result.
+        if (!workspaces) return undefined;
+        const workspace = await read.snapshot(WorkspaceDoc, conversationId, envContext);
+        if (!workspace?.id) throw new Error('This conversation has no committed workspace identity.');
+        // The environment holds no handles between calls, so a fresh one per use needs no cleanup.
+        return new WorkspaceExecutionEnv(workspaces.workspace(workspace.id), workspace.id, cwd);
+      },
       settings: {
         // SDK retry and timeout defaults apply, so a request cut off while the app was suspended is retried.
         stream: { transport: 'sse' },
@@ -101,16 +112,9 @@ export class DurableChatService {
         metadata.createdAt = now();
       },
       onReport: (error) => service?.report(error),
-    }, context).catch(async (error) => {
-      execution.stop();
-      try { await execution.close(); }
-      catch (closeError) {
-        throw new AggregateError([error, closeError], 'Execution resources could not close after opening failed.');
-      }
-      throw error;
-    });
+    }, context);
     nativeSearch.attach(harness);
-    service = new DurableChatService(harness, options.storage, options.models, execution, {
+    service = new DurableChatService(harness, options.storage, options.models, remote, {
       now, newChat: options.newChat ?? { models: {} }, authError: options.authError,
     });
     try { await service.loadChats(); }
@@ -378,9 +382,10 @@ export class DurableChatService {
     this.closed = true;
     for (const state of this.chats.values()) state.dispose();
     this.listeners.clear();
-    this.execution.stop();
     this.closePromise = (async () => {
-      const results = await Promise.allSettled([this.harness.close(context), this.execution.close()]);
+      // Harness close seals admission and aborts running work at once; the remote owner then stops its
+      // environments, so a command the daemon cannot cancel does not hold the Harness open.
+      const results = await Promise.allSettled([this.harness.close(context), this.remote.close()]);
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failures.length) {
         throw new AggregateError(failures.map((result) => result.reason), 'Chat storage could not close cleanly.');
