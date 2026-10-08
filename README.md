@@ -73,56 +73,18 @@ The adapter follows Pi's browser authorization-code + PKCE protocol with dynamic
 
 `Models.login()` persists credentials. `Models.getAuth()` and request paths refresh OAuth tokens under the store's per-provider lock, with Pi's own timeout and without the caller's cancellation, so a received token rotation is always saved. `ProviderCredentialStore` keeps one versioned SecureStore record per provider, serializes each provider's operations, retries saving a rotated token whose first write failed before the old token can be used again, and removes the credential when OpenAI rejects its refresh token (`invalid_grant`). The durable harness uses the same `Models` instance.
 
-Automated tests use synthetic credentials; live consent, token exchange and authenticated inference are separate checks. References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/), [Expo SDK 58 SecureStore](https://docs.expo.dev/versions/v58.0.0/sdk/securestore/).
+References: [Expo SDK 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo SDK 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/), [Expo SDK 58 SecureStore](https://docs.expo.dev/versions/v58.0.0/sdk/securestore/).
 
 ## Validation
 
 ```sh
 npx @expo/agent-cli typecheck
 npx @expo/agent-cli lint
-pnpm test:compat
 npx @expo/agent-cli doctor
 npx expo export --platform ios --platform android --source-maps --clear
 ```
 
-`test:compat` combines package compatibility, storage conformance, durable chat, native search, runtime lifecycle, catalog, credential, and Markdown tests. Durable-chat tests use the real Harness and SQLite storage with scripted model providers. Native-search tests use Pi's actual wrapped OpenAI provider and Responses parser with synthetic HTTP SSE, covering request composition, native preservation/replay, local function rounds, concurrency, cancellation, reopening, forks, and compaction. In addition to streaming, tools, cancellation, and recovery, the broader suite verifies per-chat settings persistence, provider switching with retained history, unsupported effort rejection, credential-specific model availability, and concurrent settings/send admission. Runtime and credential tests cover provider isolation, failed removal retries, safe replacement, and recovery when some providers are disconnected. OAuth responses and credentials are synthetic.
-
-For native web-search verification with the development build foregrounded and connected to Metro:
-
-```sh
-node scripts/check-native-web-search.mjs
-# Keep each stage visible for native UI inspection:
-node scripts/check-native-web-search.mjs --hold-stage searching --hold-ms 30000
-node scripts/check-native-web-search.mjs --hold-stage completed --hold-ms 30000
-```
-
-This probe uses the wrapped OpenAI provider, synthetic SSE at the fetch boundary, and a unique native SQLite database. It checks search activity before answer text, rendered citations/sources, persistence after reopening, and a source-only fact appearing exactly once as ordinary input on the next turn. Pi's encrypted-state replay is checked separately. It temporarily mounts its fixture chat and restores the UI afterward. It does not read account credentials or send authenticated model requests.
-
-For an opt-in native integration check, keep a Hermes development build open in the foreground and connected to Metro, with the chat screen loaded, then run:
-
-```sh
-pnpm test:native
-# For Android or a different Metro port:
-pnpm test:native --platform android --port 8081
-```
-
-The command discovers the running app's Metro modules and uses unique `pi-validation-*.db` SQLite databases plus a scripted provider, without real credentials or model HTTP requests. It verifies that a probe-registered tool's result reaches the next model request, title and history survive close/reopen, work cut off by closing resumes once on the next open, a recovered chat whose provider is signed out fails visibly while another chat still answers, cancellation is durable, and requests use SSE. It also verifies settings stay independent across chats, survive reopening, and reach the selected provider's request. Finally it times opening with 1 chat, 100 chats, and 100 chats with four times the history, and fails if more history makes opening slower. The command does not start or reload the app and is separate from `test:compat`.
-
-For the streaming UI check, use an iOS Hermes development build connected to Metro on port 8081:
-
-```sh
-node scripts/check-native-streaming.mjs
-# A 60-second run for checking native drag and return-to-latest behavior:
-node scripts/check-native-streaming.mjs --manual
-# Allow more time for device automation:
-node scripts/check-native-streaming.mjs --manual --duration-seconds 120
-```
-
-The streaming probe temporarily routes the mounted runtime's chat methods to its own scripted SQLite conversation, then restores them and returns home. It checks growing-content following, completion at the bottom, and that the streamed answer keeps one row ID from its first delta to the saved message. Scroll commands and JavaScript frame timing are reported as diagnostics; `--seed-turns N` first saves N earlier turns to measure a long chat. The manual run requires native gestures and phase markers; `node scripts/check-native-streaming.mjs --help` lists them. JavaScript frame timing measures JS responsiveness, not UI-thread frames per second.
-
-Both default following and the manual native-gesture check passed on the iOS simulator with a scripted provider. During the reading-history interval, content grew by 1,220.67 points without moving the reader's position; tapping scroll-to-latest resumed following and finished at the measured bottom with the same assistant row.
-
-At the user's request, the current Release build with modern OpenAI OAuth and native web search was installed and cold-launched on the physical iPhone 15 Pro. The Chats screen and existing saved history loaded from the bundled app with Metro unavailable. Feature integration checks use the simulator and synthetic provider responses; the physical-device check establishes installation and startup.
+At the user's request, the current Release build with modern OpenAI OAuth and native web search was installed and cold-launched on the physical iPhone 15 Pro. The Chats screen and existing saved history loaded from the bundled app with Metro unavailable.
 
 Native integration, background/foreground behavior, and live authenticated ChatGPT requests are separate validation gates.
 

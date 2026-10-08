@@ -44,9 +44,6 @@ Adding or changing Swift requires rebuilding the native app; a Metro reload cann
 npx @expo/agent-cli run:ios --device "<SIMULATOR_UDID>" --configuration Debug
 npx @expo/agent-cli lint
 npx @expo/agent-cli typecheck
-node scripts/check-native-openai-callback.mjs --port 8081
 ```
 
-The callback script requires a foreground simulator development build connected to Metro and an initially free port 1455. It checks `expo-device.isDevice === false` before any listener operation, drives the real Swift listener with loopback TCP requests, inspects its binding with `lsof`, and cleans up synthetic sessions. Cases cover fragmentation, malformed/oversized requests, read timeout, response privacy, early callback retention, single delivery, cancellation, stale cleanup, port conflict, and rebinding. It does not access accounts, exchange tokens, open a browser, or contact an external network.
-
-[`check-native-openai-browser.mjs`](../../scripts/check-native-openai-browser.mjs) covers the separate synthetic browser-to-loopback integration; run its `--help` for setup and options. Neither synthetic check proves live OpenAI consent, real token issuance, or authenticated model inference. Runtime pass/fail results must be reported from an actual run, not inferred from this documentation or a successful build. Verification is restricted to the simulator; physical-device use is installation only.
+Runtime pass/fail results must be reported from an actual run, not inferred from this documentation or a successful build. Verification is restricted to the simulator; physical-device use is installation only.
