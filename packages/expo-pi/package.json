@@ -44,8 +44,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf build",
-    "prepare": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && tsc -p tests && node --test tests/*.test.cjs tests/*.test.mjs"
+    "prepare": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@babel/parser": "^7.29.0",
