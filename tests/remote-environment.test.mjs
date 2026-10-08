@@ -6,7 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import { getOrThrow } from '@earendil-works/pi-durable/env';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
-import { remoteDaemonFixture, remoteDaemonPath } from './helpers/remote-daemon.mjs';
+import { remoteDaemonFixture } from './helpers/remote-daemon.mjs';
 
 const hooks = installBashBrowserHooks();
 test.after(() => hooks.deregister());
@@ -14,8 +14,6 @@ const { Connection } = await import('../src/pi/execution/remote/connection.ts');
 const { MobileRemoteExecutionEnv } = await import('../src/pi/execution/remote/environment.ts');
 const { MobileUtf8Decoder } = await import('../src/pi/execution/remote/utf8.ts');
 const { posix, resolveRemotePath } = await import('../src/pi/execution/remote/paths.ts');
-const available = await remoteDaemonPath();
-const real = { skip: available ? false : 'Install Pi Env 1.0.4 or set PI_ENV_DAEMON.' };
 const C = BACKGROUND_CONTEXT;
 async function fixture(t, options = {}) {
   const remote = await remoteDaemonFixture(t, options);
@@ -60,7 +58,7 @@ test('POSIX paths use remote cwd and match Node lexical normalization without co
   assert.equal(connections, 0);
 });
 
-test('real daemon preserves opened identity, UTF8/BOM, paged directories and temporary ownership', real, async (t) => {
+test('real daemon preserves opened identity, UTF8/BOM, paged directories and temporary ownership', async (t) => {
   const { env, directory, metrics } = await fixture(t, { fragment: true });
   const text = '\ufeff\ufeffHello 🙂\r\n\ufeffsecond\n';
   getOrThrow(await env.writeFile('text', text, C));
@@ -80,7 +78,7 @@ test('real daemon preserves opened identity, UTF8/BOM, paged directories and tem
   assert.equal(metrics.sessions, 1); assert.equal(metrics.closes, 1);
 });
 
-test('lost session invalidates handles; later requests reconnect without replaying mutations', real, async (t) => {
+test('lost session invalidates handles; later requests reconnect without replaying mutations', async (t) => {
   const { env, directory, children, metrics } = await fixture(t);
   getOrThrow(await env.writeFile('counter', 'x', C));
   const reader = getOrThrow(await env.openBinaryReader('counter', undefined, C));
@@ -94,7 +92,7 @@ test('lost session invalidates handles; later requests reconnect without replayi
   assert.equal(await readFile(`${directory}/counter`, 'utf8'), 'x');
 });
 
-test('normal cleanup kills only owned command groups and awaits readers and session closure', real, async (t) => {
+test('normal cleanup kills only owned command groups and awaits readers and session closure', async (t) => {
   const { env, metrics } = await fixture(t);
   const other = await fixture(t);
   let started;
@@ -124,7 +122,7 @@ test('cancel pending connection and stop pending admission settle and dispose la
   assert.equal(closed, 1);
 });
 
-test('exec timeout, argv literals, stream metadata and callback errors retain public results', real, async (t) => {
+test('exec timeout, argv literals, stream metadata and callback errors retain public results', async (t) => {
   const { env } = await fixture(t);
   const output = [];
   assert.equal(getOrThrow(await env.exec(['printf', '%s', 'literal; $(pwd)'], { onOutput: (text, _, info) => output.push([text, info.stream]) }, C)).exitCode, 0);
@@ -134,7 +132,7 @@ test('exec timeout, argv literals, stream metadata and callback errors retain pu
   assert.equal(getOrThrow(await env.exec('exit 7', undefined, C)).exitCode, 7);
 });
 
-test('watch recovers coverage with overflow after session loss and stops before owner disposal', real, async (t) => {
+test('watch recovers coverage with overflow after session loss and stops before owner disposal', async (t) => {
   const { env, children, metrics } = await fixture(t);
   const changes = [];
   let recovered;
@@ -186,7 +184,7 @@ test('a reused owner forgets explicitly closed and terminal watchers, including 
   }
 });
 
-test('owner shutdown still closes the daemon when a watcher disposer rejects', real, async (t) => {
+test('owner shutdown still closes the daemon when a watcher disposer rejects', async (t) => {
   const { env, metrics } = await fixture(t);
   const watcher = getOrThrow(await env.watch([{ path: '.' }], () => {}, C));
   watcher.close = async () => { throw new Error('watch disposer failed'); };
@@ -195,7 +193,7 @@ test('owner shutdown still closes the daemon when a watcher disposer rejects', r
   assert.equal((await env.fileInfo('.', C)).error.code, 'aborted');
 });
 
-test('removing an owned temporary root relinquishes its path before shutdown', real, async (t) => {
+test('removing an owned temporary root relinquishes its path before shutdown', async (t) => {
   const { env } = await fixture(t);
   const temporary = getOrThrow(await env.createTempDir('pi-mobile-removed-', C));
   t.after(() => rm(temporary, { recursive: true, force: true }));
@@ -206,7 +204,7 @@ test('removing an owned temporary root relinquishes its path before shutdown', r
   assert.equal(await readFile(`${temporary}/replacement`, 'utf8'), 'belongs to the replacement directory');
 });
 
-test('stop seals active work, closes watch admission and does not reconnect during cleanup', real, async (t) => {
+test('stop seals active work, closes watch admission and does not reconnect during cleanup', async (t) => {
   const { env, metrics } = await fixture(t);
   let started;
   const ready = new Promise((resolve) => { started = resolve; });
@@ -219,7 +217,7 @@ test('stop seals active work, closes watch admission and does not reconnect duri
   assert.equal(metrics.sessions, 1); assert.equal(metrics.closes, 1);
 });
 
-test('native conformance assertion adapter runs the same reader case', real, async (t) => {
+test('native conformance assertion adapter runs the same reader case', async (t) => {
   const { createEnvConformance } = await import('@earendil-works/pi-durable/testing');
   const { remoteConformanceAssertions } = await import('./helpers/remote-conformance-assertions.js');
   const { env } = await fixture(t);
@@ -227,7 +225,7 @@ test('native conformance assertion adapter runs the same reader case', real, asy
   await cases[0].run();
 });
 
-test('whole text read stays within the size-at-open boundary when a remote file grows', real, async (t) => {
+test('whole text read stays within the size-at-open boundary when a remote file grows', async (t) => {
   const { env, directory, connection } = await fixture(t);
   const initial = `${'a'.repeat(512 * 1024 - 1)}🙂`;
   await writeFile(`${directory}/growing`, initial);
@@ -247,14 +245,14 @@ test('whole text read stays within the size-at-open boundary when a remote file 
   assert.ok(reads.every(([offset, length]) => offset + length <= Buffer.byteLength(initial)));
 });
 
-test('exec well-forms environment keys before JSON object serialization', real, async (t) => {
+test('exec well-forms environment keys before JSON object serialization', async (t) => {
   const { env } = await fixture(t);
   let output = '';
   assert.equal(getOrThrow(await env.exec(['printf', 'ok'], { env: { '\ud800': 'value' }, onOutput: (text) => { output += text; } }, C)).exitCode, 0);
   assert.equal(output, 'ok');
 });
 
-test('owner cleanup bounds non-cancellable FIFO opens and reports the lost operation honestly', real, async (t) => {
+test('owner cleanup bounds non-cancellable FIFO opens and reports the lost operation honestly', async (t) => {
   const { env } = await fixture(t);
   getOrThrow(await env.exec(['mkfifo', 'blocked'], undefined, C));
   const reading = env.readTextFile('blocked', C);
@@ -267,7 +265,7 @@ test('owner cleanup bounds non-cancellable FIFO opens and reports the lost opera
   assert.ok(Date.now() - start < 3000, 'cleanup must close an unresponsive owned channel');
 });
 
-test('temporary paths retire through an existing replacement session; cleanup alone never reconnects', real, async (t) => {
+test('temporary paths retire through an existing replacement session; cleanup alone never reconnects', async (t) => {
   for (const reconnect of [false, true]) {
     const { env, children, metrics } = await fixture(t);
     const temporary = getOrThrow(await env.createTempDir('pi-mobile-recovery-', C));
@@ -282,7 +280,7 @@ test('temporary paths retire through an existing replacement session; cleanup al
   }
 });
 
-test('callback failure still leaves daemon spill cleanup owned by its environment', real, async (t) => {
+test('callback failure still leaves daemon spill cleanup owned by its environment', async (t) => {
   const { env, connection } = await fixture(t);
   const request = connection.request.bind(connection);
   let spill;

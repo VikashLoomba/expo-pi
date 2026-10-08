@@ -1,7 +1,7 @@
 Pi Env daemon assets
 
-Unmodified binaries from @earendil-works/pi-env 1.0.4.
-Source: https://github.com/earendil-works/pi/tree/7c10bd4337495ee613f2224843ecdf349b80d1df/packages/env
+Unmodified binaries from @earendil-works/pi-env 1.1.0.
+Source: https://github.com/earendil-works/pi/tree/abe508e1b89912adde45528136c3221eb69acdd7/packages/env
 Reproduce and verify with scripts/sync-pi-daemon-assets.mjs.
 These files run on the SSH host; they are never executed on the phone.
 

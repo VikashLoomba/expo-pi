@@ -3,6 +3,7 @@
 // Use the installed browser implementation in Hermes and Node smoke runs.
 // Retained subarrays below are copied because Hermes can return a Uint8Array.
 import { Buffer } from 'buffer/index.js';
+import { PI_DAEMON_VERSION } from '../../src/pi/execution/remote/daemon-manifest';
 
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const quote = (value) => `'${value.replace(/'/g, `'"'"'`)}'`;
@@ -155,7 +156,7 @@ export default async function nativeSshDaemonProbe({ connection, daemonPath, sig
       const reply = await start('hello', { protocol: 1 }, undefined, true).promise;
       const hello = reply.json;
       assert(synced && reply.payload.length === 0, 'Pi synchronization or hello payload was invalid');
-      assert(hello.protocol === 1 && hello.version === '1.0.4', 'Unexpected Pi protocol or daemon version');
+      assert(hello.protocol === 1 && hello.version === PI_DAEMON_VERSION, 'Unexpected Pi protocol or daemon version');
       assert(hello.os === 'macos' && hello.arch === 'aarch64' && hello.separator === '/', 'Hello did not describe the test Mac');
       assert(['home', 'tmpdir', 'cwd'].every((key) => typeof hello[key] === 'string' && hello[key].startsWith('/')),
         'Pi hello omitted absolute remote paths');

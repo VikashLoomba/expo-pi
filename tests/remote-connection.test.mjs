@@ -3,15 +3,16 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
-import { remoteDaemonFixture, remoteDaemonPath } from './helpers/remote-daemon.mjs';
+import { remoteDaemonFixture } from './helpers/remote-daemon.mjs';
 
 const hooks = installBashBrowserHooks();
 test.after(() => hooks.deregister());
 const { Connection, isConnectionLost } = await import('../src/pi/execution/remote/connection.ts');
 const { FrameDecoder, encodeFrame, FrameType, MAX_FRAME } = await import('../src/pi/execution/remote/protocol.ts');
 const { createSshChannelFactory } = await import('../src/pi/execution/remote/channel.ts');
+const { PI_DAEMON_VERSION } = await import('../src/pi/execution/remote/daemon-manifest.ts');
 const token = '0123456789abcdef0123456789abcdef';
-const hello = { protocol: 1, version: '1.0.4', os: 'macos', arch: 'aarch64', home: '/Users/test',
+const hello = { protocol: 1, version: PI_DAEMON_VERSION, os: 'macos', arch: 'aarch64', home: '/Users/test',
   tmpdir: '/tmp', cwd: '/work', driveCwds: {}, separator: '/', pid: 99 };
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -155,7 +156,7 @@ test('one cancelled startup waiter does not cancel another caller sharing the sa
   await assert.rejects(first, { code: 'aborted' });
   assert.equal(startup.signal.aborted, false);
   ready.resolve();
-  assert.equal((await second).version, '1.0.4');
+  assert.equal((await second).version, PI_DAEMON_VERSION);
   await connection.close();
 });
 
@@ -260,11 +261,11 @@ test('SSH cancellation closes a late shell; trust/auth errors preserve codes wit
 });
 
 test('production Pi connection interoperates with real daemon binary, exec, cancellation and recovery',
-  { timeout: 15_000, skip: !(await remoteDaemonPath()) && 'Install the matching external Pi daemon or set PI_ENV_DAEMON' }, async (t) => {
+  { timeout: 15_000 }, async (t) => {
     const fixture = await remoteDaemonFixture(t, { fragment: true });
     const connection = new Connection({ openChannel: fixture.openChannel });
     t.after(() => connection.close());
-    assert.equal((await connection.info()).version, '1.0.4');
+    assert.equal((await connection.info()).version, PI_DAEMON_VERSION);
     const path = join(fixture.directory, 'bytes-π');
     const bytes = Uint8Array.from({ length: 65553 }, (_, i) => i & 255);
     await connection.request('write', { path }, { payload: bytes });

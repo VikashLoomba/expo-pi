@@ -1,4 +1,4 @@
-// Adapted from Pi Env 1.0.4 remote-env.ts (MIT); the daemon wire contract is unchanged.
+// Adapted from Pi Env 1.1.0 remote-env.ts (MIT); the daemon wire contract is unchanged.
 import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";

@@ -55,10 +55,10 @@
     "expo": "~58.0.2"
   },
   "devDependencies": {
-    "@earendil-works/chord": "1.0.4",
-    "@earendil-works/pi-agent-core": "1.0.4",
-    "@earendil-works/pi-ai": "1.0.4",
-    "@earendil-works/pi-durable": "1.0.4",
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0",
     "@types/node": "^26.6.2",
     "expo": "~58.0.6",
     "typescript": "~6.0.3"

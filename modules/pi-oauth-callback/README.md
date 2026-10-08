@@ -2,7 +2,7 @@
 
 This local Expo module receives the modern Pi OpenAI provider's fixed redirect, `http://127.0.0.1:1455/auth/callback`, inside the iOS app. Its native implementation is Swift-only, using Apple Network and the Expo Modules 2.0 `@ExpoModule` / `@JS` macros. It contains no Objective-C, Kotlin, token exchange, or credential storage.
 
-The module is a transport adapter for browser authorization with PKCE. It does not implement device-code authorization. Pi's modern `openai` provider has no device-code route in the inspected SDK versions 1.0.0 and 1.0.1; the separate legacy `openai-codex` provider has that flow. See the [OpenAI adapter documentation](../../src/pi/openai-auth/README.md) for the public Pi `OAuthAuth` integration and versioned SDK sources.
+The module is a transport adapter for browser authorization with PKCE. It does not implement device-code authorization. Pi's modern `openai` provider has no device-code route in the installed `pi-ai` 1.1.0; the separate legacy `openai-codex` provider has that flow. See the [OpenAI adapter documentation](../../src/pi/openai-auth/README.md) for the public Pi `OAuthAuth` integration and versioned SDK sources.
 
 ## Integration and API
 

@@ -1,21 +1,18 @@
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { chmod, copyFile, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** Use an explicitly supplied daemon, or the documented external Pi Env 1.0.4 installation. */
-export async function remoteDaemonPath() {
-  const architecture = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const path = process.env.PI_ENV_DAEMON ?? join(homedir(), '.local/share/pi-env-test/node_modules/@earendil-works/pi-env',
-    'bin', `pi-env-${process.platform}-${architecture}`, process.platform === 'win32' ? 'pi-env.exe' : 'pi-env');
-  try { await access(path); return path; }
-  catch { return undefined; }
-}
+const { PI_DAEMON_MANIFEST } = await import('../../src/pi/execution/remote/daemon-manifest.ts');
+const target = `${process.platform}-${process.arch}`;
 
-/** Actual unchanged Pi daemon; only the binary channel transport uses child_process in Node tests. */
+/** The daemon the app ships for this host, run from an executable copy; only the channel transport uses child_process. */
 export async function remoteDaemonFixture(t, { fragment = false } = {}) {
-  const daemonPath = await remoteDaemonPath();
-  if (!daemonPath) throw new Error('Install Pi Env 1.0.4 outside the app as documented, or set PI_ENV_DAEMON.');
+  if (!(target in PI_DAEMON_MANIFEST)) throw new Error(`The app ships no Pi daemon for this host (${target}).`);
+  const daemonDirectory = await mkdtemp(join(tmpdir(), 'pi-env-daemon-'));
+  const daemonPath = join(daemonDirectory, 'pi-env');
+  await copyFile(new URL(`../../assets/pi-env/pi-env-${target}.bin`, import.meta.url), daemonPath);
+  await chmod(daemonPath, 0o700);
   const directory = await mkdtemp(join(tmpdir(), 'pi-mobile-remote-'));
   const children = new Set();
   const metrics = { sessions: 0, writes: 0, stderrBytes: 0, closes: 0 };
@@ -56,6 +53,7 @@ export async function remoteDaemonFixture(t, { fragment = false } = {}) {
   t.after(async () => {
     await Promise.all([...children].map((child) => new Promise((resolve) => { child.once('close', resolve); child.kill(); })));
     await rm(directory, { recursive: true, force: true });
+    await rm(daemonDirectory, { recursive: true, force: true });
   });
-  return { openChannel, directory, metrics, daemonPath, children };
+  return { openChannel, directory, metrics, children };
 }

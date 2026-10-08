@@ -10,7 +10,7 @@ import { installBashBrowserHooks } from './helpers/bash-browser-hooks.mjs';
 import { readChat } from './helpers/chat-view.mjs';
 import { scriptedModels } from './helpers/scripted-models.mjs';
 import { DirectEnvTask, OwnedConversationTask } from './helpers/independent-env.mjs';
-import { remoteDaemonFixture, remoteDaemonPath } from './helpers/remote-daemon.mjs';
+import { remoteDaemonFixture } from './helpers/remote-daemon.mjs';
 
 const hooks = installBashBrowserHooks();
 test.after(() => hooks.deregister());
@@ -19,7 +19,7 @@ const { createRemoteExecution, admittedSshChannel } = await import('../src/pi/ex
 const { RemoteHostRepository } = await import('../src/pi/execution/remote/hosts.ts');
 const { ExecutionTargetDoc } = await import('../src/pi/execution/document.ts');
 const C = BACKGROUND_CONTEXT;
-const real = { skip: await remoteDaemonPath() ? false : 'Install Pi Env 1.0.4 or set PI_ENV_DAEMON.', timeout: 20_000 };
+const real = { timeout: 20_000 };
 const answer = { chunks: ['Done.'] };
 const rows = async (service, id) => (await readChat(service, id)).messages.filter((message) => message.tool);
 function backend() {

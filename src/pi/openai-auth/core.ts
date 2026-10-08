@@ -1,6 +1,6 @@
 import type { Credential, OAuthCredential } from '@earendil-works/pi-ai';
 
-// Protocol constants from Pi's openai ChatGPT OAuth provider (pi-ai 1.0.0).
+// Protocol constants from Pi's openai ChatGPT OAuth provider (pi-ai 1.1.0).
 export const OPENAI_PROVIDER_ID = 'openai';
 export const OPENAI_DYNAMIC_CLIENT_ID = 'dynamic_agent_client';
 export const OPENAI_RESOURCE = 'https://api.openai.com/v1';

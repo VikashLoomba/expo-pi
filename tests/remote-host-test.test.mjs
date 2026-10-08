@@ -8,7 +8,7 @@ const hooks = installBashBrowserHooks();
 const { RemoteHostRepository } = await import('../src/pi/execution/remote/hosts.ts');
 const { testRemoteHost, resolveRemoteWorkingDirectory, remoteHostConnectionMessage } = await import('../src/pi/execution/remote/test-host.ts');
 const { encodeFrame, FrameType } = await import('../src/pi/execution/remote/protocol.ts');
-const { PI_DAEMON_MANIFEST } = await import('../src/pi/execution/remote/daemon-manifest.ts');
+const { PI_DAEMON_MANIFEST, PI_DAEMON_VERSION } = await import('../src/pi/execution/remote/daemon-manifest.ts');
 hooks.deregister();
 const settings = { name: 'Fixture', hostname: 'fixture.tailnet.ts.net', port: 22, username: 'test' };
 const key = { algorithm: 'ssh-ed25519', fingerprint: 'SHA256:abc', publicKey: 'abc' };
@@ -74,7 +74,7 @@ function ssh(observed = key, behavior = {}) {
               return;
             }
             const response = request.op === 'hello'
-              ? { protocol: 1, version: '1.0.4', os: behavior.os ?? 'darwin', arch: 'arm64', home: behavior.home ?? '/home/test', tmpdir: '/tmp', separator: '/', cwd: '/', driveCwds: {}, pid: 123 }
+              ? { protocol: 1, version: PI_DAEMON_VERSION, os: behavior.os ?? 'darwin', arch: 'arm64', home: behavior.home ?? '/home/test', tmpdir: '/tmp', separator: '/', cwd: '/', driveCwds: {}, pid: 123 }
               : request.op === 'realpath' ? { path: behavior.resolvedPath ?? '/real/project' }
                 : { name: 'project', kind: behavior.kind ?? 'directory', size: 0, mtimeSec: 0, mtimeNsec: 0 };
             emit(encodeFrame(FrameType.result, id, response));
@@ -111,7 +111,7 @@ test('explicit verified-key acceptance persists trust, validates only the daemon
     assert.equal(challenge.trusted, undefined);
     return true;
   } }, remote.dependencies);
-  assert.deepEqual(result, { version: '1.0.4', os: 'darwin', arch: 'arm64', home: '/home/test' });
+  assert.deepEqual(result, { version: PI_DAEMON_VERSION, os: 'darwin', arch: 'arm64', home: '/home/test' });
   assert.equal(challenges, 1);
   assert.deepEqual(remote.calls.setup, ['detecting', 'checking'], 'an existing installation is verified automatically');
   assert.equal(remote.calls.uploaded.length, 0, 'a verified installation is reused');

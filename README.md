@@ -2,7 +2,7 @@
 
 An on-device chat app built with Pi's **durable `Harness`**, Expo SQLite, and Pi's provider registry. Connect OpenAI with ChatGPT or an API key, or use Anthropic, Google, OpenRouter, or xAI with an API key. Continue independent conversations across app restarts, each with its own provider, model, and reasoning effort. A new chat uses the first connected provider in the catalog and that provider's first model with a supported reasoning setting.
 
-The app exact-pins `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord` to **1.0.4**. The previous one-prompt Agent Core runner has been replaced by a shared durable session with separate conversations. [`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge needed to run Pi in Expo on iOS and Android.
+The app exact-pins `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord` to **1.1.0**. The previous one-prompt Agent Core runner has been replaced by a shared durable session with separate conversations. [`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge needed to run Pi in Expo on iOS and Android.
 
 ## Run
 
@@ -18,7 +18,7 @@ Use a development build for the app's OAuth integration. Rebuild an existing dev
 3. Return to **Chats** and start a chat. It uses a connected provider; change the provider, model or effort in the chat's **Model settings**.
 4. Use **Stop** to cancel a response. Rename or archive conversations from their chat actions; archived chats are hidden from the list, while their durable records remain stored.
 
-Existing chats remain readable without a provider connection. Starting a chat, sending, or resuming model work requires credentials for a provider. Pi's `openai` OAuth provider has no device-code route in the installed `pi-ai` 1.0.4.
+Existing chats remain readable without a provider connection. Starting a chat, sending, or resuming model work requires credentials for a provider. Pi's `openai` OAuth provider has no device-code route in the installed `pi-ai` 1.1.0.
 
 ## Per-chat model settings
 
@@ -38,11 +38,11 @@ The modern **OpenAI** provider makes Responses' hosted `web_search` tool availab
 
 The durable extension uses `GenerationTask.beforeRequest` to bind each generation's signal to its conversation and request identity. Native response envelopes, ordered output items, search results, annotations, and opaque reasoning state are stored in the conversation-scoped, rewindable `app.openai.responses` document. Commits finish before the corresponding normalized Pi events are forwarded. A separate latest-state document selects live activity; it does not copy in-flight state into a fork. Provider callbacks stay in memory and never enter serialized harness settings.
 
-The signal binding and public transcript conversion behavior are verified against the pinned Pi 1.0.0 packages. Run the native-search integration suite when upgrading Pi; it verifies that the generation hook and provider receive the same signal and that replay respects the SDK's context transformations.
+Run the native-search integration suite when upgrading Pi; it verifies that the generation hook and provider receive the same signal and that replay respects the SDK's context transformations.
 
 Completed searches also become typed `SearchObservationEntry` records in that same transaction. Their `model` content contains attributed, readable source excerpts; their `data` contains provenance and completeness metadata. Pi-durable's canonical context now supplies the findings after reopening, across model/provider changes, and to its built-in compactor. The UI projects search activity and sources without presenting observations as human messages or assistant prose.
 
-Pi owns native reasoning signatures, request conversion, and local tool pairing. The former raw-history input rewrite has been removed. Immutable context edits handle enrichment and logical-turn changes, and an idempotent migration backfills retained snippets only from valid active history. Deterministic evidence limits preserve complete raw results and report projection omissions; a generation capacity guard routes oversized canonical requests through Pi's normal overflow-compaction path. See [the architecture and validation guide](docs/native-web-search.md) for module ownership, migration rules, sizing, and verification limits.
+Pi owns native reasoning signatures, request conversion, and local tool pairing. The former raw-history input rewrite has been removed. Immutable context edits handle enrichment and logical-turn changes, and an idempotent migration backfills retained snippets only from valid active history. Deterministic evidence limits preserve complete raw results and report projection omissions; a generation capacity guard routes oversized canonical requests through Pi's normal overflow-compaction path.
 
 ## Persistent chats and lifecycle
 
@@ -54,7 +54,7 @@ The UI reads pi-durable's own views and keeps no copy of them. The chat list rea
 
 The app opens the database once at launch and keeps it open, including in the background, until the app's root unmounts. After opening it calls `harness.resume()`, so work the last process left unfinished continues. Each request resolves its credentials when it starts. A recovered chat whose provider is signed out fails with a visible error and does not hold up other chats. Requests use SSE with pi-durable's default retry and timeout policy, so a request cut off by a transient network error, for example while iOS suspended the app, is retried. The app does not keep running work in the background; that is a separate, later feature. Completed requests with an existing request ID are not submitted again.
 
-Streaming follows the bottom of the transcript until you drag to read earlier messages. Returning to the bottom or choosing **Scroll to latest message** resumes following. The scroll animation runs on the UI thread and respects the system's Reduce Motion setting. Markdown keeps completed blocks in place as the last block grows, and assistant/tool rows retain their identity when a partial becomes a saved message. The [Markdown architecture and parser decision](docs/markdown.md) explains CommonMark/GFM parsing, native tables, citation source maps, streaming behavior, and the explicit rendering limits. The header and composer subscribe only to control-state changes. These presentation changes preserve Pi's existing 100 ms durable partial-checkpoint cadence.
+Streaming follows the bottom of the transcript until you drag to read earlier messages. Returning to the bottom or choosing **Scroll to latest message** resumes following. The scroll animation runs on the UI thread and respects the system's Reduce Motion setting. Markdown keeps completed blocks in place as the last block grows, and assistant/tool rows retain their identity when a partial becomes a saved message. The header and composer subscribe only to control-state changes. These presentation changes preserve Pi's existing 100 ms durable partial-checkpoint cadence.
 
 **Credentials persist in Expo SecureStore** (iOS Keychain / Android Keystore), one record per provider: an API key, or for ChatGPT the access token, refresh token, expiry, issued client ID and scopes. They are restored on startup and never stored in the chat SQLite database. Pi refreshes OAuth tokens near expiry and saves the replacement before authenticating the request. System authentication-browser cookies are managed separately.
 
@@ -118,13 +118,13 @@ node scripts/check-native-streaming.mjs --manual
 node scripts/check-native-streaming.mjs --manual --duration-seconds 120
 ```
 
-The streaming probe temporarily routes the mounted runtime's chat methods to its own scripted SQLite conversation, then restores them and returns home. It checks growing-content following, completion at the bottom, and that the streamed answer keeps one row ID from its first delta to the saved message. Scroll commands and JavaScript frame timing are reported as diagnostics; `--seed-turns N` first saves N earlier turns to measure a long chat. The manual run requires native gestures and phase markers; follow the [streaming verification procedure](docs/ios-compatibility.md#streaming-presentation-and-repeatable-check). JavaScript frame timing measures JS responsiveness, not UI-thread frames per second.
+The streaming probe temporarily routes the mounted runtime's chat methods to its own scripted SQLite conversation, then restores them and returns home. It checks growing-content following, completion at the bottom, and that the streamed answer keeps one row ID from its first delta to the saved message. Scroll commands and JavaScript frame timing are reported as diagnostics; `--seed-turns N` first saves N earlier turns to measure a long chat. The manual run requires native gestures and phase markers; `node scripts/check-native-streaming.mjs --help` lists them. JavaScript frame timing measures JS responsiveness, not UI-thread frames per second.
 
 Both default following and the manual native-gesture check passed on the iOS simulator with a scripted provider. During the reading-history interval, content grew by 1,220.67 points without moving the reader's position; tapping scroll-to-latest resumed following and finished at the measured bottom with the same assistant row.
 
 At the user's request, the current Release build with modern OpenAI OAuth and native web search was installed and cold-launched on the physical iPhone 15 Pro. The Chats screen and existing saved history loaded from the bundled app with Metro unavailable. Feature integration checks use the simulator and synthetic provider responses; the physical-device check establishes installation and startup.
 
-Native integration, background/foreground behavior, and live authenticated ChatGPT requests are separate validation gates. Current results and historical checks are recorded in [compatibility and verification notes](docs/ios-compatibility.md).
+Native integration, background/foreground behavior, and live authenticated ChatGPT requests are separate validation gates.
 
 ## Main files
 

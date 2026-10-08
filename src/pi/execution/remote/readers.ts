@@ -1,4 +1,4 @@
-// Reader behavior adapted from Pi Env 1.0.4 (MIT), with mobile resource ownership.
+// Reader behavior adapted from Pi Env 1.1.0 (MIT), with mobile resource ownership.
 import type { Context } from '@earendil-works/chord';
 import {
   err, ok, FileError, type BinaryReader, type DirReader, type FileInfo, type FileKind,
