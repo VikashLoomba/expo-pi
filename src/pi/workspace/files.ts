@@ -100,8 +100,7 @@ export class WorkspaceFs implements IFileSystem {
     const target = await this.#kindOf(destination);
     if (kind === 'file') {
       if (target === 'directory') this.#fail('EISDIR', 'cp', destination);
-      if (target) await this.storage.remove(destination);
-      else await this.#requireParent(destination, 'cp');
+      if (!target) await this.#requireParent(destination, 'cp');
       await this.storage.copyFile(source, destination);
       return;
     }
@@ -211,10 +210,11 @@ export class WorkspaceFs implements IFileSystem {
     if (target) {
       if (kind === 'directory' && target !== 'directory') this.#fail('ENOTDIR', 'mv', destination);
       if (kind === 'file' && target === 'directory') this.#fail('EISDIR', 'mv', destination);
-      if (target === 'directory' && (await this.storage.list(destination)).length > 0) {
-        this.#fail('ENOTEMPTY', 'mv', destination);
+      if (target === 'directory') {
+        if ((await this.storage.list(destination)).length > 0) this.#fail('ENOTEMPTY', 'mv', destination);
+        // expo-file-system moves a directory into an existing directory instead of replacing it.
+        await this.storage.remove(destination);
       }
-      await this.storage.remove(destination);
     } else {
       await this.#requireParent(destination, 'mv');
     }

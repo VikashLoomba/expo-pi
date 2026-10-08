@@ -18,7 +18,6 @@ export interface ByteReader {
 /**
  * The files of one workspace directory. Paths are absolute and normalized inside it, such as `/` and `/notes/a.txt`.
  * Methods throw on failure; callers check existence and kinds first so every platform reports the same error codes.
- * The directory itself is created on first use.
  */
 export interface WorkspaceStorage {
   info(path: string): Promise<Entry | undefined>;
@@ -32,15 +31,15 @@ export interface WorkspaceStorage {
   createDirectory(path: string): Promise<void>;
   /** Remove a file, or a directory with everything in it. */
   remove(path: string): Promise<void>;
-  /** Rename a file or directory to a path that does not exist. */
+  /** Rename a file, replacing a file at the destination, or a directory to a path that does not exist. */
   move(source: string, destination: string): Promise<void>;
-  /** Copy a file to a path that does not exist. */
+  /** Copy a file, replacing a file at the destination. */
   copyFile(source: string, destination: string): Promise<void>;
 }
 
 /** The directory that holds one directory per workspace. */
 export interface Workspaces {
-  /** A workspace's files. Nothing touches the disk until the first operation. */
+  /** A workspace's files, creating its directory if it does not exist. */
   workspace(id: string): WorkspaceStorage;
 }
 

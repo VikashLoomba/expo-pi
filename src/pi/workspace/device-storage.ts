@@ -6,9 +6,8 @@ import { workspaceDirectoryName, type ByteReader, type Entry, type WorkspaceStor
 class DeviceWorkspaceStorage implements WorkspaceStorage {
   constructor(private readonly root: Directory) {}
 
-  /** The URI of a workspace path; segments are percent-encoded by `Paths.join`. The directory appears on first use. */
+  /** The URI of a workspace path; segments are percent-encoded by `Paths.join`. */
   #uri(path: string): string {
-    this.root.create({ intermediates: true, idempotent: true });
     return path === '/' ? this.root.uri : Paths.join(this.root, path);
   }
 
@@ -64,13 +63,13 @@ class DeviceWorkspaceStorage implements WorkspaceStorage {
   async move(source: string, destination: string): Promise<void> {
     const from = this.#uri(source);
     const to = this.#uri(destination);
-    // The destination does not exist, so a directory is renamed rather than moved into it.
+    // A directory's destination does not exist, so it is renamed rather than moved into it.
     if (Paths.info(from).isDirectory) await new Directory(from).move(new Directory(to));
-    else await new File(from).move(new File(to));
+    else await new File(from).move(new File(to), { overwrite: true });
   }
 
   copyFile(source: string, destination: string): Promise<void> {
-    return new File(this.#uri(source)).copy(new File(this.#uri(destination)));
+    return new File(this.#uri(source)).copy(new File(this.#uri(destination)), { overwrite: true });
   }
 }
 
@@ -78,6 +77,10 @@ class DeviceWorkspaceStorage implements WorkspaceStorage {
 export function createDeviceWorkspaces(directoryName = 'workspaces'): Workspaces {
   const root = new Directory(Paths.document, directoryName);
   return {
-    workspace: (id) => new DeviceWorkspaceStorage(new Directory(root, workspaceDirectoryName(id))),
+    workspace: (id) => {
+      const directory = new Directory(root, workspaceDirectoryName(id));
+      directory.create({ intermediates: true, idempotent: true });
+      return new DeviceWorkspaceStorage(directory);
+    },
   };
 }
