@@ -2,10 +2,9 @@ import { defineExtension, section } from '@earendil-works/pi-durable';
 
 import type { SharedToolPolicy } from '../execution/types';
 import { WORKSPACE_EXTENSION } from './document';
-import { createWorkspaceTools } from './tools';
 
+/** The prompt for pi's `CodingTools`, which are installed beside it. */
 export function createWorkspaceExtension(policy: SharedToolPolicy) {
-  const { tools, wraps } = createWorkspaceTools();
   return defineExtension({
     // The historical name is a persisted selection, independent of the selected environment.
     name: WORKSPACE_EXTENSION,
@@ -18,7 +17,5 @@ export function createWorkspaceExtension(policy: SharedToolPolicy) {
       'Tool output is bounded and keeps its end. Interrupted bash, write and edit calls may have changed files; ' +
         'inspect with read or bash before retrying a mutation.',
     ].join('\n'))],
-    tools,
-    wraps,
   });
 }

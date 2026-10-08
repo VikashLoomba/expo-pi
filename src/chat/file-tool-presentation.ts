@@ -4,7 +4,6 @@ export type FileToolPresentation = {
   path: string;
   summary: string;
   diff?: string;
-  diffTruncated?: boolean;
   firstChangedLine?: number;
 };
 
@@ -18,7 +17,7 @@ const positiveInteger = (value: unknown): value is number => typeof value === 'n
 export function fileToolPresentation(name: string, args: unknown): FileToolPresentation | undefined {
   if (name !== 'read' && name !== 'write' && name !== 'edit') return;
   const input = record(args);
-  if (!input || typeof input.path !== 'string' || !input.path || input.path.length > 4096) return;
+  if (!input || typeof input.path !== 'string' || !input.path) return;
   let summary: string;
   if (name === 'read') {
     if ((input.offset !== undefined && !positiveInteger(input.offset)) ||
@@ -33,7 +32,7 @@ export function fileToolPresentation(name: string, args: unknown): FileToolPrese
     // Mixed legacy + array forms are repaired by Pi; keep their original input visible.
     if (input.edits !== undefined && (input.oldText !== undefined || input.newText !== undefined)) return;
     let edits = input.edits;
-    if (typeof edits === 'string' && edits.length <= 1024 * 1024) {
+    if (typeof edits === 'string') {
       try { edits = JSON.parse(edits); } catch { return; }
     }
     const replacements = Array.isArray(edits) ? edits : record(edits) ? [edits] : [input];
@@ -47,19 +46,13 @@ export function fileToolPresentation(name: string, args: unknown): FileToolPrese
   return { kind: name, path: input.path, summary };
 }
 
-/** Never trust old stored details to satisfy the current production output policy. */
+/** The edit card shows pi's own diff and where it starts; other stored details, such as the patch, stay out. */
 export function withFileToolDetails(presentation: FileToolPresentation | undefined, details: unknown): FileToolPresentation | undefined {
   if (!presentation || presentation.kind !== 'edit') return presentation;
   const value = record(details);
   if (!value) return presentation;
-  const diff = typeof value.diff === 'string' ? value.diff : undefined;
-  const maxUnits = 24 * 1024;
-  let preview = diff?.slice(0, maxUnits);
-  // A historical diff can exceed today's bound; don't end its preview inside a surrogate pair.
-  if (preview && /[\uD800-\uDBFF]$/.test(preview)) preview = preview.slice(0, -1);
   return { ...presentation,
-    ...(diff !== undefined && preview !== undefined
-      ? { diff: preview, diffTruncated: diff.length > preview.length || value.diffTruncated === true } : {}),
+    ...(typeof value.diff === 'string' ? { diff: value.diff } : {}),
     ...(positiveInteger(value.firstChangedLine) ? { firstChangedLine: value.firstChangedLine } : {}),
   };
 }

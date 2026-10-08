@@ -6,17 +6,13 @@ import { WorkspaceExecutionEnv } from '../workspace/execution-env';
 import type { Workspaces } from '../workspace/storage';
 import type { SharedToolPolicy } from './types';
 
-const FORK_FACT = 'This conversation fork started with an empty workspace. ' +
-  'Files mentioned in inherited messages were NOT copied or restored.';
-
 /** The service owns this composition; Pi owns neither environments nor their cleanup. */
 export interface ExecutionComposition {
   /** Builds the environment for one use. Select cwd through this resolver, never by mutating a shared value. */
   readonly resolve: NonNullable<HarnessOptions['env']>;
   readonly toolPolicy: SharedToolPolicy;
-  /** Optional application documents/tasks and transactional creation inheritance. */
+  /** Optional application documents and tasks. */
   readonly extensions?: readonly Extension[];
-  readonly conversationCreated?: HarnessOptions['conversationCreated'];
   stop(): void;
   close(): Promise<void>;
 }
@@ -35,14 +31,12 @@ export function createLocalExecution(workspaces: Workspaces | undefined): Execut
       return new WorkspaceExecutionEnv(workspaces.workspace(workspace.id), workspace.id, cwd);
     },
     toolPolicy: {
-      async promptFacts({ env, conversationId, read }, context) {
+      promptFacts({ env }) {
         if (!(env instanceof WorkspaceExecutionEnv)) return [];
-        const workspace = await read.snapshot(WorkspaceDoc, conversationId, context);
         return [
           'The read, write, edit and bash tools share this chat’s own /workspace on this device. ' +
             'It persists across app restarts; HOME and the default cwd resolve there. ' +
             'File tools reach only /workspace.',
-          ...(workspace?.origin === 'fork' ? [FORK_FACT] : []),
           BASH_CAPABILITY_DESCRIPTION,
         ];
       },

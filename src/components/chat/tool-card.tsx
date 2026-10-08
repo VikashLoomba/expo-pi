@@ -42,7 +42,6 @@ export function ToolCard({ message }: { message: ChatMessage }) {
       {file?.diff !== undefined ? <>
         <Text style={[styles.label, { color: colors.muted }]}>CHANGES{file.firstChangedLine ? ` · LINE ${file.firstChangedLine}` : ''}</Text>
         <Text selectable testID={`tool-diff-${message.id}`} style={[styles.output, { color: colors.text }]}>{file.diff}</Text>
-        {file.diffTruncated ? <Text style={[styles.summary, { color: colors.muted }]}>Diff preview truncated.</Text> : null}
       </> : null}
     </View> : null}
   </View>;

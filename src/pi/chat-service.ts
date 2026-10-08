@@ -5,17 +5,18 @@ import {
   type ConversationId, type Cursor, type DocumentState, type Extension, type SettledSubmissionRecord, type Storage,
   type SubmissionId, type SubmissionRecord, type Tx,
 } from '@earendil-works/pi-durable';
+import { CodingTools } from '@earendil-works/pi-durable/tools';
 
 import type { ChatSummary } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { isBusy, oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
 import { createWorkspaceExtension } from './workspace/extension';
-import { ensureWorkspaceDoc } from './workspace/document';
+import { WorkspaceDoc } from './workspace/document';
 import type { Workspaces } from './workspace/storage';
 import { createLocalExecution, type ExecutionComposition } from './execution/composition';
 import {
-  ExecutionTargetDoc, executionSettings, validateExecution, type ChatExecutionSettings,
+  ExecutionTargetDoc, validateExecution, type ChatExecutionSettings,
 } from './execution/document';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
@@ -74,6 +75,7 @@ export class DurableChatService {
     const registry = createRegistry();
     const local = createLocalExecution(options.workspaces);
     const execution = options.execution?.(local) ?? local;
+    registry.install(CodingTools);
     registry.install(createWorkspaceExtension(execution.toolPolicy));
     for (const extension of execution.extensions ?? []) registry.install(extension);
     const nativeSearch = createNativeWebSearchBridge(options.models);
@@ -97,13 +99,6 @@ export class DurableChatService {
       async conversationCreated(tx, conversation) {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
         metadata.createdAt = now();
-        await ensureWorkspaceDoc(tx, conversation.id, conversation.parent ? 'fork' : 'new');
-        const selection = await tx.doc(ExecutionTargetDoc, conversation.id);
-        if (conversation.owner && !conversation.parent) {
-          const owner = await tx.doc(ExecutionTargetDoc, conversation.owner.conversationId);
-          selection.target = executionSettings(owner).target;
-        }
-        await execution.conversationCreated?.(tx, conversation);
       },
       onReport: (error) => service?.report(error),
     }, context).catch(async (error) => {
@@ -133,7 +128,7 @@ export class DurableChatService {
     let cursor: Cursor | undefined;
     do {
       const page = await this.storage.scanConversations({}, 100, cursor, context);
-      for (const record of page.items) if (!record.owner) await this.watchChat(record.id);
+      for (const record of page.items) await this.watchChat(record.id);
       cursor = page.next;
     } while (cursor !== undefined);
     this.updateList();
@@ -262,8 +257,13 @@ export class DurableChatService {
     const settings = await this.defaultSettings();
     if (!settings) throw new Error('No chat models are available. Connect a provider in Account.');
     this.assertOpen();
-    const conversation = await this.harness.createConversation({ ownership: { kind: 'ownerless' }, agent: settings },
-      context);
+    const conversation = await this.harness.createConversation({
+      ownership: { kind: 'ownerless' },
+      agent: settings,
+      init: async (tx, id) => {
+        (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
+      },
+    }, context);
     await this.watchChat(conversation.id);
     this.updateList();
     return conversation.id;

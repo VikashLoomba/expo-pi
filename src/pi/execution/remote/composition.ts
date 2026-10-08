@@ -24,7 +24,6 @@ export function createRemoteExecution(local: ExecutionComposition, hosts: Remote
   const assertOpen = () => { if (stopped) throw new Error('Execution admission is stopped. Return to the app to continue.'); };
   return {
     extensions: local.extensions,
-    conversationCreated: local.conversationCreated,
     async resolve(target, context) {
       assertOpen();
       const selection = (await target.read.snapshot(ExecutionTargetDoc, target.conversationId, context))?.target;
