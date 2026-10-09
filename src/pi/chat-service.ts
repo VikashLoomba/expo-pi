@@ -64,7 +64,7 @@ export class DurableChatService {
     /** Holds the SSH connections of chats that run on a remote machine; the service closes it with the Harness. */
     remote: RemoteExecution;
     newChat?: NewChatDefaults;
-    /** Why a provider has no usable credential, for example a locked keychain. */
+    /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */
     authError?: (providerId: string) => string | undefined;
   }): Promise<DurableChatService> {
     const { workspaces, remote } = options;
@@ -176,7 +176,11 @@ export class DurableChatService {
     // Resolving refreshes an expiring token now, so a failed refresh never becomes failed durable work. pi-ai keeps
     // the credential when the refresh fails; signing in again replaces it.
     const auth = await this.models.getAuth(provider.id).catch((error: unknown) => {
-      if (error instanceof ModelsError && error.code === 'oauth') throw new Error(SESSION_EXPIRED, { cause: error });
+      // Only a refresh the provider refused carries the expired mark; any other OAuth failure keeps pi-ai's message.
+      const expired = this.options.authError?.(provider.id) === SESSION_EXPIRED;
+      if (error instanceof ModelsError && error.code === 'oauth' && expired) {
+        throw new Error(SESSION_EXPIRED, { cause: error });
+      }
       throw error;
     });
     if (!auth) throw signIn();
@@ -307,14 +311,19 @@ export class DurableChatService {
     if (workspace?.id) this.workspaces?.remove(workspace.id);
   }
 
-  async send(id: ConversationId, text: string, requestId = uuidv7()): Promise<SubmissionId> {
+  /**
+   * The caller keeps one `requestId` for every attempt to send the same draft. pi-durable returns the existing
+   * submission for a repeated one, so a retry after a failure does not submit twice.
+   */
+  async send(id: ConversationId, text: string, requestId: string): Promise<SubmissionId> {
     const content = text.trim();
     if (!content) throw new Error('Enter a message.');
     const conversation = await this.conversation(id);
     await this.requireAuth(settingsOf(await this.harness.snapshot(AgentDoc, id, context)));
     const submission = await conversation.submit({ type: 'input', content, whenBusy: 'reject', requestId }, context);
-    // pi-durable has no public way to write this in the submission's own commit, so it follows in the next one.
-    // The list shows it without reading the transcript; an untitled chat is named after its first message.
+    // pi-durable has no public way to write this in the submission's own commit, so it follows in the next one, and
+    // a retry of the same request writes it again. The list shows it without reading the transcript; an untitled
+    // chat is named after its first message.
     await conversation.commit(async (tx) => {
       const chat = await tx.doc(ChatMetadataDoc, id);
       chat.lastInput = submission.id;

@@ -1,3 +1,4 @@
+import { uuidv7 } from '@earendil-works/pi-ai';
 import type { ConversationId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
@@ -26,7 +27,11 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const { ready, service, catalog, providerAccess, error: appError } = useChatApp();
   const view = useChatView(id, true);
   const conversation = useChatControls(view);
-  const [draft, setDraft] = useState('');
+  // A draft keeps one request ID for every attempt to send it, so a resend after a failure does not submit twice.
+  const [draft, setDraft] = useState(() => ({ text: '', requestId: uuidv7() }));
+  const changeDraft = useCallback((text: string) => {
+    setDraft((current) => current.text === text ? current : { text, requestId: uuidv7() });
+  }, []);
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [localError, setLocalError] = useState<string>();
@@ -54,16 +59,19 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const openActions = () => {
     if (id !== undefined && conversation) setActionsChat({ id, title: conversation.title });
   };
-  const choosePrompt = useCallback((text: string) => { setDraft(text); input.current?.focus(); }, []);
+  const choosePrompt = useCallback((text: string) => {
+    changeDraft(text);
+    input.current?.focus();
+  }, [changeDraft]);
   const sendMessage = async () => {
-    if (id === undefined || !service || !draft.trim() || admitting || !access.ready || !access.connected || busy) return;
+    const text = draft.text.trim();
+    if (id === undefined || !service || !text || admitting || !access.ready || !access.connected || busy) return;
     if (settingsError) return;
-    const text = draft.trim();
     setAdmitting(true);
     setLocalError(undefined);
     try {
-      await service.send(id, text);
-      setDraft('');
+      await service.send(id, text, draft.requestId);
+      setDraft({ text: '', requestId: uuidv7() });
       transcript.current?.scrollToLatest();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : 'Your message could not be sent. Try again.');
@@ -103,7 +111,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
           action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} /></View>}
         {messageError && messageError !== settingsError && <View style={styles.banner}><InlineNotice testID="conversation-error" message={messageError} action={localError ? 'Dismiss' : access.error ? 'Account' : undefined}
           onAction={localError ? () => setLocalError(undefined) : access.error ? openAccount : undefined} /></View>}
-        <Composer value={draft} onChange={setDraft} onSend={() => { void sendMessage(); }}
+        <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
           onStop={() => { void stop(); }}
           onConnect={openAccount} busy={busy} admitting={admitting} connected={access.connected}
           disabled={!ready || !conversation || stopping || (!busy && (!access.ready || !!settingsError))}

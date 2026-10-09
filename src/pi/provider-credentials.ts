@@ -16,7 +16,10 @@ export interface ProviderCredentialPolicy {
   /** The provider refused a refresh, so only a new sign-in restores access. */
   isPermanentAuthError?(error: unknown): boolean;
 }
-/** Why a provider whose refresh was refused cannot send, and the reply to a send that finds out. */
+/**
+ * Why a provider whose refresh was refused cannot send. A provider's access reports it only while it carries the
+ * expired mark, so a send that meets an OAuth failure can tell a refused refresh from any other.
+ */
 export const SESSION_EXPIRED = 'Session expired — sign in again';
 interface ProviderRecord {
   credential?: Credential;
