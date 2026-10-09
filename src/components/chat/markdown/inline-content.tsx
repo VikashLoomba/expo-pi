@@ -1,4 +1,3 @@
-import { memo } from 'react';
 import { Platform, StyleSheet, Text } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -7,7 +6,7 @@ import { citedInlineRuns, type InlineCitation } from '../web-search-presentation
 import type { InlineFragment } from './types';
 
 /** Used inside a native Text so formatting, selection, and links remain inline. */
-export const InlineContent = memo(function InlineContent({ fragment, citations }: {
+export function InlineContent({ fragment, citations }: {
   fragment: InlineFragment;
   citations: readonly InlineCitation[];
 }) {
@@ -34,7 +33,7 @@ export const InlineContent = memo(function InlineContent({ fragment, citations }
       {run.text}
     </Text>;
   });
-});
+}
 
 const styles = StyleSheet.create({
   strong: { fontWeight: '600' },

@@ -73,7 +73,7 @@ class Session {
   channel?: DaemonChannel;
   opening?: Promise<DaemonChannel>;
   timer?: ReturnType<typeof setInterval>;
-  lastSeen = Date.now();
+  lastSeen = 0;
   live = true;
   ready = false;
   failure?: unknown;
@@ -188,6 +188,8 @@ export class Connection {
     try {
       session.channel = await Promise.race([session.opening, session.failed]);
       if (!session.live || this.#closed) throw session.failure ?? closed();
+      // Like pi-env's session after spawning its daemon, the silence clock starts here: provisioning is not counted.
+      session.lastSeen = Date.now();
       session.timer = setInterval(() => {
         if (Date.now() - session.lastSeen > SILENCE_LIMIT_MS) {
           this.#teardown(session, lost('Pi daemon connection timed out. Check the phone Tailscale VPN and remote host.'));

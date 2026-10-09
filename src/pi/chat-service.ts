@@ -16,7 +16,7 @@ import type { Workspaces } from './workspace/storage';
 import {
   ExecutionTargetDoc, validateExecution, type ChatExecutionSettings,
 } from './execution/document';
-import type { RemoteExecution } from './execution/remote/composition';
+import type { RemoteExecution } from './execution/remote/owner';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
   type ChatModelSettings, type NewChatDefaults,

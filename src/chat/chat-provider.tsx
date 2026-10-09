@@ -9,7 +9,7 @@ import { AppState } from 'react-native';
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
 import type { ChatView, ChatViewSnapshot } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
-import { createRemoteExecution } from '../pi/execution/remote/composition';
+import { createRemoteExecution } from '../pi/execution/remote/owner';
 import { buildModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';

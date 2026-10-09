@@ -31,7 +31,7 @@ function BlockList({ blocks, citations, compact = false }: {
   </View>;
 }
 
-const ContentBlock = memo(function ContentBlock({ block, citations }: BlockProps) {
+function ContentBlock({ block, citations }: BlockProps) {
   const colors = useChatColors();
 
   switch (block.kind) {
@@ -68,7 +68,7 @@ const ContentBlock = memo(function ContentBlock({ block, citations }: BlockProps
     default:
       return assertNever(block);
   }
-});
+}
 
 /** Blocks are keyed by source offset, so completed blocks stay mounted as later content streams. */
 export const MessageContent = memo(function MessageContent({ text, streaming = false, citations = noCitations }: {
