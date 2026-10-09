@@ -22,15 +22,6 @@ export function isBashCommand(name: string | undefined): boolean {
   return BASH_CAPABILITIES.some((command) => command === name);
 }
 
-export const BASH_CAPABILITY_DESCRIPTION =
-  'An interpreted local shell with pipes, redirects, loops, scripts, text processing, jq, md5sum and rg. ' +
-  'No native programs, network commands, JS, Python, sqlite3, tar, gzip, sha1sum, sha256sum, yq, xan, file, ' +
-  'or html-to-markdown. ' +
-  '/workspace persists across restarts; it has no symbolic links, hard links or permission bits. ' +
-  '/tmp starts empty for every command. ' +
-  'Each call starts in the selected conversation cwd (default /workspace) with fresh shell variables/functions. ' +
-  `Available commands: ${BASH_CAPABILITIES.join(', ')}.`;
-
 /**
  * Own one instance per command: exec restores its environment/cwd and does not
  * promise a persistent interactive process. The caller supplies the filesystem

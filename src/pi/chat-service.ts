@@ -11,14 +11,13 @@ import type { ChatSummary } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { isBusy, oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
-import { WorkspaceExtension } from './workspace/extension';
 import { WorkspaceDoc } from './workspace/document';
 import { WorkspaceExecutionEnv } from './workspace/execution-env';
 import type { Workspaces } from './workspace/storage';
 import {
   ExecutionTargetDoc, validateExecution, type ChatExecutionSettings,
 } from './execution/document';
-import { RemoteExecutionExtension, type RemoteExecution } from './execution/remote/composition';
+import type { RemoteExecution } from './execution/remote/composition';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
   type ChatModelSettings, type NewChatDefaults,
@@ -76,8 +75,6 @@ export class DurableChatService {
     const { workspaces, remote } = options;
     const registry = createRegistry();
     registry.install(CodingTools);
-    registry.install(RemoteExecutionExtension);
-    registry.install(WorkspaceExtension);
     const nativeSearch = createNativeWebSearchBridge(options.models);
     registry.install(nativeSearch.extension);
     registry.install(defineExtension({

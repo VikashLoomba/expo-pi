@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { defineExtension, section } from '@earendil-works/pi-durable';
 
 import { createSshChannelFactory, type DaemonChannelFactory } from './channel';
 import { Connection } from './connection';
@@ -19,7 +18,7 @@ function admittedSshChannel(admission: RemoteHostAdmission): DaemonChannelFactor
 export type RemoteExecution = ReturnType<typeof createRemoteExecution>;
 
 /**
- * Holds the app's SSH connections. Tools, prompt sections and tasks borrow its environments; the chat service closes
+ * Holds the app's SSH connections. Tools and tasks borrow its environments; the chat service closes
  * it with the Harness. SSH opens lazily, and a closed owner can hand out environments again for a reopened service.
  */
 export function createRemoteExecution(hosts: RemoteHostRepository) {
@@ -71,22 +70,3 @@ export function createRemoteExecution(hosts: RemoteHostRepository) {
     },
   };
 }
-
-/** What a remote environment tells the model about itself; renders only when the chat runs on a remote machine. */
-export const RemoteExecutionExtension = defineExtension({
-  name: 'remote-execution',
-  sections: [section('remote_machine', ({ env }) => env instanceof MobileRemoteExecutionEnv ? [
-    'The read, write, edit and bash tools execute on the selected remote machine through SSH over Tailscale. ' +
-      'Files and installed programs belong to that machine; its working directory is not a filesystem sandbox.',
-    'Each bash invocation starts a separate command, so shell variables do not persist between tools. ' +
-      'Ordinary remote files persist and may be shared with other chats. Environment-created temporary files are ' +
-      'cleaned up when the chat service closes while connected; files a shell creates in /tmp follow the host’s ' +
-      'ordinary lifetime.',
-    'Switching environments does not copy files. Forked conversations see the remote machine’s current files, ' +
-      'not a historical filesystem snapshot.',
-    'Output previews are bounded. This remote environment does not save complete output artifacts. ' +
-      'Connection loss or interruption can leave mutations applied; inspect the remote state before retrying.',
-    'Execution requires the phone’s active Tailscale VPN, working tailnet DNS, and a reachable SSH server. ' +
-      'Background execution is not guaranteed.',
-  ].join('\n') : undefined)],
-});
