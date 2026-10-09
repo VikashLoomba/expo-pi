@@ -2,7 +2,42 @@ import { Buffer } from 'buffer';
 
 export type Json = Record<string, unknown>;
 export const FrameType = { request: 1, result: 2, error: 3, event: 4, cancel: 5, ping: 6 } as const;
-export const MAX_FRAME = 16 * 1024 * 1024;
+const MAX_FRAME = 16 * 1024 * 1024;
+
+export function isJson(value: unknown): value is Json {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The daemon broke its reply contract (pi-env docs/protocol.md). */
+export function invalidReply(key: string): Error {
+  return new Error(`The Pi daemon sent an invalid "${key}" field.`);
+}
+
+export function numberField(json: Json, key: string): number {
+  const value = json[key];
+  if (typeof value !== 'number') throw invalidReply(key);
+  return value;
+}
+
+export function stringField(json: Json, key: string): string {
+  const value = json[key];
+  if (typeof value !== 'string') throw invalidReply(key);
+  return value;
+}
+
+export function jsonField(json: Json, key: string): Json {
+  const value = json[key];
+  if (!isJson(value)) throw invalidReply(key);
+  return value;
+}
+
+export function listField<T>(json: Json, key: string, is: (item: unknown) => item is T): T[] {
+  const value = json[key];
+  if (!Array.isArray(value)) throw invalidReply(key);
+  const items: unknown[] = value;
+  if (!items.every(is)) throw invalidReply(key);
+  return items;
+}
 
 /** Hermes versions differ in toWellFormed support; UTF-8 encoding has Node's replacement behavior. */
 function wellFormed(_key: string, value: unknown): unknown {
@@ -12,7 +47,6 @@ function wellFormed(_key: string, value: unknown): unknown {
 export function encodeFrame(type: number, id: number, json: Json, payload: Uint8Array = new Uint8Array(0)): Uint8Array {
   const body = Buffer.from(JSON.stringify(json, wellFormed), 'utf8');
   const length = 9 + body.length + payload.length;
-  if (length > MAX_FRAME) throw new Error('Pi protocol frame exceeds 16 MiB.');
   const bytes = Buffer.alloc(4 + length);
   bytes.writeUInt32BE(length, 0);
   bytes.writeUInt8(type, 4);
@@ -35,6 +69,7 @@ export class FrameDecoder {
 
   constructor(token: string) { this.#marker = Buffer.from(`PI-ENV ${token}\n`, 'utf8'); }
 
+  /** `chunk` is owned by the decoder from here on (`DaemonChannelOpen.onData`). */
   push(chunk: Uint8Array, receive: (frame: Frame) => void): void {
     let offset = 0;
     if (!this.#synced) {
@@ -47,8 +82,7 @@ export class FrameDecoder {
       }
     }
     if (!this.#synced || offset === chunk.length) return;
-    // Copy again at the portable boundary: injected transports have the same lifetime guarantee.
-    const retained = new Uint8Array(chunk.subarray(offset));
+    const retained = chunk.subarray(offset);
     this.#chunks.push(retained);
     this.#buffered += retained.length;
     while (this.#buffered >= 4) {
@@ -62,16 +96,16 @@ export class FrameDecoder {
       const jsonLength = bytes.readUInt32BE(9);
       if (jsonLength > length - 9) throw new Error('Invalid Pi protocol JSON length.');
       // Never call toString on a subarray: Hermes may return Uint8Array there.
-      const parsed: unknown = JSON.parse(bytes.toString('utf8', 13, 13 + jsonLength));
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('Invalid Pi protocol JSON object.');
+      const json: unknown = JSON.parse(bytes.toString('utf8', 13, 13 + jsonLength));
+      if (!isJson(json)) throw new Error('Invalid Pi protocol JSON object.');
       const payload = new Uint8Array(bytes.subarray(13 + jsonLength, 4 + length));
       this.#consume(4 + length);
-      receive({ type, id, json: parsed as Json, payload });
+      receive({ type, id, json, payload });
     }
   }
 
   #peek(length: number): Buffer {
-    const first = this.#chunks[0]!;
+    const first = this.#chunks[0];
     if (first.length >= length) return Buffer.from(first.buffer, first.byteOffset, length);
     const joined = Buffer.concat(this.#chunks, this.#buffered);
     this.#chunks = [joined];
@@ -81,7 +115,7 @@ export class FrameDecoder {
   #consume(length: number): void {
     this.#buffered -= length;
     while (length > 0) {
-      const first = this.#chunks[0]!;
+      const first = this.#chunks[0];
       if (first.length <= length) { this.#chunks.shift(); length -= first.length; }
       else { this.#chunks[0] = first.subarray(length); length = 0; }
     }

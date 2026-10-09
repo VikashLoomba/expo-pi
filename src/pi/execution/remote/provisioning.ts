@@ -1,8 +1,14 @@
-import type { DaemonLoader, DaemonPlatform } from './daemon-assets';
+import type { SshConnection } from '@osuki-dev/react-native-ssh';
+import { loadPackagedDaemon, type DaemonPlatform } from './daemon-assets';
 import { BootstrapError } from './bootstrap-errors';
-import { type BootstrapConnection, runSshCommand } from './command-channel';
+import { runSshCommand } from './command-channel';
 
 export type SshSetupStage = 'detecting' | 'checking' | 'uploading';
+
+/** An authenticated SSH account's POSIX home and matching packaged target. */
+export type RemotePlatform = DaemonPlatform & { home: string };
+/** What a connection learned about its remote system, kept across its starts like pi-env's `SshState`. */
+export interface RemotePlatformState { remote?: RemotePlatform }
 
 export function quotePosix(value: string): string { return `'${value.replace(/'/g, `'"'"'`)}'`; }
 
@@ -17,8 +23,7 @@ function afterMarker(stdout: string, marker: string): string[] {
   return lines.slice(start + 1);
 }
 
-/** An authenticated SSH account's POSIX home and matching packaged target. */
-async function detect(connection: BootstrapConnection, signal: AbortSignal, token: string): Promise<DaemonPlatform & { home: string }> {
+async function detect(connection: SshConnection, signal: AbortSignal, token: string): Promise<RemotePlatform> {
   const marker = `PI-ENV-PROBE ${token}`;
   const response = await runSshCommand(connection, script(`set -eu\nprintf '%s\\n' ${quotePosix(marker)}\nif [ "$(uname -o 2>/dev/null || true)" = Android ]; then printf '%s\\n' Android; else uname -s; fi\nuname -m\nprintf '%s\\n' "$HOME"`), { signal });
   if (response.exitCode !== 0) throw new BootstrapError('UNSUPPORTED_REMOTE');
@@ -34,24 +39,27 @@ async function detect(connection: BootstrapConnection, signal: AbortSignal, toke
 }
 
 /**
- * Verify on every session. Upload the packaged binary only when missing or corrupt,
- * then publish by atomic rename. Unique temporary files permit concurrent clients;
- * each client cleans only its own temporary file, never another version or upload.
+ * Detect the remote system at a connection's first start, as pi-env's `sshConnection` does, and verify the daemon on
+ * every start. Upload the packaged binary only when missing or corrupt, then publish by atomic rename. Unique
+ * temporary files permit concurrent clients; each client cleans only its own temporary file, never another version
+ * or upload.
  */
-export async function provisionDaemon(connection: BootstrapConnection, options: {
+export async function provisionDaemon(connection: SshConnection, options: {
   signal: AbortSignal;
   token: string;
-  loadDaemon: DaemonLoader;
+  platform: RemotePlatformState;
   onProgress?: (stage: SshSetupStage) => void;
 }): Promise<string> {
-  const { signal, token } = options;
+  const { signal, token, platform } = options;
   if (!/^[a-f0-9]{32}$/.test(token)) throw new BootstrapError('DAEMON_SETUP');
   if (signal.aborted) throw new BootstrapError('CANCELLED');
-  options.onProgress?.('detecting');
-  const remote = await detect(connection, signal, token);
-  const binary = await options.loadDaemon({ platform: remote.platform, arch: remote.arch }, signal);
+  if (!platform.remote) {
+    options.onProgress?.('detecting');
+    platform.remote = await detect(connection, signal, token);
+  }
+  const remote = platform.remote;
+  const binary = await loadPackagedDaemon({ platform: remote.platform, arch: remote.arch }, signal);
   if (signal.aborted) throw new BootstrapError('CANCELLED');
-  if (!/^[a-f0-9]{64}$/.test(binary.sha256) || !binary.bytes.length) throw new BootstrapError('DAEMON_VERIFY');
   const file = `${remote.home === '/' ? '' : remote.home}/.pi/mobile/tools/pi-env-${binary.sha256.slice(0, 32)}`;
   const cacheMarker = `PI-ENV-CACHE ${token}`;
   options.onProgress?.('checking');

@@ -18,8 +18,7 @@ export const posix = {
   join: (...parts: string[]) => normalize(parts.filter(Boolean).join('/')),
   resolve: (...parts: string[]) => {
     let path = '';
-    for (let index = parts.length - 1; index >= 0; index--) {
-      const part = parts[index]!;
+    for (const part of [...parts].reverse()) {
       path = `${part}/${path}`;
       if (part.startsWith('/')) break;
     }

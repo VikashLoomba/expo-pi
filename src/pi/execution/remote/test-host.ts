@@ -1,8 +1,8 @@
 import type { SshHostKey } from '@osuki-dev/react-native-ssh';
 
-import { createSshChannelFactory, type SshChannelDependencies, type SshSetupStage } from './channel';
-import { Connection, type RemoteInfo } from './connection';
-import { matchesHostKey, sameRemoteConnection, type RemoteHost, type RemoteHostRepository } from './hosts';
+import { createSshChannelFactory, type SshSetupStage } from './channel';
+import { Connection } from './connection';
+import { matchesHostKey, type RemoteHost, type RemoteHostRepository } from './hosts';
 
 export interface HostKeyChallenge {
   readonly host: RemoteHost;
@@ -16,8 +16,6 @@ export interface RemoteHostTestOptions {
   onProgress?: (stage: SshSetupStage) => void;
 }
 export interface RemoteHostTestResult { version: string; os: string; arch: string; home: string }
-export type RemoteDirectoryOptions = Pick<RemoteHostTestOptions, 'signal' | 'onProgress'>;
-export interface RemoteDirectoryResult { cwd: string; host: RemoteHost }
 
 /** Stable, sanitized user feedback. Never display native errors containing secret input or remote stderr. */
 export function remoteHostConnectionMessage(error: unknown): string {
@@ -33,8 +31,6 @@ export function remoteHostConnectionMessage(error: unknown): string {
   }
   if (code === 'TIMEOUT') return 'The SSH connection timed out. Check Tailscale connectivity and the SSH server, then test again.';
   if (code === 'CANCELLED' || code === 'aborted') return 'Remote connection cancelled.';
-  if (code === 'not_found' || code === 'not_directory' || code === 'ENOENT' || code === 'ENOTDIR') return 'The working directory does not exist or is not a directory on this machine.';
-  if (code === 'permission_denied' || code === 'EACCES' || code === 'EPERM') return 'The SSH account cannot access this working directory.';
   if (code === 'not_supported') return 'This remote operating system is not supported by the mobile execution environment. Configure a machine with POSIX paths.';
   if (code === 'UNSUPPORTED_REMOTE') return 'This machine’s operating system or processor is not supported for automatic remote execution setup.';
   if (code === 'DAEMON_ASSET') return 'The app’s bundled remote execution software is unavailable or damaged. Reinstall the app, then test the connection again.';
@@ -44,9 +40,9 @@ export function remoteHostConnectionMessage(error: unknown): string {
   return 'Remote execution could not be prepared or verified. Check the connection and try again.';
 }
 
-async function withRemoteHost<T>(repository: RemoteHostRepository, id: string, options: RemoteHostTestOptions,
-  action: (connection: Connection, host: RemoteHost, info: RemoteInfo) => Promise<T>,
-  dependencies?: SshChannelDependencies): Promise<T> {
+/** Verify the machine's SSH trust, automatic setup and daemon handshake independently of any chat directory. */
+export async function testRemoteHost(repository: RemoteHostRepository, id: string,
+  options: RemoteHostTestOptions): Promise<RemoteHostTestResult> {
   options.signal.throwIfAborted();
   const admission = await repository.admit(id);
   options.signal.throwIfAborted();
@@ -75,16 +71,15 @@ async function withRemoteHost<T>(repository: RemoteHostRepository, id: string, o
           return false;
         }
       },
-    }, dependencies),
+    }),
   });
-  // Each settings operation owns this connection. Read-only path validation
-  // must also stop when a filesystem request ignores protocol cancellation.
+  // The test owns this connection; closing it is what stops connecting and requests on abort.
   const abort = () => { void connection.close(); };
   options.signal.addEventListener('abort', abort, { once: true });
   try {
-    const info = await connection.info(options.signal);
+    const info = await connection.info();
     if (info.separator !== '/' || info.os === 'windows') throw Object.assign(new Error('Unsupported remote operating system.'), { code: 'not_supported' });
-    return await action(connection, host, info);
+    return { version: info.version, os: info.os, arch: info.arch, home: info.home };
   } catch (error) {
     if (trustFailure) throw trustFailure;
     if (options.signal.aborted) throw Object.assign(new Error('Remote connection cancelled.'), { code: 'aborted' });
@@ -93,40 +88,4 @@ async function withRemoteHost<T>(repository: RemoteHostRepository, id: string, o
     options.signal.removeEventListener('abort', abort);
     await connection.close();
   }
-}
-
-/** Verify the machine's SSH trust, automatic setup and daemon handshake independently of any chat directory. */
-export function testRemoteHost(repository: RemoteHostRepository, id: string, options: RemoteHostTestOptions,
-  dependencies?: SshChannelDependencies): Promise<RemoteHostTestResult> {
-  return withRemoteHost(repository, id, options, async (_connection, _host, info) =>
-    ({ version: info.version, os: info.os, arch: info.arch, home: info.home }), dependencies);
-}
-
-/**
- * Resolve a chat's directory using an already trusted machine. Empty input uses
- * the remote account's home. The caller must recheck the connection settings immediately
- * before committing the chat selection, since host edits can follow this return.
- */
-export async function resolveRemoteWorkingDirectory(repository: RemoteHostRepository, id: string, path: string,
-  options: RemoteDirectoryOptions, dependencies?: SshChannelDependencies): Promise<RemoteDirectoryResult> {
-  const requested = path.trim() ? path : '';
-  if (requested && (!requested.startsWith('/') || /[\x00-\x1f\x7f]/.test(requested))) {
-    throw new Error('Enter an absolute working directory starting with /, or leave it empty to use the remote home directory.');
-  }
-  const result = await withRemoteHost(repository, id, { signal: options.signal, onProgress: options.onProgress },
-    async (connection, host, info) => {
-      const session = connection.currentSession;
-      if (session === undefined) throw new Error('The remote connection closed.');
-      const resolved = await connection.request('realpath', { path: requested || info.home }, { signal: options.signal, session });
-      const cwd = resolved.json.path;
-      if (typeof cwd !== 'string' || !cwd.startsWith('/') || /[\x00-\x1f\x7f]/.test(cwd)) {
-        throw new Error('The daemon returned an invalid working directory.');
-      }
-      const directory = await connection.request('lstat', { path: cwd }, { signal: options.signal, session });
-      if (directory.json.kind !== 'directory') throw Object.assign(new Error('The working directory is not a directory.'), { code: 'not_directory' });
-      return { cwd, host };
-    }, dependencies);
-  options.signal.throwIfAborted();
-  if (!sameRemoteConnection(repository.get(id), result.host)) throw new Error('This machine changed. Select it again and retry saving the chat settings.');
-  return result;
 }

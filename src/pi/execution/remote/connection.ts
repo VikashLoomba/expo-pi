@@ -1,6 +1,6 @@
 import type { DaemonChannel, DaemonChannelFactory } from './channel';
 import { getRandomValues } from 'expo-crypto';
-import { encodeFrame, FrameDecoder, FrameType, type Frame, type Json } from './protocol';
+import { encodeFrame, FrameDecoder, FrameType, isJson, type Frame, type Json } from './protocol';
 
 export type { Json } from './protocol';
 
@@ -41,7 +41,7 @@ export interface Reply { json: Json; payload: Uint8Array; session: number }
 
 export interface RequestOptions {
   payload?: Uint8Array;
-  /** Cancellation waits for the daemon's terminal reply, preserving mutation uncertainty. */
+  /** Aborting, even before sending, sends `cancel`; the request still settles with the daemon's result or error. */
   signal?: AbortSignal;
   onEvent?: (json: Json, payload: Uint8Array) => void;
   onStart?: (id: number, session: number) => void;
@@ -50,6 +50,7 @@ export interface RequestOptions {
 }
 
 export interface ConnectionOptions {
+  /** Runs at each start, like pi-env's `command`; its failure fails that start and the next request tries again. */
   openChannel: DaemonChannelFactory;
 }
 
@@ -68,7 +69,7 @@ class Session {
   readonly controller = new AbortController();
   readonly pending = new Map<number, Pending>();
   readonly failed: Promise<never>;
-  fail!: (error: unknown) => void;
+  readonly fail: (error: unknown) => void;
   channel?: DaemonChannel;
   opening?: Promise<DaemonChannel>;
   timer?: ReturnType<typeof setInterval>;
@@ -81,7 +82,9 @@ class Session {
     this.id = id;
     this.token = token;
     this.decoder = new FrameDecoder(token);
-    this.failed = new Promise((_, reject) => { this.fail = reject; });
+    let fail: (error: unknown) => void = () => {};
+    this.failed = new Promise((_, reject) => { fail = reject; });
+    this.fail = fail;
     void this.failed.catch(() => {});
   }
 }
@@ -90,7 +93,6 @@ function lost(message = 'Pi daemon connection lost. An in-flight operation may a
   return new RemoteError({ code: 'unknown', message, lost: true });
 }
 function closed(): RemoteError { return new RemoteError({ code: 'unknown', message: 'Remote environment connection is closed.' }); }
-function aborted(): RemoteError { return new RemoteError({ code: 'aborted', message: 'Remote operation cancelled.' }); }
 
 export function isConnectionLost(error: unknown): boolean {
   return error instanceof RemoteError && error.fields.lost === true;
@@ -102,13 +104,21 @@ function secureToken(): string {
 }
 
 function remoteInfo(json: Json): RemoteInfo {
-  if (json.protocol !== 1 || !['version', 'os', 'arch', 'home', 'tmpdir', 'cwd', 'separator'].every((key) => typeof json[key] === 'string')
-    || !['/', '\\'].includes(json.separator as string) || !Number.isSafeInteger(json.pid) || (json.pid as number) < 1
-    || typeof json.driveCwds !== 'object' || json.driveCwds === null || Array.isArray(json.driveCwds)
-    || !Object.values(json.driveCwds).every((value) => typeof value === 'string')) {
-    throw lost('Pi daemon returned an incompatible hello response. Test this machine again to verify automatic remote setup.');
+  const incompatible = () => lost(
+    'Pi daemon returned an incompatible hello response. Test this machine again to verify automatic remote setup.');
+  const { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds, pid } = json;
+  if (protocol !== 1 || typeof version !== 'string' || typeof os !== 'string' || typeof arch !== 'string'
+    || typeof home !== 'string' || typeof tmpdir !== 'string' || typeof cwd !== 'string'
+    || (separator !== '/' && separator !== '\\') || typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1
+    || !isJson(driveCwds)) {
+    throw incompatible();
   }
-  return json as unknown as RemoteInfo;
+  const drives: Record<string, string> = {};
+  for (const [drive, value] of Object.entries(driveCwds)) {
+    if (typeof value !== 'string') throw incompatible();
+    drives[drive] = value;
+  }
+  return { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds: drives, pid };
 }
 
 /**
@@ -127,23 +137,17 @@ export class Connection {
 
   constructor(options: ConnectionOptions) { this.#options = { ...options }; }
 
-  /** Observe an already connected daemon without starting or reconnecting one. */
-  get currentSession(): number | undefined {
-    return this.#session?.live && this.#session.ready ? this.#session.id : undefined;
-  }
-
-  async info(signal?: AbortSignal): Promise<RemoteInfo> { return (await this.#connect(signal)).info; }
-  async session(signal?: AbortSignal): Promise<number> { return (await this.#connect(signal)).session.id; }
+  async info(): Promise<RemoteInfo> { return (await this.#connect()).info; }
+  async session(): Promise<number> { return (await this.#connect()).session.id; }
 
   async request(op: string, json: Json, options: RequestOptions = {}): Promise<Reply> {
-    if (options.signal?.aborted) throw aborted();
     if (this.#closed) throw closed();
     if (options.session !== undefined) {
       const session = this.#session;
       if (!session?.live || !session.ready || session.id !== options.session) throw lost('This remote handle belongs to a disconnected Pi daemon session.');
       return this.#send(session, op, json, options);
     }
-    const { session } = await this.#connect(options.signal);
+    const { session } = await this.#connect();
     return this.#send(session, op, json, options);
   }
 
@@ -162,8 +166,7 @@ export class Connection {
     return this.#closing;
   }
 
-  #connect(signal?: AbortSignal): Promise<Ready> {
-    if (signal?.aborted) return Promise.reject(aborted());
+  #connect(): Promise<Ready> {
     if (this.#closed) return Promise.reject(closed());
     if (!this.#ready) {
       const session = new Session(++this.#sessions, secureToken());
@@ -172,23 +175,7 @@ export class Connection {
       this.#ready = ready;
       void ready.catch(() => { if (this.#ready === ready) this.#ready = undefined; });
     }
-    const ready = this.#ready;
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const finish = () => {
-        settled = true;
-        signal?.removeEventListener('abort', onAbort);
-      };
-      const onAbort = () => {
-        if (settled) return;
-        finish();
-        reject(aborted());
-      };
-      signal?.addEventListener('abort', onAbort, { once: true });
-      ready.then((value) => { if (!settled) { finish(); resolve(value); } },
-        (error) => { if (!settled) { finish(); reject(error); } });
-      if (signal?.aborted) onAbort();
-    });
+    return this.#ready;
   }
 
   async #start(session: Session): Promise<Ready> {
@@ -223,16 +210,8 @@ export class Connection {
 
   #send(session: Session, op: string, json: Json, options: RequestOptions): Promise<Reply> {
     if (!session.live) return Promise.reject(session.failure ?? lost());
-    if (options.signal?.aborted) return Promise.reject(aborted());
-    if (this.#nextId > 0xffffffff) {
-      this.#teardown(session, lost('Pi request identifiers exhausted; establish a new session.'));
-      this.#nextId = 1;
-      return Promise.reject(lost());
-    }
     const id = this.#nextId++;
-    let bytes: Uint8Array;
-    try { bytes = encodeFrame(FrameType.request, id, { ...json, op }, options.payload); }
-    catch (error) { return Promise.reject(error); }
+    const bytes = encodeFrame(FrameType.request, id, { ...json, op }, options.payload);
     return new Promise((resolve, reject) => {
       const onAbort = () => this.#write(session, encodeFrame(FrameType.cancel, id, {}));
       const done = () => options.signal?.removeEventListener('abort', onAbort);
@@ -249,8 +228,8 @@ export class Connection {
   }
 
   #write(session: Session, bytes: Uint8Array): void {
-    if (!session.live) return;
-    try { session.channel!.write(bytes); }
+    if (!session.live || session.channel === undefined) return;
+    try { session.channel.write(bytes); }
     catch { this.#teardown(session, lost('SSH could not send the Pi request. The remote operation outcome is unknown.')); }
   }
 
@@ -281,16 +260,15 @@ export class Connection {
   }
 
   #dispatch(session: Session, { type, id, json, payload }: Frame): void {
-    if (type === FrameType.ping && id === 0) return;
-    if (![FrameType.event, FrameType.result, FrameType.error].includes(type as 2 | 3 | 4) || id === 0) throw new Error('Unexpected Pi frame.');
     const pending = session.pending.get(id);
-    if (!pending) return;
     if (type === FrameType.event) {
-      pending.onEvent?.(json, payload);
+      pending?.onEvent?.(json, payload);
       return;
     }
+    if (type !== FrameType.result && type !== FrameType.error) return;
+    if (pending === undefined) return;
     session.pending.delete(id);
-    if (type === FrameType.error) pending.reject(new RemoteError(json));
-    else pending.resolve({ json, payload, session: session.id });
+    if (type === FrameType.result) pending.resolve({ json, payload, session: session.id });
+    else pending.reject(new RemoteError(json));
   }
 }

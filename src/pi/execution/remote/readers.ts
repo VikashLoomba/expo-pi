@@ -1,4 +1,4 @@
-// Reader behavior adapted from Pi Env 1.1.0 (MIT), with mobile resource ownership.
+// Reader behavior adapted from Pi Env 1.1.0 remote-env.ts (MIT).
 import type { Context } from '@earendil-works/chord';
 import {
   err, ok, FileError, StreamDecoder, type BinaryReader, type DirReader, type FileInfo, type FileKind,
@@ -8,6 +8,7 @@ import { type Json, RemoteError } from './connection';
 import type { MobileRemoteExecutionEnv } from './environment';
 import { abortResult, toFileError } from './errors';
 import { posix, type PlatformPath } from './paths';
+import { invalidReply, isJson, jsonField, listField, numberField, stringField } from './protocol';
 
 export const READ_DEPTH = 8;
 const READ_CHUNK = 256 * 1024;
@@ -15,7 +16,47 @@ const LINE_CHUNK = 64 * 1024;
 
 /** An info record from the daemon. */
 export type RemoteFileInfo = { name: string; kind: FileKind | "other"; size: number; mtimeSec: number; mtimeNsec: number };
-export type RemoteDirEntry = { name: string; raw?: number[]; info?: RemoteFileInfo; error?: Json };
+/** A `readdir` entry: its `info`, or the `error` of its lstat. */
+export type RemoteDirEntry = { name: string; raw?: number[] } & ({ info: RemoteFileInfo } | { error: Json });
+
+export function toRemoteFileInfo(json: Json): RemoteFileInfo {
+	const { kind } = json;
+	if (kind !== "file" && kind !== "directory" && kind !== "symlink" && kind !== "other") throw invalidReply("kind");
+	return {
+		name: stringField(json, "name"),
+		kind,
+		size: numberField(json, "size"),
+		mtimeSec: numberField(json, "mtimeSec"),
+		mtimeNsec: numberField(json, "mtimeNsec"),
+	};
+}
+
+function toDirEntry(json: Json): RemoteDirEntry {
+	const entry = {
+		name: stringField(json, "name"),
+		...(json.raw === undefined ? {} : { raw: listField(json, "raw", (byte) => typeof byte === "number") }),
+	};
+	return json.error === undefined
+		? { ...entry, info: toRemoteFileInfo(jsonField(json, "info")) }
+		: { ...entry, error: jsonField(json, "error") };
+}
+
+/** The `entries` of a `readdir` reply. */
+export function toDirEntries(json: Json): RemoteDirEntry[] {
+	return listField(json, "entries", isJson).map(toDirEntry);
+}
+
+function toLineScan(json: Json): LineScan {
+	return {
+		newlines: numberField(json, "newlines"),
+		start: numberField(json, "start"),
+		end: numberField(json, "end"),
+		firstLineEnd: numberField(json, "firstLineEnd"),
+		lastLineStart: numberField(json, "lastLineStart"),
+		selectedBytes: numberField(json, "selectedBytes"),
+		firstLineBytes: numberField(json, "firstLineBytes"),
+	};
+}
 
 export function toInfo(path: string, remote: RemoteFileInfo, paths: PlatformPath): Result<FileInfo, FileError> {
 	if (remote.kind === "other") return err(new FileError("invalid", "Unsupported file type", path));
@@ -29,7 +70,7 @@ export function toInfo(path: string, remote: RemoteFileInfo, paths: PlatformPath
 }
 
 export function concat(chunks: readonly Uint8Array[], total: number): Uint8Array {
-	if (chunks.length === 1) return chunks[0]!;
+	if (chunks.length === 1) return chunks[0];
 	const bytes = new Uint8Array(total);
 	let position = 0;
 	for (const chunk of chunks) {
@@ -63,7 +104,8 @@ export async function readRange(
 			inFlight.push({ length: size, bytes });
 			next += size;
 		}
-		const head = inFlight.shift()!;
+		const head = inFlight.shift();
+		if (head === undefined) break;
 		const bytes = await head.bytes;
 		if (aborted()) return undefined;
 		if (bytes.length === 0) break;
@@ -84,19 +126,16 @@ export class Handle {
 	readonly id: number;
 	readonly session: number;
 	readonly path: string;
-	#closing?: Promise<void>;
 
 	constructor(env: MobileRemoteExecutionEnv, id: number, session: number, path: string) {
 		this.env = env;
 		this.id = id;
 		this.session = session;
 		this.path = path;
-		env.ownHandle(this);
 	}
 
 	request(op: string, json: Json = {}, options: { signal?: AbortSignal; payload?: Uint8Array } = {}) {
-		if (this.#closing) return Promise.reject(new FileError("invalid", "Remote handle is closed", this.path));
-		return this.env.request(op, { ...json, handle: this.id }, { ...options, session: this.session });
+		return this.env.connection.request(op, { ...json, handle: this.id }, { ...options, session: this.session });
 	}
 
 	async pread(offset: number | undefined, length: number): Promise<Uint8Array> {
@@ -104,9 +143,7 @@ export class Handle {
 	}
 
 	async close(): Promise<void> {
-		this.#closing ??= this.env.connection.request("close", { handle: this.id }, { session: this.session })
-			.then(() => undefined, () => undefined).finally(() => this.env.releaseHandle(this));
-		await this.#closing;
+		await this.request("close").catch(() => undefined);
 	}
 }
 
@@ -123,7 +160,7 @@ export class RemoteBinaryReader implements BinaryReader {
 	}
 
 	#closedResult<T>(): Result<T, FileError> | undefined {
-		return (this.#closed || this.#handle.env.isClosed) ? err(new FileError("invalid", "Binary reader is closed", this.#path)) : undefined;
+		return this.#closed ? err(new FileError("invalid", "Binary reader is closed", this.#path)) : undefined;
 	}
 
 	async info(context: Context): Promise<Result<FileInfo, FileError>> {
@@ -131,7 +168,7 @@ export class RemoteBinaryReader implements BinaryReader {
 		if (early) return early;
 		try {
 			const { json } = await this.#handle.request("fstat");
-			return toInfo(this.#path, json as unknown as RemoteFileInfo, posix);
+			return toInfo(this.#path, toRemoteFileInfo(json), posix);
 		} catch (error) {
 			return err(toFileError(error, this.#path));
 		}
@@ -178,7 +215,7 @@ export class RemoteBinaryReader implements BinaryReader {
 				{ startLine, ...(endLine === undefined ? {} : { endLine }) },
 				context.abortSignal ? { signal: context.abortSignal } : {},
 			);
-			return ok(json as unknown as LineScan);
+			return ok(toLineScan(json));
 		} catch (error) {
 			return err(toFileError(error, this.#path));
 		}
@@ -207,26 +244,25 @@ export class RemoteDirReader implements DirReader {
 		const path = this.#handle.path;
 		const aborted = abortResult<{ entries: FileInfo[]; done: boolean }>(context.abortSignal, path);
 		if (aborted) return aborted;
-		if (this.#closed || this.#handle.env.isClosed) return err(new FileError("invalid", "Directory reader is closed", path));
+		if (this.#closed) return err(new FileError("invalid", "Directory reader is closed", path));
 		if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
 			return err(new FileError("invalid", "maxEntries must be a positive safe integer", path));
 		}
 		const entries: FileInfo[] = [];
 		try {
-			const paths = posix;
 			// Like `NodeDirReader`, count only entries that are part of the listing.
 			while (!this.#done && entries.length < maxEntries) {
 				const { json } = await this.#handle.request("readdir", { max: maxEntries - entries.length });
 				const loopAbort = abortResult<{ entries: FileInfo[]; done: boolean }>(context.abortSignal, path);
 				if (loopAbort) return loopAbort;
-				for (const entry of json.entries as RemoteDirEntry[]) {
-					const entryPath = paths.resolve(path, entry.name);
-					if (entry.error !== undefined) {
+				for (const entry of toDirEntries(json)) {
+					const entryPath = posix.resolve(path, entry.name);
+					if ("error" in entry) {
 						// Removed between enumeration and lstat: not part of the listing any more.
 						if (entry.error.code === "ENOENT") continue;
 						return err(toFileError(new RemoteError(entry.error), entryPath));
 					}
-					const info = toInfo(entryPath, entry.info!, paths);
+					const info = toInfo(entryPath, entry.info, posix);
 					if (info.ok) entries.push(info.value);
 				}
 				this.#done = json.done === true;
@@ -261,7 +297,7 @@ export class RemoteTextLineReader implements TextLineReader {
 		const path = this.#handle.path;
 		const aborted = abortResult<TextLine | undefined>(context.abortSignal, path);
 		if (aborted) return aborted;
-		if (this.#closed || this.#handle.env.isClosed) return err(new FileError("invalid", "Text line reader is closed", path));
+		if (this.#closed) return err(new FileError("invalid", "Text line reader is closed", path));
 		try {
 			while (true) {
 				const newline = this.#buffered.indexOf("\n");

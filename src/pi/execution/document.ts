@@ -2,7 +2,8 @@ import { defineDoc, type AgentState } from '@earendil-works/pi-durable';
 
 export type ExecutionTarget = { kind: 'local' } | { kind: 'ssh'; machineId: string };
 export type ExecutionTargetState = { target: ExecutionTarget };
-export type ChatExecutionSettings = { target: ExecutionTarget; cwd: string };
+/** `cwd: null` leaves the agent's directory unset, so a remote machine uses its account's home directory. */
+export type ChatExecutionSettings = { target: ExecutionTarget; cwd: string | null };
 
 /**
  * The target sits under `target` so a commit can replace it whole: a draft cannot turn one variant of a root union
@@ -16,8 +17,8 @@ export const ExecutionTargetDoc = defineDoc<ExecutionTargetState>({
 export function executionSettings(state?: Readonly<ExecutionTargetState> | null,
   agent?: Pick<AgentState, 'cwd'> | null): ChatExecutionSettings {
   const target = state?.target;
-  return { target: target?.kind === 'ssh' ? { kind: 'ssh', machineId: target.machineId } : { kind: 'local' },
-    cwd: agent?.cwd ?? '/workspace' };
+  if (target?.kind === 'ssh') return { target: { kind: 'ssh', machineId: target.machineId }, cwd: agent?.cwd ?? null };
+  return { target: { kind: 'local' }, cwd: agent?.cwd ?? '/workspace' };
 }
 
 export function sameExecution(left: ChatExecutionSettings, right: ChatExecutionSettings): boolean {
@@ -29,7 +30,13 @@ export function validateExecution(settings: ChatExecutionSettings): void {
   if (settings.target.kind !== 'local' && (settings.target.kind !== 'ssh' || !settings.target.machineId?.trim())) {
     throw new Error('Choose an execution environment.');
   }
-  if (!settings.cwd.startsWith('/') || settings.cwd.includes('\0')) throw new Error('Enter an absolute working directory.');
+  if (settings.cwd === null) {
+    if (settings.target.kind === 'local') throw new Error('Enter a working directory inside /workspace.');
+    return;
+  }
+  if (!settings.cwd.startsWith('/') || /[\x00-\x1f\x7f]/.test(settings.cwd)) {
+    throw new Error('Enter an absolute working directory.');
+  }
   const parts: string[] = [];
   for (const part of settings.cwd.split('/')) {
     if (part === '..') parts.pop();

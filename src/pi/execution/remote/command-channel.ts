@@ -1,8 +1,7 @@
-import type { SshConnection, SshShell } from '@osuki-dev/react-native-ssh';
+import type { SshConnection } from '@osuki-dev/react-native-ssh';
 import { Buffer } from 'buffer';
 import { BootstrapError } from './bootstrap-errors';
 
-export type BootstrapConnection = Pick<SshConnection, 'openShell' | 'disconnect'>;
 const WRITE_CHUNK = 64 * 1024;
 
 function code(error: unknown): unknown {
@@ -20,21 +19,20 @@ async function writable(operation: () => void, signal: AbortSignal): Promise<voi
 }
 
 /** A short bootstrap command with owned output, EOF, exit status, and awaited channel disposal. */
-export async function runSshCommand(connection: BootstrapConnection, command: string, options: {
+export async function runSshCommand(connection: SshConnection, command: string, options: {
   signal: AbortSignal;
   input?: Uint8Array;
   timeoutMs?: number;
 }): Promise<{ stdout: string; exitCode: number }> {
   if (options.signal.aborted) throw new BootstrapError('CANCELLED');
   const controller = new AbortController();
-  let shell: SshShell | undefined;
   let failed = false;
   let failure: unknown;
   let ended = false;
   let exitCode: number | undefined;
   const chunks: Uint8Array[] = [];
-  let rejectFailure!: (error: unknown) => void;
-  let resolveExit!: () => void;
+  let rejectFailure: (error: unknown) => void = () => {};
+  let resolveExit: () => void = () => {};
   const failurePromise = new Promise<never>((_, reject) => { rejectFailure = reject; });
   const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
   const fail = (error: unknown) => {
@@ -62,18 +60,18 @@ export async function runSshCommand(connection: BootstrapConnection, command: st
       onClosed: (status) => { ended = true; exitCode = status; resolveExit(); },
     });
   });
-  // Install a rejection observer even if an injected transport rejects synchronously.
+  // `fail` can reject this before anything awaits it.
   void failurePromise.catch(() => {});
   try {
     if (options.signal.aborted) abort();
-    shell = await Promise.race([opening, failurePromise]);
+    const shell = await Promise.race([opening, failurePromise]);
     if (failed) throw failure;
     const input = options.input;
     if (input) {
       for (let offset = 0; offset < input.length; offset += WRITE_CHUNK) {
         if (ended) throw new BootstrapError('DAEMON_UPLOAD');
         const bytes = new Uint8Array(input.subarray(offset, offset + WRITE_CHUNK));
-        await Promise.race([writable(() => shell!.write(bytes), controller.signal), failurePromise]);
+        await Promise.race([writable(() => shell.write(bytes), controller.signal), failurePromise]);
         // Give native output/closure and cancellation callbacks an opportunity
         // to run instead of filling the native input queue in one JS turn.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -81,7 +79,7 @@ export async function runSshCommand(connection: BootstrapConnection, command: st
     }
     if (!ended) {
       try {
-        await Promise.race([writable(() => shell!.sendEof(), controller.signal), failurePromise]);
+        await Promise.race([writable(() => shell.sendEof(), controller.signal), failurePromise]);
       } catch (error) {
         // A short command can close its native handle before its queued stdout
         // and onClosed callbacks reach JS. EOF has no remaining input to send;

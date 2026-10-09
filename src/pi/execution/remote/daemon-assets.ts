@@ -1,10 +1,11 @@
+import { Asset } from 'expo-asset';
 import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
+import { File } from 'expo-file-system';
 import { PI_DAEMON_MANIFEST } from './daemon-manifest';
 import { BootstrapError } from './bootstrap-errors';
 
 export interface DaemonPlatform { platform: 'darwin' | 'linux'; arch: 'arm64' | 'x64' }
 export interface DaemonBinary { bytes: Uint8Array; sha256: string }
-export type DaemonLoader = (remote: DaemonPlatform, signal: AbortSignal) => Promise<DaemonBinary>;
 type Target = keyof typeof PI_DAEMON_MANIFEST;
 
 // Literal asset references let Metro embed every supported remote target in the
@@ -22,12 +23,6 @@ function bundledModule(target: Target): number {
 
 const loaded = new Map<Target, Promise<DaemonBinary>>();
 async function readBundled(target: Target): Promise<DaemonBinary> {
-  // Keep native module loading behind actual SSH admission. Node conformance
-  // tests inject the binary loader and never evaluate these Expo modules.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Asset } = require('expo-asset') as typeof import('expo-asset');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { File } = require('expo-file-system') as typeof import('expo-file-system');
   const asset = await Asset.fromModule(bundledModule(target)).downloadAsync();
   if (!asset.localUri) throw new Error('The bundled Pi daemon asset is unavailable. Reinstall the app.');
   const bytes = await new File(asset.localUri).bytes();
@@ -40,10 +35,9 @@ async function readBundled(target: Target): Promise<DaemonBinary> {
 }
 
 /** Loads only the detected target, checks the pinned hash, and gives the caller owned bytes. */
-export const loadPackagedDaemon: DaemonLoader = async (remote, signal) => {
+export async function loadPackagedDaemon(remote: DaemonPlatform, signal: AbortSignal): Promise<DaemonBinary> {
   signal.throwIfAborted();
-  const target = `${remote.platform}-${remote.arch}` as Target;
-  if (!Object.hasOwn(PI_DAEMON_MANIFEST, target)) throw new Error('This remote platform has no bundled Pi daemon.');
+  const target: Target = `${remote.platform}-${remote.arch}`;
   let loading = loaded.get(target);
   if (!loading) {
     loading = readBundled(target).catch(() => { throw new BootstrapError('DAEMON_ASSET'); });
@@ -61,4 +55,4 @@ export const loadPackagedDaemon: DaemonLoader = async (remote, signal) => {
   });
   signal.throwIfAborted();
   return { bytes: binary.bytes.slice(), sha256: binary.sha256 };
-};
+}

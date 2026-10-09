@@ -32,6 +32,11 @@ export interface RemoteHostSnapshot {
 interface HostIndex { version: 1; hosts: RemoteHost[]; pendingDelete: string[] }
 interface SecretRecord { version: 1; auth: RemoteCredential; trustedHostKey?: SshHostKey }
 const INDEX_KEY = 'pi.remote-hosts.v1';
+const CREDENTIAL_REF = /^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 function text(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`Enter a valid ${label}.`);
@@ -44,25 +49,64 @@ export function validateRemoteHost(input: RemoteHostInput): Omit<RemoteHostInput
   return { name: text(input.name, 'machine name'), hostname, port: input.port,
     username: text(input.username, 'SSH username') };
 }
-function credential(value: RemoteCredential): RemoteCredential {
-  if (value?.type === 'password' && typeof value.password === 'string' && value.password.length > 0) {
-    return Object.freeze({ type: 'password', password: value.password });
-  }
-  if (value?.type === 'privateKey' && typeof value.privateKey === 'string' && value.privateKey.trim() &&
-      (value.passphrase === undefined || typeof value.passphrase === 'string')) {
-    return Object.freeze({ type: 'privateKey', privateKey: value.privateKey.trim(),
-      ...(value.passphrase ? { passphrase: value.passphrase } : {}) });
+function credential(value: unknown): RemoteCredential {
+  if (isRecord(value)) {
+    const { type, password, privateKey, passphrase } = value;
+    if (type === 'password' && typeof password === 'string' && password.length > 0) {
+      return Object.freeze({ type: 'password', password });
+    }
+    if (type === 'privateKey' && typeof privateKey === 'string' && privateKey.trim() &&
+        (passphrase === undefined || typeof passphrase === 'string')) {
+      return Object.freeze({ type: 'privateKey', privateKey: privateKey.trim(),
+        ...(passphrase ? { passphrase } : {}) });
+    }
   }
   throw new Error('Enter an SSH password or private key.');
 }
-function hostKey(value: SshHostKey): Readonly<SshHostKey> {
-  if (!value || typeof value.algorithm !== 'string' || !value.algorithm ||
-      typeof value.fingerprint !== 'string' || !/^SHA256:[A-Za-z0-9+/]+={0,2}$/.test(value.fingerprint) ||
-      typeof value.publicKey !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.publicKey)) throw new Error('The SSH server returned an invalid host key.');
-  return Object.freeze({ algorithm: value.algorithm, fingerprint: value.fingerprint, publicKey: value.publicKey });
+function hostKey(value: unknown): Readonly<SshHostKey> {
+  if (isRecord(value)) {
+    const { algorithm, fingerprint, publicKey } = value;
+    if (typeof algorithm === 'string' && algorithm &&
+        typeof fingerprint === 'string' && /^SHA256:[A-Za-z0-9+/]+={0,2}$/.test(fingerprint) &&
+        typeof publicKey === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(publicKey)) {
+      return Object.freeze({ algorithm, fingerprint, publicKey });
+    }
+  }
+  throw new Error('The SSH server returned an invalid host key.');
 }
 export function matchesHostKey(trusted: Readonly<SshHostKey> | undefined, observed: SshHostKey): boolean {
   return !!trusted && trusted.algorithm === observed.algorithm && trusted.fingerprint === observed.fingerprint && trusted.publicKey === observed.publicKey;
+}
+
+function storedHost(value: unknown): RemoteHost {
+  if (!isRecord(value)) throw new Error();
+  const { id, namespaceId, credentialRef, credentialType, name, hostname, port, username } = value;
+  if (typeof id !== 'string' || !id || typeof namespaceId !== 'string' || !namespaceId ||
+      typeof credentialRef !== 'string' || !CREDENTIAL_REF.test(credentialRef) ||
+      (credentialType !== 'password' && credentialType !== 'privateKey') ||
+      typeof name !== 'string' || typeof hostname !== 'string' || typeof port !== 'number' ||
+      typeof username !== 'string') throw new Error();
+  return Object.freeze({ ...validateRemoteHost({ name, hostname, port, username }), id, namespaceId, credentialRef,
+    credentialType });
+}
+function hostIndex(raw: string): HostIndex {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.hosts) ||
+      !Array.isArray(parsed.pendingDelete)) throw new Error();
+  const ids = new Set<string>();
+  const hosts = parsed.hosts.map((value: unknown) => {
+    const host = storedHost(value);
+    if (ids.has(host.id)) throw new Error();
+    ids.add(host.id);
+    return host;
+  });
+  const pendingDelete = parsed.pendingDelete.map((ref: unknown) => {
+    if (typeof ref !== 'string' || !CREDENTIAL_REF.test(ref) || hosts.some((host) => host.credentialRef === ref)) {
+      throw new Error();
+    }
+    return ref;
+  });
+  return { version: 1, hosts, pendingDelete };
 }
 
 /** Display metadata does not change an admitted connection; saved secret records are immutable. */
@@ -101,23 +145,7 @@ export class RemoteHostRepository {
     if (this.snapshot.ready && !this.snapshot.error) return;
     try {
       const raw = await this.metadata.getItemAsync(INDEX_KEY);
-      const parsed = raw === null ? { version: 1, hosts: [], pendingDelete: [] } : JSON.parse(raw);
-      if (parsed.version !== 1 || !Array.isArray(parsed.hosts) || !Array.isArray(parsed.pendingDelete)) throw new Error();
-      const ids = new Set<string>();
-      const hosts = parsed.hosts.map((host: RemoteHost) => {
-        if (typeof host.id !== 'string' || !host.id || ids.has(host.id) ||
-            typeof host.namespaceId !== 'string' || !host.namespaceId ||
-            typeof host.credentialRef !== 'string' || !/^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/.test(host.credentialRef) ||
-            !['password', 'privateKey'].includes(host.credentialType)) throw new Error();
-        ids.add(host.id);
-        // Project connection settings explicitly; obsolete working-directory,
-        // daemon-path and revision fields have no effect on restored machines.
-        return Object.freeze({ ...validateRemoteHost(host), id: host.id,
-          namespaceId: host.namespaceId, credentialRef: host.credentialRef, credentialType: host.credentialType });
-      });
-      if (parsed.pendingDelete.some((ref: unknown) => typeof ref !== 'string' || !/^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/.test(ref) ||
-          hosts.some((host: RemoteHost) => host.credentialRef === ref))) throw new Error();
-      this.index = { version: 1, hosts, pendingDelete: parsed.pendingDelete };
+      this.index = raw === null ? { version: 1, hosts: [], pendingDelete: [] } : hostIndex(raw);
       this.publish();
     } catch {
       const message = 'Could not restore remote machines. Unlock this device and retry. Saved settings have been preserved.';
@@ -136,8 +164,8 @@ export class RemoteHostRepository {
     try {
       const raw = await this.secrets.getItemAsync(host.credentialRef);
       if (!raw) throw new Error();
-      const parsed = JSON.parse(raw);
-      if (parsed.version !== 1) throw new Error();
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed) || parsed.version !== 1) throw new Error();
       const auth = credential(parsed.auth);
       if (auth.type !== host.credentialType) throw new Error();
       return { version: 1, auth, ...(parsed.trustedHostKey ? { trustedHostKey: hostKey(parsed.trustedHostKey) } : {}) };

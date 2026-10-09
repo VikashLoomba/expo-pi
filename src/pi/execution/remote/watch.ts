@@ -3,6 +3,7 @@ import type { Context } from "@earendil-works/chord";
 import { FileError, type FileWatcher, type WatchChange, type WatchTarget } from "@earendil-works/pi-durable/env";
 import { type Connection, isConnectionLost } from "./connection";
 import { toFileError } from "./errors";
+import { listField } from "./protocol";
 
 /** How the daemon watches, like `NodeExecutionEnv`'s `NodeWatchOptions`. */
 export interface RemoteWatchOptions {
@@ -22,11 +23,10 @@ const RECONNECT_MAX_MS = 30_000;
  * opened again once the connection can be started again, and reports `overflow`: changes in between were not seen.
  */
 export class RemoteWatcher implements FileWatcher {
-	readonly #connection: Pick<Connection, "request">;
+	readonly #connection: Connection;
 	readonly #targets: readonly WatchTarget[];
 	readonly #onChange: (change: WatchChange) => void;
 	readonly #options: RemoteWatchOptions;
-	#onClose: ((watcher: RemoteWatcher) => void) | undefined;
 	#mode: "native" | "polling" = "native";
 	#closed = false;
 	#controller: AbortController | undefined;
@@ -34,57 +34,36 @@ export class RemoteWatcher implements FileWatcher {
 	#wake: (() => void) | undefined;
 
 	private constructor(
-		connection: Pick<Connection, "request">,
+		connection: Connection,
 		targets: readonly WatchTarget[],
 		onChange: (change: WatchChange) => void,
 		options: RemoteWatchOptions,
-		onClose?: (watcher: RemoteWatcher) => void,
 	) {
 		this.#connection = connection;
 		this.#targets = targets;
 		this.#onChange = onChange;
 		this.#options = options;
-		this.#onClose = onClose;
 	}
 
 	/** Watch `targets` (resolved paths); fails like `NodeFileWatcher.open` if coverage cannot be established. */
 	static async open(
-		connection: Pick<Connection, "request">,
+		connection: Connection,
 		targets: readonly WatchTarget[],
 		onChange: (change: WatchChange) => void,
 		options: RemoteWatchOptions = {},
-		signal?: AbortSignal,
-		onClose?: (watcher: RemoteWatcher) => void,
 	): Promise<RemoteWatcher> {
-		const watcher = new RemoteWatcher(connection, targets, onChange, options, onClose);
-		const abort = () => watcher.#controller?.abort();
-		signal?.addEventListener("abort", abort, { once: true });
-		try {
-			if (signal?.aborted) throw new FileError("aborted", "Watch admission was aborted.");
-			await watcher.#start();
-			if (signal?.aborted) { await watcher.close({} as Context); throw new FileError("aborted", "Watch admission was aborted."); }
-			return watcher;
-		} catch (error) {
-			await watcher.close({} as Context);
-			throw error;
-		} finally { signal?.removeEventListener("abort", abort); }
+		const watcher = new RemoteWatcher(connection, targets, onChange, options);
+		await watcher.#start();
+		return watcher;
 	}
 
 	get mode(): "native" | "polling" {
 		return this.#mode;
 	}
 
-	get isClosed(): boolean { return this.#closed; }
-
-	#markClosed(): void {
-		this.#closed = true;
-		const onClose = this.#onClose;
-		this.#onClose = undefined;
-		onClose?.(this);
-	}
-
 	async close(_context: Context): Promise<void> {
-		this.#markClosed();
+		if (this.#closed) return;
+		this.#closed = true;
 		this.#wake?.();
 		this.#controller?.abort();
 		await this.#request;
@@ -125,20 +104,17 @@ export class RemoteWatcher implements FileWatcher {
 						} else if (event.kind === "change") {
 							if (event.mode === "polling") this.#mode = "polling";
 							if (event.overflow === true) this.#deliver({ overflow: true });
-							else this.#deliver({ paths: event.paths as string[] });
+							else this.#deliver({ paths: listField(event, "paths", (path) => typeof path === "string") });
 						} else if (event.kind === "error") {
 							const code = event.code === "permission_denied" ? "permission_denied" : "invalid";
 							this.#deliver({ error: new FileError(code, String(event.message)) });
-							this.#markClosed();
+							this.#closed = true;
 						}
 					},
 				},
 			);
 			this.#request = request.then(
-				() => {
-					this.#markClosed();
-					if (!ready) reject(new FileError("aborted", "Watch closed before coverage was established."));
-				},
+				() => {},
 				(error: unknown) => {
 					if (!ready) {
 						reject(error);
@@ -150,7 +126,7 @@ export class RemoteWatcher implements FileWatcher {
 						return;
 					}
 					this.#deliver({ error: toFileError(error) });
-					this.#markClosed();
+					this.#closed = true;
 				},
 			);
 		});
@@ -175,7 +151,7 @@ export class RemoteWatcher implements FileWatcher {
 			} catch (error) {
 				if (isConnectionLost(error)) continue;
 				this.#deliver({ error: toFileError(error) });
-				this.#markClosed();
+				this.#closed = true;
 				return;
 			}
 		}

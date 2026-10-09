@@ -1,7 +1,7 @@
 import type { ConversationId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams, usePreventRemove } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
@@ -14,8 +14,6 @@ import {
 } from '@/pi/model-catalog';
 
 import { sameExecution, validateExecution, type ChatExecutionSettings } from '@/pi/execution/document';
-import { sameRemoteConnection } from '@/pi/execution/remote/hosts';
-import { resolveRemoteWorkingDirectory } from '@/pi/execution/remote/test-host';
 
 type Picker = 'provider' | 'model' | 'effort' | 'environment';
 
@@ -58,31 +56,21 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   const target = execution.target;
   const selectedHost = target.kind === 'ssh' ? hosts.hosts.find((host) => host.id === target.machineId) : undefined;
   let executionError: string | undefined;
-  // An empty remote draft selects the account's home. Only its resolved absolute
-  // path is committed; durable execution settings never contain this UI choice.
-  const usesRemoteHome = execution.target.kind === 'ssh' && execution.cwd.trim() === '';
-  if (!usesRemoteHome) {
-    try { validateExecution(execution); }
-    catch (cause) { executionError = cause instanceof Error ? cause.message : String(cause); }
-  }
+  try { validateExecution(execution); }
+  catch (cause) { executionError = cause instanceof Error ? cause.message : String(cause); }
   if (executionChanged && execution.target.kind === 'ssh' && !selectedHost) executionError = 'Choose an available remote machine.';
   const [draft, setDraft] = useState<ChatModelSettings>(initialSettings);
   const [picker, setPicker] = useState<Picker>();
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
-  const [checkingDirectory, setCheckingDirectory] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const savingRef = useRef(false);
-  const directoryCheck = useRef<AbortController | undefined>(undefined);
   const mounted = useRef(true);
   const directoryDrafts = useRef(new Map([[initialExecution.target.kind === 'local' ? 'local' : initialExecution.target.machineId, initialExecution.cwd]]));
   useEffect(() => {
     mounted.current = true;
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'background') directoryCheck.current?.abort();
-    });
-    return () => { mounted.current = false; subscription.remove(); directoryCheck.current?.abort(); };
+    return () => { mounted.current = false; };
   }, []);
   const disableRemovalPrevention = usePreventRemove(saving || !!picker, () => {
     if (!saving && picker) { setSearch(''); setPicker(undefined); }
@@ -109,36 +97,17 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
     savingRef.current = true;
     setSaving(true); setError(undefined);
     try {
-      if (executionChanged) {
-        let selected = execution;
-        if (execution.target.kind === 'ssh') {
-          const controller = new AbortController();
-          directoryCheck.current = controller;
-          setCheckingDirectory(true);
-          const { cwd, host } = await resolveRemoteWorkingDirectory(remoteHosts, execution.target.machineId, execution.cwd,
-            { signal: controller.signal });
-          controller.signal.throwIfAborted();
-          if (!sameRemoteConnection(remoteHosts.get(execution.target.machineId), host)) {
-            throw new Error('This machine changed while its directory was being checked. Save again to use its updated settings.');
-          }
-          selected = { ...execution, cwd };
-          directoryCheck.current = undefined;
-          setCheckingDirectory(false);
-        }
-        await runtime.updateExecution(id, selected, changed ? draft : undefined);
-      }
+      if (executionChanged) await runtime.updateExecution(id, execution, changed ? draft : undefined);
       else await runtime.updateSettings(id, draft);
       if (!mounted.current) return;
       setSaving(false);
       disableRemovalPrevention();
       dismissSettings(id);
     } catch (cause) {
-      if (mounted.current) setError(directoryCheck.current?.signal.aborted ? 'Directory check cancelled.'
-        : cause instanceof Error ? cause.message : 'Could not save these settings. Try again.');
+      if (mounted.current) setError(cause instanceof Error ? cause.message : 'Could not save these settings. Try again.');
     } finally {
-      directoryCheck.current = undefined;
       savingRef.current = false;
-      if (mounted.current) { setSaving(false); setCheckingDirectory(false); }
+      if (mounted.current) setSaving(false);
     }
   };
   const selectProvider = (providerId: string) => {
@@ -178,7 +147,7 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
           if (disabled) return;
           directoryDrafts.current.set(execution.target.kind === 'local' ? 'local' : execution.target.machineId, execution.cwd);
           setExecution(value === 'local' ? { target: { kind: 'local' }, cwd: directoryDrafts.current.get(value) ?? '/workspace' }
-            : { target: { kind: 'ssh', machineId: value }, cwd: directoryDrafts.current.get(value) ?? '' });
+            : { target: { kind: 'ssh', machineId: value }, cwd: directoryDrafts.current.get(value) ?? null });
           choosePage();
         } else if (picker === 'provider') selectProvider(value);
         else if (picker === 'model') selectModel(value);
@@ -195,10 +164,6 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
       {blocked && <InlineNotice tone="neutral" testID="settings-locked"
         message="Chat settings will be available when this chat finishes loading." />}
       {error && <InlineNotice testID="settings-save-error" message={error} />}
-      {checkingDirectory && <View style={styles.directory}>
-        <InlineNotice tone="neutral" message="Checking the working directory on this chat’s remote machine…" />
-        <ActionButton testID="cancel-remote-directory-check" title="Cancel directory check" secondary onPress={() => directoryCheck.current?.abort()} />
-      </View>}
       {settingsError && <InlineNotice testID="settings-unavailable" message={draft.model.modelId ? settingsError : 'Choose a model to finish changing the provider.'} />}
       <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <SettingRow testID="settings-provider" label="Provider" value={provider?.name || draft.model.provider} disabled={disabled} onPress={() => choosePage('provider')} />
@@ -213,10 +178,11 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
           detail={execution.target.kind === 'ssh' ? selectedHost?.hostname ?? 'This machine was removed. Choose another environment.' : 'Local workspace'} disabled={disabled || !hosts.ready} onPress={() => choosePage('environment')} />
         <View style={styles.directory}>
           <Text style={{ color: colors.text, fontSize: 15 }}>Working directory</Text>
-          <TextInput testID="settings-cwd" accessibilityLabel="Working directory" value={execution.cwd} onChangeText={(cwd) => setExecution({ ...execution, cwd })}
+          <TextInput testID="settings-cwd" accessibilityLabel="Working directory" value={execution.cwd ?? ''}
+            onChangeText={(cwd) => setExecution({ ...execution, cwd: cwd.trim() ? cwd : null })}
             editable={!disabled} autoCapitalize="none" autoCorrect={false} placeholder={execution.target.kind === 'ssh' ? 'Remote home directory' : '/workspace'} placeholderTextColor={colors.muted}
             style={[styles.directoryInput, { color: colors.text, borderColor: colors.border }]} />
-          {execution.target.kind === 'ssh' && <Text style={[styles.caption, { color: colors.muted }]}>Choose an existing absolute path for this chat, or leave blank to use the remote account’s home directory.</Text>}
+          {execution.target.kind === 'ssh' && <Text style={[styles.caption, { color: colors.muted }]}>Enter an absolute path on this machine, or leave blank to use the machine’s home directory.</Text>}
         </View>
       </View>
       {executionError && <InlineNotice testID="settings-execution-error" message={executionError} />}

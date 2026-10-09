@@ -1,7 +1,6 @@
 // Adapted from Pi Env 1.1.0 remote-env.ts (MIT); the daemon wire contract is unchanged.
 import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { posix, resolveRemotePath } from "./paths";
 import type { Context } from "@earendil-works/chord";
 import {
@@ -25,14 +24,13 @@ import {
 } from "@earendil-works/pi-durable/env";
 import { type Connection, type Json, RemoteError, type RemoteInfo } from "./connection";
 import { abortResult, toFileError } from "./errors";
+import { invalidReply, jsonField, numberField, stringField } from "./protocol";
 import {
-  Handle, READ_DEPTH, RemoteBinaryReader, RemoteDirReader, RemoteTextLineReader, readRange, toInfo,
-  type RemoteFileInfo, type RemoteDirEntry,
+  Handle, READ_DEPTH, RemoteBinaryReader, RemoteDirReader, RemoteTextLineReader, readRange, toDirEntries, toInfo,
+  toRemoteFileInfo, type RemoteDirEntry,
 } from './readers';
 import { RemoteWatcher, type RemoteWatchOptions } from "./watch";
 
-/** Give normal kill replies a chance to settle, then close an unresponsive owned session. */
-const CLEANUP_GRACE_MS = 1_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
 /** Node's `writeFile` writes at most this much per call and checks for an abort before each. */
@@ -42,6 +40,12 @@ const WRITE_DEPTH = 8;
 const READ_FILE_CHUNK = 512 * 1024;
 const READ_FILE_UNKNOWN_CHUNK = 64 * 1024;
 const READ_FILE_MAX = 2 ** 31 - 1;
+
+function toOutputSkip(json: Json): ShellOutputSkip {
+	const { endsWithNewline } = json;
+	if (typeof endsWithNewline !== "boolean") throw invalidReply("endsWithNewline");
+	return { bytes: numberField(json, "bytes"), newlines: numberField(json, "newlines"), endsWithNewline };
+}
 
 export interface MobileRemoteExecutionEnvOptions {
 	connection: Connection;
@@ -61,18 +65,11 @@ export interface MobileRemoteExecutionEnvOptions {
  */
 export class MobileRemoteExecutionEnv implements ExecutionEnv {
 	readonly id: string;
-	readonly cwd: string;
+	cwd: string;
 	readonly connection: Connection;
 	readonly #shellPath: string | undefined;
 	readonly #shellEnv: Record<string, string> | undefined;
 	readonly #watchOptions: RemoteWatchOptions;
-	readonly #lifetime = new AbortController();
-	readonly #pending = new Set<Promise<unknown>>();
-	readonly #handles = new Set<Handle>();
-	readonly #watchers = new Set<FileWatcher>();
-	readonly #temporary = new Set<string>();
-	#closed = false;
-	#closing?: Promise<void>;
 	/** Running commands this environment started, for `cleanup()`. */
 	readonly #running = new Map<number, number>();
 
@@ -85,10 +82,9 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		this.#watchOptions = { ...options.watch };
 	}
 
-	/** POSIX lexical paths are available before opening SSH; home expansion needs remote hello. */
-	async #resolve(path: string, signal?: AbortSignal): Promise<string> {
-		if (this.#closed) throw new FileError("aborted", "Remote environment is closed.", path);
-		const home = path === "~" || path.startsWith("~/") ? (await this.#info(signal)).home : undefined;
+	/** POSIX lexical paths are available before opening SSH; `~` needs the home the daemon reported. */
+	async #resolve(path: string): Promise<string> {
+		const home = path === "~" || path.startsWith("~/") ? (await this.connection.info()).home : undefined;
 		return resolveRemotePath(this.cwd, path, home);
 	}
 
@@ -100,7 +96,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 	): Promise<Result<T, FileError>> {
 		let resolved: string;
 		try {
-			resolved = await this.#resolve(path, context.abortSignal);
+			resolved = await this.#resolve(path);
 		} catch (error) {
 			return err(toFileError(error, path));
 		}
@@ -118,14 +114,14 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		}
 	}
 
-	async #open(resolved: string, json: Json, signal?: AbortSignal): Promise<{ handle: Handle; json: Json }> {
-		const reply = await this.request("open", { path: resolved, ...json }, { signal });
-		return { handle: new Handle(this, reply.json.handle as number, reply.session, resolved), json: reply.json };
+	async #open(resolved: string, json: Json): Promise<{ handle: Handle; json: Json }> {
+		const reply = await this.connection.request("open", { path: resolved, ...json });
+		return { handle: new Handle(this, numberField(reply.json, "handle"), reply.session, resolved), json: reply.json };
 	}
 
 	async absolutePath(path: string, _context: Context): Promise<Result<string, FileError>> {
 		try {
-			return ok(await this.#resolve(path, _context.abortSignal));
+			return ok(await this.#resolve(path));
 		} catch (error) {
 			return err(toFileError(error, path));
 		}
@@ -146,13 +142,13 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 	async #readFile(path: string, encoding: boolean, context: Context): Promise<Result<Uint8Array, FileError>> {
 		const signal = context.abortSignal;
 		return this.#fileOp(path, context, async (resolved) => {
-			const { handle, json } = await this.#open(resolved, { mode: "read" }, context.abortSignal);
+			const { handle, json } = await this.#open(resolved, { mode: "read" });
 			const aborted = () => signal?.aborted === true;
 			const abort = () => new FileError("aborted", "The operation was aborted", resolved);
 			try {
-				if (json.statError !== undefined) throw new RemoteError(json.statError as Json);
+				if (json.statError !== undefined) throw new RemoteError(jsonField(json, "statError"));
 				if (aborted()) throw abort();
-				const stat = json.stat as RemoteFileInfo;
+				const stat = toRemoteFileInfo(jsonField(json, "stat"));
 				const size = stat.kind === "file" ? stat.size : 0;
 				if (size > READ_FILE_MAX) {
 					throw new FileError("unknown", `File size (${size}) is greater than 2 GiB`, resolved);
@@ -227,10 +223,10 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		context: Context,
 	): Promise<Result<BinaryReader, FileError>> {
 		const opened = await this.#fileOp(path, context, async (resolved) => {
-			return (await this.#open(resolved, { noFollow: options?.noFollow === true }, context.abortSignal)).handle;
+			return (await this.#open(resolved, { noFollow: options?.noFollow === true })).handle;
 		});
 		if (!opened.ok) return opened;
-		const aborted = this.#closed ? err<BinaryReader, FileError>(new FileError("aborted", "Remote environment is closed.")) : abortResult<BinaryReader>(context.abortSignal, opened.value.path);
+		const aborted = abortResult<BinaryReader>(context.abortSignal, opened.value.path);
 		if (aborted) {
 			await opened.value.close();
 			return aborted;
@@ -240,10 +236,10 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 
 	async openTextLineReader(path: string, context: Context): Promise<Result<TextLineReader, FileError>> {
 		const opened = await this.#fileOp(path, context, async (resolved) => {
-			return (await this.#open(resolved, { mode: "read" }, context.abortSignal)).handle;
+			return (await this.#open(resolved, { mode: "read" })).handle;
 		});
 		if (!opened.ok) return opened;
-		const aborted = this.#closed ? err<TextLineReader, FileError>(new FileError("aborted", "Remote environment is closed.")) : abortResult<TextLineReader>(context.abortSignal, opened.value.path);
+		const aborted = abortResult<TextLineReader>(context.abortSignal, opened.value.path);
 		if (aborted) {
 			await opened.value.close();
 			return aborted;
@@ -286,9 +282,9 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 			async (resolved) => {
 				const first = bytes.subarray(0, WRITE_CHUNK);
 				const keep = bytes.length > WRITE_CHUNK;
-				const reply = await this.request("write", { path: resolved, append, keep }, { payload: first, signal: context.abortSignal });
+				const reply = await this.connection.request("write", { path: resolved, append, keep }, { payload: first });
 				if (!keep) return;
-				const handle = new Handle(this, reply.json.handle as number, reply.session, resolved);
+				const handle = new Handle(this, numberField(reply.json, "handle"), reply.session, resolved);
 				const inFlight: Promise<unknown>[] = [];
 				try {
 					for (let offset = WRITE_CHUNK; offset < bytes.length; offset += WRITE_CHUNK) {
@@ -334,7 +330,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 				if (!Number.isSafeInteger(size) || size < 0) {
 					throw new FileError("invalid", "File size must be a non-negative safe integer", resolved);
 				}
-				await this.request("truncate", { path: resolved, size }, { signal: context.abortSignal });
+				await this.connection.request("truncate", { path: resolved, size });
 			},
 			"both",
 		);
@@ -345,7 +341,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 			path,
 			context,
 			async (resolved) => {
-				await this.request("fsync", { path: resolved }, { signal: context.abortSignal });
+				await this.connection.request("fsync", { path: resolved });
 			},
 			"both",
 		);
@@ -355,15 +351,15 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		let source: string;
 		let destination: string;
 		try {
-			source = await this.#resolve(sourcePath, context.abortSignal);
-			destination = await this.#resolve(destinationPath, context.abortSignal);
+			source = await this.#resolve(sourcePath);
+			destination = await this.#resolve(destinationPath);
 		} catch (error) {
 			return err(toFileError(error, sourcePath));
 		}
 		const aborted = abortResult<void>(context.abortSignal, destination);
 		if (aborted) return aborted;
 		try {
-			await this.request("rename", { path: source, to: destination }, { signal: context.abortSignal });
+			await this.connection.request("rename", { path: source, to: destination });
 			return ok(undefined);
 		} catch (error) {
 			return err(toFileError(error, source));
@@ -372,53 +368,49 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 
 	async fileInfo(path: string, context: Context): Promise<Result<FileInfo, FileError>> {
 		const result = await this.#fileOp(path, context, async (resolved) => {
-			const { json } = await this.request("lstat", { path: resolved }, { signal: context.abortSignal });
-			return toInfo(resolved, json as unknown as RemoteFileInfo, posix);
+			const { json } = await this.connection.request("lstat", { path: resolved });
+			return toInfo(resolved, toRemoteFileInfo(json), posix);
 		});
 		return result.ok ? result.value : result;
 	}
 
 	listDir(path: string, context: Context): Promise<Result<FileInfo[], FileError>> {
 		return this.#fileOp(path, context, async (resolved) => {
-			const { handle } = await this.#openDir(resolved, context.abortSignal);
+			const { handle } = await this.#openDir(resolved);
 			const entries: RemoteDirEntry[] = [];
 			try {
 				for (let done = false; !done; ) {
 					const { json } = await handle.request("readdir", { max: 1000 });
-					entries.push(...(json.entries as RemoteDirEntry[]));
+					entries.push(...toDirEntries(json));
 					done = json.done === true;
 				}
 			} finally {
 				await handle.close();
 			}
-			// Node's `readdir` fails on any entry it cannot lstat. libuv sorts names by their bytes on POSIX; on Windows it
-			// keeps the file system's order, which the daemon reports.
-			const paths = posix;
-			if (paths === posix) {
-				const key = (entry: RemoteDirEntry) => Buffer.from(entry.raw ?? Buffer.from(entry.name, "utf8"));
-				entries.sort((a, b) => Buffer.compare(key(a), key(b)));
-			}
+			// Node's `readdir` fails on any entry it cannot lstat, and libuv sorts names by their bytes on POSIX.
+			const key = (entry: RemoteDirEntry) => Buffer.from(entry.raw ?? Buffer.from(entry.name, "utf8"));
+			entries.sort((a, b) => Buffer.compare(key(a), key(b)));
 			const infos: FileInfo[] = [];
 			for (const entry of entries) {
 				if (context.abortSignal?.aborted) throw new FileError("aborted", "aborted", resolved);
-				const entryPath = paths.resolve(resolved, entry.name);
-				if (entry.error !== undefined) throw toFileError(new RemoteError(entry.error), entryPath);
-				const info = toInfo(entryPath, entry.info!, paths);
+				const entryPath = posix.resolve(resolved, entry.name);
+				if ("error" in entry) throw toFileError(new RemoteError(entry.error), entryPath);
+				const info = toInfo(entryPath, entry.info, posix);
 				if (info.ok) infos.push(info.value);
 			}
 			return infos;
 		});
 	}
 
-	async #openDir(resolved: string, signal?: AbortSignal): Promise<{ handle: Handle }> {
-		const reply = await this.request("opendir", { path: resolved }, { signal });
-		return { handle: new Handle(this, reply.json.handle as number, reply.session, resolved) };
+	async #openDir(resolved: string): Promise<{ handle: Handle }> {
+		const reply = await this.connection.request("opendir", { path: resolved });
+		return { handle: new Handle(this, numberField(reply.json, "handle"), reply.session, resolved) };
 	}
 
 	async openDirReader(path: string, context: Context): Promise<Result<DirReader, FileError>> {
-		const opened = await this.#fileOp(path, context, async (resolved) => (await this.#openDir(resolved, context.abortSignal)).handle);
+		const opened = await this.#fileOp(path, context, async (resolved) => (await this.#openDir(resolved)).handle);
 		if (!opened.ok) return opened;
-		const aborted = this.#closed ? err<DirReader, FileError>(new FileError("aborted", "Remote environment is closed.")) : abortResult<DirReader>(context.abortSignal, opened.value.path);
+		const aborted = abortResult<DirReader>(context.abortSignal, opened.value.path);
 		if (aborted) {
 			await opened.value.close();
 			return aborted;
@@ -428,8 +420,8 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 
 	canonicalPath(path: string, context: Context): Promise<Result<string, FileError>> {
 		return this.#fileOp(path, context, async (resolved) => {
-			const { json } = await this.request("realpath", { path: resolved }, { signal: context.abortSignal });
-			return json.path as string;
+			const { json } = await this.connection.request("realpath", { path: resolved });
+			return stringField(json, "path");
 		});
 	}
 
@@ -446,7 +438,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		context: Context,
 	): Promise<Result<void, FileError>> {
 		return this.#fileOp(path, context, async (resolved) => {
-			await this.request("mkdir", { path: resolved, recursive: options?.recursive ?? true }, { signal: context.abortSignal });
+			await this.connection.request("mkdir", { path: resolved, recursive: options?.recursive ?? true });
 		});
 	}
 
@@ -456,19 +448,11 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		context: Context,
 	): Promise<Result<void, FileError>> {
 		return this.#fileOp(path, context, async (resolved) => {
-			await this.request("rm", {
+			await this.connection.request("rm", {
 				path: resolved,
 				recursive: options?.recursive ?? false,
 				force: options?.force ?? false,
-			}, { signal: context.abortSignal });
-			// A removed temporary root no longer belongs to us. In particular, do
-			// not remove someone else's replacement at this path during shutdown.
-			const prefix = resolved === "/" ? "/" : `${resolved}/`;
-			for (const temporary of this.#temporary) {
-				if (temporary === resolved || (options?.recursive && temporary.startsWith(prefix))) {
-					this.#temporary.delete(temporary);
-				}
-			}
+			});
 		});
 	}
 
@@ -476,11 +460,9 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		const aborted = abortResult<string>(context.abortSignal);
 		if (aborted) return aborted;
 		try {
-			const { tmpdir } = await this.#info(context.abortSignal);
-			const paths = posix;
-			const { json } = await this.request("mkdtemp", { path: paths.join(tmpdir, prefix ?? "tmp-") }, { signal: context.abortSignal });
-			this.#temporary.add(json.path as string);
-			return ok(json.path as string);
+			const { tmpdir } = await this.connection.info();
+			const { json } = await this.connection.request("mkdtemp", { path: posix.join(tmpdir, prefix ?? "tmp-") });
+			return ok(stringField(json, "path"));
 		} catch (error) {
 			return err(toFileError(error));
 		}
@@ -494,10 +476,9 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		if (!dir.ok) return dir;
 		let filePath = "";
 		try {
-			const paths = posix;
-			filePath = paths.join(dir.value, `${options?.prefix ?? ""}${randomUUID()}${options?.suffix ?? ""}`);
+			filePath = posix.join(dir.value, `${options?.prefix ?? ""}${randomUUID()}${options?.suffix ?? ""}`);
 			// Node's `writeFile(filePath, "")`, which does not create parents.
-			await this.request(
+			await this.connection.request(
 				"write",
 				{ path: filePath, append: false, parents: false },
 				{ payload: new Uint8Array(0) },
@@ -517,20 +498,16 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		if (aborted) return aborted;
 		try {
 			const resolved = await Promise.all(
-				targets.map(async (target) => ({ ...target, path: await this.#resolve(target.path, context.abortSignal) })),
+				targets.map(async (target) => ({ ...target, path: await this.#resolve(target.path) })),
 			);
 			const afterResolve = abortResult<FileWatcher>(context.abortSignal);
 			if (afterResolve) return afterResolve;
-			const watcher = await RemoteWatcher.open(this, resolved, onChange, this.#watchOptions, context.abortSignal,
-				(closed) => this.#watchers.delete(closed));
-			const afterOpen = this.#closed ? err<FileWatcher, FileError>(new FileError("aborted", "Remote environment is closed.")) : abortResult<FileWatcher>(context.abortSignal);
+			const watcher = await RemoteWatcher.open(this.connection, resolved, onChange, this.#watchOptions);
+			const afterOpen = abortResult<FileWatcher>(context.abortSignal);
 			if (afterOpen) {
 				await watcher.close(context);
 				return afterOpen;
 			}
-			// A terminal event may arrive immediately after coverage, before open()
-			// returns. Such a watcher has already released its owner registration.
-			if (!watcher.isClosed) this.#watchers.add(watcher);
 			return ok(watcher);
 		} catch (error) {
 			return err(toFileError(error));
@@ -543,7 +520,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		context: Context,
 	): Promise<Result<ShellExecResult, ExecutionError>> {
 		const signal = context.abortSignal;
-		if (signal?.aborted || this.#closed) return err(new ExecutionError("aborted", "aborted"));
+		if (signal?.aborted) return err(new ExecutionError("aborted", "aborted"));
 		const timeout = options?.timeout;
 		if (timeout !== undefined) {
 			if (!Number.isFinite(timeout) || timeout <= 0) {
@@ -556,11 +533,11 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		const inheritEnv = options?.inheritEnv ?? true;
 		let cwd: string;
 		try {
-			cwd = options?.cwd ? await this.#resolve(options.cwd, context.abortSignal) : this.cwd;
+			cwd = options?.cwd ? await this.#resolve(options.cwd) : this.cwd;
 		} catch (error) {
 			return err(new ExecutionError("unknown", error instanceof Error ? error.message : String(error)));
 		}
-		if (signal?.aborted || this.#closed) return err(new ExecutionError("aborted", "aborted"));
+		if (signal?.aborted) return err(new ExecutionError("aborted", "aborted"));
 		const env: Record<string, string> = {};
 		for (const [key, value] of Object.entries(
 			inheritEnv ? { ...this.#shellEnv, ...options?.env } : { ...options?.env },
@@ -574,7 +551,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		const onAbort = () => controller.abort();
 		signal?.addEventListener("abort", onAbort, { once: true });
 		try {
-			const { json } = await this.request(
+			const { json } = await this.connection.request(
 				"exec",
 				{
 					...(typeof command === "string" ? { command } : { argv: [...command] }),
@@ -591,14 +568,13 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 					onStart: (requestId, session) => {
 						running = requestId;
 						this.#running.set(requestId, session);
-						if (this.#closed) this.connection.kill(requestId, session);
 					},
 					onEvent: (event, payload) => {
 						if (settled || callbackError !== undefined || event.kind !== "output") return;
 						const text = Buffer.from(payload.buffer, payload.byteOffset, payload.length).toString("utf8");
 						if (text === "" || options?.onOutput === undefined) return;
 						const info: ShellOutputInfo = { stream: event.stream === "stderr" ? "stderr" : "stdout" };
-						if (event.skipped !== undefined) info.skipped = event.skipped as ShellOutputSkip;
+						if (event.skipped !== undefined) info.skipped = toOutputSkip(jsonField(event, "skipped"));
 						try {
 							options.onOutput(text, context, info);
 						} catch (error) {
@@ -609,18 +585,13 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 					},
 				},
 			);
-			if (typeof json.spillPath === "string") this.trackSpill(json.spillPath);
 			if (callbackError) return err(callbackError);
 			return ok({
-				exitCode: json.exitCode as number,
+				exitCode: numberField(json, "exitCode"),
 				...(typeof json.spillPath === "string" ? { spillPath: json.spillPath } : {}),
 			});
 		} catch (error) {
-			if (error instanceof RemoteError && typeof error.fields.spillPath === "string") {
-				this.trackSpill(error.fields.spillPath);
-			}
 			if (callbackError) return err(callbackError);
-			if (error instanceof FileError && error.code === "aborted") return err(new ExecutionError("aborted", error.message));
 			if (!(error instanceof RemoteError)) {
 				return err(new ExecutionError("unknown", error instanceof Error ? error.message : String(error)));
 			}
@@ -632,10 +603,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 						: error.code === "shell_unavailable" || error.code === "spawn_error"
 							? new ExecutionError(error.code, error.message)
 							: new ExecutionError("unknown", error.message);
-			if (typeof error.fields.spillPath === "string") {
-				failure.spillPath = error.fields.spillPath;
-				this.trackSpill(failure.spillPath);
-			}
+			if (typeof error.fields.spillPath === "string") failure.spillPath = error.fields.spillPath;
 			return err(failure);
 		} finally {
 			settled = true;
@@ -644,90 +612,10 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		}
 	}
 
-	private trackSpill(path: string): void {
-		this.#temporary.add(path.slice(0, path.lastIndexOf("/")));
-	}
-
-	get isClosed(): boolean { return this.#closed; }
-
-	/** Seal admission synchronously, including a pending SSH connection. */
-	stop(): void {
-		this.#closed = true;
-		this.#lifetime.abort();
-	}
-
-	private assertOpen(): void {
-		if (this.#closed) throw new FileError("aborted", "Remote environment is closed.");
-	}
-
-	async #info(signal?: AbortSignal): Promise<RemoteInfo> {
-		this.assertOpen();
-		const { json } = await this.request("hello", { protocol: 1 }, { signal });
-		return json as unknown as RemoteInfo;
-	}
-
-	/** Internal resource ownership shared with reader helpers. */
-	ownHandle(handle: Handle): void { this.#handles.add(handle); }
-	releaseHandle(handle: Handle): void { this.#handles.delete(handle); }
-
-	request(...args: Parameters<Connection["request"]>): ReturnType<Connection["request"]> {
-		try { this.assertOpen(); } catch (error) { return Promise.reject(error); }
-		const [op, json, options = {}] = args;
-		const controller = new AbortController();
-		const abort = () => controller.abort();
-		const signals = [options.signal, this.#lifetime.signal].filter((signal): signal is AbortSignal => !!signal);
-		for (const signal of signals) {
-			if (signal.aborted) abort();
-			else signal.addEventListener("abort", abort, { once: true });
-		}
-		const request = (async () => {
-			if (options.session === undefined) {
-				const info = await this.connection.info(controller.signal);
-				if (info.os === "windows") throw new FileError("not_supported", "Remote Windows path semantics are not supported by this mobile adapter.");
-			}
-			if (this.#closed) throw new FileError("aborted", "Remote environment is closed.");
-			return this.connection.request(op, json, { ...options, signal: controller.signal });
-		})();
-		this.#pending.add(request);
-		const settled = () => {
-			this.#pending.delete(request);
-			for (const signal of signals) signal.removeEventListener("abort", abort);
-		};
-		request.then(settled, settled);
-		return request;
-	}
-
-	cleanup(_context: Context): Promise<void> {
-		if (this.#closing) return this.#closing;
-		this.#closed = true;
-		if (!this.#running.size) this.#lifetime.abort();
+	async cleanup(_context: Context): Promise<void> {
+		// Kill without aborting, so the commands settle with their killed status, as `NodeExecutionEnv` does.
 		for (const [id, session] of this.#running) this.connection.kill(id, session);
-		this.#closing = (async () => {
-			// Some daemon filesystem calls (for example open of a FIFO) cannot be
-			// cancelled individually. Pings keep that daemon alive, so owner shutdown
-			// must eventually close its channel rather than wait forever for a result.
-			const timer = setTimeout(() => { void this.connection.close(); }, CLEANUP_GRACE_MS);
-			try {
-				await Promise.allSettled([...this.#watchers].map((watcher) => watcher.close(BACKGROUND_CONTEXT)));
-				await Promise.allSettled([...this.#pending]);
-				await Promise.allSettled([...this.#handles].map((handle) => handle.close()));
-				// Temporary paths survive a daemon restart, unlike opened handles. Use
-				// an already connected replacement session for the same immutable host;
-				// cleanup alone must not reconnect an unreachable host.
-				const session = this.connection.currentSession;
-				if (session !== undefined) await Promise.allSettled([...this.#temporary].map((path) =>
-					this.connection.request("rm", { path, recursive: true, force: true }, { session })));
-			} finally {
-				try { await this.connection.close(); }
-				finally {
-					clearTimeout(timer);
-					this.#lifetime.abort();
-					this.#watchers.clear();
-					this.#temporary.clear();
-				}
-			}
-		})();
-		return this.#closing;
+		this.#running.clear();
 	}
 }
 

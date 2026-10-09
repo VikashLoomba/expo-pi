@@ -272,7 +272,8 @@ export class DurableChatService {
 
   /**
    * Commits the machine, working directory and model together. As in pi-durable, work already running keeps what
-   * it resolved; the next request or tool call uses the new selection.
+   * it resolved; the next request or tool call uses the new selection. A `null` directory clears the agent's `cwd`,
+   * so a remote machine runs in its account's home directory.
    */
   async updateExecution(id: ConversationId, settings: ChatExecutionSettings,
     modelSettings?: ChatModelSettings): Promise<void> {
@@ -346,8 +347,8 @@ export class DurableChatService {
     for (const state of this.chats.values()) state.dispose();
     this.listeners.clear();
     this.closePromise = (async () => {
-      // Harness close seals admission and aborts running work at once; the remote owner then stops its
-      // environments, so a command the daemon cannot cancel does not hold the Harness open.
+      // Harness close seals admission and aborts running work at once; the remote owner then closes its
+      // connections, so a command the daemon cannot cancel does not hold the Harness open.
       const results = await Promise.allSettled([this.harness.close(context), this.remote.close()]);
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failures.length) {

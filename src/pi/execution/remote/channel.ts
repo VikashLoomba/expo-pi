@@ -1,7 +1,6 @@
-import type { SshAuth, SshConnectOptions, SshConnection, SshHostKey, SshShell } from '@osuki-dev/react-native-ssh';
+import { connect, type SshAuth, type SshConnection, type SshHostKey, type SshShell } from '@osuki-dev/react-native-ssh';
 import { BootstrapError } from './bootstrap-errors';
-import { loadPackagedDaemon, type DaemonLoader } from './daemon-assets';
-import { provisionDaemon, quotePosix, type SshSetupStage } from './provisioning';
+import { provisionDaemon, quotePosix, type RemotePlatformState, type SshSetupStage } from './provisioning';
 
 export type { SshSetupStage } from './provisioning';
 
@@ -30,14 +29,8 @@ export interface SshChannelOptions {
   hostKeyAlgorithms?: string[];
   connectTimeoutMs?: number;
   onProgress?: (stage: SshSetupStage) => void;
-}
-
-/** Structural injection is for transport ownership tests; production uses the selected native library. */
-export type SshConnector = (options: SshConnectOptions) => Promise<Pick<SshConnection, 'openShell' | 'disconnect'>>;
-
-export interface SshChannelDependencies {
-  connect?: SshConnector;
-  loadDaemon?: DaemonLoader;
+  /** The connection's detected platform, shared by its starts; by default this factory's own. */
+  platform?: RemotePlatformState;
 }
 
 function aborted(): Error {
@@ -62,7 +55,7 @@ function connectionFailure(error: unknown): Error {
     TOO_LARGE: 'The SSH operation exceeded the transport size limit.',
     INTERNAL: 'The SSH connection could not be opened.',
   };
-  let message = messages[code] ?? messages.INTERNAL!;
+  let message = messages[code] ?? messages.INTERNAL;
   if (code === 'CONNECT' || code === 'NOT_FOUND') {
     const diagnostic = error instanceof Error ? error.message : '';
     message = /dns|resolve|lookup|name or service|nodename/i.test(diagnostic)
@@ -73,12 +66,13 @@ function connectionFailure(error: unknown): Error {
 }
 
 /** Credentials and verifier belong to the immutable host admission snapshot, never to protocol messages. */
-export function createSshChannelFactory(options: SshChannelOptions, dependencies: SshChannelDependencies = {}): DaemonChannelFactory {
+export function createSshChannelFactory(options: SshChannelOptions): DaemonChannelFactory {
   const snapshot = { ...options, auth: { ...options.auth }, hostKeyAlgorithms: options.hostKeyAlgorithms?.slice() };
+  const platform: RemotePlatformState = options.platform ?? {};
   return async ({ token, signal, onData, onClosed }) => {
     if (signal.aborted) throw aborted();
     if (!/^[a-f0-9]{32}$/.test(token)) throw new Error('Invalid Pi synchronization token.');
-    let connection: Pick<SshConnection, 'openShell' | 'disconnect'> | undefined;
+    let connection: SshConnection | undefined;
     let shell: SshShell | undefined;
     let closing: Promise<void> | undefined;
     let closingRequested = false;
@@ -99,12 +93,6 @@ export function createSshChannelFactory(options: SshChannelOptions, dependencies
     const onAbort = () => { void dispose(); };
     signal.addEventListener('abort', onAbort, { once: true });
     try {
-      // Metro's async-import namespace is not consistent with this package's
-      // native ESM entry in Hermes. A literal require uses its normal named
-      // export while still deferring Nitro loading until SSH is actually used.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const connect = dependencies.connect ?? (require('@osuki-dev/react-native-ssh') as typeof import('@osuki-dev/react-native-ssh')).connect;
-      if (signal.aborted) throw aborted();
       connection = await connect({
         host: snapshot.host, port: snapshot.port, username: snapshot.username, auth: snapshot.auth,
         verifyHostKey: snapshot.verifyHostKey, hostKeyAlgorithms: snapshot.hostKeyAlgorithms,
@@ -116,10 +104,11 @@ export function createSshChannelFactory(options: SshChannelOptions, dependencies
         throw aborted();
       }
       const daemonPath = await provisionDaemon(connection, {
-        signal, token, loadDaemon: dependencies.loadDaemon ?? loadPackagedDaemon, onProgress: snapshot.onProgress,
+        signal, token, platform, onProgress: snapshot.onProgress,
       });
       if (signal.aborted || closingRequested || notified) throw aborted();
-      shell = await connection.openShell({ term: '', command: `${quotePosix(daemonPath)} serve --token ${token}` }, {
+      const command = `${quotePosix(daemonPath)} serve --token ${token}`;
+      const daemon = await connection.openShell({ term: '', command }, {
         // Native owns callback buffers. Copy immediately, before the callback returns.
         onData: (bytes) => onData(new Uint8Array(bytes).slice()),
         // Mandatory: omitting this causes native stderr to enter framed stdout.
@@ -127,15 +116,16 @@ export function createSshChannelFactory(options: SshChannelOptions, dependencies
         onStderr: () => {},
         onClosed: () => notifyClosed(closingRequested ? undefined : new Error('The Pi daemon SSH channel closed.')),
       });
+      shell = daemon;
       if (signal.aborted || closingRequested || notified) {
-        await Promise.allSettled([shell.close(), connection.disconnect()]);
+        await Promise.allSettled([daemon.close(), connection.disconnect()]);
         throw signal.aborted ? aborted() : new Error('The Pi daemon SSH channel closed during startup.');
       }
       return {
         write(bytes) {
           if (closingRequested || notified || signal.aborted) throw new Error('SSH channel is closed.');
           // Own offset views as well. Native write copies synchronously into its queue.
-          shell!.write(new Uint8Array(bytes));
+          daemon.write(new Uint8Array(bytes));
         },
         async close() {
           signal.removeEventListener('abort', onAbort);
