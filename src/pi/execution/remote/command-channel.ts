@@ -3,7 +3,6 @@ import { Buffer } from 'buffer';
 import { BootstrapError } from './bootstrap-errors';
 
 export type BootstrapConnection = Pick<SshConnection, 'openShell' | 'disconnect'>;
-const OUTPUT_LIMIT = 64 * 1024;
 const WRITE_CHUNK = 64 * 1024;
 
 function code(error: unknown): unknown {
@@ -20,7 +19,7 @@ async function writable(operation: () => void, signal: AbortSignal): Promise<voi
   }
 }
 
-/** A short bootstrap command with owned bounded output, EOF, exit status, and awaited channel disposal. */
+/** A short bootstrap command with owned output, EOF, exit status, and awaited channel disposal. */
 export async function runSshCommand(connection: BootstrapConnection, command: string, options: {
   signal: AbortSignal;
   input?: Uint8Array;
@@ -33,7 +32,6 @@ export async function runSshCommand(connection: BootstrapConnection, command: st
   let failure: unknown;
   let ended = false;
   let exitCode: number | undefined;
-  let received = 0;
   const chunks: Uint8Array[] = [];
   let rejectFailure!: (error: unknown) => void;
   let resolveExit!: () => void;
@@ -51,17 +49,16 @@ export async function runSshCommand(connection: BootstrapConnection, command: st
   const abort = () => fail(new BootstrapError('CANCELLED'));
   const timer = setTimeout(() => fail(new BootstrapError('TIMEOUT')), options.timeoutMs ?? 60_000);
   options.signal.addEventListener('abort', abort, { once: true });
-  const capture = (bytes: ArrayBuffer, keep: boolean) => {
+  const capture = (bytes: ArrayBuffer) => {
     if (failed || ended) return;
-    received += bytes.byteLength;
-    if (received > OUTPUT_LIMIT) { fail(new BootstrapError('DAEMON_SETUP')); return; }
-    if (keep) chunks.push(new Uint8Array(bytes).slice());
+    chunks.push(new Uint8Array(bytes).slice());
   };
   const opening = Promise.resolve().then(() => {
     if (failed || options.signal.aborted) throw failure ?? new BootstrapError('CANCELLED');
     return connection.openShell({ term: '', command }, {
-      onData: (bytes) => capture(bytes, true),
-      onStderr: (bytes) => capture(bytes, false),
+      onData: capture,
+      // Remote shell diagnostics stay out of the parsed output and are deliberately discarded.
+      onStderr: () => {},
       onClosed: (status) => { ended = true; exitCode = status; resolveExit(); },
     });
   });

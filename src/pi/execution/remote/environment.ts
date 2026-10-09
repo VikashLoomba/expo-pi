@@ -3,7 +3,6 @@ import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { posix, resolveRemotePath } from "./paths";
-import { decodeStrictUtf8 } from "../strict-utf8";
 import type { Context } from "@earendil-works/chord";
 import {
 	type BinaryReader,
@@ -27,7 +26,7 @@ import {
 import { type Connection, type Json, RemoteError, type RemoteInfo } from "./connection";
 import { abortResult, toFileError } from "./errors";
 import {
-  Handle, RemoteBinaryReader, RemoteDirReader, RemoteTextLineReader, readRange, toInfo,
+  Handle, READ_DEPTH, RemoteBinaryReader, RemoteDirReader, RemoteTextLineReader, readRange, toInfo,
   type RemoteFileInfo, type RemoteDirEntry,
 } from './readers';
 import { RemoteWatcher, type RemoteWatchOptions } from "./watch";
@@ -140,8 +139,11 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		}
 	}
 
-	/** Node's `readFile` without decoding, over a file opened like `open(path, "r")`. */
-	async #readFile(path: string, context: Context): Promise<Result<Uint8Array, FileError>> {
+	/**
+	 * Node's `readFile` over a file opened like `open(path, "r")`, as bytes. With `encoding`, it reads the way Node's
+	 * `readFile` does when it decodes.
+	 */
+	async #readFile(path: string, encoding: boolean, context: Context): Promise<Result<Uint8Array, FileError>> {
 		const signal = context.abortSignal;
 		return this.#fileOp(path, context, async (resolved) => {
 			const { handle, json } = await this.#open(resolved, { mode: "read" }, context.abortSignal);
@@ -168,36 +170,55 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 					}
 					return Buffer.concat(chunks, total);
 				}
-				// A single read of the whole size, or reads of 512 KiB until the size or the end of the file.
-				if (size <= READ_FILE_CHUNK) return Buffer.from(await handle.pread(0, size));
-				const read = await readRange(
-					(at, length) => handle.pread(at, length),
-					0,
-					size,
-					READ_FILE_CHUNK,
-					aborted,
-				);
-				if (read === undefined) throw abort();
-				return Buffer.concat(read.chunks, read.total);
+				if (!encoding) {
+					// A single read of the whole size, or reads of 512 KiB until the size or the end of the file.
+					if (size <= READ_FILE_CHUNK) return Buffer.from(await handle.pread(0, size));
+					const read = await readRange(
+						(at, length) => handle.pread(at, length),
+						0,
+						size,
+						READ_FILE_CHUNK,
+						aborted,
+					);
+					if (read === undefined) throw abort();
+					return Buffer.concat(read.chunks, read.total);
+				}
+				// Decoding: reads of min(size, 512 KiB) until the size, a short read, or the end of the file.
+				const length = Math.min(size, READ_FILE_CHUNK);
+				const readAt = (at: number) => {
+					const bytes = handle.pread(at, length);
+					bytes.catch(() => {});
+					return bytes;
+				};
+				const inFlight = Array.from({ length: READ_DEPTH }, (_, index) => readAt(index * length));
+				const chunks: Uint8Array[] = [];
+				let total = 0;
+				for (let next = READ_DEPTH * length; ; next += length) {
+					const bytes = await inFlight[0];
+					if (aborted()) throw abort();
+					chunks.push(bytes);
+					total += bytes.length;
+					if (bytes.length === 0 || total === size || bytes.length !== length) {
+						return Buffer.concat(chunks, total);
+					}
+					inFlight.shift();
+					inFlight.push(readAt(next));
+				}
 			} finally {
 				await handle.close();
 			}
 		});
 	}
 
-	/** Strict, so `edit` refuses a file that is not UTF-8 instead of corrupting it. */
+	/** Node's `readFile(path, "utf8")`: invalid bytes become U+FFFD and a byte-order mark is kept. */
 	async readTextFile(path: string, context: Context): Promise<Result<string, FileError>> {
-		const bytes = await this.readBinaryFile(path, context);
+		const bytes = await this.#readFile(path, true, context);
 		if (!bytes.ok) return bytes;
-		try {
-			return ok(decodeStrictUtf8(bytes.value, path));
-		} catch (error) {
-			return err(toFileError(error, path));
-		}
+		return ok(new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes.value));
 	}
 
 	async readBinaryFile(path: string, context: Context): Promise<Result<Uint8Array, FileError>> {
-		return this.#readFile(path, context);
+		return this.#readFile(path, false, context);
 	}
 
 	async openBinaryReader(

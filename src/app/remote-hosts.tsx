@@ -88,31 +88,30 @@ export default function RemoteHostsScreen() {
       {snapshot.error && <InlineNotice message={snapshot.error} action="Retry" onAction={() => { void remoteHosts.restore().catch(() => {}); }} />}
       {snapshot.cleanupError && <InlineNotice message={snapshot.cleanupError} action="Retry cleanup" onAction={() => { void remoteHosts.restore().catch(() => {}); }} />}
       {notice && <InlineNotice testID="remote-host-notice" message={notice.message} tone={notice.error ? 'error' : 'neutral'} />}
-      {Platform.OS === 'web' ? <InlineNotice tone="neutral" message="Remote SSH execution is available in the native mobile app." />
-        : editing ? <RemoteHostForm key={editing === 'new' ? 'new' : editing.id} host={editing === 'new' ? undefined : editing}
-          onCancel={() => { setEditing(undefined); setNotice(undefined); }} onSave={async (input, auth) => {
-            const host = await remoteHosts.save(input, auth, editing === 'new' ? undefined : editing);
-            setEditing(undefined); setNotice({ message: `${host.name} saved. Test the connection to verify the server and prepare remote execution.` });
-          }} />
-          : <>
-            {!snapshot.ready && <Text style={[styles.detail, { color: colors.secondary }]}>Loading saved machines…</Text>}
-            {snapshot.ready && !snapshot.hosts.length && !snapshot.error && <Text style={[styles.detail, { color: colors.secondary }]}>No remote machines yet. Local execution remains available in every chat.</Text>}
-            {snapshot.hosts.map((host) => <View key={host.id} testID={`remote-machine-${host.id}`} style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-              <Text style={[styles.name, { color: colors.text }]}>{host.name}</Text>
-              <Text selectable style={[styles.detail, { color: colors.secondary }]}>{host.username}@{host.hostname}:{host.port}</Text>
-              <Text style={[styles.detail, { color: colors.muted }]}>{host.credentialType === 'password' ? 'SSH password saved' : 'SSH private key saved'}</Text>
-              <ActionButton testID={`test-remote-host-${host.id}`} title="Test connection" disabled={!!busy} onPress={() => { void test(host); }} />
-              <ActionButton testID={`edit-remote-host-${host.id}`} title="Edit machine" secondary disabled={!!busy} onPress={() => { setEditing(host); setNotice(undefined); setRemoving(undefined); }} />
-              <ActionButton testID={`forget-remote-host-key-${host.id}`} title="Reset accepted SSH key" secondary disabled={!!busy} onPress={() => { void forget(host); }} />
-              <ActionButton testID={`remove-remote-host-${host.id}`} title="Remove machine" secondary disabled={!!busy} onPress={() => { setRemoving(host); setNotice(undefined); }} />
-              {removing?.id === host.id && <View style={styles.confirmation}>
-                <Text style={[styles.detail, { color: colors.secondary }]}>Remove {host.name} and its saved SSH credentials? Existing chats keep their selection and need another environment.</Text>
-                <ActionButton testID="confirm-remove-remote-host" title="Remove machine and credentials" disabled={!!busy} onPress={() => { void remove(host); }} />
-                <ActionButton title="Keep machine" secondary disabled={!!busy} onPress={() => setRemoving(undefined)} />
-              </View>}
-            </View>)}
-            <ActionButton testID="add-remote-host" title="Add remote machine" disabled={!!busy || !snapshot.ready || !!snapshot.error} onPress={() => { setEditing('new'); setNotice(undefined); setRemoving(undefined); }} />
-          </>}
+      {editing ? <RemoteHostForm key={editing === 'new' ? 'new' : editing.id} host={editing === 'new' ? undefined : editing}
+        onCancel={() => { setEditing(undefined); setNotice(undefined); }} onSave={async (input, auth) => {
+          const host = await remoteHosts.save(input, auth, editing === 'new' ? undefined : editing);
+          setEditing(undefined); setNotice({ message: `${host.name} saved. Test the connection to verify the server and prepare remote execution.` });
+        }} />
+        : <>
+          {!snapshot.ready && <Text style={[styles.detail, { color: colors.secondary }]}>Loading saved machines…</Text>}
+          {snapshot.ready && !snapshot.hosts.length && !snapshot.error && <Text style={[styles.detail, { color: colors.secondary }]}>No remote machines yet. Local execution remains available in every chat.</Text>}
+          {snapshot.hosts.map((host) => <View key={host.id} testID={`remote-machine-${host.id}`} style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <Text style={[styles.name, { color: colors.text }]}>{host.name}</Text>
+            <Text selectable style={[styles.detail, { color: colors.secondary }]}>{host.username}@{host.hostname}:{host.port}</Text>
+            <Text style={[styles.detail, { color: colors.muted }]}>{host.credentialType === 'password' ? 'SSH password saved' : 'SSH private key saved'}</Text>
+            <ActionButton testID={`test-remote-host-${host.id}`} title="Test connection" disabled={!!busy} onPress={() => { void test(host); }} />
+            <ActionButton testID={`edit-remote-host-${host.id}`} title="Edit machine" secondary disabled={!!busy} onPress={() => { setEditing(host); setNotice(undefined); setRemoving(undefined); }} />
+            <ActionButton testID={`forget-remote-host-key-${host.id}`} title="Reset accepted SSH key" secondary disabled={!!busy} onPress={() => { void forget(host); }} />
+            <ActionButton testID={`remove-remote-host-${host.id}`} title="Remove machine" secondary disabled={!!busy} onPress={() => { setRemoving(host); setNotice(undefined); }} />
+            {removing?.id === host.id && <View style={styles.confirmation}>
+              <Text style={[styles.detail, { color: colors.secondary }]}>Remove {host.name} and its saved SSH credentials? Existing chats keep their selection and need another environment.</Text>
+              <ActionButton testID="confirm-remove-remote-host" title="Remove machine and credentials" disabled={!!busy} onPress={() => { void remove(host); }} />
+              <ActionButton title="Keep machine" secondary disabled={!!busy} onPress={() => setRemoving(undefined)} />
+            </View>}
+          </View>)}
+          <ActionButton testID="add-remote-host" title="Add remote machine" disabled={!!busy || !snapshot.ready || !!snapshot.error} onPress={() => { setEditing('new'); setNotice(undefined); setRemoving(undefined); }} />
+        </>}
       {testing && <>
         <Text testID="remote-host-test-progress" accessibilityLiveRegion="polite" style={[styles.detail, { color: colors.secondary }]}>{challenge ? 'Waiting for your SSH host-key decision…' : progress}</Text>
         <ActionButton testID="cancel-remote-host-test" title="Cancel connection test" secondary onPress={() => active.current?.abort()} />

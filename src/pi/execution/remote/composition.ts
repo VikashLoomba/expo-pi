@@ -42,8 +42,7 @@ export function createRemoteExecution(hosts: RemoteHostRepository) {
       // Metadata is captured now; secrets only at admission. A concurrent settings
       // edit fails admission instead of silently redirecting this resolved facade.
       let factory: Promise<DaemonChannelFactory> | undefined;
-      // First admission can include detection and a bounded daemon upload.
-      const connection = new Connection({ startTimeoutMs: 420_000, openChannel: async (options) => {
+      const connection = new Connection({ openChannel: async (options) => {
         options.signal.throwIfAborted();
         factory ??= hosts.admit(host.id, host).then(admittedSshChannel).catch((cause) => {
           // Failed admission owns no usable configuration. A later operation can

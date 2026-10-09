@@ -54,9 +54,6 @@ async function withRemoteHost<T>(repository: RemoteHostRepository, id: string, o
   let accepted = trustedHostKey;
   let trustFailure: Error | undefined;
   const connection = new Connection({
-    // Host verification is interactive and first connection may upload the
-    // bundled runtime; the transport bounds each setup stage independently.
-    startTimeoutMs: 450_000,
     openChannel: createSshChannelFactory({
       host: host.hostname, port: host.port, username: host.username, auth,
       connectTimeoutMs: 120_000,

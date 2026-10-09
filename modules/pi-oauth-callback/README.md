@@ -6,7 +6,7 @@ The module is a transport adapter for browser authorization with PKCE. It does n
 
 ## Integration and API
 
-[`src/PiOAuthCallbackModule.ts`](src/PiOAuthCallbackModule.ts) loads `PiOAuthCallback` through Expo's `requireOptionalNativeModule`. The web implementation returns `null`; other platforms or older builds without this native module retain the OAuth adapter's manual callback fallback.
+[`src/PiOAuthCallbackModule.ts`](src/PiOAuthCallbackModule.ts) loads `PiOAuthCallback` through Expo's `requireOptionalNativeModule`. Other platforms or older builds without this native module retain the OAuth adapter's manual callback fallback.
 
 | Method | Contract |
 | --- | --- |

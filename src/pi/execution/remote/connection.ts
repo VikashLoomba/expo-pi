@@ -4,6 +4,12 @@ import { encodeFrame, FrameDecoder, FrameType, type Frame, type Json } from './p
 
 export type { Json } from './protocol';
 
+const PING_INTERVAL_MS = 5_000;
+/** The daemon pings every five seconds; this much silence means the connection is gone. */
+const SILENCE_LIMIT_MS = 30_000;
+/** How long the daemon may take to answer `hello` once its channel is open; provisioning bounds its own steps. */
+const START_TIMEOUT_MS = 60_000;
+
 export class RemoteError extends Error {
   readonly code: string;
   readonly path?: string;
@@ -45,18 +51,12 @@ export interface RequestOptions {
 
 export interface ConnectionOptions {
   openChannel: DaemonChannelFactory;
-  /** Defaults match the unchanged Pi v1 daemon. Overrides support deterministic transport tests. */
-  startTimeoutMs?: number;
-  pingIntervalMs?: number;
-  silenceLimitMs?: number;
-  token?: () => string;
 }
 
 type Pending = {
   resolve(value: Reply): void;
   reject(error: unknown): void;
   onEvent?: RequestOptions['onEvent'];
-  callbackError?: RemoteError;
 };
 
 type Ready = { info: RemoteInfo; session: Session };
@@ -67,7 +67,6 @@ class Session {
   readonly decoder: FrameDecoder;
   readonly controller = new AbortController();
   readonly pending = new Map<number, Pending>();
-  readonly waiters = new Set<object>();
   readonly failed: Promise<never>;
   fail!: (error: unknown) => void;
   channel?: DaemonChannel;
@@ -167,27 +166,22 @@ export class Connection {
     if (signal?.aborted) return Promise.reject(aborted());
     if (this.#closed) return Promise.reject(closed());
     if (!this.#ready) {
-      const session = new Session(++this.#sessions, (this.#options.token ?? secureToken)());
+      const session = new Session(++this.#sessions, secureToken());
       this.#session = session;
       const ready = this.#start(session);
       this.#ready = ready;
       void ready.catch(() => { if (this.#ready === ready) this.#ready = undefined; });
     }
-    const session = this.#session!;
     const ready = this.#ready;
-    const waiter = {};
-    session.waiters.add(waiter);
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = () => {
         settled = true;
-        session.waiters.delete(waiter);
         signal?.removeEventListener('abort', onAbort);
       };
       const onAbort = () => {
         if (settled) return;
         finish();
-        if (!session.ready && session.waiters.size === 0) this.#teardown(session, aborted());
         reject(aborted());
       };
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -198,8 +192,7 @@ export class Connection {
   }
 
   async #start(session: Session): Promise<Ready> {
-    const timer = setTimeout(() => this.#teardown(session, lost('Automatic Pi daemon setup timed out. Check the SSH connection and remote account’s home-directory permissions.')),
-      this.#options.startTimeoutMs ?? 60_000);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     session.opening = Promise.resolve().then(() => this.#options.openChannel({
       token: session.token, signal: session.controller.signal,
       onData: (bytes) => this.#onData(session, bytes),
@@ -209,10 +202,13 @@ export class Connection {
       session.channel = await Promise.race([session.opening, session.failed]);
       if (!session.live || this.#closed) throw session.failure ?? closed();
       session.timer = setInterval(() => {
-        if (Date.now() - session.lastSeen > (this.#options.silenceLimitMs ?? 30_000)) {
+        if (Date.now() - session.lastSeen > SILENCE_LIMIT_MS) {
           this.#teardown(session, lost('Pi daemon connection timed out. Check the phone Tailscale VPN and remote host.'));
         } else this.#write(session, encodeFrame(FrameType.ping, 0, {}));
-      }, this.#options.pingIntervalMs ?? 5_000);
+      }, PING_INTERVAL_MS);
+      timer = setTimeout(() => {
+        this.#teardown(session, lost(`The Pi daemon did not answer within ${START_TIMEOUT_MS / 1000} s.`));
+      }, START_TIMEOUT_MS);
       const reply = await this.#send(session, 'hello', { protocol: 1 }, {});
       if (reply.payload.length) throw lost('Pi hello unexpectedly contained binary data.');
       const info = remoteInfo(reply.json);
@@ -240,16 +236,14 @@ export class Connection {
     return new Promise((resolve, reject) => {
       const onAbort = () => this.#write(session, encodeFrame(FrameType.cancel, id, {}));
       const done = () => options.signal?.removeEventListener('abort', onAbort);
-      const pending: Pending = {
+      session.pending.set(id, {
         resolve: (value) => { done(); resolve(value); },
         reject: (error) => { done(); reject(error); },
         onEvent: options.onEvent,
-      };
-      session.pending.set(id, pending);
+      });
       options.signal?.addEventListener('abort', onAbort, { once: true });
       this.#write(session, bytes);
-      try { if (session.live) options.onStart?.(id, session.id); }
-      catch { pending.callbackError = new RemoteError({ code: 'callback_error', message: 'Remote operation callback failed.' }); onAbort(); }
+      if (session.live) options.onStart?.(id, session.id);
       if (options.signal?.aborted) onAbort();
     });
   }
@@ -292,18 +286,11 @@ export class Connection {
     const pending = session.pending.get(id);
     if (!pending) return;
     if (type === FrameType.event) {
-      if (!pending.callbackError) {
-        try { pending.onEvent?.(json, payload); }
-        catch {
-          pending.callbackError = new RemoteError({ code: 'callback_error', message: 'Remote operation output callback failed.' });
-          this.#write(session, encodeFrame(FrameType.cancel, id, {}));
-        }
-      }
+      pending.onEvent?.(json, payload);
       return;
     }
     session.pending.delete(id);
-    if (pending.callbackError) pending.reject(pending.callbackError);
-    else if (type === FrameType.error) pending.reject(new RemoteError(json));
+    if (type === FrameType.error) pending.reject(new RemoteError(json));
     else pending.resolve({ json, payload, session: session.id });
   }
 }

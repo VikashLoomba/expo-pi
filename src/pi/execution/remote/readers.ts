@@ -1,16 +1,15 @@
 // Reader behavior adapted from Pi Env 1.1.0 (MIT), with mobile resource ownership.
 import type { Context } from '@earendil-works/chord';
 import {
-  err, ok, FileError, type BinaryReader, type DirReader, type FileInfo, type FileKind,
+  err, ok, FileError, StreamDecoder, type BinaryReader, type DirReader, type FileInfo, type FileKind,
   type LineScan, type Result, type TextLine, type TextLineReader,
 } from '@earendil-works/pi-durable/env';
 import { type Json, RemoteError } from './connection';
 import type { MobileRemoteExecutionEnv } from './environment';
 import { abortResult, toFileError } from './errors';
 import { posix, type PlatformPath } from './paths';
-import { MobileUtf8Decoder } from './utf8';
 
-const READ_DEPTH = 8;
+export const READ_DEPTH = 8;
 const READ_CHUNK = 256 * 1024;
 const LINE_CHUNK = 64 * 1024;
 
@@ -248,7 +247,7 @@ export class RemoteDirReader implements DirReader {
 /** `NodeTextLineReader`: positional reads of a file opened like `open(path, "r")`. */
 export class RemoteTextLineReader implements TextLineReader {
 	readonly #handle: Handle;
-	readonly #decoder = new MobileUtf8Decoder(true);
+	readonly #decoder = new StreamDecoder();
 	#offset = 0;
 	#buffered = "";
 	#ended = false;
@@ -282,10 +281,10 @@ export class RemoteTextLineReader implements TextLineReader {
 				if (afterReadAbort) return afterReadAbort;
 				this.#offset += bytes.length;
 				if (bytes.length === 0) {
-					this.#buffered += this.#decoder.end();
+					this.#buffered += this.#decoder.decode();
 					this.#ended = true;
 				} else {
-					this.#buffered += this.#decoder.write(bytes);
+					this.#buffered += this.#decoder.decode(bytes);
 				}
 			}
 		} catch (error) {
