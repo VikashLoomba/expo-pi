@@ -30,6 +30,14 @@ export interface ChatServiceSnapshot { chats: ChatSummary[]; error?: string }
 const context = BACKGROUND_CONTEXT;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
+/** `deleteChat` marked the chat deleted but could not remove its workspace directories. */
+export class WorkspaceRemovalError extends Error {
+  constructor(cause: unknown) {
+    super(errorText(cause), { cause });
+    this.name = 'WorkspaceRemovalError';
+  }
+}
+
 /**
  * Owns the app's durable session for its lifetime. The chat list reads each chat's metadata document; a chat's
  * transcript is read only while a `ChatView` of it is shown.
@@ -306,7 +314,7 @@ export class DurableChatService {
 
   /**
    * Stops the chat's work, then marks it deleted and removes its workspace directories. The chat stays deleted when
-   * the removal fails.
+   * the removal fails, which rejects with a `WorkspaceRemovalError`.
    */
   async deleteChat(id: ConversationId) {
     const conversation = await this.conversation(id);
@@ -314,8 +322,12 @@ export class DurableChatService {
     await conversation.commit(async (tx) => {
       (await tx.doc(ChatMetadataDoc, id)).deleted = true;
     }, context);
-    const workspace = await this.harness.snapshot(WorkspaceDoc, id, context);
-    if (workspace?.id) this.workspaces?.remove(workspace.id);
+    try {
+      const workspace = await this.harness.snapshot(WorkspaceDoc, id, context);
+      if (workspace?.id) this.workspaces?.remove(workspace.id);
+    } catch (cause) {
+      throw new WorkspaceRemovalError(cause);
+    }
   }
 
   /**

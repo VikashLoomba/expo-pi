@@ -2,6 +2,7 @@ import type { ConversationId } from '@earendil-works/pi-durable';
 import { Alert } from 'react-native';
 
 import { useChatApp } from '@/chat/chat-provider';
+import { WorkspaceRemovalError } from '@/pi/chat-service';
 
 type Chat = { id: ConversationId; title: string };
 
@@ -35,12 +36,11 @@ export function useChatActions(onError: (message: string) => void) {
       onPress: () => {
         if (!service) return;
         void service.deleteChat(chat.id).catch((cause: unknown) => {
-          // The list leaves out deleted chats, so a chat missing from it was deleted and only its files remain.
-          if (service.getSnapshot().chats.some((listed) => listed.id === chat.id)) {
-            onError(errorText(cause, 'Could not delete this chat.'));
+          if (cause instanceof WorkspaceRemovalError) {
+            Alert.alert("Couldn't remove workspace files", cause.message);
             return;
           }
-          Alert.alert("Couldn't remove workspace files", errorText(cause, 'Could not remove this chat’s files.'));
+          onError(errorText(cause, 'Could not delete this chat.'));
         });
       },
     },
