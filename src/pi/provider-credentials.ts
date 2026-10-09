@@ -29,43 +29,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function copyJson(value: unknown, parents = new Set<object>()): unknown {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (!value || typeof value !== 'object' || parents.has(value)) throw new Error('Invalid credential data.');
-  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
-    throw new Error('Invalid credential data.');
-  }
-  parents.add(value);
-  const result = Array.isArray(value)
-    ? Array.from(value, (item) => copyJson(item, parents))
-    : Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, copyJson(item, parents)]));
-  parents.delete(value);
-  return result;
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
 }
 
-function copyCredential(value: unknown): Credential {
-  if (!isRecord(value)) throw new Error('Invalid credential.');
-  if (value.type === 'api_key') {
-    const { key, env } = value;
-    if (key !== undefined && (typeof key !== 'string' || !key.trim())) throw new Error('Enter an API key.');
-    if (env !== undefined && (!isRecord(env) || Object.values(env).some((item) => typeof item !== 'string'))) {
-      throw new Error('Invalid provider configuration.');
-    }
-    const copiedEnv = isRecord(env) ? Object.fromEntries(Object.entries(env)
-      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : undefined;
-    return { type: 'api_key', ...(typeof key === 'string' ? { key: key.trim() } : {}),
-      ...(copiedEnv ? { env: copiedEnv } : {}) };
+/** Decodes a SecureStore entry, the one place credential data arrives untyped. */
+function decodeSavedCredential(raw: string): Credential {
+  const saved: unknown = JSON.parse(raw);
+  const value = isRecord(saved) && saved.version === 1 ? saved.credential : undefined;
+  if (!isRecord(value)) throw new Error('Invalid saved credential.');
+  const { type, key, env, access, refresh, expires } = value;
+  if (type === 'api_key' && (key === undefined || typeof key === 'string')
+      && (env === undefined || isStringRecord(env))) {
+    return { type, ...(key === undefined ? {} : { key }), ...(env === undefined ? {} : { env }) };
   }
-  const { access, refresh, expires } = value;
-  if (value.type !== 'oauth' || typeof access !== 'string' || !access.trim() ||
-      typeof refresh !== 'string' || !refresh.trim() || typeof expires !== 'number' ||
-      !Number.isFinite(expires) || expires <= 0) throw new Error('Invalid OAuth credential.');
-  // Pi permits provider-specific fields (for example clientId and scopes). Keep
-  // their JSON data intact without sharing nested references with SDK callers.
-  const fields = copyJson(value);
-  if (!isRecord(fields)) throw new Error('Invalid OAuth credential.');
-  return { ...fields, type: 'oauth', access, refresh, expires };
+  // Pi permits provider-specific OAuth fields, for example clientId and scopes.
+  if (type === 'oauth' && typeof access === 'string' && typeof refresh === 'string' && typeof expires === 'number') {
+    return { ...value, type, access, refresh, expires };
+  }
+  throw new Error('Invalid saved credential.');
 }
 
 class InvalidSavedCredentialError extends Error {
@@ -149,9 +131,7 @@ export class ProviderCredentialStore implements CredentialStore {
     let credential: Credential | undefined;
     if (raw !== null) {
       try {
-        const record = JSON.parse(raw);
-        if (record.version !== 1) throw new Error('Unsupported credential version.');
-        credential = copyCredential(record.credential);
+        credential = decodeSavedCredential(raw);
         this.policies[id]?.validate?.(credential);
       } catch {
         current.credential = undefined;
@@ -195,19 +175,11 @@ export class ProviderCredentialStore implements CredentialStore {
   restoreProvider(id: string): Promise<void> {
     return this.enqueue(id, () => this.load(id, true));
   }
-  /** Explicit user replacement can recover a malformed or newer-format record. */
-  replaceApiKey(id: string, key: string): Promise<void> {
-    return this.enqueue(id, async () => {
-      const credential = copyCredential({ type: 'api_key', key });
-      await this.save(id, credential);
-    });
-  }
   read(id: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
     return this.enqueue(id, async () => {
       await this.load(id);
       options?.signal?.throwIfAborted();
-      const credential = this.record(id).credential;
-      return credential && copyCredential(credential);
+      return this.record(id).credential;
     }, options);
   }
   async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
@@ -222,14 +194,14 @@ export class ProviderCredentialStore implements CredentialStore {
     return this.enqueue(id, async () => {
       try { await this.load(id); }
       catch (error) {
-        // A fresh SDK login can explicitly replace invalid persisted data. Reads
+        // A fresh login or saved API key can replace invalid persisted data. Reads
         // preserve that data and report the problem until replacement or logout.
         if (!(error instanceof InvalidSavedCredentialError)) throw error;
       }
       options?.signal?.throwIfAborted();
       const current = this.record(id).credential;
       let next: Credential | undefined;
-      try { next = await fn(current && copyCredential(current)); }
+      try { next = await fn(current); }
       catch (error) {
         if (this.policies[id]?.isPermanentAuthError?.(error)) {
           await this.remove(id);
@@ -240,10 +212,9 @@ export class ProviderCredentialStore implements CredentialStore {
       // Pi passes refresh a lock-wait signal that it detaches before calling this
       // modifier, so only abandoned logins and direct writes are discarded here.
       options?.signal?.throwIfAborted();
-      if (next === undefined) return current && copyCredential(current);
-      const credential = copyCredential(next);
-      await this.save(id, credential);
-      return copyCredential(credential);
+      if (next === undefined) return current;
+      await this.save(id, next);
+      return next;
     }, options);
   }
   delete(id: string, options?: AuthOperationOptions): Promise<void> {

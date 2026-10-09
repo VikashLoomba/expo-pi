@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import type { AuthInteraction, LoginOptions, Models } from '@earendil-works/pi-ai';
+import type { AuthInteraction, CredentialStore, LoginOptions, Models } from '@earendil-works/pi-ai';
 import type { ConversationId, Storage } from '@earendil-works/pi-durable';
 
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
@@ -17,7 +17,7 @@ export interface ChatRuntimeSnapshot extends ChatServiceSnapshot {
 
 interface Credentials {
   readonly getProviderSnapshot: (providerId: string) => ProviderAccess;
-  readonly replaceApiKey: (providerId: string, key: string) => Promise<void>;
+  readonly modify: CredentialStore['modify'];
   readonly restoreProvider: (providerId: string) => Promise<void>;
 }
 
@@ -167,12 +167,14 @@ export class ChatRuntime {
     }
   }
 
-  async saveProviderKey(providerId: string, key: string) {
-    if (!key.trim()) throw new Error('Enter an API key.');
+  /** Pi's store contract has one write path, the same `modify` that `models.login` ends in. */
+  async saveProviderKey(providerId: string, input: string) {
+    const key = input.trim();
+    if (!key) throw new Error('Enter an API key.');
     if (!this.options.models.getProvider(providerId)?.auth.apiKey?.login) {
       throw new Error('This provider does not support API key sign-in.');
     }
-    await this.options.credentials.replaceApiKey(providerId, key);
+    await this.options.credentials.modify(providerId, async () => ({ type: 'api_key', key }));
   }
 
   /** Removes the saved credential. A failed removal stays pending so the account screen can retry it. */
