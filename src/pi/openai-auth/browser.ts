@@ -7,7 +7,7 @@ import { OPENAI_DISCOVERY } from './core';
 type BrowserOutcome = { source: 'browser'; result?: AuthSessionResult };
 type CallbackOutcome = { source: 'listener'; url?: string };
 
-/** Expo owns presentation; the optional native receiver owns only the HTTP callback. */
+/** Expo owns presentation; the native receiver owns only the HTTP callback. */
 export async function openOpenAIBrowser(request: AuthRequest, url: string, signal: AbortSignal): Promise<string | undefined> {
   signal.throwIfAborted();
   let sessionId: string | undefined;
@@ -18,7 +18,7 @@ export async function openOpenAIBrowser(request: AuthRequest, url: string, signa
   let browserPending = false;
   let browserDismissed = false;
   const stop = () => {
-    if (receiver && sessionId) stopped ??= receiver.stop(sessionId);
+    if (sessionId) stopped ??= receiver.stop(sessionId);
     return stopped ?? Promise.resolve();
   };
   const dismiss = () => {
@@ -33,20 +33,18 @@ export async function openOpenAIBrowser(request: AuthRequest, url: string, signa
   };
   signal.addEventListener('abort', abort, { once: true });
   try {
-    if (receiver) {
-      try {
-        // Await real readiness, not merely listener construction, before the
-        // browser can redirect. The native receiver caches an early callback.
-        sessionId = await receiver.start(request.state);
-        callback = receiver.waitForCallback(sessionId).then(
-          (value): CallbackOutcome => ({ source: 'listener', url: value }),
-          (): CallbackOutcome => ({ source: 'listener' }),
-        );
-      } catch {
-        signal.throwIfAborted();
-        // An occupied port or unavailable native module preserves the existing
-        // Expo browser and Pi manual_code fallback for this same PKCE attempt.
-      }
+    try {
+      // Await real readiness, not merely listener construction, before the
+      // browser can redirect. The native receiver caches an early callback.
+      sessionId = await receiver.start(request.state);
+      callback = receiver.waitForCallback(sessionId).then(
+        (value): CallbackOutcome => ({ source: 'listener', url: value }),
+        (): CallbackOutcome => ({ source: 'listener' }),
+      );
+    } catch {
+      signal.throwIfAborted();
+      // An occupied callback port keeps Expo's browser and Pi's manual_code
+      // fallback for this same PKCE attempt.
     }
     signal.throwIfAborted();
     browserPending = true;

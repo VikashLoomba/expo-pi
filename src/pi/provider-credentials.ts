@@ -33,7 +33,7 @@ interface ProviderCredentialSnapshot { providers: Readonly<Record<string, Provid
 const EMPTY_ACCESS: ProviderAccess = { ready: false, connected: false };
 
 export function providerCredentialKey(providerId: string) {
-  // Keep the existing key namespace so saved API keys remain available after upgrade.
+  // SecureStore keys allow only alphanumerics, '.', '-' and '_', so the provider ID is spelled in hex code points.
   const codePoints = Array.from(providerId, (character) => (character.codePointAt(0) ?? 0).toString(16));
   return `pi.provider.api-key.v1.${codePoints.join('-')}`;
 }

@@ -1,4 +1,4 @@
-import { requireOptionalNativeModule, type NativeModule } from 'expo';
+import { requireNativeModule, type NativeModule } from 'expo';
 
 /** A session owns one listener; a stale session ID cannot stop a later login. */
 export interface NativeOAuthCallbackModule extends NativeModule {
@@ -9,5 +9,4 @@ export interface NativeOAuthCallbackModule extends NativeModule {
   stop(sessionId: string): Promise<void>;
 }
 
-// Older development builds keep Pi's manual-return fallback.
-export default requireOptionalNativeModule<NativeOAuthCallbackModule>('PiOAuthCallback');
+export default requireNativeModule<NativeOAuthCallbackModule>('PiOAuthCallback');

@@ -48,7 +48,6 @@ export class DurableChatService {
   private readonly ids = new Map<string, ConversationId>();
   private readonly listeners = new Set<() => void>();
   private snapshot: ChatServiceSnapshot = { chats: [] };
-  private listScheduled = false;
   private closed = false;
   private closePromise?: Promise<void>;
 
@@ -141,19 +140,10 @@ export class DurableChatService {
     if (!state) return;
     this.chats.set(id, state);
     this.ids.set(String(id), id);
-    state.subscribe(this.scheduleList);
+    state.subscribe(this.updateList);
   }
 
-  private readonly scheduleList = () => {
-    if (this.listScheduled) return;
-    this.listScheduled = true;
-    queueMicrotask(() => {
-      this.listScheduled = false;
-      this.updateList();
-    });
-  };
-
-  private updateList() {
+  private readonly updateList = () => {
     if (this.closed) return;
     const chats = [...this.chats].flatMap(([id, state]) => {
       const summary = state.value ? summarizeChat(id, state.value) : undefined;
@@ -161,7 +151,7 @@ export class DurableChatService {
     }).sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id);
     this.snapshot = { ...this.snapshot, chats };
     this.notify();
-  }
+  };
 
   private notify() {
     for (const listener of [...this.listeners]) listener();
@@ -264,8 +254,11 @@ export class DurableChatService {
     const conversation = await this.harness.createConversation({
       ownership: { kind: 'ownerless' },
       agent: settings,
+      // Like pi's sandbox-per-conversation example, the chat's own documents exist from the creating commit, so an
+      // open chat observes its execution target through `documentState` from the start.
       init: async (tx, id) => {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
+        (await tx.doc(ExecutionTargetDoc, id)).target = { kind: 'local' };
       },
     }, context);
     await this.watchChat(conversation.id);

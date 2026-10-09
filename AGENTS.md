@@ -1,4 +1,4 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This is an Expo/React Native app for iOS. Prioritize iOS-native patterns and the components Expo provides.
 
 ## Expo has changed — do not trust your training data
 
@@ -29,7 +29,6 @@ Run lint and typecheck before declaring any task done.
 - Never use type casts (`as X`, `as unknown as X`) or non-null assertions (`x!`) without explicit permission from the owner. `as const` is fine. Prefer typed SDK APIs. A cast that seems necessary usually means a design seam is wrong (for example, rebuilding an SDK-issued id from a string instead of looking it up among the records the SDK returned).
 - Approved exception: reading pi-durable's built-in documents from `ConversationView.docs` by kind with the SDK's own types (`docs["pi.live"] as LiveState`, likewise `InboxState` and `AgentState`), in one helper, exactly as pi's v1.1.0 example `packages/durable/test/examples/21-late-join.ts` does. Don't replace it with hand-written decoders or shadow types.
 - Before inventing a pattern for a pi-durable, pi-ai or pi-env integration, find the matching upstream example or source at the installed version tag (github.com/earendil-works/pi, `packages/*/test/examples`, tag `v<installed version>`) and follow it, or state why none applies.
-- Tests assert behavior a user or an upstream contract cares about. Never assert object identity, memoization, lock ownership, call counts or internal ordering, and never keep a test only because the current code makes it pass.
 - Idiomatic first; no speculative performance work. Use Expo and pi-durable the way their docs and examples do and assume it is fast enough. Don't add caches, batching, budgets or other optimization layers without a measured problem on a real device.
 - No app-added limits by default; use library defaults. Never construct stress or adversarial scenarios (huge files, runaway loops, enormous outputs) to justify a limit or an optimization. Only ordinary, realistic use counts as evidence.
 - Upstream decides how; the product decides what. A missing upstream feature is never a reason to drop a product feature: build it in the simplest way consistent with upstream's mechanics. Any deviation from upstream's pattern needs the owner's approval.
@@ -47,8 +46,10 @@ Run lint and typecheck before declaring any task done.
 - Before implementing or reviewing a dependency integration, inspect the installed package's public contracts and the current canonical upstream example. Record the package version and source revision used; an existing app abstraction or test is not evidence of the upstream contract.
 - State who creates, borrows, cancels and closes each resource, including its lifetime across calls and application shutdown. Distinguish operation cancellation and caller-owned handles from shared-owner cleanup.
 - Choose the smallest integration that follows the upstream ownership and usage pattern. Any additional policy, reset boundary, counter or ownership layer needs a concrete product requirement or demonstrated correctness need. Existing code and tests are not requirements: remove unnecessary behavior rather than preserving it by default. Keep operation cancellation separate from filesystem lifetime.
-- Verify user-visible behavior and upstream semantics with behavioral tests, including relevant sharing, cancellation and shutdown boundaries. Tests must not preserve an incidental implementation choice merely because the current code makes it pass.
-- Review the final implementation against those contracts and update affected guidance. Report source assessment, automated tests, native/device checks and unverified behavior separately; passing tests do not establish guarantees they did not exercise.
+- Implementers don't write tests. Verify user-visible behavior on an iPhone or the iOS simulator, including relevant
+  sharing, cancellation and shutdown boundaries.
+- Review the final implementation against those contracts and update affected guidance. Report source assessment,
+  device checks and unverified behavior separately.
 
 ## Navigation & Routing
 
@@ -64,7 +65,8 @@ Docs: https://docs.expo.dev/eas/index.md
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx @expo/agent-cli run:ios|android` locally, or `eas build --profile development`.
+- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a
+  development build: `npx @expo/agent-cli run:ios` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
 
 <!-- BEGIN EXPO AGENT CLI MANAGED BLOCK -->

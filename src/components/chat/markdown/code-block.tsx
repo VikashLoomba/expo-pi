@@ -1,11 +1,11 @@
 import * as Clipboard from 'expo-clipboard';
-import { memo, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from '../icon';
 
-export const CodeBlock = memo(function CodeBlock({ language, code }: { language: string; code: string }) {
+export function CodeBlock({ language, code }: { language: string; code: string }) {
   const colors = useChatColors();
   const [copied, setCopied] = useState(false);
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -35,7 +35,7 @@ export const CodeBlock = memo(function CodeBlock({ language, code }: { language:
       <Text selectable style={[styles.code, { color: colors.text }]}>{code || ' '}</Text>
     </ScrollView>
   </View>;
-});
+}
 
 const styles = StyleSheet.create({
   container: { borderRadius: 13, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },

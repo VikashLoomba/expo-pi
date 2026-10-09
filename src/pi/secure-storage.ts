@@ -8,7 +8,7 @@ export interface CredentialBackend {
 }
 
 export function createCredentialBackend(): CredentialBackend {
-  // Keep this service name: saved API keys, OAuth grants and the OpenAI installation ID live under it.
+  // This one service holds saved API keys, OAuth grants and the OpenAI installation ID.
   const options: SecureStore.SecureStoreOptions = {
     keychainService: 'com.vikashloomba.piagent.oauth',
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,

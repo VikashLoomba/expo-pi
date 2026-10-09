@@ -21,7 +21,6 @@ function bundledModule(target: Target): number {
 }
 /* eslint-enable @typescript-eslint/no-require-imports */
 
-const loaded = new Map<Target, Promise<DaemonBinary>>();
 async function readBundled(target: Target): Promise<DaemonBinary> {
   const asset = await Asset.fromModule(bundledModule(target)).downloadAsync();
   if (!asset.localUri) throw new Error('The bundled Pi daemon asset is unavailable. Reinstall the app.');
@@ -34,25 +33,11 @@ async function readBundled(target: Target): Promise<DaemonBinary> {
   return { bytes, sha256 };
 }
 
-/** Loads only the detected target, checks the pinned hash, and gives the caller owned bytes. */
+/** Loads only the detected target and checks the pinned hash. */
 export async function loadPackagedDaemon(remote: DaemonPlatform, signal: AbortSignal): Promise<DaemonBinary> {
   signal.throwIfAborted();
   const target: Target = `${remote.platform}-${remote.arch}`;
-  let loading = loaded.get(target);
-  if (!loading) {
-    loading = readBundled(target).catch(() => { throw new BootstrapError('DAEMON_ASSET'); });
-    loaded.set(target, loading);
-    void loading.catch(() => { if (loaded.get(target) === loading) loaded.delete(target); });
-  }
-  // Native asset reads may be shared, but a cancelled admission must stop
-  // waiting immediately and release its SSH connection independently.
-  const pending = loading;
-  const binary = await new Promise<DaemonBinary>((resolve, reject) => {
-    const abort = () => reject(signal.reason ?? new Error('Pi daemon preparation cancelled.'));
-    signal.addEventListener('abort', abort, { once: true });
-    void pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-    if (signal.aborted) abort();
-  });
+  const binary = await readBundled(target).catch(() => { throw new BootstrapError('DAEMON_ASSET'); });
   signal.throwIfAborted();
-  return { bytes: binary.bytes.slice(), sha256: binary.sha256 };
+  return binary;
 }

@@ -52,7 +52,6 @@ export async function testRemoteHost(repository: RemoteHostRepository, id: strin
   const connection = new Connection({
     openChannel: createSshChannelFactory({
       host: host.hostname, port: host.port, username: host.username, auth,
-      connectTimeoutMs: 120_000,
       onProgress: options.onProgress,
       hostKeyAlgorithms: trustedHostKey ? [trustedHostKey.algorithm] : undefined,
       verifyHostKey: async (observed) => {

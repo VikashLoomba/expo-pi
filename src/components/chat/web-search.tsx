@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { WebSearchCall } from '@/chat/web-search-types';
@@ -33,7 +33,7 @@ function SearchCall({ call }: { call: WebSearchCall }) {
 }
 
 /** Search activity lives with its assistant response, so no synthetic local tool runs are shown. */
-export const WebSearchActivity = memo(function WebSearchActivity({ calls, messageId }: {
+export function WebSearchActivity({ calls, messageId }: {
   calls: readonly WebSearchCall[]; messageId: string;
 }) {
   const colors = useChatColors();
@@ -60,9 +60,9 @@ export const WebSearchActivity = memo(function WebSearchActivity({ calls, messag
     </Pressable>
     {open ? <View style={[styles.calls, { borderTopColor: colors.border }]}>{calls.map((call) => <SearchCall key={call.id} call={call} />)}</View> : null}
   </View>;
-});
+}
 
-export const WebSearchSources = memo(function WebSearchSources({ sources, messageId }: {
+export function WebSearchSources({ sources, messageId }: {
   sources: readonly SearchSource[]; messageId: string;
 }) {
   const colors = useChatColors();
@@ -93,7 +93,7 @@ export const WebSearchSources = memo(function WebSearchSources({ sources, messag
       <ChatIcon name="chevron" size={10} color={colors.muted} />
     </Pressable>)}</View> : null}
   </View>;
-});
+}
 
 const styles = StyleSheet.create({
   activity: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, overflow: 'hidden' },

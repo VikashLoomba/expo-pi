@@ -55,7 +55,6 @@
   },
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
     "ios": "expo run:ios",
     "lint": "expo lint"
   },

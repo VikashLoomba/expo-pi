@@ -1,4 +1,3 @@
-import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -71,14 +70,14 @@ function ContentBlock({ block, citations }: BlockProps) {
 }
 
 /** Blocks are keyed by source offset, so completed blocks stay mounted as later content streams. */
-export const MessageContent = memo(function MessageContent({ text, streaming = false, citations = noCitations }: {
+export function MessageContent({ text, streaming = false, citations = noCitations }: {
   text: string;
   streaming?: boolean;
   citations?: readonly InlineCitation[];
 }) {
-  const blocks = useMemo(() => parseMessageMarkdown(text, streaming), [text, streaming]);
+  const blocks = parseMessageMarkdown(text, streaming);
   return <View style={styles.content}><BlockList blocks={blocks} citations={citations} /></View>;
-});
+}
 
 const styles = StyleSheet.create({
   content: { minHeight: 25 },

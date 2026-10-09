@@ -1,5 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ChatMessage } from '@/chat/types';
@@ -11,14 +11,14 @@ import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
 import { collectSearchSources, inlineCitations } from './web-search-presentation';
 
-export const MessageRow = memo(function MessageRow({ message, stopping = false }: {
+export function MessageRow({ message, stopping = false }: {
   message: ChatMessage; stopping?: boolean;
 }) {
   const colors = useChatColors();
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const sources = useMemo(() => message.webSearch ? collectSearchSources(message.webSearch) : [], [message.webSearch]);
-  const citations = useMemo(() => inlineCitations(message.text, message.webSearch?.citations ?? [], sources), [message.text, message.webSearch, sources]);
+  const sources = message.webSearch ? collectSearchSources(message.webSearch) : [];
+  const citations = inlineCitations(message.text, message.webSearch?.citations ?? [], sources);
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timeout.current), []);
   const copy = async () => {
@@ -65,7 +65,7 @@ export const MessageRow = memo(function MessageRow({ message, stopping = false }
       <Text style={[styles.copiedLabel, { color: colors.muted }]}>{copied ? 'Copied' : ' '}</Text>
     </Pressable>
   </View>;
-});
+}
 
 const styles = StyleSheet.create({
   userRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 10, paddingBottom: 21 },
