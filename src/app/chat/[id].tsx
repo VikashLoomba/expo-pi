@@ -1,11 +1,11 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
 import type { ConversationId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useChatApp, useChatControls, useChatId, useChatView } from '@/chat/chat-provider';
+import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
 import { useChatActions } from '@/components/chat/chat-actions';
 import { Composer } from '@/components/chat/composer';
 import { ChatIcon } from '@/components/chat/icon';
@@ -27,6 +27,13 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const { ready, service, catalog, providerAccess, error: appError, dismissError } = useChatApp();
   const view = useChatView(id, true);
   const conversation = useChatControls(view);
+  const status = useChatStatus(view);
+  const shown = useRef(false);
+  useEffect(() => {
+    if (status === 'ready') shown.current = true;
+    // A shown chat goes missing only when Delete in its menu deletes it, and then the chat list is what is left.
+    else if (status === 'missing' && shown.current) router.back();
+  }, [status]);
   // A draft keeps one request ID for every attempt to send it, so a resend after a failure does not submit twice.
   const [draft, setDraft] = useState(() => ({ text: '', requestId: uuidv7() }));
   const changeDraft = useCallback((text: string) => {
@@ -114,7 +121,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
         </Stack.Toolbar.MenuAction>
       </Stack.Toolbar.Menu>
     </Stack.Toolbar>
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerOffset}>
+    <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
       <SafeAreaView style={styles.screen} edges={['bottom']}>
         <ChatTranscript ref={transcript} view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} />
         {settingsError && <View style={styles.banner}><InlineNotice testID="conversation-settings-error" message={settingsError}

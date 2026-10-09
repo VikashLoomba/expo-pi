@@ -74,6 +74,6 @@ export function RemoteHostForm({ host, onSave, onCancel }: {
 const styles = StyleSheet.create({
   form: { gap: 16 }, title: { fontSize: 22, fontWeight: '600' }, field: { gap: 8 }, label: { fontSize: 13, fontWeight: '500' },
   input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, minHeight: 48, padding: 13, fontSize: 15 },
-  multiline: { minHeight: 120, maxHeight: 240, textAlignVertical: 'top', fontSize: 12 },
+  multiline: { minHeight: 120, maxHeight: 240, fontSize: 12 },
   detail: { fontSize: 13, lineHeight: 20 }, authentication: { flexDirection: 'row', gap: 10 },
 });

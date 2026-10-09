@@ -1,6 +1,6 @@
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef } from 'react';
-import { AppState, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp } from '@/chat/chat-provider';
@@ -133,6 +133,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1 }, content: { padding: 22, gap: 20, width: '100%', maxWidth: 620, alignSelf: 'center' },
   intro: { fontSize: 15, lineHeight: 23 }, detail: { fontSize: 13, lineHeight: 20 },
   card: { padding: 18, gap: 14, borderWidth: StyleSheet.hairlineWidth, borderRadius: 18 },
-  name: { fontSize: 19, fontWeight: '600' }, fingerprint: { fontSize: 14, lineHeight: 22, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  name: { fontSize: 19, fontWeight: '600' }, fingerprint: { fontSize: 14, lineHeight: 22, fontFamily: 'Menlo' },
   confirmation: { gap: 12, paddingTop: 6 },
 });

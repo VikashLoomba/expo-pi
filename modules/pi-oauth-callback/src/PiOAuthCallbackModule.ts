@@ -9,5 +9,5 @@ export interface NativeOAuthCallbackModule extends NativeModule {
   stop(sessionId: string): Promise<void>;
 }
 
-// Older development builds and other platforms keep Pi's manual-return fallback.
+// Older development builds keep Pi's manual-return fallback.
 export default requireOptionalNativeModule<NativeOAuthCallbackModule>('PiOAuthCallback');

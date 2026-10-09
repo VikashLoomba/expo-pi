@@ -8,8 +8,9 @@ type Chat = { id: ConversationId; title: string };
 const errorText = (cause: unknown, fallback: string) => cause instanceof Error ? cause.message : fallback;
 
 /**
- * Rename and delete for the chat menus. Failures go to `onError`, so each screen shows them in its own error banner;
- * a delete that fails after the chat is deleted reports there while the chat stays deleted.
+ * Rename and delete for the chat menus. Failures go to `onError`, so each screen shows them in its own error banner.
+ * A delete whose workspace removal fails after the chat is deleted shows an alert instead, because the screen that
+ * asked may be gone.
  */
 export function useChatActions(onError: (message: string) => void) {
   const { service } = useChatApp();
@@ -33,8 +34,14 @@ export function useChatActions(onError: (message: string) => void) {
       style: 'destructive',
       onPress: () => {
         if (!service) return;
-        void service.deleteChat(chat.id)
-          .catch((cause: unknown) => onError(errorText(cause, 'Could not delete this chat.')));
+        void service.deleteChat(chat.id).catch((cause: unknown) => {
+          // The list leaves out deleted chats, so a chat missing from it was deleted and only its files remain.
+          if (service.getSnapshot().chats.some((listed) => listed.id === chat.id)) {
+            onError(errorText(cause, 'Could not delete this chat.'));
+            return;
+          }
+          Alert.alert("Couldn't remove workspace files", errorText(cause, 'Could not remove this chat’s files.'));
+        });
       },
     },
   ]);

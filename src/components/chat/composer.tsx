@@ -19,7 +19,7 @@ export function Composer({ value, onChange, onSend, onStop, onConnect, busy, adm
     <View style={[styles.inputShell, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <TextInput ref={inputRef} testID="composer-input" accessibilityLabel="Message Pi" value={value} onChangeText={onChange}
         placeholder={busy ? 'Write a follow-up…' : 'Message Pi…'} placeholderTextColor={colors.muted}
-        multiline maxLength={30000} editable={!admitting} textAlignVertical="top" style={[styles.input, { color: colors.text }]}
+        multiline maxLength={30000} editable={!admitting} style={[styles.input, { color: colors.text }]}
         selectionColor={colors.accent} />
       {busy ? <Pressable testID="stop-generation" accessibilityRole="button" accessibilityLabel="Stop response" onPress={onStop} disabled={disabled}
         style={({ pressed }) => [styles.send, { backgroundColor: colors.accentSoft, opacity: pressed || disabled ? 0.5 : 1 }]}>

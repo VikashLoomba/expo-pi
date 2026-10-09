@@ -1,4 +1,4 @@
-import { Platform, StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { openExternalLink } from '../source-link';
@@ -38,6 +38,6 @@ export function InlineContent({ fragment, citations }: {
 const styles = StyleSheet.create({
   strong: { fontWeight: '600' },
   emphasis: { fontStyle: 'italic' },
-  code: { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: 14 },
+  code: { fontFamily: 'Menlo', fontSize: 14 },
   deleted: { textDecorationLine: 'line-through' },
 });

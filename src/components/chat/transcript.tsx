@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { memo, useCallback, useImperativeHandle, type Ref } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@/chat/chat-provider';
@@ -71,7 +71,7 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
   return <View style={styles.transcript}>
     <Animated.FlatList ref={list} testID="message-list" data={messages} keyExtractor={keyExtractor}
       renderItem={renderMessage} extraData={stopping}
-      keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'} keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
       scrollEventThrottle={16} initialNumToRender={20} contentContainerStyle={styles.messages}
       onScroll={onScroll} onContentSizeChange={onContentSizeChange} onLayout={onLayout}
       ListFooterComponent={<View style={styles.working}>

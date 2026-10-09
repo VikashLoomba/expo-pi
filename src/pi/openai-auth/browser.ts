@@ -1,8 +1,7 @@
 import type { AuthRequest, AuthSessionResult } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import { Platform } from 'react-native';
 
-import callbackModule from '../../../modules/pi-oauth-callback/src/PiOAuthCallbackModule';
+import receiver from '../../../modules/pi-oauth-callback/src/PiOAuthCallbackModule';
 import { OPENAI_DISCOVERY } from './core';
 
 type BrowserOutcome = { source: 'browser'; result?: AuthSessionResult };
@@ -11,7 +10,6 @@ type CallbackOutcome = { source: 'listener'; url?: string };
 /** Expo owns presentation; the optional native receiver owns only the HTTP callback. */
 export async function openOpenAIBrowser(request: AuthRequest, url: string, signal: AbortSignal): Promise<string | undefined> {
   signal.throwIfAborted();
-  const receiver = Platform.OS === 'ios' ? callbackModule : null;
   let sessionId: string | undefined;
   let stopped: Promise<void> | undefined;
   let callback: Promise<CallbackOutcome> | undefined;

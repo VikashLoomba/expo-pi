@@ -3,6 +3,7 @@
     "name": "pi-agent",
     "slug": "pi-agent",
     "version": "1.0.0",
+    "platforms": ["ios"],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "piagent",
@@ -10,15 +11,6 @@
     "ios": {
       "bundleIdentifier": "com.vikashloomba.piagent",
       "icon": "./assets/expo.icon"
-    },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
     },
     "plugins": [
       "expo-router",

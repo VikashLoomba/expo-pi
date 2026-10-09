@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { memo, useEffect, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from '../icon';
@@ -44,5 +44,5 @@ const styles = StyleSheet.create({
   copyButton: { minHeight: 44, minWidth: 80, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 5 },
   copyLabel: { fontSize: 12 },
   scroll: { padding: 13, minHeight: 47 },
-  code: { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: 13, lineHeight: 21 },
+  code: { fontFamily: 'Menlo', fontSize: 13, lineHeight: 21 },
 });

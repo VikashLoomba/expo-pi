@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ChatMessage } from '@/chat/types';
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -58,5 +58,5 @@ const styles = StyleSheet.create({
   details: { borderTopWidth: StyleSheet.hairlineWidth, padding: 14, gap: 8 },
   label: { fontSize: 10, fontWeight: '600', letterSpacing: 1.1, marginTop: 4 },
   summary: { fontSize: 12 },
-  output: { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: 12, lineHeight: 19 },
+  output: { fontFamily: 'Menlo', fontSize: 12, lineHeight: 19 },
 });
