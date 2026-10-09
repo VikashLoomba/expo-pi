@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FlatList, LayoutChangeEvent } from 'react-native';
 import {
   cancelAnimation, Easing, ReduceMotion, runOnJS, runOnUI, scrollTo,
@@ -75,9 +75,9 @@ export function useTranscriptScroll() {
       following.set(Math.max(0, height.get() - viewport.get()) - event.contentOffset.y <= 48);
     },
   });
-  const onContentSizeChange = useCallback((_width: number, value: number) => { height.set(value); }, [height]);
-  const onLayout = useCallback((event: LayoutChangeEvent) => { viewport.set(event.nativeEvent.layout.height); }, [viewport]);
-  const scrollToLatest = useCallback(() => {
+  const onContentSizeChange = (_width: number, value: number) => { height.set(value); };
+  const onLayout = (event: LayoutChangeEvent) => { viewport.set(event.nativeEvent.layout.height); };
+  const scrollToLatest = () => {
     runOnUI(() => {
       'worklet';
       dragging.set(false);
@@ -88,7 +88,7 @@ export function useTranscriptScroll() {
         duration: 160, easing: Easing.out(Easing.quad), reduceMotion: ReduceMotion.System,
       }));
     })();
-  }, [dragging, following, height, momentum, offset, position, viewport]);
+  };
 
   return { list, onScroll, onContentSizeChange, onLayout, scrollToLatest, showScrollDown };
 }

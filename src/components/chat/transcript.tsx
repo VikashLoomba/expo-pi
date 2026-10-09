@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { memo, useCallback, useImperativeHandle, type Ref } from 'react';
+import { memo, useImperativeHandle, type Ref } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
@@ -38,7 +38,10 @@ const keyExtractor = (message: ChatMessage) => message.id;
 
 export interface ChatTranscriptHandle { scrollToLatest: () => void }
 
-/** Only this subtree subscribes to text deltas. Header, composer and history rows stay still. */
+/**
+ * Only this subtree subscribes to text deltas. `memo` stays because the chat screen that renders it is not compiled
+ * by React Compiler (it contains `try … finally`).
+ */
 export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, ref }: {
   view: ChatView | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
   ref: Ref<ChatTranscriptHandle>;
@@ -49,9 +52,8 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
   const busy = !!controls?.busy;
   const status = useChatStatus(view);
   const error = useChatError(view);
-  // Only the streaming row reads `stopping`, so the other rows keep their memoized render.
-  const renderMessage = useCallback(({ item }: { item: ChatMessage }) =>
-    <MessageRow message={item} stopping={stopping && !!item.streaming} />, [stopping]);
+  const renderMessage = ({ item }: { item: ChatMessage }) =>
+    <MessageRow message={item} stopping={stopping && !!item.streaming} />;
   const working = stopping ? 'Stopping…' : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
   const { list, onScroll, onContentSizeChange, onLayout, scrollToLatest, showScrollDown } = useTranscriptScroll();
   useImperativeHandle(ref, () => ({ scrollToLatest }), [scrollToLatest]);

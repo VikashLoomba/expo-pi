@@ -194,28 +194,27 @@ function useChatController() {
   const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
   const signOutPending = disconnectingProvider !== undefined;
-  const onSignedIn = useCallback(() => setCatalog(buildModelCatalog(models)), [models]);
+  const onSignedIn = () => setCatalog(buildModelCatalog(models));
   const { setAuthNotice, ...signIn } = useProviderSignIn({ models, credentials, signOutPending, onSignedIn });
   const { signingIn, cancelSignIn } = signIn;
 
-  const providerAccess = useCallback((providerId: string): ProviderAccess => {
+  const providerAccess = (providerId: string): ProviderAccess => {
     const state = credentialState.providers[providerId] ?? { ready: false, connected: false };
     return signOutPending ? { ...state, ready: false, connected: false } : state;
-  }, [credentialState, signOutPending]);
-  const providerName = useCallback((providerId: string) => models.getProvider(providerId)?.name ?? providerId,
-    [models]);
-  const refreshCatalog = useCallback(async () => {
+  };
+  const providerName = (providerId: string) => models.getProvider(providerId)?.name ?? providerId;
+  const refreshCatalog = async () => {
     const result = await models.refresh();
     setCatalog(buildModelCatalog(models));
     if (result.errors.size) {
       throw new Error('Some provider models could not be refreshed. Existing models are still available.');
     }
-  }, [models]);
-  const retryAuth = useCallback(async (providerId: string) => {
+  };
+  const retryAuth = async (providerId: string) => {
     setAuthNotice(undefined);
     await credentials.restoreProvider(providerId);
-  }, [credentials, setAuthNotice]);
-  const saveProviderKey = useCallback(async (providerId: string, input: string) => {
+  };
+  const saveProviderKey = async (providerId: string, input: string) => {
     if (signingIn) throw new Error('Finish or cancel sign-in before changing provider credentials.');
     const key = input.trim();
     if (!key) throw new Error('Enter an API key.');
@@ -225,9 +224,9 @@ function useChatController() {
     // Pi's store contract has one write path, the same `modify` that `models.login` ends in.
     await credentials.modify(providerId, async () => ({ type: 'api_key', key }));
     await refreshCatalog();
-  }, [credentials, models, refreshCatalog, signingIn]);
+  };
   /** Removes the saved credential. A failed removal stays pending so the account screen can retry it. */
-  const disconnectProvider = useCallback(async (providerId: string) => {
+  const disconnectProvider = async (providerId: string) => {
     if (disconnectingProvider !== undefined && disconnectingProvider !== providerId) {
       throw new Error(`Finish disconnecting ${providerName(disconnectingProvider)} before removing another provider.`);
     }
@@ -239,17 +238,17 @@ function useChatController() {
       throw new Error(`Could not remove the saved ${providerName(providerId)} key. Try again.`, { cause: error });
     }
     setDisconnectingProvider(undefined);
-  }, [cancelSignIn, disconnectingProvider, models, providerName]);
-  const providerOAuth = useCallback((providerId: string) => {
+  };
+  const providerOAuth = (providerId: string) => {
     const oauth = models.getProvider(providerId)?.auth.oauth;
     return oauth ? { name: oauth.name, loginLabel: oauth.loginLabel, isSubscription: oauth.isSubscription } : undefined;
-  }, [models]);
+  };
 
   // Hides the current app-wide error; a later failed open or Harness report shows again.
-  const dismissError = useCallback(() => {
+  const dismissError = () => {
     setOpenError(undefined);
     service?.dismissError();
-  }, [service, setOpenError]);
+  };
 
   // Only a failed open and the Harness's own reports reach every screen; operations return their errors to the
   // screen that started them.
@@ -301,12 +300,12 @@ export function useChatMessages(view: ChatView | undefined): readonly ChatMessag
 }
 
 export function useChatStatus(view: ChatView | undefined): ChatViewSnapshot['status'] {
-  const getStatus = useCallback(() => view?.getSnapshot().status ?? 'loading', [view]);
+  const getStatus = () => view?.getSnapshot().status ?? 'loading';
   return useSyncExternalStore(view?.subscribe ?? subscribeNothing, getStatus, getStatus);
 }
 
 /** Why the chat could not be opened, when it could not. */
 export function useChatError(view: ChatView | undefined): string | undefined {
-  const getError = useCallback(() => view?.getSnapshot().error, [view]);
+  const getError = () => view?.getSnapshot().error;
   return useSyncExternalStore(view?.subscribe ?? subscribeNothing, getError, getError);
 }

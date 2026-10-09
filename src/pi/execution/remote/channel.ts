@@ -96,7 +96,7 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
       connection = await connect({
         host: snapshot.host, port: snapshot.port, username: snapshot.username, auth: snapshot.auth,
         verifyHostKey: snapshot.verifyHostKey, hostKeyAlgorithms: snapshot.hostKeyAlgorithms,
-        signal, connectTimeoutMs: snapshot.connectTimeoutMs ?? 30_000,
+        signal, connectTimeoutMs: snapshot.connectTimeoutMs,
         onDisconnected: () => notifyClosed(new Error('SSH connection lost. Check the Tailscale VPN and remote host.')),
       });
       if (signal.aborted || closingRequested) {

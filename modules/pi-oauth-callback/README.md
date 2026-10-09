@@ -6,7 +6,7 @@ The module is a transport adapter for browser authorization with PKCE. It does n
 
 ## Integration and API
 
-[`src/PiOAuthCallbackModule.ts`](src/PiOAuthCallbackModule.ts) loads `PiOAuthCallback` through Expo's `requireOptionalNativeModule`. Other platforms or older builds without this native module retain the OAuth adapter's manual callback fallback.
+[`src/PiOAuthCallbackModule.ts`](src/PiOAuthCallbackModule.ts) loads `PiOAuthCallback` through Expo's `requireNativeModule`; the app requires it.
 
 | Method | Contract |
 | --- | --- |
@@ -14,7 +14,7 @@ The module is a transport adapter for browser authorization with PKCE. It does n
 | `waitForCallback(sessionId): Promise<string>` | Resolves once with the complete callback URL. A callback received before this call is retained until consumed or expired. A second waiter or delivery is rejected. |
 | `stop(sessionId): Promise<void>` | Stops that session and waits for listener cancellation. Repeated or stale IDs are harmless. Rejects an outstanding waiter unless a callback was already accepted, in which case the accepted callback wins. |
 
-[`browser.ts`](../../src/pi/openai-auth/browser.ts) starts the receiver with the existing Expo `AuthRequest.state`, registers the callback waiter, then presents the Expo authentication browser. It arbitrates native reception, browser completion, and cancellation. After reception it dismisses and drains the Expo browser before allowing another login; its `finally` block stops the native session. If native startup is unavailable, the existing Expo/browser path and same-request manual fallback remain available.
+[`browser.ts`](../../src/pi/openai-auth/browser.ts) starts the receiver with the existing Expo `AuthRequest.state`, registers the callback waiter, then presents the Expo authentication browser. It arbitrates native reception, browser completion, and cancellation. After reception it dismisses and drains the Expo browser before allowing another login; its `finally` block stops the native session. If the receiver cannot start, for example because the port is busy, the Expo/browser path and the same-request manual fallback remain available.
 
 The returned URL still passes through the TypeScript adapter's full callback validation before token exchange. The native module does not generate state or PKCE, interpret tokens, persist credentials, or make an outbound request. Expo owns browser presentation; Pi's `Models` and the app's `OAuthAuth` adapter own authentication. Manual entry reuses the original authorization request and verifier.
 

@@ -43,8 +43,8 @@ export async function openOpenAIBrowser(request: AuthRequest, url: string, signa
       );
     } catch {
       signal.throwIfAborted();
-      // An occupied callback port keeps Expo's browser and Pi's manual_code
-      // fallback for this same PKCE attempt.
+      // Whenever the receiver cannot start (an occupied port, an active session, a startup failure),
+      // Expo's browser and Pi's manual_code fallback still complete this same PKCE attempt.
     }
     signal.throwIfAborted();
     browserPending = true;

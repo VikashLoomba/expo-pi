@@ -254,8 +254,8 @@ export class DurableChatService {
     const conversation = await this.harness.createConversation({
       ownership: { kind: 'ownerless' },
       agent: settings,
-      // Like pi's sandbox-per-conversation example, the chat's own documents exist from the creating commit, so an
-      // open chat observes its execution target through `documentState` from the start.
+      // As pi's examples 06 and 29 create in `init` a document they later read, the execution target exists from the
+      // creating commit, so an open chat observes it through `documentState` from the start.
       init: async (tx, id) => {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
         (await tx.doc(ExecutionTargetDoc, id)).target = { kind: 'local' };
