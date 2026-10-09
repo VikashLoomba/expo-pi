@@ -6,11 +6,11 @@ import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View, type
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useChatId, useChatView } from '@/chat/chat-provider';
-import { ChatActions } from '@/components/chat/chat-actions';
+import { useChatActions } from '@/components/chat/chat-actions';
 import { Composer } from '@/components/chat/composer';
 import { ChatIcon } from '@/components/chat/icon';
 import { ChatTranscript, type ChatTranscriptHandle } from '@/components/chat/transcript';
-import { IconButton, InlineNotice } from '@/components/chat/primitives';
+import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { findCatalogModel, getModelSettingsError } from '@/pi/model-catalog';
@@ -24,7 +24,7 @@ export default function ConversationRoute() {
 
 function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const colors = useChatColors();
-  const { ready, service, catalog, providerAccess, error: appError } = useChatApp();
+  const { ready, service, catalog, providerAccess, error: appError, dismissError } = useChatApp();
   const view = useChatView(id, true);
   const conversation = useChatControls(view);
   // A draft keeps one request ID for every attempt to send it, so a resend after a failure does not submit twice.
@@ -35,8 +35,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [localError, setLocalError] = useState<string>();
-  // Held while the menu is open, so it stays open to report a failure after the chat is deleted.
-  const [actionsChat, setActionsChat] = useState<{ id: ConversationId; title: string }>();
+  const actions = useChatActions(setLocalError);
   const [headerOffset, setHeaderOffset] = useState(0);
   const transcript = useRef<ChatTranscriptHandle>(null);
   const input = useRef<TextInputInstance>(null);
@@ -56,9 +55,8 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     if (id !== undefined) router.push({ pathname: '/chat-settings/[id]', params: { id } });
   };
   const openAccount = () => router.push({ pathname: '/account', params: { provider: providerId } });
-  const openActions = () => {
-    if (id !== undefined && conversation) setActionsChat({ id, title: conversation.title });
-  };
+  // Undefined while the chat is loading, unavailable or deleted, which hides its menu.
+  const chat = id !== undefined && conversation ? { id, title: conversation.title } : undefined;
   const choosePrompt = useCallback((text: string) => {
     changeDraft(text);
     input.current?.focus();
@@ -89,6 +87,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     finally { setStopping(false); }
   };
   const messageError = localError || conversation?.error || appError || access.error;
+  const showsAppError = !localError && !conversation?.error && !!appError;
   const accountStatus = !access.ready ? 'Restoring your connection…'
     : access.error ? `Reconnect ${provider?.name || providerId} in Account`
       : `Connect ${provider?.name || providerId || 'your provider'} to send a message`;
@@ -101,16 +100,31 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
         <Text numberOfLines={1} style={[styles.headerName, { color: colors.text }]}>{conversation?.title || 'New chat'}</Text>
         <View style={styles.headerSettings}><Text numberOfLines={1} style={[styles.headerSubtitle, { color: colors.muted }]}>{busy ? `Working… · ${settingsLabel}` : settingsLabel}</Text><ChatIcon name="down" color={colors.muted} size={9} /></View>
       </Pressable>,
-      headerRight: () => <IconButton testID="conversation-options" icon="more" label="Chat options"
-        disabled={!conversation || !ready} onPress={openActions} />,
     }} />
+    <Stack.Toolbar placement="right">
+      <Stack.Toolbar.Menu icon="ellipsis.circle" accessibilityLabel="Chat options" hidden={!chat}>
+        <Stack.Toolbar.MenuAction icon="slider.horizontal.3" onPress={openSettings}>
+          Model settings
+        </Stack.Toolbar.MenuAction>
+        <Stack.Toolbar.MenuAction icon="pencil" onPress={() => { if (chat) actions.rename(chat); }}>
+          Rename
+        </Stack.Toolbar.MenuAction>
+        <Stack.Toolbar.MenuAction icon="trash" destructive onPress={() => { if (chat) actions.remove(chat); }}>
+          Delete
+        </Stack.Toolbar.MenuAction>
+      </Stack.Toolbar.Menu>
+    </Stack.Toolbar>
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerOffset}>
       <SafeAreaView style={styles.screen} edges={['bottom']}>
         <ChatTranscript ref={transcript} view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} />
         {settingsError && <View style={styles.banner}><InlineNotice testID="conversation-settings-error" message={settingsError}
           action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} /></View>}
-        {messageError && messageError !== settingsError && <View style={styles.banner}><InlineNotice testID="conversation-error" message={messageError} action={localError ? 'Dismiss' : access.error ? 'Account' : undefined}
-          onAction={localError ? () => setLocalError(undefined) : access.error ? openAccount : undefined} /></View>}
+        {messageError && messageError !== settingsError && <View style={styles.banner}>
+          <InlineNotice testID="conversation-error" message={messageError}
+            action={localError || showsAppError ? 'Dismiss' : access.error ? 'Account' : undefined}
+            onAction={localError ? () => setLocalError(undefined) : showsAppError ? dismissError
+              : access.error ? openAccount : undefined} />
+        </View>}
         <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
           onStop={() => { void stop(); }}
           onConnect={openAccount} busy={busy} admitting={admitting} connected={access.connected}
@@ -118,7 +132,6 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
           accountStatus={accountStatus} inputRef={input} />
       </SafeAreaView>
     </KeyboardAvoidingView>
-    <ChatActions chat={actionsChat} onClose={() => setActionsChat(undefined)} />
   </View>;
 }
 

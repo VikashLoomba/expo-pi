@@ -1,11 +1,10 @@
-import { router, Stack } from 'expo-router';
+import { Link, router, Stack } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp } from '@/chat/chat-provider';
-import type { ChatSummary } from '@/chat/types';
-import { ChatActions } from '@/components/chat/chat-actions';
+import { useChatActions } from '@/components/chat/chat-actions';
 import { ChatIcon } from '@/components/chat/icon';
 import { ActionButton, IconButton, InlineNotice, PiMark } from '@/components/chat/primitives';
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -22,13 +21,14 @@ function dateLabel(timestamp: number) {
 export default function ChatsScreen() {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { ready, error, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, service } = useChatApp();
+  const { ready, error, dismissError, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, service } =
+    useChatApp();
   const connectionsReady = catalog.every((provider) => providerAccess(provider.id).ready);
   const connectionError = catalog.map((provider) => providerAccess(provider.id).error).find(Boolean);
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
   const [localError, setLocalError] = useState<string>();
-  const [selected, setSelected] = useState<ChatSummary>();
+  const actions = useChatActions(setLocalError);
   const query = search.trim().toLocaleLowerCase();
   const visibleChats = query ? chats.filter((chat) => `${chat.title} ${chat.preview}`.toLocaleLowerCase().includes(query)) : chats;
   const newChat = async () => {
@@ -60,25 +60,45 @@ export default function ChatsScreen() {
             autoCorrect={false} returnKeyType="search" style={[styles.searchInput, { color: colors.text }]} />
           {!!search && <IconButton icon="close" label="Clear search" onPress={() => setSearch('')} />}
         </View>}
-        {(localError || error) && <InlineNotice testID="chat-list-error" message={localError || error || ''} />}
+        {(localError || error) && <InlineNotice testID="chat-list-error" message={localError || error || ''}
+          action="Dismiss" onAction={localError ? () => setLocalError(undefined) : dismissError} />}
         {chats.length > 0 && <View style={styles.sectionRow}>
           <Text style={[styles.sectionTitle, { color: colors.secondary }]}>{query ? `${visibleChats.length} results` : 'YOUR CONVERSATIONS'}</Text>
           <Text style={[styles.savedLabel, { color: colors.muted }]}>Saved on this device</Text>
         </View>}
       </View>}
-      renderItem={({ item }) => <Pressable testID={`chat-row-${item.id}`} accessibilityRole="button" accessibilityLabel={`${item.title || 'New chat'}. ${item.preview || 'No messages yet'}`}
-        onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.id } })} onLongPress={() => setSelected(item)}
-        style={({ pressed }) => [styles.chatRow, { borderBottomColor: colors.border, backgroundColor: pressed ? colors.subtle : 'transparent' }]}>
-        <View style={[styles.chatGlyph, { backgroundColor: colors.surface }]}><ChatIcon name="message" color={colors.secondary} size={19} /></View>
-        <View style={styles.chatInfo}>
-          <View style={styles.chatHeading}><Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>{item.title || 'New chat'}</Text>
-            <Text style={[styles.chatDate, { color: colors.muted }]}>{dateLabel(item.updatedAt)}</Text></View>
-          <Text numberOfLines={2} style={[styles.chatPreview, { color: colors.secondary }]}>{item.preview || 'A fresh start. What’s on your mind?'}</Text>
-        </View>
-        <Pressable testID={`chat-options-${item.id}`} accessibilityRole="button" accessibilityLabel={`Options for ${item.title || 'New chat'}`} onPress={() => setSelected(item)} hitSlop={8} style={styles.rowOptions}>
-          <ChatIcon name="more" color={colors.muted} size={18} />
-        </Pressable>
-      </Pressable>}
+      renderItem={({ item }) => <Link href={{ pathname: '/chat/[id]', params: { id: item.id } }} asChild>
+        <Link.Trigger>
+          <Pressable testID={`chat-row-${item.id}`}
+            accessibilityLabel={`${item.title || 'New chat'}. ${item.preview || 'No messages yet'}`}>
+            {({ pressed }) => <View style={[styles.chatRow,
+              { borderBottomColor: colors.border, backgroundColor: pressed ? colors.subtle : 'transparent' }]}>
+              <View style={[styles.chatGlyph, { backgroundColor: colors.surface }]}>
+                <ChatIcon name="message" color={colors.secondary} size={19} />
+              </View>
+              <View style={styles.chatInfo}>
+                <View style={styles.chatHeading}>
+                  <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>
+                    {item.title || 'New chat'}
+                  </Text>
+                  <Text style={[styles.chatDate, { color: colors.muted }]}>{dateLabel(item.updatedAt)}</Text>
+                </View>
+                <Text numberOfLines={2} style={[styles.chatPreview, { color: colors.secondary }]}>
+                  {item.preview || 'A fresh start. What’s on your mind?'}
+                </Text>
+              </View>
+            </View>}
+          </Pressable>
+        </Link.Trigger>
+        <Link.Menu>
+          <Link.MenuAction icon="slider.horizontal.3"
+            onPress={() => router.push({ pathname: '/chat-settings/[id]', params: { id: item.id } })}>
+            Model settings
+          </Link.MenuAction>
+          <Link.MenuAction icon="pencil" onPress={() => actions.rename(item)}>Rename</Link.MenuAction>
+          <Link.MenuAction icon="trash" destructive onPress={() => actions.remove(item)}>Delete</Link.MenuAction>
+        </Link.Menu>
+      </Link>}
       ListEmptyComponent={!ready ? <View style={styles.loading}><ActivityIndicator color={colors.accent} /><Text style={[styles.loadingText, { color: colors.muted }]}>Opening your chats…</Text></View>
         : query ? <View style={styles.noResults}><Text style={[styles.noResultsTitle, { color: colors.text }]}>No chats found</Text><Text style={[styles.emptyBody, { color: colors.secondary }]}>Try another word or start something new.</Text></View>
         : <View style={styles.empty}>
@@ -95,7 +115,6 @@ export default function ChatsScreen() {
         </View><ChatIcon name="chevron" color={colors.accent} size={12} />
       </Pressable> : undefined}
     />
-    <ChatActions chat={selected} onClose={() => setSelected(undefined)} />
   </View>;
 }
 
@@ -119,7 +138,6 @@ const styles = StyleSheet.create({
   chatTitle: { flex: 1, fontSize: 16, fontWeight: '600', letterSpacing: -0.2 },
   chatDate: { fontSize: 10 },
   chatPreview: { fontSize: 13, lineHeight: 19 },
-  rowOptions: { minWidth: 28, minHeight: 40, alignItems: 'flex-end', justifyContent: 'center' },
   loading: { paddingVertical: 100, alignItems: 'center', gap: 14 },
   loadingText: { fontSize: 14 },
   noResults: { paddingVertical: 70, alignItems: 'center', gap: 10 },

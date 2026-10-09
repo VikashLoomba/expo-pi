@@ -85,7 +85,7 @@ function useChatRuntime() {
       });
     };
   }, [credentials, models, remote, remoteHosts, workspaces]);
-  return { remoteHosts, credentials, models, service, openError };
+  return { remoteHosts, credentials, models, service, openError, setOpenError };
 }
 
 /** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
@@ -187,7 +187,7 @@ function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: 
 }
 
 function useChatController() {
-  const { remoteHosts, credentials, models, service, openError } = useChatRuntime();
+  const { remoteHosts, credentials, models, service, openError, setOpenError } = useChatRuntime();
   const serviceState = useSyncExternalStore(service?.subscribe ?? subscribeNothing,
     service?.getSnapshot ?? getClosedService, service?.getSnapshot ?? getClosedService);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
@@ -245,10 +245,17 @@ function useChatController() {
     return oauth ? { name: oauth.name, loginLabel: oauth.loginLabel, isSubscription: oauth.isSubscription } : undefined;
   }, [models]);
 
+  // Hides the current app-wide error; a later failed open or Harness report shows again.
+  const dismissError = useCallback(() => {
+    setOpenError(undefined);
+    service?.dismissError();
+  }, [service, setOpenError]);
+
   // Only a failed open and the Harness's own reports reach every screen; operations return their errors to the
   // screen that started them.
   return { service, ready: service !== undefined, chats: serviceState.chats, error: openError ?? serviceState.error,
-    signOutPending, disconnectingProvider, ...signIn, remoteHosts, catalog, refreshCatalog, providerAccess,
+    dismissError, signOutPending, disconnectingProvider,
+    ...signIn, remoteHosts, catalog, refreshCatalog, providerAccess,
     hasConnectedProvider: catalog.some((provider) => providerAccess(provider.id).connected),
     providerOAuth, retryAuth, saveProviderKey, disconnectProvider };
 }

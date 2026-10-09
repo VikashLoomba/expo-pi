@@ -205,6 +205,13 @@ export class DurableChatService {
   };
   readonly getSnapshot = () => this.snapshot;
 
+  /** Clears the Harness's latest report once the user dismisses it; the next report sets it again. */
+  dismissError() {
+    if (this.snapshot.error === undefined) return;
+    this.snapshot = { chats: this.snapshot.chats };
+    this.notify();
+  }
+
   /** The listed chat a route names, or undefined when there is none. */
   findChat(key: string): ConversationId | undefined { return this.ids.get(key); }
 

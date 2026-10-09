@@ -1,116 +1,42 @@
 import type { ConversationId } from '@earendil-works/pi-durable';
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert } from 'react-native';
 
 import { useChatApp } from '@/chat/chat-provider';
-import { useChatColors } from '@/hooks/use-chat-colors';
-import { ChatIcon } from './icon';
-import { ActionButton, IconButton, InlineNotice } from './primitives';
 
-export function ChatActions({ chat, onClose }: {
-  chat?: { id: ConversationId; title: string }; onClose: () => void;
-}) {
-  return chat ? <ChatActionsDialog key={`${chat.id}:${chat.title}`} chat={chat} onClose={onClose} /> : null;
-}
+type Chat = { id: ConversationId; title: string };
 
-function ChatActionsDialog({ chat, onClose }: {
-  chat: { id: ConversationId; title: string }; onClose: () => void;
-}) {
-  const colors = useChatColors();
-  const insets = useSafeAreaInsets();
+const errorText = (cause: unknown, fallback: string) => cause instanceof Error ? cause.message : fallback;
+
+/**
+ * Rename and delete for the chat menus. Failures go to `onError`, so each screen shows them in its own error banner;
+ * a delete that fails after the chat is deleted reports there while the chat stays deleted.
+ */
+export function useChatActions(onError: (message: string) => void) {
   const { service } = useChatApp();
-  const [renaming, setRenaming] = useState(false);
-  const [title, setTitle] = useState(chat.title);
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string>();
-  const [openingSettings, setOpeningSettings] = useState(false);
-  const settingsDisabled = !service || working;
-  const navigateToSettings = () => {
-    onClose();
-    router.push({ pathname: '/chat-settings/[id]', params: { id: chat.id } });
-  };
-  const openSettings = () => {
-    if (settingsDisabled) return;
-    // Wait until UIKit finishes dismissing the options sheet before presenting
-    // the settings route. Android does not need this presentation handoff.
-    if (Platform.OS === 'ios') setOpeningSettings(true);
-    else navigateToSettings();
-  };
-  const save = async () => {
-    if (!service || !title.trim() || working) return;
-    setWorking(true); setError(undefined);
-    try { await service.renameChat(chat.id, title.trim()); onClose(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not rename this chat.'); }
-    finally { setWorking(false); }
-  };
-  // The chat is deleted before its files are removed, so a failed removal shows here while the chat stays deleted.
-  const remove = async () => {
-    if (!service || working) return;
-    setWorking(true);
-    setError(undefined);
-    try {
-      await service.deleteChat(chat.id);
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not delete this chat.');
-    } finally {
-      setWorking(false);
-    }
-  };
-  return <Modal visible={!openingSettings} transparent animationType="slide" onDismiss={() => { if (openingSettings) navigateToSettings(); }} onRequestClose={() => { if (!working) onClose(); }}>
-    <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <Pressable accessibilityLabel="Close chat options" style={[StyleSheet.absoluteFill, { backgroundColor: colors.scrim }]} onPress={() => { if (!working) onClose(); }} />
-      <View accessibilityViewIsModal style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: Math.max(insets.bottom, 18) }]}>
-        <View style={styles.headingRow}>
-          <Text numberOfLines={1} style={[styles.heading, { color: colors.text }]}>{renaming ? 'Rename chat' : chat?.title || 'New chat'}</Text>
-          <IconButton testID="close-chat-options" icon="close" label="Close" onPress={onClose} disabled={working} />
-        </View>
-        {error && <InlineNotice message={error} />}
-        {renaming ? <View style={styles.renameForm}>
-          <TextInput testID="rename-chat-input" accessibilityLabel="Chat title" autoFocus value={title} onChangeText={setTitle} maxLength={100}
-            editable={!working} returnKeyType="done" onSubmitEditing={() => { void save(); }} selectTextOnFocus
-            placeholder="Chat title" placeholderTextColor={colors.muted} style={[styles.titleInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]} />
-          <ActionButton testID="save-chat-title" title="Save name" loading={working} disabled={!title.trim()} onPress={() => { void save(); }} />
-        </View> : <View style={styles.options}>
-          <Pressable testID="chat-model-settings" accessibilityRole="button" accessibilityState={{ disabled: settingsDisabled }} onPress={openSettings} disabled={settingsDisabled}
-            style={[styles.option, { opacity: settingsDisabled ? 0.45 : 1 }]}>
-            <ChatIcon name="spark" color={colors.secondary} size={20} /><View style={styles.optionText}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>Model settings</Text>
-              <Text style={[styles.caption, { color: colors.muted }]}>Provider, model, and reasoning effort.</Text>
-            </View>
-          </Pressable>
-          <Pressable testID="rename-chat" accessibilityRole="button" onPress={() => setRenaming(true)} disabled={working} style={styles.option}>
-            <ChatIcon name="pencil" color={colors.secondary} size={20} /><Text style={[styles.optionLabel, { color: colors.text }]}>Rename</Text>
-          </Pressable>
-          <Pressable testID="delete-chat" accessibilityRole="button" onPress={() => { void remove(); }}
-            disabled={working} style={styles.option}>
-            <ChatIcon name="close" color={colors.danger} size={20} /><View style={styles.optionText}>
-              <Text style={[styles.optionLabel, { color: colors.danger }]}>
-                {working ? 'Deleting…' : 'Delete chat'}
-              </Text>
-              <Text style={[styles.caption, { color: colors.muted }]}>
-                Stops it and removes it and its workspace files.
-              </Text>
-            </View>
-          </Pressable>
-        </View>}
-      </View>
-    </KeyboardAvoidingView>
-  </Modal>;
+  const rename = (chat: Chat) => Alert.prompt('Rename chat', undefined, [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Save',
+      isPreferred: true,
+      onPress: (value?: string) => {
+        const title = value?.trim();
+        if (!service || !title) return;
+        void service.renameChat(chat.id, title)
+          .catch((cause: unknown) => onError(errorText(cause, 'Could not rename this chat.')));
+      },
+    },
+  ], 'plain-text', chat.title);
+  const remove = (chat: Chat) => Alert.alert('Delete chat?', 'Stops it and removes it and its workspace files.', [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Delete',
+      style: 'destructive',
+      onPress: () => {
+        if (!service) return;
+        void service.deleteChat(chat.id)
+          .catch((cause: unknown) => onError(errorText(cause, 'Could not delete this chat.')));
+      },
+    },
+  ]);
+  return { rename, remove };
 }
-
-const styles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22, paddingTop: 14, width: '100%', maxWidth: 620, alignSelf: 'center', gap: 12 },
-  headingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  heading: { fontSize: 20, fontWeight: '600', flex: 1 },
-  options: { paddingBottom: 8 },
-  option: { flexDirection: 'row', alignItems: 'center', gap: 17, minHeight: 64, paddingVertical: 13 },
-  optionLabel: { fontSize: 16 },
-  caption: { fontSize: 12, marginTop: 5 },
-  optionText: { flex: 1 },
-  renameForm: { gap: 18, paddingTop: 7, paddingBottom: 12 },
-  titleInput: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 15, paddingVertical: 15, fontSize: 17 },
-});
