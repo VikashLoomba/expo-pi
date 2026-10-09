@@ -15,7 +15,7 @@ const DESCRIPTIONS: Record<Errno, string> = {
   ENOTDIR: 'not a directory',
   ENOTEMPTY: 'directory not empty',
   EINVAL: 'invalid argument',
-  EBUSY: 'the workspace root cannot be removed or moved',
+  EBUSY: 'a mount point cannot be removed or moved',
   ENOTSUP: 'operation not supported in the workspace',
 };
 
@@ -62,12 +62,12 @@ function encode(content: FileContent, options: EncodingOptions): Uint8Array {
 }
 
 /**
- * The workspace as just-bash sees it, mounted at `/workspace`, and the file operations the execution environment
- * uses. Paths are normalized and relative to the mount. The directory has no symbolic links, hard links or
- * permission bits.
+ * One directory of a workspace as just-bash sees it, mounted at `/workspace` or `/tmp`, and the file operations the
+ * execution environment uses. Paths are normalized and relative to the mount. The directory has no symbolic links,
+ * hard links or permission bits.
  */
 export class WorkspaceFs implements IFileSystem {
-  constructor(private readonly storage: WorkspaceStorage, private readonly mountPoint = '/workspace') {}
+  constructor(private readonly storage: WorkspaceStorage, private readonly mountPoint: string) {}
 
   #fail(code: Errno, operation: string, path: string): never {
     throw new WorkspaceFsError(code, operation, path === '/' ? this.mountPoint : `${this.mountPoint}${path}`);
@@ -225,7 +225,7 @@ export class WorkspaceFs implements IFileSystem {
     return resolvePath(base, path);
   }
 
-  /** just-bash allows an empty list; nothing in it depends on enumerating the workspace. */
+  /** just-bash allows an empty list; nothing in it depends on enumerating the directory. */
   getAllPaths(): string[] {
     return [];
   }

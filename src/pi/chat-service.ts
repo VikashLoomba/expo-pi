@@ -86,7 +86,8 @@ export class DurableChatService {
         if (!workspaces) return undefined;
         const workspace = await read.snapshot(WorkspaceDoc, conversationId, envContext);
         if (!workspace?.id) throw new Error('This conversation has no committed workspace identity.');
-        // The environment holds no handles between calls, so a fresh one per use needs no cleanup.
+        // Building it creates the workspace's directory and its temporary directory under the cache, which the
+        // system may have purged. It holds no handles between calls, so a fresh one per use needs no cleanup.
         return new WorkspaceExecutionEnv(workspaces.workspace(workspace.id), workspace.id, cwd);
       },
       settings: {

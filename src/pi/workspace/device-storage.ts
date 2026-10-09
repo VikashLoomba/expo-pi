@@ -2,7 +2,7 @@ import { Directory, File, FileMode, Paths } from 'expo-file-system';
 
 import { workspaceDirectoryName, type ByteReader, type Entry, type WorkspaceStorage, type Workspaces } from './storage';
 
-/** One workspace directory, accessed through expo-file-system's `File`, `Directory` and `FileHandle`. */
+/** One directory of a workspace, accessed through expo-file-system's `File`, `Directory` and `FileHandle`. */
 class DeviceWorkspaceStorage implements WorkspaceStorage {
   constructor(private readonly root: Directory) {}
 
@@ -73,14 +73,22 @@ class DeviceWorkspaceStorage implements WorkspaceStorage {
   }
 }
 
-/** Workspaces live in the app's document directory, one directory per workspace. */
+/**
+ * Workspaces live in the app's document directory, one directory per workspace, and their temporary files in the
+ * cache directory, where the system may purge them.
+ */
 export function createDeviceWorkspaces(directoryName = 'workspaces'): Workspaces {
   const root = new Directory(Paths.document, directoryName);
+  const tempRoot = new Directory(Paths.cache, directoryName);
   return {
     workspace: (id) => {
-      const directory = new Directory(root, workspaceDirectoryName(id));
-      directory.create({ intermediates: true, idempotent: true });
-      return new DeviceWorkspaceStorage(directory);
+      const name = workspaceDirectoryName(id);
+      const files = new Directory(root, name);
+      files.create({ intermediates: true, idempotent: true });
+      // Created again for every environment, because a purge may have removed it since the last one.
+      const temp = new Directory(tempRoot, name);
+      temp.create({ intermediates: true, idempotent: true });
+      return { files: new DeviceWorkspaceStorage(files), temp: new DeviceWorkspaceStorage(temp) };
     },
   };
 }

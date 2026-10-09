@@ -16,8 +16,9 @@ export interface ByteReader {
 }
 
 /**
- * The files of one workspace directory. Paths are absolute and normalized inside it, such as `/` and `/notes/a.txt`.
- * Methods throw on failure; callers check existence and kinds first so every platform reports the same error codes.
+ * The files of one directory of a workspace. Paths are absolute and normalized inside it, such as `/` and
+ * `/notes/a.txt`. Methods throw on failure; callers check existence and kinds first so every platform reports the same
+ * error codes.
  */
 export interface WorkspaceStorage {
   info(path: string): Promise<Entry | undefined>;
@@ -27,7 +28,7 @@ export interface WorkspaceStorage {
   open(path: string): Promise<ByteReader>;
   /** Create, replace or append to a file whose parent directory exists. */
   write(path: string, bytes: Uint8Array, append: boolean): Promise<void>;
-  /** Create one directory whose parent exists. */
+  /** Create one directory whose parent exists; fails when the path exists, which keeps temporary names unique. */
   createDirectory(path: string): Promise<void>;
   /** Remove a file, or a directory with everything in it. */
   remove(path: string): Promise<void>;
@@ -37,10 +38,16 @@ export interface WorkspaceStorage {
   copyFile(source: string, destination: string): Promise<void>;
 }
 
-/** The directory that holds one directory per workspace. */
+/** A workspace's own files and its temporary directory, which nothing deletes and the system may purge. */
+export interface Workspace {
+  readonly files: WorkspaceStorage;
+  readonly temp: WorkspaceStorage;
+}
+
+/** The directories that hold one directory per workspace. */
 export interface Workspaces {
-  /** A workspace's files, creating its directory if it does not exist. */
-  workspace(id: string): WorkspaceStorage;
+  /** A workspace's directories, creating each one that does not exist. */
+  workspace(id: string): Workspace;
 }
 
 /** Workspace ids name directories, so only plain names are accepted. */
