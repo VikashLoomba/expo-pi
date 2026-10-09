@@ -34,7 +34,7 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
   const openSettings = () => {
     if (settingsDisabled) return;
     // Wait until UIKit finishes dismissing the options sheet before presenting
-    // the settings route. Android and web do not need this presentation handoff.
+    // the settings route. Android does not need this presentation handoff.
     if (Platform.OS === 'ios') setOpeningSettings(true);
     else navigateToSettings();
   };
