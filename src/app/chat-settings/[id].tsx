@@ -48,7 +48,7 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
 }) {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { ready, runtime, catalog, providerAccess, refreshCatalog, remoteHosts } = useChatApp();
+  const { service, catalog, providerAccess, refreshCatalog, remoteHosts } = useChatApp();
   const conversation = useChatControls(view);
   const hosts = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   const [execution, setExecution] = useState<ChatExecutionSettings>(initialExecution);
@@ -80,7 +80,7 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   const access = providerAccess(draft.model.provider);
   const settingsError = getModelSettingsError(catalog, draft);
   const canChooseEffort = !!model?.thinkingLevels.length && (model.thinkingLevels.length > 1 || !model.thinkingLevels.includes(draft.thinkingLevel));
-  const blocked = !ready || !conversation;
+  const blocked = !service || !conversation;
   const disabled = blocked || saving || refreshing;
   const changed = draft.model.provider !== initialSettings.model.provider || draft.model.modelId !== initialSettings.model.modelId || draft.thinkingLevel !== initialSettings.thinkingLevel;
   const canSave = !disabled && (changed || executionChanged) && (!changed || !settingsError) && !executionError;
@@ -93,12 +93,12 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
     finally { setRefreshing(false); }
   };
   const save = async () => {
-    if (!canSave || savingRef.current) return;
+    if (!service || !canSave || savingRef.current) return;
     savingRef.current = true;
     setSaving(true); setError(undefined);
     try {
-      if (executionChanged) await runtime.updateExecution(id, execution, changed ? draft : undefined);
-      else await runtime.updateSettings(id, draft);
+      if (executionChanged) await service.updateExecution(id, execution, changed ? draft : undefined);
+      else await service.updateSettings(id, draft);
       if (!mounted.current) return;
       setSaving(false);
       disableRemovalPrevention();

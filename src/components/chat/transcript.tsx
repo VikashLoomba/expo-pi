@@ -61,7 +61,7 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
     {unavailable ? <View style={styles.loading}>
       <Text style={[styles.missingTitle, { color: colors.text }]}>Chat unavailable</Text>
       <Text style={[styles.loadingText, { color: colors.secondary }]}>{status === 'failed' && error
-        ? error : 'This conversation may have been archived.'}</Text>
+        ? error : 'This conversation may have been deleted.'}</Text>
       <ActionButton title="Back to chats" secondary onPress={() => router.replace('/')} />
     </View>
       : !ready || status === 'loading' ? <View style={styles.loading}><ActivityIndicator color={colors.accent} />

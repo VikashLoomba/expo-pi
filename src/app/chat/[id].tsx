@@ -23,14 +23,15 @@ export default function ConversationRoute() {
 
 function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const colors = useChatColors();
-  const { ready, runtime, catalog, providerAccess, error: appError } = useChatApp();
+  const { ready, service, catalog, providerAccess, error: appError } = useChatApp();
   const view = useChatView(id, true);
   const conversation = useChatControls(view);
   const [draft, setDraft] = useState('');
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [localError, setLocalError] = useState<string>();
-  const [actionsOpen, setActionsOpen] = useState(false);
+  // Held while the menu is open, so it stays open to report a failure after the chat is deleted.
+  const [actionsChat, setActionsChat] = useState<{ id: ConversationId; title: string }>();
   const [headerOffset, setHeaderOffset] = useState(0);
   const transcript = useRef<ChatTranscriptHandle>(null);
   const input = useRef<TextInputInstance>(null);
@@ -50,15 +51,18 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     if (id !== undefined) router.push({ pathname: '/chat-settings/[id]', params: { id } });
   };
   const openAccount = () => router.push({ pathname: '/account', params: { provider: providerId } });
+  const openActions = () => {
+    if (id !== undefined && conversation) setActionsChat({ id, title: conversation.title });
+  };
   const choosePrompt = useCallback((text: string) => { setDraft(text); input.current?.focus(); }, []);
   const sendMessage = async () => {
-    if (id === undefined || !draft.trim() || admitting || !ready || !access.ready || !access.connected || busy) return;
+    if (id === undefined || !service || !draft.trim() || admitting || !access.ready || !access.connected || busy) return;
     if (settingsError) return;
     const text = draft.trim();
     setAdmitting(true);
     setLocalError(undefined);
     try {
-      await runtime.send(id, text);
+      await service.send(id, text);
       setDraft('');
       transcript.current?.scrollToLatest();
     } catch (cause) {
@@ -68,11 +72,11 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     }
   };
   const stop = async () => {
-    if (id === undefined || stopping) return;
+    if (id === undefined || !service || stopping) return;
     // Shown until the abort settles; it resolves once the chat is idle.
     setStopping(true);
     setLocalError(undefined);
-    try { await runtime.cancel(id); }
+    try { await service.cancel(id); }
     catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'); }
     finally { setStopping(false); }
   };
@@ -89,7 +93,8 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
         <Text numberOfLines={1} style={[styles.headerName, { color: colors.text }]}>{conversation?.title || 'New chat'}</Text>
         <View style={styles.headerSettings}><Text numberOfLines={1} style={[styles.headerSubtitle, { color: colors.muted }]}>{busy ? `Working… · ${settingsLabel}` : settingsLabel}</Text><ChatIcon name="down" color={colors.muted} size={9} /></View>
       </Pressable>,
-      headerRight: () => <IconButton testID="conversation-options" icon="more" label="Chat options" disabled={!conversation || !ready} onPress={() => setActionsOpen(true)} />,
+      headerRight: () => <IconButton testID="conversation-options" icon="more" label="Chat options"
+        disabled={!conversation || !ready} onPress={openActions} />,
     }} />
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerOffset}>
       <SafeAreaView style={styles.screen} edges={['bottom']}>
@@ -105,8 +110,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
           accountStatus={accountStatus} inputRef={input} />
       </SafeAreaView>
     </KeyboardAvoidingView>
-    {id !== undefined && <ChatActions chat={actionsOpen && conversation ? { id, title: conversation.title } : undefined}
-      onClose={() => setActionsOpen(false)} onArchived={() => router.replace('/')} />}
+    <ChatActions chat={actionsChat} onClose={() => setActionsChat(undefined)} />
   </View>;
 }
 

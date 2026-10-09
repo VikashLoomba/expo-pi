@@ -22,7 +22,7 @@ function dateLabel(timestamp: number) {
 export default function ChatsScreen() {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { ready, error, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, runtime } = useChatApp();
+  const { ready, error, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, service } = useChatApp();
   const connectionsReady = catalog.every((provider) => providerAccess(provider.id).ready);
   const connectionError = catalog.map((provider) => providerAccess(provider.id).error).find(Boolean);
   const [search, setSearch] = useState('');
@@ -32,10 +32,10 @@ export default function ChatsScreen() {
   const query = search.trim().toLocaleLowerCase();
   const visibleChats = query ? chats.filter((chat) => `${chat.title} ${chat.preview}`.toLocaleLowerCase().includes(query)) : chats;
   const newChat = async () => {
-    if (creating || !ready) return;
+    if (creating || !service) return;
     setCreating(true); setLocalError(undefined);
     try {
-      const id = await runtime.createChat();
+      const id = await service.createChat();
       router.push({ pathname: '/chat/[id]', params: { id } });
     }
     catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'Could not create a chat.'); }

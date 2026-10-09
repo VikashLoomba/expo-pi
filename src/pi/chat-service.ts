@@ -1,8 +1,8 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { uuidv7, type Models } from '@earendil-works/pi-ai';
+import { ModelsError, uuidv7, type Models } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
-  type ConversationId, type Cursor, type DocumentState, type Storage, type SubmissionId, type SubmissionRecord,
+  type ConversationId, type Cursor, type DocumentState, type Storage, type SubmissionId,
 } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 
@@ -22,7 +22,9 @@ import {
   type ChatModelSettings, type NewChatDefaults,
 } from './model-catalog';
 import { createNativeWebSearchBridge } from './native-web-search/durable';
+import { SESSION_EXPIRED } from './provider-credentials';
 
+/** `error` is the Harness's latest report; operations reject to their callers instead. */
 export interface ChatServiceSnapshot { chats: ChatSummary[]; error?: string }
 
 const context = BACKGROUND_CONTEXT;
@@ -47,6 +49,7 @@ export class DurableChatService {
     private readonly storage: Storage,
     private readonly models: Models,
     private readonly remote: RemoteExecution,
+    private readonly workspaces: Workspaces | undefined,
     private readonly options: {
       now: () => number;
       newChat: NewChatDefaults;
@@ -101,7 +104,7 @@ export class DurableChatService {
       onReport: (error) => service?.report(error),
     }, context);
     nativeSearch.attach(harness);
-    service = new DurableChatService(harness, options.storage, options.models, remote, {
+    service = new DurableChatService(harness, options.storage, options.models, remote, workspaces, {
       now, newChat: options.newChat ?? { models: {} }, authError: options.authError,
     });
     try { await service.loadChats(); }
@@ -170,8 +173,13 @@ export class DurableChatService {
     if (!provider) throw new Error(`The provider ${settings.model.provider} is unavailable.`);
     const signIn = () => new Error(this.options.authError?.(provider.id)
       || `Sign in or connect ${provider.name} in Account to send a message.`);
-    // Resolving refreshes an expiring token now, so a failed refresh never becomes failed durable work.
-    if (!await this.models.getAuth(provider.id)) throw signIn();
+    // Resolving refreshes an expiring token now, so a failed refresh never becomes failed durable work. pi-ai keeps
+    // the credential when the refresh fails; signing in again replaces it.
+    const auth = await this.models.getAuth(provider.id).catch((error: unknown) => {
+      if (error instanceof ModelsError && error.code === 'oauth') throw new Error(SESSION_EXPIRED, { cause: error });
+      throw error;
+    });
+    if (!auth) throw signIn();
     const available = await this.models.getAvailable(provider.id);
     if (!available.some((model) => model.id === settings.model.modelId)) {
       throw new Error(`${settings.model.modelId} is not available for this account. `
@@ -198,19 +206,7 @@ export class DurableChatService {
 
   /** A chat's committed state while subscribed; `transcript` adds its messages, including pre-compaction history. */
   chat(id: ConversationId, options: { transcript?: boolean } = {}): ChatView {
-    return new ChatView(this.harness, id, options.transcript ?? false, () => this.latestInput(id));
-  }
-
-  /** The latest input submission is not part of the conversation view; read it once when a chat opens. */
-  private async latestInput(id: ConversationId): Promise<SubmissionRecord | undefined> {
-    let latest: SubmissionRecord | undefined;
-    let cursor: Cursor | undefined;
-    do {
-      const page = await this.storage.scanSubmissions({ conversationId: id }, 100, cursor, context);
-      for (const record of page.items) if (record.type === 'input') latest = record;
-      cursor = page.next;
-    } while (cursor !== undefined);
-    return latest;
+    return new ChatView(this.harness, id, options.transcript ?? false);
   }
 
   /**
@@ -263,7 +259,6 @@ export class DurableChatService {
     assertModelSettings(buildModelCatalog(this.models), selected);
     const conversation = await this.conversation(id);
     await conversation.commit(async (tx) => {
-      if ((await tx.doc(ChatMetadataDoc, id)).archived) throw new Error('This chat is archived.');
       // The public SDK mutation keeps history/fork semantics and preserves
       // unrelated agent fields. Model and effort commit in the same transaction.
       await configure(tx, id, selected);
@@ -284,7 +279,6 @@ export class DurableChatService {
     if (selectedModel) assertModelSettings(buildModelCatalog(this.models), selectedModel);
     const conversation = await this.conversation(id);
     await conversation.commit(async (tx) => {
-      if ((await tx.doc(ChatMetadataDoc, id)).archived) throw new Error('This chat is archived.');
       (await tx.doc(ExecutionTargetDoc, id)).target = selected.target;
       await configure(tx, id, { ...selectedModel, cwd: selected.cwd });
     }, context);
@@ -299,39 +293,35 @@ export class DurableChatService {
     }, context);
   }
 
-  async archiveChat(id: ConversationId) {
+  /**
+   * Stops the chat's work, then marks it deleted and removes its workspace directories. The chat stays deleted when
+   * the removal fails.
+   */
+  async deleteChat(id: ConversationId) {
     const conversation = await this.conversation(id);
+    await conversation.abort(context);
     await conversation.commit(async (tx) => {
-      (await tx.doc(ChatMetadataDoc, id)).archived = true;
+      (await tx.doc(ChatMetadataDoc, id)).deleted = true;
     }, context);
+    const workspace = await this.harness.snapshot(WorkspaceDoc, id, context);
+    if (workspace?.id) this.workspaces?.remove(workspace.id);
   }
 
   async send(id: ConversationId, text: string, requestId = uuidv7()): Promise<SubmissionId> {
     const content = text.trim();
     if (!content) throw new Error('Enter a message.');
     const conversation = await this.conversation(id);
-    const metadata = await this.harness.snapshot(ChatMetadataDoc, id, context);
-    if (metadata?.archived) throw new Error('This chat is archived.');
     await this.requireAuth(settingsOf(await this.harness.snapshot(AgentDoc, id, context)));
     const submission = await conversation.submit({ type: 'input', content, whenBusy: 'reject', requestId }, context);
-    // The list shows this without reading the transcript; an untitled chat is named after its first message.
-    // The message is already admitted, so a failure here is reported rather than failing the send.
-    try {
-      await conversation.commit(async (tx) => {
-        const chat = await tx.doc(ChatMetadataDoc, id);
-        chat.title ||= oneLine(content, 64);
-        chat.preview = oneLine(content, 120);
-        chat.updatedAt = this.options.now();
-      }, context);
-    } catch (error) {
-      this.report(error);
-      return submission.id;
-    }
-    // A later send that also updates the list supersedes an earlier failure to do so.
-    if (this.snapshot.error !== undefined) {
-      this.snapshot = { chats: this.snapshot.chats };
-      this.notify();
-    }
+    // pi-durable has no public way to write this in the submission's own commit, so it follows in the next one.
+    // The list shows it without reading the transcript; an untitled chat is named after its first message.
+    await conversation.commit(async (tx) => {
+      const chat = await tx.doc(ChatMetadataDoc, id);
+      chat.lastInput = submission.id;
+      chat.title ||= oneLine(content, 64);
+      chat.preview = oneLine(content, 120);
+      chat.updatedAt = this.options.now();
+    }, context);
     return submission.id;
   }
 

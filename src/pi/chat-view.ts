@@ -1,8 +1,8 @@
 import type { AttachedReplicatedState } from '@earendil-works/chord';
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
 import type {
   CommitPublication, Conversation, ConversationDocToken, ConversationId, ConversationView, Cursor, DocumentState,
-  EntryId, EntryRecord, Harness, JsonObject, SubmissionRecord,
+  EntryId, EntryRecord, Harness, JsonObject, SubmissionId, SubmissionRecord,
 } from '@earendil-works/pi-durable';
 
 import type { ChatControls, ChatMessage } from '../chat/types';
@@ -65,6 +65,8 @@ export class ChatView {
   private loaded = false;
   private scheduled = false;
   private readonly entries = new Map<EntryId, EntryRecord>();
+  /** The chat's latest input, followed until it settles; disconnecting or a newer input cancels the wait. */
+  private followed?: { id: SubmissionId; cancel: (reason?: unknown) => void };
   private submission?: SubmissionRecord;
   private snapshot: ChatViewSnapshot = { status: 'loading' };
   private controls?: ChatControls;
@@ -74,8 +76,6 @@ export class ChatView {
     private readonly harness: Harness,
     readonly id: ConversationId,
     private readonly transcript: boolean,
-    /** The chat's latest input submission; its outcome is not part of the view. */
-    private readonly latestInput: () => Promise<SubmissionRecord | undefined>,
   ) {
     const document = <T extends JsonObject>(token: ConversationDocToken<T>) =>
       new DocumentView(token.definition.kind, () => harness.documentState(token, id, context));
@@ -110,8 +110,8 @@ export class ChatView {
         this.publish({ status: 'missing' });
         return;
       }
-      // Submissions are not part of the view, and a document state cannot observe a document that does not exist
-      // yet (OpenAI chats create their native documents on the first request). Commits announce both.
+      // A document state cannot observe a document that does not exist yet (OpenAI chats create their native
+      // documents on the first request). Commits announce it.
       this.unsubscribeCommits = this.harness.subscribeCommits((publication) => this.observe(publication, current));
       const view = await conversation.viewState(context);
       if (!current()) {
@@ -122,13 +122,13 @@ export class ChatView {
       this.unsubscribeView = view.subscribe(this.schedule);
       await Promise.all(Object.values(this.documents).map((document) => document.attach(this.schedule, current)));
       if (!current()) return;
-      if (!this.documents.metadata.value) {
+      const metadata = this.documents.metadata.value;
+      if (!metadata || metadata.deleted) {
         this.publish({ status: 'missing' });
         return;
       }
-      const latest = await this.latestInput();
-      // A commit observed while reading carries a newer revision; keep it.
-      if (current() && latest && (!this.submission || latest.id > this.submission.id)) this.submission = latest;
+      if (metadata.lastInput !== undefined) await this.follow(metadata.lastInput, current);
+      if (!current()) return;
       if (this.transcript) await this.readHistory(conversation, current);
       if (!current()) return;
       this.loaded = true;
@@ -143,6 +143,8 @@ export class ChatView {
     // readable; the next one is published once every document is attached again.
     this.connection++;
     this.loaded = false;
+    this.followed?.cancel();
+    this.followed = undefined;
     this.submission = undefined;
     this.unsubscribeCommits();
     this.unsubscribeCommits = noop;
@@ -167,13 +169,39 @@ export class ChatView {
     } while (cursor !== undefined);
   }
 
+  /**
+   * The outcome of an input is not part of the view. Read its record now, then wait for it to settle, as pi-durable's
+   * inbox example does; the wait's context is cancelled when the chat disconnects or a newer input replaces it.
+   */
+  private async follow(id: SubmissionId, current: () => boolean) {
+    this.followed?.cancel();
+    this.submission = undefined;
+    const waiting = withCancel(context);
+    const followed = { id, cancel: waiting.cancel };
+    this.followed = followed;
+    const following = () => current() && this.followed === followed;
+    // A read that the cancellation interrupted belongs to an input or a connection that was replaced.
+    const unlessReplaced = (error: unknown): undefined => {
+      if (following()) throw error;
+      return undefined;
+    };
+    const submission = await this.harness.submission(id, waiting.context).catch(unlessReplaced);
+    if (!submission || !following()) return;
+    const record = await submission.status(waiting.context).catch(unlessReplaced);
+    if (!record || !following()) return;
+    this.submission = record;
+    this.schedule();
+    submission.wait(waiting.context).then((settled) => {
+      if (!following()) return;
+      this.submission = settled;
+      this.schedule();
+    }, (error: unknown) => {
+      if (following()) this.fail(error);
+    });
+  }
+
   private observe(publication: CommitPublication, current: () => boolean) {
     for (const change of publication.changes) {
-      if (change.type === 'submission' && change.value.type === 'input' && change.value.conversationId === this.id
-          && (!this.submission || change.value.id >= this.submission.id)) {
-        this.submission = change.value;
-        this.schedule();
-      }
       if (change.type !== 'document' || change.conversationId !== this.id) continue;
       const document = Object.values(this.documents).find((candidate) =>
         candidate.kind === change.record.kind && !candidate.attached);
@@ -205,6 +233,21 @@ export class ChatView {
     const view = this.view?.value;
     if (!this.loaded || !view) return;
     const { metadata, target, native, nativeLive } = this.documents;
+    if (metadata.value?.deleted) {
+      this.controls = undefined;
+      this.messages = [];
+      this.publish({ status: 'missing' });
+      return;
+    }
+    const lastInput = metadata.value?.lastInput;
+    if (lastInput !== undefined && lastInput !== this.followed?.id) {
+      // Only the loaded connection updates, so this one is current.
+      const connection = this.connection;
+      const current = () => connection === this.connection;
+      this.follow(lastInput, current).catch((error: unknown) => {
+        if (current()) this.fail(error);
+      });
+    }
     const state: ChatState = { id: this.id, ...readConversationView(view), metadata: metadata.value,
       execution: target.value, native: native.value, nativeLive: nativeLive.value, submission: this.submission };
     this.controls = projectControls(state);

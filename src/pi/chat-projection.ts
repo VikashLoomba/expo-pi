@@ -15,7 +15,7 @@ import { isSearchObservationEntry } from './native-web-search/observations';
 import { nativeResponseText, projectNativeWebSearch } from './native-web-search/projection';
 import type { NativeResponseRecord } from './native-web-search/types';
 
-/** Committed state of one chat: its conversation view, app documents and latest input submission. */
+/** Committed state of one chat: its conversation view, app documents and the record of its latest input. */
 export type ChatState = {
   readonly id: ConversationId;
   readonly metadata?: Readonly<ChatMetadata>;
@@ -55,13 +55,18 @@ export function settingsOf(agent?: Readonly<AgentState> | null): ChatModelSettin
 }
 
 export function summarizeChat(id: ConversationId, metadata: Readonly<ChatMetadata>): ChatSummary | undefined {
-  if (metadata.archived) return undefined;
+  if (metadata.deleted) return undefined;
   return { id, title: metadata.title || 'New chat', preview: metadata.preview || 'Start a conversation',
     updatedAt: Math.max(metadata.createdAt, metadata.updatedAt ?? 0) };
 }
 
+/**
+ * Why the latest input went unanswered, unless the transcript already shows it: a model error's detail is the failed
+ * assistant entry's message, and a stop has its own notice.
+ */
 function submissionError(submission?: SubmissionRecord): string | undefined {
-  if (submission?.status !== 'unanswered' || submission.reason === 'aborted') return undefined;
+  if (submission?.status !== 'unanswered') return undefined;
+  if (submission.reason === 'aborted' || submission.reason === 'model_error') return undefined;
   const { detail } = submission;
   if (typeof detail === 'string' && detail) return detail;
   if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.message === 'string') {
@@ -265,8 +270,12 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
         file: withFileToolDetails(message.tool.file, slot.details) } };
     }
   }
+  // A stopped run saves its partial answer as an interrupted entry, which already shows the stop.
   const last = state.submission;
-  if (last?.status === 'unanswered' && last.reason === 'aborted') {
+  const placed = last?.entry;
+  const partialSaved = placed !== undefined && visible.some((entry) => entry.id > placed
+    && entry.model?.some((message) => message.role === 'assistant' && message.stopReason === 'aborted'));
+  if (last?.status === 'unanswered' && last.reason === 'aborted' && !partialSaved) {
     messages.push({ id: `submission-${last.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 });
   }
   return messages;

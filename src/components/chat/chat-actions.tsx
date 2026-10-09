@@ -9,24 +9,24 @@ import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
 import { ActionButton, IconButton, InlineNotice } from './primitives';
 
-export function ChatActions({ chat, onClose, onArchived }: {
-  chat?: { id: ConversationId; title: string }; onClose: () => void; onArchived?: () => void;
+export function ChatActions({ chat, onClose }: {
+  chat?: { id: ConversationId; title: string }; onClose: () => void;
 }) {
-  return chat ? <ChatActionsDialog key={`${chat.id}:${chat.title}`} chat={chat} onClose={onClose} onArchived={onArchived} /> : null;
+  return chat ? <ChatActionsDialog key={`${chat.id}:${chat.title}`} chat={chat} onClose={onClose} /> : null;
 }
 
-function ChatActionsDialog({ chat, onClose, onArchived }: {
-  chat: { id: ConversationId; title: string }; onClose: () => void; onArchived?: () => void;
+function ChatActionsDialog({ chat, onClose }: {
+  chat: { id: ConversationId; title: string }; onClose: () => void;
 }) {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { ready, runtime } = useChatApp();
+  const { service } = useChatApp();
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [openingSettings, setOpeningSettings] = useState(false);
-  const settingsDisabled = !ready || working;
+  const settingsDisabled = !service || working;
   const navigateToSettings = () => {
     onClose();
     router.push({ pathname: '/chat-settings/[id]', params: { id: chat.id } });
@@ -39,18 +39,25 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
     else navigateToSettings();
   };
   const save = async () => {
-    if (!chat || !title.trim() || working) return;
+    if (!service || !title.trim() || working) return;
     setWorking(true); setError(undefined);
-    try { await runtime.renameChat(chat.id, title.trim()); onClose(); }
+    try { await service.renameChat(chat.id, title.trim()); onClose(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not rename this chat.'); }
     finally { setWorking(false); }
   };
-  const archive = async () => {
-    if (!chat || working) return;
-    setWorking(true); setError(undefined);
-    try { await runtime.archiveChat(chat.id); onClose(); onArchived?.(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not archive this chat.'); }
-    finally { setWorking(false); }
+  // The chat is deleted before its files are removed, so a failed removal shows here while the chat stays deleted.
+  const remove = async () => {
+    if (!service || working) return;
+    setWorking(true);
+    setError(undefined);
+    try {
+      await service.deleteChat(chat.id);
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not delete this chat.');
+    } finally {
+      setWorking(false);
+    }
   };
   return <Modal visible={!openingSettings} transparent animationType="slide" onDismiss={() => { if (openingSettings) navigateToSettings(); }} onRequestClose={() => { if (!working) onClose(); }}>
     <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -69,7 +76,7 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
         </View> : <View style={styles.options}>
           <Pressable testID="chat-model-settings" accessibilityRole="button" accessibilityState={{ disabled: settingsDisabled }} onPress={openSettings} disabled={settingsDisabled}
             style={[styles.option, { opacity: settingsDisabled ? 0.45 : 1 }]}>
-            <ChatIcon name="spark" color={colors.secondary} size={20} /><View style={styles.archiveText}>
+            <ChatIcon name="spark" color={colors.secondary} size={20} /><View style={styles.optionText}>
               <Text style={[styles.optionLabel, { color: colors.text }]}>Model settings</Text>
               <Text style={[styles.caption, { color: colors.muted }]}>Provider, model, and reasoning effort.</Text>
             </View>
@@ -77,10 +84,15 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
           <Pressable testID="rename-chat" accessibilityRole="button" onPress={() => setRenaming(true)} disabled={working} style={styles.option}>
             <ChatIcon name="pencil" color={colors.secondary} size={20} /><Text style={[styles.optionLabel, { color: colors.text }]}>Rename</Text>
           </Pressable>
-          <Pressable testID="archive-chat" accessibilityRole="button" onPress={() => { void archive(); }} disabled={working} style={styles.option}>
-            <ChatIcon name="archive" color={colors.secondary} size={20} /><View style={styles.archiveText}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>{working ? 'Archiving…' : 'Archive chat'}</Text>
-              <Text style={[styles.caption, { color: colors.muted }]}>Remove from your chat list.</Text>
+          <Pressable testID="delete-chat" accessibilityRole="button" onPress={() => { void remove(); }}
+            disabled={working} style={styles.option}>
+            <ChatIcon name="close" color={colors.danger} size={20} /><View style={styles.optionText}>
+              <Text style={[styles.optionLabel, { color: colors.danger }]}>
+                {working ? 'Deleting…' : 'Delete chat'}
+              </Text>
+              <Text style={[styles.caption, { color: colors.muted }]}>
+                Stops it and removes it and its workspace files.
+              </Text>
             </View>
           </Pressable>
         </View>}
@@ -98,7 +110,7 @@ const styles = StyleSheet.create({
   option: { flexDirection: 'row', alignItems: 'center', gap: 17, minHeight: 64, paddingVertical: 13 },
   optionLabel: { fontSize: 16 },
   caption: { fontSize: 12, marginTop: 5 },
-  archiveText: { flex: 1 },
+  optionText: { flex: 1 },
   renameForm: { gap: 18, paddingTop: 7, paddingBottom: 12 },
   titleInput: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 15, paddingVertical: 15, fontSize: 17 },
 });

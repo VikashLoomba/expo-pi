@@ -90,5 +90,11 @@ export function createDeviceWorkspaces(directoryName = 'workspaces'): Workspaces
       temp.create({ intermediates: true, idempotent: true });
       return { files: new DeviceWorkspaceStorage(files), temp: new DeviceWorkspaceStorage(temp) };
     },
+    remove: (id) => {
+      const name = workspaceDirectoryName(id);
+      for (const directory of [new Directory(root, name), new Directory(tempRoot, name)]) {
+        if (directory.exists) directory.delete();
+      }
+    },
   };
 }

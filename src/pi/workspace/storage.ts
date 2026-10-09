@@ -48,6 +48,8 @@ export interface Workspace {
 export interface Workspaces {
   /** A workspace's directories, creating each one that does not exist. */
   workspace(id: string): Workspace;
+  /** Remove a workspace's directories with everything in them; one that does not exist is skipped. */
+  remove(id: string): void;
 }
 
 /** Workspace ids name directories, so only plain names are accepted. */

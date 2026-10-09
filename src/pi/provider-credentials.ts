@@ -13,9 +13,19 @@ export interface ProviderAccess {
 /** Protocol adapters validate stored grants and identify terminal authentication failures. */
 export interface ProviderCredentialPolicy {
   validate?(credential: Credential): void;
+  /** The provider refused a refresh, so only a new sign-in restores access. */
   isPermanentAuthError?(error: unknown): boolean;
 }
-interface ProviderRecord { credential?: Credential; pendingCredential?: Credential; loaded: boolean; access: ProviderAccess }
+/** Why a provider whose refresh was refused cannot send, and the reply to a send that finds out. */
+export const SESSION_EXPIRED = 'Session expired — sign in again';
+interface ProviderRecord {
+  credential?: Credential;
+  pendingCredential?: Credential;
+  loaded: boolean;
+  /** A refresh was refused. pi-ai keeps the credential; a new one replaces it and clears this. */
+  expired: boolean;
+  access: ProviderAccess;
+}
 interface ProviderCredentialSnapshot { providers: Readonly<Record<string, ProviderAccess>> }
 const EMPTY_ACCESS: ProviderAccess = { ready: false, connected: false };
 
@@ -67,7 +77,7 @@ export class ProviderCredentialStore implements CredentialStore {
   private record(id: string): ProviderRecord {
     let record = this.records.get(id);
     if (!record) {
-      record = { loaded: false, access: EMPTY_ACCESS };
+      record = { loaded: false, expired: false, access: EMPTY_ACCESS };
       this.records.set(id, record);
     }
     return record;
@@ -88,8 +98,10 @@ export class ProviderCredentialStore implements CredentialStore {
     this.snapshot = { providers: Object.fromEntries([...this.records].map(([id, record]) => [id, record.access])) };
     for (const listener of this.listeners) listener();
   }
-  private setAccess(id: string, error?: string, retryable = false) {
+  private setAccess(id: string, explicitError?: string, retryable = false) {
     const record = this.record(id);
+    // The expired mark outlives later reads, which reload the same credential.
+    const error = explicitError ?? (record.expired ? SESSION_EXPIRED : undefined);
     const next: ProviderAccess = { ready: true, connected: !!record.credential && !error,
       ...(record.credential ? { type: record.credential.type } : {}),
       ...(error ? { error, ...(retryable ? { retryable } : {}) } : {}) };
@@ -156,6 +168,7 @@ export class ProviderCredentialStore implements CredentialStore {
     record.credential = credential;
     record.pendingCredential = undefined;
     record.loaded = true;
+    record.expired = false;
     this.setAccess(id);
   }
   private async remove(id: string) {
@@ -165,6 +178,7 @@ export class ProviderCredentialStore implements CredentialStore {
     record.credential = undefined;
     record.pendingCredential = undefined;
     record.loaded = true;
+    record.expired = false;
     this.setAccess(id);
   }
   async restore() {
@@ -203,9 +217,10 @@ export class ProviderCredentialStore implements CredentialStore {
       let next: Credential | undefined;
       try { next = await fn(current); }
       catch (error) {
+        // As pi-ai documents, a failed refresh keeps the stored credential for re-login.
         if (this.policies[id]?.isPermanentAuthError?.(error)) {
-          await this.remove(id);
-          this.setAccess(id, 'Your provider session expired. Sign in again.');
+          this.record(id).expired = true;
+          this.setAccess(id);
         }
         throw error;
       }

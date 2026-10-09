@@ -54,6 +54,7 @@ export class OpenAITokenRequestError extends Error {
   }
 }
 
+/** OpenAI refused the refresh grant. pi-ai wraps refresh failures, so the cause chain is searched. */
 export function isPermanentOpenAIAuthError(error: unknown): boolean {
   const visited = new Set<unknown>();
   while (error instanceof Error && !visited.has(error)) {

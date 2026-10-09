@@ -8,7 +8,6 @@ import { OPENAI_DISCOVERY, OPENAI_DYNAMIC_CLIENT_ID, OPENAI_REDIRECT_URI, OPENAI
 import { openOpenAIBrowser } from './browser';
 
 export { OPENAI_PROVIDER_ID } from './core';
-let loginOpen = false;
 
 /** Retry the same authorization in a browser with an address bar for manual return. */
 export async function openOpenAIManualBrowser(value: string, signal: AbortSignal): Promise<void> {
@@ -30,37 +29,33 @@ export function createNativeOpenAIOAuth(): OAuthAuth {
     async login(interaction, options) {
       const { signal, notify } = interaction;
       signal.throwIfAborted();
-      if (loginOpen) throw new Error('ChatGPT sign-in is already open. Finish or cancel it first.');
       const deviceId = options?.getDeviceId?.();
       if (!deviceId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId)) {
         throw new Error('ChatGPT sign-in requires a saved installation ID.');
       }
-      loginOpen = true;
-      try {
-        const request = new AuthRequest({ clientId: OPENAI_DYNAMIC_CLIENT_ID, redirectUri: OPENAI_REDIRECT_URI,
-          responseType: ResponseType.Code, usePKCE: true, scopes: [...OPENAI_SCOPES],
-          state: Crypto.randomUUID(), extraParams: { nonce: Crypto.randomUUID(), resource: OPENAI_RESOURCE,
-            ext_agent_host_id: `urn:uuid:${deviceId.toLowerCase()}`, agent_name_hint: 'Pi Agent' } });
-        const url = await request.makeAuthUrlAsync(OPENAI_DISCOVERY);
-        signal.throwIfAborted();
-        notify({ type: 'auth_url', url, instructions: 'Complete sign-in in the browser. If it cannot return here, paste the full return URL.' });
-        notify({ type: 'progress', message: 'Complete ChatGPT sign-in in the browser.' });
-        let callback = await openOpenAIBrowser(request, url, signal);
-        if (!callback) {
-          notify({ type: 'info', message: 'The browser did not return a sign-in result. Paste its full return URL to finish, or cancel.' });
-          callback = await interaction.prompt({ type: 'manual_code', signal,
-            message: 'Finish sign-in in the browser, then copy and paste the full return URL, even if that page does not load.',
-            placeholder: OPENAI_REDIRECT_URI });
-        }
-        signal.throwIfAborted();
-        const { code, clientId } = validateOpenAICallback(callback, request.state);
-        // Expo performs its own OAuth error/state parsing for manual returns too.
-        if (request.parseReturnUrl(callback.trim()).type !== 'success') throw new Error('OpenAI sign-in did not complete. Start sign-in again.');
-        if (!request.codeVerifier) throw new Error('Secure sign-in could not be initialized.');
-        notify({ type: 'progress', message: 'Completing ChatGPT sign-in…' });
-        return await requestOpenAIToken(new AccessTokenRequest({ clientId, code, redirectUri: OPENAI_REDIRECT_URI,
-          extraParams: { code_verifier: request.codeVerifier, resource: OPENAI_RESOURCE } }), clientId, signal);
-      } finally { loginOpen = false; }
+      const request = new AuthRequest({ clientId: OPENAI_DYNAMIC_CLIENT_ID, redirectUri: OPENAI_REDIRECT_URI,
+        responseType: ResponseType.Code, usePKCE: true, scopes: [...OPENAI_SCOPES],
+        state: Crypto.randomUUID(), extraParams: { nonce: Crypto.randomUUID(), resource: OPENAI_RESOURCE,
+          ext_agent_host_id: `urn:uuid:${deviceId.toLowerCase()}`, agent_name_hint: 'Pi Agent' } });
+      const url = await request.makeAuthUrlAsync(OPENAI_DISCOVERY);
+      signal.throwIfAborted();
+      notify({ type: 'auth_url', url, instructions: 'Complete sign-in in the browser. If it cannot return here, paste the full return URL.' });
+      notify({ type: 'progress', message: 'Complete ChatGPT sign-in in the browser.' });
+      let callback = await openOpenAIBrowser(request, url, signal);
+      if (!callback) {
+        notify({ type: 'info', message: 'The browser did not return a sign-in result. Paste its full return URL to finish, or cancel.' });
+        callback = await interaction.prompt({ type: 'manual_code', signal,
+          message: 'Finish sign-in in the browser, then copy and paste the full return URL, even if that page does not load.',
+          placeholder: OPENAI_REDIRECT_URI });
+      }
+      signal.throwIfAborted();
+      const { code, clientId } = validateOpenAICallback(callback, request.state);
+      // Expo performs its own OAuth error/state parsing for manual returns too.
+      if (request.parseReturnUrl(callback.trim()).type !== 'success') throw new Error('OpenAI sign-in did not complete. Start sign-in again.');
+      if (!request.codeVerifier) throw new Error('Secure sign-in could not be initialized.');
+      notify({ type: 'progress', message: 'Completing ChatGPT sign-in…' });
+      return requestOpenAIToken(new AccessTokenRequest({ clientId, code, redirectUri: OPENAI_REDIRECT_URI,
+        extraParams: { code_verifier: request.codeVerifier, resource: OPENAI_RESOURCE } }), clientId, signal);
     },
     async refresh(credential, signal) {
       validateOpenAICredential(credential);
