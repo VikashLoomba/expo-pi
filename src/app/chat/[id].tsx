@@ -45,7 +45,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     ? `${provider?.name || providerId} · ${model?.name || conversation.settings.model.modelId} · `
       + thinkingLevelLabel(conversation.settings.thinkingLevel)
     : 'Loading settings…';
-  const settingsDisabled = !ready || !conversation || busy || admitting || stopping;
+  const settingsDisabled = !ready || !conversation;
   const openSettings = () => {
     if (id !== undefined) router.push({ pathname: '/chat-settings/[id]', params: { id } });
   };
@@ -89,7 +89,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
         <Text numberOfLines={1} style={[styles.headerName, { color: colors.text }]}>{conversation?.title || 'New chat'}</Text>
         <View style={styles.headerSettings}><Text numberOfLines={1} style={[styles.headerSubtitle, { color: colors.muted }]}>{busy ? `Working… · ${settingsLabel}` : settingsLabel}</Text><ChatIcon name="down" color={colors.muted} size={9} /></View>
       </Pressable>,
-      headerRight: () => <IconButton testID="conversation-options" icon="more" label="Chat options" disabled={!conversation || busy || !ready} onPress={() => setActionsOpen(true)} />,
+      headerRight: () => <IconButton testID="conversation-options" icon="more" label="Chat options" disabled={!conversation || !ready} onPress={() => setActionsOpen(true)} />,
     }} />
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerOffset}>
       <SafeAreaView style={styles.screen} edges={['bottom']}>

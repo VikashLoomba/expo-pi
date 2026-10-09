@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useChatApp, useChatControls, useChatView } from '@/chat/chat-provider';
+import { useChatApp } from '@/chat/chat-provider';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
 import { ActionButton, IconButton, InlineNotice } from './primitives';
@@ -21,13 +21,12 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
   const { ready, runtime } = useChatApp();
-  const conversation = useChatControls(useChatView(chat.id));
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
   const [openingSettings, setOpeningSettings] = useState(false);
-  const settingsDisabled = !ready || !!conversation?.busy || working;
+  const settingsDisabled = !ready || working;
   const navigateToSettings = () => {
     onClose();
     router.push({ pathname: '/chat-settings/[id]', params: { id: chat.id } });
@@ -72,8 +71,7 @@ function ChatActionsDialog({ chat, onClose, onArchived }: {
             style={[styles.option, { opacity: settingsDisabled ? 0.45 : 1 }]}>
             <ChatIcon name="spark" color={colors.secondary} size={20} /><View style={styles.archiveText}>
               <Text style={[styles.optionLabel, { color: colors.text }]}>Model settings</Text>
-              <Text style={[styles.caption, { color: colors.muted }]}>{conversation?.busy
-                ? 'Finish or stop the response to make changes.' : 'Provider, model, and reasoning effort.'}</Text>
+              <Text style={[styles.caption, { color: colors.muted }]}>Provider, model, and reasoning effort.</Text>
             </View>
           </Pressable>
           <Pressable testID="rename-chat" accessibilityRole="button" onPress={() => setRenaming(true)} disabled={working} style={styles.option}>

@@ -6,15 +6,6 @@ import { openExternalLink } from '../source-link';
 import { citedInlineRuns, type InlineCitation } from '../web-search-presentation';
 import type { InlineFragment } from './types';
 
-/** New arrays of unchanged provider annotations must not repaint closed blocks. */
-export function sameCitations(previous: readonly InlineCitation[], next: readonly InlineCitation[]): boolean {
-  return previous === next || (previous.length === next.length && previous.every((citation, index) => {
-    const other = next[index];
-    return citation.id === other.id && citation.startIndex === other.startIndex && citation.endIndex === other.endIndex
-      && citation.url === other.url && citation.title === other.title && citation.number === other.number;
-  }));
-}
-
 /** Used inside a native Text so formatting, selection, and links remain inline. */
 export const InlineContent = memo(function InlineContent({ fragment, citations }: {
   fragment: InlineFragment;
@@ -43,7 +34,7 @@ export const InlineContent = memo(function InlineContent({ fragment, citations }
       {run.text}
     </Text>;
   });
-}, (previous, next) => previous.fragment === next.fragment && sameCitations(previous.citations, next.citations));
+});
 
 const styles = StyleSheet.create({
   strong: { fontWeight: '600' },

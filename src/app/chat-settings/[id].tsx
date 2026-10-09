@@ -92,7 +92,7 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   const access = providerAccess(draft.model.provider);
   const settingsError = getModelSettingsError(catalog, draft);
   const canChooseEffort = !!model?.thinkingLevels.length && (model.thinkingLevels.length > 1 || !model.thinkingLevels.includes(draft.thinkingLevel));
-  const blocked = !ready || !conversation || conversation.busy;
+  const blocked = !ready || !conversation;
   const disabled = blocked || saving || refreshing;
   const changed = draft.model.provider !== initialSettings.model.provider || draft.model.modelId !== initialSettings.model.modelId || draft.thinkingLevel !== initialSettings.thinkingLevel;
   const canSave = !disabled && (changed || executionChanged) && (!changed || !settingsError) && !executionError;
@@ -192,9 +192,8 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
         <Text style={[styles.chatTitle, { color: colors.text }]}>{conversation?.title || 'New chat'}</Text>
         <Text style={[styles.description, { color: colors.secondary }]}>These settings apply to the next response in this chat and are saved on this device.</Text>
       </View>
-      {blocked && <InlineNotice tone="neutral" testID="settings-locked" message={conversation?.busy
-        ? 'Finish or stop the current response before changing settings.'
-        : 'Chat settings will be available when this chat finishes loading.'} />}
+      {blocked && <InlineNotice tone="neutral" testID="settings-locked"
+        message="Chat settings will be available when this chat finishes loading." />}
       {error && <InlineNotice testID="settings-save-error" message={error} />}
       {checkingDirectory && <View style={styles.directory}>
         <InlineNotice tone="neutral" message="Checking the working directory on this chat’s remote machine…" />

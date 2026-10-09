@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-n
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { InlineCitation } from '../web-search-presentation';
-import { InlineContent, sameCitations } from './inline-content';
+import { InlineContent } from './inline-content';
 import type { ColumnAlignment, MarkdownBlock, TableRow } from './types';
 
 type Table = Extract<MarkdownBlock, { kind: 'table' }>;
@@ -29,10 +29,7 @@ const Row = memo(function Row({ row, header, rowNumber, columnWidth, alignments,
       </Text>
     </View>)}
   </View>;
-}, (previous, next) => previous.row === next.row && previous.header === next.header && previous.rowNumber === next.rowNumber
-  && previous.columnWidth === next.columnWidth && previous.alignments.length === next.alignments.length
-  && previous.alignments.every((alignment, index) => alignment === next.alignments[index])
-  && sameCitations(previous.citations, next.citations));
+});
 
 /** One scroller and shared column widths keep all rows aligned during streaming. */
 export function TableBlock({ block, citations }: { block: Table; citations: readonly InlineCitation[] }) {

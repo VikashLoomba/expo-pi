@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { CodeBlock } from './markdown/code-block';
-import { InlineContent, sameCitations } from './markdown/inline-content';
+import { InlineContent } from './markdown/inline-content';
 import { parseMessageMarkdown } from './markdown/streaming-parser';
 import { TableBlock } from './markdown/table-block';
 import { assertNever, type MarkdownBlock } from './markdown/types';
@@ -68,7 +68,7 @@ const ContentBlock = memo(function ContentBlock({ block, citations }: BlockProps
     default:
       return assertNever(block);
   }
-}, (previous, next) => previous.block === next.block && sameCitations(previous.citations, next.citations));
+});
 
 /** Blocks are keyed by source offset, so completed blocks stay mounted as later content streams. */
 export const MessageContent = memo(function MessageContent({ text, streaming = false, citations = noCitations }: {
