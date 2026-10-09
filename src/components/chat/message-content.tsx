@@ -1,10 +1,10 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { CodeBlock } from './markdown/code-block';
 import { InlineContent, sameCitations } from './markdown/inline-content';
-import { createMarkdownParser } from './markdown/streaming-parser';
+import { parseMessageMarkdown } from './markdown/streaming-parser';
 import { TableBlock } from './markdown/table-block';
 import { assertNever, type MarkdownBlock } from './markdown/types';
 import type { InlineCitation } from './web-search-presentation';
@@ -70,14 +70,13 @@ const ContentBlock = memo(function ContentBlock({ block, citations }: BlockProps
   }
 }, (previous, next) => previous.block === next.block && sameCitations(previous.citations, next.citations));
 
-/** Parser identities keep completed blocks mounted as later content streams. */
+/** Blocks are keyed by source offset, so completed blocks stay mounted as later content streams. */
 export const MessageContent = memo(function MessageContent({ text, streaming = false, citations = noCitations }: {
   text: string;
   streaming?: boolean;
   citations?: readonly InlineCitation[];
 }) {
-  const [parse] = useState(() => createMarkdownParser());
-  const blocks = useMemo(() => parse(text, streaming), [parse, text, streaming]);
+  const blocks = useMemo(() => parseMessageMarkdown(text, streaming), [text, streaming]);
   return <View style={styles.content}><BlockList blocks={blocks} citations={citations} /></View>;
 });
 

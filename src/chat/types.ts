@@ -36,7 +36,3 @@ export interface ChatControls {
   retrying: boolean;
   error?: string;
 }
-
-export interface ChatConversation extends ChatControls {
-  messages: readonly ChatMessage[];
-}

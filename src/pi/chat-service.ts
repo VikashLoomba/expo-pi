@@ -1,15 +1,14 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models } from '@earendil-works/pi-ai';
 import {
-  AgentDoc, Harness, InboxDoc, LiveDoc, configure, createRegistry, defineExtension, section,
-  type ConversationId, type Cursor, type DocumentState, type Extension, type SettledSubmissionRecord, type Storage,
-  type SubmissionId, type SubmissionRecord, type Tx,
+  AgentDoc, Harness, configure, createRegistry, defineExtension, section,
+  type ConversationId, type Cursor, type DocumentState, type Storage, type SubmissionId, type SubmissionRecord,
 } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 
 import type { ChatSummary } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
-import { isBusy, oneLine, settingsOf, summarizeChat } from './chat-projection';
+import { oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
 import { WorkspaceDoc } from './workspace/document';
 import { WorkspaceExecutionEnv } from './workspace/execution-env';
@@ -28,11 +27,6 @@ export interface ChatServiceSnapshot { chats: ChatSummary[]; error?: string }
 
 const context = BACKGROUND_CONTEXT;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
-
-/** Commits that change a chat's model, environment or archive state wait until its work has settled. */
-async function assertIdle(tx: Tx, id: ConversationId, message: string) {
-  if (isBusy(await tx.doc(LiveDoc, id), await tx.doc(InboxDoc, id))) throw new Error(message);
-}
 
 /**
  * Owns the app's durable session for its lifetime. The chat list reads each chat's metadata document; a chat's
@@ -69,8 +63,6 @@ export class DurableChatService {
     newChat?: NewChatDefaults;
     /** Why a provider has no usable credential, for example a locked keychain. */
     authError?: (providerId: string) => string | undefined;
-    /** Installed beside the app's own extensions; tests and probes register their tools here. */
-    extensions?: readonly Extension[];
   }): Promise<DurableChatService> {
     const { workspaces, remote } = options;
     const registry = createRegistry();
@@ -82,7 +74,6 @@ export class DurableChatService {
       sections: [section('assistant',
         () => 'You are a helpful, thoughtful assistant. Use Markdown when it improves clarity.', { tag: false })],
     }));
-    for (const extension of options.extensions ?? []) registry.install(extension);
     const now = options.now ?? Date.now;
     let service: DurableChatService | undefined;
     const harness = await Harness.open(options.storage, {
@@ -101,8 +92,6 @@ export class DurableChatService {
       settings: {
         // SDK retry and timeout defaults apply, so a request cut off while the app was suspended is retried.
         stream: { transport: 'sse' },
-        // Keep long conversations usable, without starting background model calls.
-        compaction: { backgroundTokens: 0 },
       },
       async conversationCreated(tx, conversation) {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
@@ -175,12 +164,11 @@ export class DurableChatService {
 
   /** The one pre-send check: the chat's provider is registered and authenticated and offers its model. */
   private async requireAuth(settings: ChatModelSettings) {
-    assertModelSettings(this.getCatalog(), settings);
+    assertModelSettings(buildModelCatalog(this.models), settings);
     const provider = this.models.getProvider(settings.model.provider);
     if (!provider) throw new Error(`The provider ${settings.model.provider} is unavailable.`);
     const signIn = () => new Error(this.options.authError?.(provider.id)
       || `Sign in or connect ${provider.name} in Account to send a message.`);
-    if (!await this.models.checkAuth(provider.id)) throw signIn();
     // Resolving refreshes an expiring token now, so a failed refresh never becomes failed durable work.
     if (!await this.models.getAuth(provider.id)) throw signIn();
     const available = await this.models.getAvailable(provider.id);
@@ -203,7 +191,6 @@ export class DurableChatService {
     return () => { this.listeners.delete(listener); };
   };
   readonly getSnapshot = () => this.snapshot;
-  getCatalog() { return buildModelCatalog(this.models); }
 
   /** The listed chat a route names, or undefined when there is none. */
   findChat(key: string): ConversationId | undefined { return this.ids.get(key); }
@@ -230,7 +217,7 @@ export class DurableChatService {
    * is available and its provider connected. Otherwise it uses a connected provider's default.
    */
   private async defaultSettings(): Promise<ChatModelSettings | undefined> {
-    const catalog = this.getCatalog();
+    const catalog = buildModelCatalog(this.models);
     // Saved credentials that cannot be read do not make a provider usable for a new chat.
     const connected = (providerId: string) => this.models.checkAuth(providerId).then(Boolean, () => false);
     const recent = this.snapshot.chats[0];
@@ -272,10 +259,9 @@ export class DurableChatService {
 
   async updateSettings(id: ConversationId, settings: ChatModelSettings): Promise<void> {
     const selected = { model: { ...settings.model }, thinkingLevel: settings.thinkingLevel };
-    assertModelSettings(this.getCatalog(), selected);
+    assertModelSettings(buildModelCatalog(this.models), selected);
     const conversation = await this.conversation(id);
     await conversation.commit(async (tx) => {
-      await assertIdle(tx, id, 'Finish or stop the pending response before changing chat settings.');
       if ((await tx.doc(ChatMetadataDoc, id)).archived) throw new Error('This chat is archived.');
       // The public SDK mutation keeps history/fork semantics and preserves
       // unrelated agent fields. Model and effort commit in the same transaction.
@@ -283,36 +269,22 @@ export class DurableChatService {
     }, context);
   }
 
-  updateExecution(id: ConversationId, settings: ChatExecutionSettings, modelSettings?: ChatModelSettings) {
+  /**
+   * Commits the machine, working directory and model together. As in pi-durable, work already running keeps what
+   * it resolved; the next request or tool call uses the new selection.
+   */
+  async updateExecution(id: ConversationId, settings: ChatExecutionSettings,
+    modelSettings?: ChatModelSettings): Promise<void> {
     const selected = structuredClone(settings);
     validateExecution(selected);
     const selectedModel = modelSettings
       && { model: { ...modelSettings.model }, thinkingLevel: modelSettings.thinkingLevel };
-    return this.configureExecution(id, { cwd: selected.cwd }, async (tx) => {
-      if (selectedModel) assertModelSettings(this.getCatalog(), selectedModel);
-      (await tx.doc(ExecutionTargetDoc, id)).target = selected.target;
-      if (selectedModel) await configure(tx, id, selectedModel);
-    });
-  }
-
-  /** Commit cwd and application-owned selection state together after old work settles. */
-  async configureExecution(id: ConversationId, change: { cwd?: string | null },
-    updateState?: (tx: Tx, id: ConversationId) => Promise<void>): Promise<void> {
+    if (selectedModel) assertModelSettings(buildModelCatalog(this.models), selectedModel);
     const conversation = await this.conversation(id);
     await conversation.commit(async (tx) => {
-      // Any durable task can call runtime.env(), including custom/background
-      // tasks that never appear in LiveDoc. Abort intent is not settled work.
-      // Read on this same transaction line before changing selection or cwd,
-      // so a task admitted concurrently cannot slip through an earlier check.
-      for (const status of ['pending', 'running', 'waiting', 'completing'] as const) {
-        if ((await tx.scanTasks({ conversationId: id, status }, 1)).items.length) {
-          throw new Error('Wait for execution to stop before changing its environment or working directory.');
-        }
-      }
-      await assertIdle(tx, id, 'Wait for execution to stop before changing its environment or working directory.');
       if ((await tx.doc(ChatMetadataDoc, id)).archived) throw new Error('This chat is archived.');
-      await updateState?.(tx, id);
-      await configure(tx, id, change);
+      (await tx.doc(ExecutionTargetDoc, id)).target = selected.target;
+      await configure(tx, id, { ...selectedModel, cwd: selected.cwd });
     }, context);
   }
 
@@ -328,7 +300,6 @@ export class DurableChatService {
   async archiveChat(id: ConversationId) {
     const conversation = await this.conversation(id);
     await conversation.commit(async (tx) => {
-      await assertIdle(tx, id, 'Stop the response before archiving this chat.');
       (await tx.doc(ChatMetadataDoc, id)).archived = true;
     }, context);
   }
@@ -360,12 +331,6 @@ export class DurableChatService {
       this.notify();
     }
     return submission.id;
-  }
-
-  async waitForSubmission(id: SubmissionId): Promise<SettledSubmissionRecord> {
-    const submission = await this.harness.submission(id, context);
-    if (!submission) throw new Error('Submission not found.');
-    return submission.wait(context);
   }
 
   /** Withdraws queued input and aborts the running work; resolves once the chat is idle. */

@@ -34,6 +34,9 @@ function useChatRuntime() {
     newChat: NEW_CHAT_DEFAULTS }));
   useEffect(() => {
     void remoteHosts.restore().catch((error) => runtime.report(error));
+    // Account restoration does not depend on SQLite, so a database failure leaves sign-in usable. A provider whose
+    // credential cannot be read reports it in its own access state.
+    void credentials.restore().catch(() => {});
     // The runtime reports a failed open. Returning to the app retries it; an open runtime ignores the call.
     const open = () => { void runtime.open().catch(() => {}); };
     open();
@@ -42,7 +45,7 @@ function useChatRuntime() {
       subscription.remove();
       void runtime.close().catch((error) => runtime.report(error));
     };
-  }, [remoteHosts, runtime]);
+  }, [credentials, remoteHosts, runtime]);
   return { remoteHosts, credentials, models, runtime };
 }
 

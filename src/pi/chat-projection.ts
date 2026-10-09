@@ -1,8 +1,8 @@
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai';
 import {
-  AgentDoc, CompactionEntry, InboxDoc, LiveDoc, ResetEntry,
-  type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord, type InboxState,
-  type LiveState, type SubmissionRecord,
+  AgentDoc, CompactionEntry, LiveDoc, ResetEntry,
+  type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord, type LiveState,
+  type SubmissionRecord,
 } from '@earendil-works/pi-durable';
 
 import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-presentation';
@@ -22,14 +22,10 @@ export type ChatState = {
   readonly agent?: Readonly<AgentState>;
   readonly execution?: Readonly<ExecutionTargetState>;
   readonly live?: Readonly<LiveState>;
-  readonly inbox?: Readonly<InboxState>;
   readonly native?: Readonly<NativeResponsesState>;
   readonly nativeLive?: Readonly<NativeLiveState>;
   readonly submission?: SubmissionRecord;
 };
-
-/** Rows built from an immutable source (a message, entry, native record or submission) and the inputs used. */
-export type RowCache = WeakMap<object, { readonly inputs: readonly unknown[]; readonly rows: readonly ChatMessage[] }>;
 
 const SUMMARIZED_NOTICE = 'Earlier messages summarized';
 
@@ -41,7 +37,6 @@ export function readConversationView(view: ConversationView) {
   // pi-durable reads its view this way in its own example, test/examples/21-late-join.ts.
   return {
     live: view.docs[LiveDoc.definition.kind] as LiveState | undefined,
-    inbox: view.docs[InboxDoc.definition.kind] as InboxState | undefined,
     agent: view.docs[AgentDoc.definition.kind] as AgentState | undefined,
   };
 }
@@ -65,11 +60,6 @@ export function summarizeChat(id: ConversationId, metadata: Readonly<ChatMetadat
     updatedAt: Math.max(metadata.createdAt, metadata.updatedAt ?? 0) };
 }
 
-/** Queued inputs, a run and compactions all keep the chat busy until they settle or are aborted. */
-export function isBusy(live?: Readonly<LiveState>, inbox?: Readonly<InboxState>): boolean {
-  return !!live?.run || !!live?.compactions?.length || !!inbox?.items.some((item) => item.mode !== 'write');
-}
-
 function submissionError(submission?: SubmissionRecord): string | undefined {
   if (submission?.status !== 'unanswered' || submission.reason === 'aborted') return undefined;
   const { detail } = submission;
@@ -87,7 +77,7 @@ export function projectControls(state: ChatState): ChatControls {
     title: state.metadata?.title || 'New chat',
     settings: settingsOf(state.agent),
     execution: executionSettings(state.execution, state.agent),
-    busy: isBusy(state.live, state.inbox),
+    busy: state.live?.run !== undefined,
     // pi-durable waits before retrying a failed request; the failed attempt is not an answer.
     retrying: state.live?.generation?.retry !== undefined,
     ...(error ? { error } : {}),
@@ -101,17 +91,6 @@ function nativeTimestamp(record: NativeResponseRecord, fallback: number): number
   // keeps interrupted attempts in order even when no response.created arrived.
   return /^[0-9a-f]{8}-[0-9a-f]{4}-7/i.test(record.requestId)
     ? Number.parseInt(record.requestId.replaceAll('-', '').slice(0, 12), 16) : fallback;
-}
-
-/** Return the rows built from `source` when its inputs are unchanged, so a memoized row skips rendering. */
-function reuse(cache: RowCache, source: object, inputs: readonly unknown[], build: () => ChatMessage[]) {
-  const hit = cache.get(source);
-  if (hit && hit.inputs.length === inputs.length && hit.inputs.every((input, index) => input === inputs[index])) {
-    return hit.rows;
-  }
-  const rows = build();
-  cache.set(source, { inputs, rows });
-  return rows;
 }
 
 function userRows(message: UserMessage, key: string): ChatMessage[] {
@@ -177,10 +156,8 @@ function nativeRows(record: NativeResponseRecord, key: string, interrupted: bool
 /**
  * Derive transcript rows from committed entries (ascending IDs) and live documents. Row IDs stay stable as a
  * streamed partial becomes a saved entry: assistants are numbered in order, and the partial takes the next number.
- * Rows of committed entries come from `cache` while their inputs are unchanged.
  */
-export function projectMessages(state: ChatState, entries: readonly EntryRecord[],
-  cache: RowCache = new WeakMap()): ChatMessage[] {
+export function projectMessages(state: ChatState, entries: readonly EntryRecord[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const calls = new Map<string, number>();
   let assistantCount = 0;
@@ -208,8 +185,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
   const appendNative = (record: NativeResponseRecord) => {
     const key = `assistant-${assistantCount++}`;
     const interrupted = nativeInterrupted(record) || record.status === 'interrupted';
-    messages.push(...reuse(cache, record, [key, interrupted, createdAt],
-      () => nativeRows(record, key, interrupted, false, createdAt)));
+    messages.push(...nativeRows(record, key, interrupted, false, createdAt));
   };
 
   // Observation model messages are external evidence for the model. Native
@@ -245,21 +221,18 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
       appendNative(orphaned[nativeIndex++]);
     }
     for (const summary of summaries.get(entry.id) ?? []) {
-      messages.push(...reuse(cache, summary, [],
-        () => [{ id: `summary-${summary.id}`, role: 'notice', text: SUMMARIZED_NOTICE, createdAt: 0 }]));
+      messages.push({ id: `summary-${summary.id}`, role: 'notice', text: SUMMARIZED_NOTICE, createdAt: 0 });
     }
     if (CompactionEntry.is(entry) || ResetEntry.is(entry)) continue;
     entry.model?.forEach((message, index) => {
       const entryKey = `${entry.id}-${index}`;
-      if (message.role === 'user') {
-        messages.push(...reuse(cache, message, [entryKey], () => userRows(message, entryKey)));
-      }
+      if (message.role === 'user') messages.push(...userRows(message, entryKey));
       if (message.role === 'toolResult') {
         const callIndex = calls.get(message.toolCallId);
         const call = callIndex === undefined ? undefined : messages[callIndex];
-        const rows = reuse(cache, message, [entryKey, call], () => [toolResultRow(message, entryKey, call)]);
-        if (call?.tool && callIndex !== undefined) messages[callIndex] = rows[0];
-        else messages.push(...rows);
+        const row = toolResultRow(message, entryKey, call);
+        if (call?.tool && callIndex !== undefined) messages[callIndex] = row;
+        else messages.push(row);
       }
       if (message.role !== 'assistant') return;
       // Entries are append-only, so the next assistant's ordinal is known before its entry exists. Count every
@@ -268,8 +241,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
       if (message.stopReason === 'error' && retried(entry)) return;
       const native = message.responseId ? nativeByResponse.get(message.responseId) : undefined;
       const interrupted = native ? nativeInterrupted(native) : false;
-      pushAssistant(reuse(cache, message, [key, native, interrupted],
-        () => assistantRows(message, key, false, native, interrupted)), key, message);
+      pushAssistant(assistantRows(message, key, false, native, interrupted), key, message);
     });
   }
   while (nativeIndex < orphaned.length) appendNative(orphaned[nativeIndex++]);
@@ -295,8 +267,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
   }
   const last = state.submission;
   if (last?.status === 'unanswered' && last.reason === 'aborted') {
-    messages.push(...reuse(cache, last, [],
-      () => [{ id: `submission-${last.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 }]));
+    messages.push({ id: `submission-${last.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 });
   }
   return messages;
 }

@@ -7,7 +7,6 @@ import {
 import { InMemoryFs, MountableFs } from 'just-bash/browser';
 
 import { createBashEngine, isBashCommand } from '../bash/engine/index';
-import { decodeStrictUtf8 } from '../execution/strict-utf8';
 import { WorkspaceFs, WorkspaceFsError, normalizePath, resolvePath } from './files';
 import type { ByteReader, WorkspaceStorage } from './storage';
 
@@ -253,10 +252,9 @@ export class WorkspaceExecutionEnv implements ExecutionEnv {
     return ok(normalizePath(parts.filter((part) => part !== '').join('/')));
   }
 
+  /** Like `NodeExecutionEnv`'s `readFile(path, 'utf8')`: invalid bytes become U+FFFD and a byte-order mark stays. */
   readTextFile(path: string, context: Context): Promise<Result<string, FileError>> {
-    return this.#run(path, context, async (local, absolute) => {
-      return decodeStrictUtf8(await this.#files.readFileBuffer(local), absolute);
-    });
+    return this.#run(path, context, (local) => this.#files.readFile(local, 'utf8'));
   }
 
   openTextLineReader(path: string, context: Context): Promise<Result<TextLineReader, FileError>> {

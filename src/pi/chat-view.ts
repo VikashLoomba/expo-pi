@@ -5,12 +5,10 @@ import type {
   EntryId, EntryRecord, Harness, JsonObject, SubmissionRecord,
 } from '@earendil-works/pi-durable';
 
-import type { ChatControls, ChatConversation, ChatMessage } from '../chat/types';
+import type { ChatControls, ChatMessage } from '../chat/types';
 import { ChatMetadataDoc } from './chat-metadata';
-import {
-  projectControls, projectMessages, readConversationView, type ChatState, type RowCache,
-} from './chat-projection';
-import { ExecutionTargetDoc, sameExecution } from './execution/document';
+import { projectControls, projectMessages, readConversationView, type ChatState } from './chat-projection';
+import { ExecutionTargetDoc } from './execution/document';
 import { NativeLiveDoc, NativeResponsesDoc } from './native-web-search/durable';
 
 const context = BACKGROUND_CONTEXT;
@@ -18,7 +16,6 @@ const noop = () => {};
 
 export type ChatViewSnapshot = {
   status: 'loading' | 'ready' | 'missing' | 'failed';
-  conversation?: ChatConversation;
   error?: string;
 };
 
@@ -52,14 +49,6 @@ class DocumentView<T extends JsonObject> {
   }
 }
 
-function sameControls(left: ChatControls, right: ChatControls) {
-  return left.id === right.id && left.title === right.title && left.busy === right.busy
-    && left.retrying === right.retrying && left.error === right.error
-    && left.settings.model.provider === right.settings.model.provider
-    && left.settings.model.modelId === right.settings.model.modelId
-    && left.settings.thinkingLevel === right.settings.thinkingLevel && sameExecution(left.execution, right.execution);
-}
-
 /**
  * A chat while something shows it. The first subscriber attaches pi-durable's conversation view and the chat's
  * app document states; the last one to leave disposes them. With `transcript`, it also reads the chat's whole
@@ -76,9 +65,6 @@ export class ChatView {
   private loaded = false;
   private scheduled = false;
   private readonly entries = new Map<EntryId, EntryRecord>();
-  private sorted: EntryRecord[] = [];
-  /** Committed entries are immutable, so their rows are built once and keep their identity between deltas. */
-  private readonly rows: RowCache = new WeakMap();
   private submission?: SubmissionRecord;
   private snapshot: ChatViewSnapshot = { status: 'loading' };
   private controls?: ChatControls;
@@ -153,7 +139,7 @@ export class ChatView {
   }
 
   private disconnect() {
-    // Committed entries and their rows are immutable, so a later subscriber reuses them. The last snapshot stays
+    // Committed entries are immutable, so a later subscriber reuses them. The last snapshot stays
     // readable; the next one is published once every document is attached again.
     this.connection++;
     this.loaded = false;
@@ -176,8 +162,7 @@ export class ChatView {
     do {
       const page = await conversation.entries({}, 200, cursor, context);
       if (!current()) return;
-      // The view's own objects replace these as it delivers them; either revision of an entry is the same record.
-      for (const entry of page.items) if (!this.entries.has(entry.id)) this.entries.set(entry.id, entry);
+      for (const entry of page.items) this.entries.set(entry.id, entry);
       cursor = page.next;
     } while (cursor !== undefined);
   }
@@ -222,21 +207,12 @@ export class ChatView {
     const { metadata, target, native, nativeLive } = this.documents;
     const state: ChatState = { id: this.id, ...readConversationView(view), metadata: metadata.value,
       execution: target.value, native: native.value, nativeLive: nativeLive.value, submission: this.submission };
-    const controls = projectControls(state);
-    // The header and composer re-render only when one of their fields changes, not for every streamed delta.
-    if (!this.controls || !sameControls(this.controls, controls)) this.controls = controls;
+    this.controls = projectControls(state);
     if (this.transcript) {
-      // The view keeps an entry's object across revisions; hold the view's object so cached rows match it.
-      let changed = this.sorted.length !== this.entries.size;
-      for (const entry of view.entries) {
-        if (this.entries.get(entry.id) === entry) continue;
-        this.entries.set(entry.id, entry);
-        changed = true;
-      }
-      if (changed) this.sorted = [...this.entries.values()].sort((left, right) => left.id - right.id);
-      this.messages = projectMessages(state, this.sorted, this.rows);
+      for (const entry of view.entries) this.entries.set(entry.id, entry);
+      this.messages = projectMessages(state, [...this.entries.values()].sort((left, right) => left.id - right.id));
     }
-    this.publish({ status: 'ready', conversation: { ...this.controls, messages: this.messages } });
+    this.publish({ status: 'ready' });
   }
 
   private fail(error: unknown) {

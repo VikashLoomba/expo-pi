@@ -185,7 +185,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 		});
 	}
 
-	/** Strict like the local workspace, so `edit` refuses a file that is not UTF-8 instead of corrupting it. */
+	/** Strict, so `edit` refuses a file that is not UTF-8 instead of corrupting it. */
 	async readTextFile(path: string, context: Context): Promise<Result<string, FileError>> {
 		const bytes = await this.readBinaryFile(path, context);
 		if (!bytes.ok) return bytes;

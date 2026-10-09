@@ -6,7 +6,7 @@ import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service
 import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { RemoteExecution } from '../pi/execution/remote/composition';
 import type { Workspaces } from '../pi/workspace/storage';
-import { buildModelCatalog, type ChatModelSettings, type NewChatDefaults } from '../pi/model-catalog';
+import type { ChatModelSettings, NewChatDefaults } from '../pi/model-catalog';
 import type { ProviderAccess } from '../pi/provider-credentials';
 
 export interface ChatRuntimeSnapshot extends ChatServiceSnapshot {
@@ -17,9 +17,8 @@ export interface ChatRuntimeSnapshot extends ChatServiceSnapshot {
 
 interface Credentials {
   readonly getProviderSnapshot: (providerId: string) => ProviderAccess;
-  readonly replaceApiKey?: (providerId: string, key: string) => Promise<void>;
-  readonly restoreProvider?: (providerId: string) => Promise<void>;
-  restore(): Promise<void>;
+  readonly replaceApiKey: (providerId: string, key: string) => Promise<void>;
+  readonly restoreProvider: (providerId: string) => Promise<void>;
 }
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -39,10 +38,9 @@ export class ChatRuntime {
   private error?: string;
   private loginController?: AbortController;
   private disconnectingProvider?: string;
-  private restoring?: Promise<void>;
 
   constructor(private readonly options: {
-    models: Models; openStorage: () => Promise<Storage>; credentials?: Credentials;
+    models: Models; openStorage: () => Promise<Storage>; credentials: Credentials;
     remote: RemoteExecution;
     workspaces: Workspaces;
     newChat?: NewChatDefaults;
@@ -91,7 +89,6 @@ export class ChatRuntime {
     return () => { this.listeners.delete(listener); };
   };
   readonly getSnapshot = () => this.snapshot;
-  getCatalog() { return this.service?.getCatalog() ?? buildModelCatalog(this.options.models); }
 
   report(error: unknown) {
     this.error = errorText(error);
@@ -100,8 +97,6 @@ export class ChatRuntime {
 
   /** Open storage and the chat list. Returns at once when open; a failed attempt can be retried. */
   open(): Promise<void> {
-    // Account restoration does not depend on SQLite, so a database failure leaves sign-in usable.
-    this.restoring ??= this.options.credentials?.restore().catch(() => {});
     return this.serialize(async () => {
       if (this.service) return;
       let storage: Storage | undefined;
@@ -110,7 +105,7 @@ export class ChatRuntime {
         const service = await DurableChatService.open({ storage, models: this.options.models,
           remote: this.options.remote, workspaces: this.options.workspaces,
           newChat: this.options.newChat,
-          authError: (providerId) => this.options.credentials?.getProviderSnapshot(providerId).error,
+          authError: (providerId) => this.options.credentials.getProviderSnapshot(providerId).error,
         });
         this.service = service;
         this.unsubscribe = service.subscribe(() => this.publish());
@@ -152,10 +147,8 @@ export class ChatRuntime {
   send(id: ConversationId, text: string) { return this.run((service) => service.send(id, text)); }
   cancel(id: ConversationId) { return this.run((service) => service.cancel(id)); }
 
-  async retryAuth(providerId: string) {
-    const credentials = this.options.credentials;
-    if (credentials?.restoreProvider) await credentials.restoreProvider(providerId);
-    else await credentials?.restore();
+  retryAuth(providerId: string) {
+    return this.options.credentials.restoreProvider(providerId);
   }
 
   /** Browser sign-in. Pi's store replaces the credential atomically; work in progress keeps its resolved auth. */
@@ -179,17 +172,7 @@ export class ChatRuntime {
     if (!this.options.models.getProvider(providerId)?.auth.apiKey?.login) {
       throw new Error('This provider does not support API key sign-in.');
     }
-    if (this.options.credentials?.replaceApiKey) {
-      await this.options.credentials.replaceApiKey(providerId, key);
-      return;
-    }
-    await this.options.models.login(providerId, 'api_key', {
-      async prompt(prompt) {
-        if (prompt.type !== 'secret') throw new Error('This provider requires additional configuration.');
-        return key.trim();
-      },
-      notify() {},
-    });
+    await this.options.credentials.replaceApiKey(providerId, key);
   }
 
   /** Removes the saved credential. A failed removal stays pending so the account screen can retry it. */
