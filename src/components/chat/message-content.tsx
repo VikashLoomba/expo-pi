@@ -6,43 +6,31 @@ import { InlineContent } from './markdown/inline-content';
 import { parseMessageMarkdown } from './markdown/streaming-parser';
 import { TableBlock } from './markdown/table-block';
 import { assertNever, type MarkdownBlock } from './markdown/types';
-import type { InlineCitation } from './web-search-presentation';
-
-const noCitations: readonly InlineCitation[] = [];
-
-interface BlockProps {
-  block: MarkdownBlock;
-  citations: readonly InlineCitation[];
-}
 
 function listMarker(checked: boolean | null, ordered: boolean, number: number): string {
   if (checked !== null) return checked ? '☑' : '☐';
   return ordered ? `${number}.` : '•';
 }
 
-function BlockList({ blocks, citations, compact = false }: {
-  blocks: readonly MarkdownBlock[];
-  citations: readonly InlineCitation[];
-  compact?: boolean;
-}) {
+function BlockList({ blocks, compact = false }: { blocks: readonly MarkdownBlock[]; compact?: boolean }) {
   return <View style={compact ? styles.compactBlocks : styles.blocks}>
-    {blocks.map((block) => <ContentBlock key={block.key} block={block} citations={citations} />)}
+    {blocks.map((block) => <ContentBlock key={block.key} block={block} />)}
   </View>;
 }
 
-function ContentBlock({ block, citations }: BlockProps) {
+function ContentBlock({ block }: { block: MarkdownBlock }) {
   const colors = useChatColors();
 
   switch (block.kind) {
     case 'paragraph':
       return <Text selectable style={[styles.body, { color: colors.text }]}>
-        <InlineContent fragment={block.content} citations={citations} />
+        <InlineContent fragment={block.content} />
       </Text>;
     case 'heading':
       return <Text selectable accessibilityRole="header" style={[
         styles.heading, { color: colors.text, fontSize: block.level === 1 ? 23 : block.level === 2 ? 21 : 19 },
       ]}>
-        <InlineContent fragment={block.content} citations={citations} />
+        <InlineContent fragment={block.content} />
       </Text>;
     case 'code':
       return <CodeBlock language={block.language} code={block.text} />;
@@ -53,30 +41,29 @@ function ContentBlock({ block, citations }: BlockProps) {
             accessibilityLabel={item.checked === null ? undefined : item.checked ? 'Completed task' : 'Incomplete task'}>
             {listMarker(item.checked, block.ordered, block.start + index)}
           </Text>
-          <View style={styles.listContent}><BlockList blocks={item.blocks} citations={citations} compact /></View>
+          <View style={styles.listContent}><BlockList blocks={item.blocks} compact /></View>
         </View>)}
       </View>;
     case 'quote':
       return <View style={[styles.quote, { borderLeftColor: colors.border }]}>
-        <BlockList blocks={block.blocks} citations={citations} />
+        <BlockList blocks={block.blocks} />
       </View>;
     case 'rule':
       return <View style={[styles.rule, { backgroundColor: colors.border }]} />;
     case 'table':
-      return <TableBlock block={block} citations={citations} />;
+      return <TableBlock block={block} />;
     default:
       return assertNever(block);
   }
 }
 
 /** Blocks are keyed by source offset, so completed blocks stay mounted as later content streams. */
-export function MessageContent({ text, streaming = false, citations = noCitations }: {
+export function MessageContent({ text, streaming = false }: {
   text: string;
   streaming?: boolean;
-  citations?: readonly InlineCitation[];
 }) {
   const blocks = parseMessageMarkdown(text, streaming);
-  return <View style={styles.content}><BlockList blocks={blocks} citations={citations} /></View>;
+  return <View style={styles.content}><BlockList blocks={blocks} /></View>;
 }
 
 const styles = StyleSheet.create({

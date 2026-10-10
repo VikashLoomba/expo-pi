@@ -9,7 +9,7 @@ import { MessageContent } from './message-content';
 import { PiMark } from './primitives';
 import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
-import { collectSearchSources, inlineCitations } from './web-search-presentation';
+import { collectSearchSources } from './web-search-presentation';
 
 export function MessageRow({ message, stopping = false }: {
   message: ChatMessage; stopping?: boolean;
@@ -18,7 +18,6 @@ export function MessageRow({ message, stopping = false }: {
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const sources = message.webSearch ? collectSearchSources(message.webSearch) : [];
-  const citations = inlineCitations(message.text, message.webSearch?.citations ?? [], sources);
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timeout.current), []);
   const copy = async () => {
@@ -53,7 +52,7 @@ export function MessageRow({ message, stopping = false }: {
       </Pressable>
       {thinkingExpanded && <Text selectable style={[styles.thinkingText, { color: colors.secondary, borderLeftColor: colors.border }]}>{message.thinking}</Text>}
     </View> : null}
-    {message.text ? <MessageContent text={message.text} streaming={message.streaming} citations={citations} />
+    {message.text ? <MessageContent text={message.text} streaming={message.streaming} />
       : message.streaming && !message.webSearch?.calls.some((call) => call.status === 'running')
         ? <View style={styles.waiting}><ActivityIndicator size="small" color={colors.accent} /></View> : null}
     <WebSearchSources sources={sources} messageId={message.id} />

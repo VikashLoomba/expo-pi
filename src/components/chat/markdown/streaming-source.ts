@@ -6,7 +6,8 @@ export interface StreamingSource {
   readonly pendingLinkAt?: number;
 }
 
-const pendingHref = 'https://streaming.invalid/';
+/** The target invented for a link label still streaming; filtered by value after the prepared re-parse. */
+export const PENDING_HREF = 'https://streaming.invalid/';
 
 /** These are presentation hints for an unfinished suffix, not Markdown grammar. */
 function closingDelimiter(text: string, delimiter: string, start: number): number {
@@ -55,7 +56,7 @@ function completeInline(text: string, allowLinks = true): StreamingSource {
           if (labelText[cursor] === ']') brackets--;
         }
         return {
-          text: text.slice(0, index + 1) + (label?.text ?? text.slice(index + 1, labelEnd)) + ']'.repeat(Math.max(0, brackets)) + `](${pendingHref})` + suffix,
+          text: text.slice(0, index + 1) + (label?.text ?? text.slice(index + 1, labelEnd)) + ']'.repeat(Math.max(0, brackets)) + `](${PENDING_HREF})` + suffix,
           changedAt: labelEnd === -1 ? index + 1 + (label?.changedAt ?? 0) : targetStart,
           pendingLinkAt: index,
         };

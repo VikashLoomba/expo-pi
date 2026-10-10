@@ -9,22 +9,19 @@ export interface WebSearchCall {
   error?: string;
 }
 
-export interface WebSearchCitation {
-  id: string;
-  url: string;
-  title: string;
-  /** UTF-16 offsets into the unmodified aggregate ChatMessage.text. End is exclusive. */
-  startIndex: number;
-  endIndex: number;
-}
-
 export interface WebSearchSource {
   url: string;
   title?: string;
+  /** The answer's Markdown links cite this page. */
+  cited?: boolean;
 }
 
+/**
+ * Search activity and sources of one assistant response. Citations are already Markdown links in the answer
+ * text, so there is nothing to decorate: sources are the union of the calls' results and the cited URLs,
+ * cited first, a citation matching its result ignoring the `utm_source=openai` parameter.
+ */
 export interface WebSearchPresentation {
   calls: readonly WebSearchCall[];
-  citations: readonly WebSearchCitation[];
   sources: readonly WebSearchSource[];
 }

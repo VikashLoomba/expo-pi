@@ -1,6 +1,5 @@
 import { parseMarkdown } from './parse-markdown';
-import { sliceMappedText, sourceRange } from './source-map';
-import { prepareStreamingSource, type StreamingSource } from './streaming-source';
+import { PENDING_HREF, prepareStreamingSource } from './streaming-source';
 import { assertNever, type InlineFragment, type MarkdownBlock, type TableRow } from './types';
 
 function mapBlocks(blocks: readonly MarkdownBlock[],
@@ -20,33 +19,39 @@ function mapBlocks(blocks: readonly MarkdownBlock[],
   });
 }
 
-/** Virtual closers never become archived text or provider citation coordinates. */
-function restoreSource(blocks: readonly MarkdownBlock[], source: string, prepared: StreamingSource): readonly MarkdownBlock[] {
-  return mapBlocks(blocks, (value) => {
-    const end = value.key + value.sourceText.length >= prepared.changedAt ? source.length : value.key + value.sourceText.length;
-    return {
-      ...value,
-      sourceText: source.slice(value.key, end),
-      runs: value.runs.flatMap((run) => {
-        let end = 0;
-        for (const character of run.text) {
-          const range = sourceRange(run.sourceSpans, end, end + character.length);
-          if (!range || range.end > prepared.changedAt) break;
-          end += character.length;
-        }
-        if (!end) return [];
-        return [{ ...run, ...sliceMappedText(run, 0, end),
-          ...(prepared.pendingLinkAt !== undefined && run.key > prepared.pendingLinkAt && run.href === 'https://streaming.invalid/' ? { href: null } : {}),
-        }];
-      }),
-    };
-  });
+/** The repaired fragment is the last one in document order; block and fragment keys are source offsets. */
+function lastFragmentKey(blocks: readonly MarkdownBlock[]): number | undefined {
+  let key: number | undefined;
+  const visit = (fragment: InlineFragment) => { key = fragment.key; };
+  const walk = (values: readonly MarkdownBlock[]) => {
+    for (const block of values) {
+      if (block.kind === 'paragraph' || block.kind === 'heading') visit(block.content);
+      else if (block.kind === 'list') block.items.forEach((item) => walk(item.blocks));
+      else if (block.kind === 'quote') walk(block.blocks);
+      else if (block.kind === 'table') [block.header, ...block.rows].forEach((row) => row.cells.forEach(visit));
+    }
+  };
+  walk(blocks);
+  return key;
 }
 
-/** A message's blocks. While it streams, an unfinished suffix is shown with virtual closers. */
+/**
+ * A message's blocks. While it streams, an unfinished suffix is shown with virtual closers: re-parse the prepared
+ * text, filter the pending-link sentinel href by value (a visible label, not a link), and key the repaired
+ * fragment's runs by index — they re-parse as the suffix grows.
+ */
 export function parseMessageMarkdown(text: string, streaming: boolean): readonly MarkdownBlock[] {
   const blocks = parseMarkdown(text);
   if (!streaming) return blocks;
   const prepared = prepareStreamingSource(text, blocks);
-  return prepared.text === text ? blocks : restoreSource(parseMarkdown(prepared.text), text, prepared);
+  if (prepared.text === text) return blocks;
+  const repairedKey = lastFragmentKey(blocks);
+  return mapBlocks(parseMarkdown(prepared.text), (fragment) => ({
+    ...fragment,
+    runs: fragment.runs.map((run, index) => ({
+      ...run,
+      key: fragment.key === repairedKey ? index : run.key,
+      href: run.href === PENDING_HREF ? null : run.href,
+    })),
+  }));
 }

@@ -1,20 +1,33 @@
-import type { WebSearchPresentation } from '../../chat/web-search-types';
-import type { SearchPresentation } from './documents';
+import type { WebSearchPresentation, WebSearchSource } from '../../chat/web-search-types';
+import { safeSourceUrl } from '../../chat/web-search-url';
+import type { SearchPresentation, SearchSource } from './documents';
+
+/** A citation matches its result ignoring the `utm_source=openai` the provider appends to cited URLs. */
+function citationKey(value: string): string | undefined {
+  const url = safeSourceUrl(value);
+  if (!url) return undefined;
+  const parsed = new URL(url);
+  if (parsed.searchParams.get('utm_source') === 'openai') parsed.searchParams.delete('utm_source');
+  return parsed.toString();
+}
 
 /**
- * The committed presentation as the UI's view model. Cited pages carry no text ranges — the answer's Markdown
- * links already render — so synthesized citations only order the sources list and carry its "Cited" badge until
- * WS-2 removes the field.
+ * The committed presentation as the UI's view model: the union of the calls' results and the cited URLs,
+ * cited pages first, each once. The answer's citations render as the Markdown links the model already wrote.
  */
-export function toWebSearchPresentation(responseId: string, presentation: SearchPresentation): WebSearchPresentation {
-  return {
-    calls: presentation.calls,
-    citations: presentation.cited.map((source, index) => ({
-      id: `${responseId}:citation:${index}`, url: source.url, title: source.title ?? source.url,
-      startIndex: 0, endIndex: 0,
-    })),
-    sources: presentation.sources,
+export function toWebSearchPresentation(presentation: SearchPresentation): WebSearchPresentation {
+  const seen = new Set<string>();
+  const sources: WebSearchSource[] = [];
+  const add = (source: SearchSource, cited: boolean) => {
+    const key = citationKey(source.url);
+    if (key === undefined || seen.has(key)) return;
+    seen.add(key);
+    sources.push({ url: source.url, ...(source.title ? { title: source.title } : {}),
+      ...(cited ? { cited: true } : {}) });
   };
+  presentation.cited.forEach((source) => add(source, true));
+  presentation.sources.forEach((source) => add(source, false));
+  return { calls: presentation.calls, sources };
 }
 
 /** A response did search work worth showing (a call, or a citation without one). */

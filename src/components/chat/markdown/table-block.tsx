@@ -2,19 +2,17 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { InlineCitation } from '../web-search-presentation';
 import { InlineContent } from './inline-content';
 import type { ColumnAlignment, MarkdownBlock, TableRow } from './types';
 
 type Table = Extract<MarkdownBlock, { kind: 'table' }>;
 
-function Row({ row, header, rowNumber, columnWidth, alignments, citations }: {
+function Row({ row, header, rowNumber, columnWidth, alignments }: {
   row: TableRow;
   header: boolean;
   rowNumber: number;
   columnWidth: number;
   alignments: readonly ColumnAlignment[];
-  citations: readonly InlineCitation[];
 }) {
   const colors = useChatColors();
   return <View style={[styles.row, { borderBottomColor: colors.border, backgroundColor: header ? colors.subtle : colors.surface }]}>
@@ -25,14 +23,14 @@ function Row({ row, header, rowNumber, columnWidth, alignments, citations }: {
       <Text selectable accessibilityRole={header ? 'header' : undefined}
         accessibilityHint={`${header ? 'Header' : `Row ${rowNumber}`}, column ${index + 1}`}
         style={[styles.text, header && styles.headerText, { color: colors.text, textAlign: alignments[index] ?? 'left' }]}>
-        <InlineContent fragment={cell} citations={citations} />
+        <InlineContent fragment={cell} />
       </Text>
     </View>)}
   </View>;
 }
 
 /** One scroller and shared column widths keep all rows aligned during streaming. */
-export function TableBlock({ block, citations }: { block: Table; citations: readonly InlineCitation[] }) {
+export function TableBlock({ block }: { block: Table }) {
   const colors = useChatColors();
   const { fontScale } = useWindowDimensions();
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -47,9 +45,9 @@ export function TableBlock({ block, citations }: { block: Table; citations: read
       onLayout={({ nativeEvent }) => setViewportWidth(nativeEvent.layout.width)}
       alwaysBounceHorizontal={false} contentContainerStyle={{ width: tableWidth }}>
       <View style={{ width: tableWidth }}>
-        <Row row={block.header} header rowNumber={0} columnWidth={columnWidth} alignments={block.alignments} citations={citations} />
+        <Row row={block.header} header rowNumber={0} columnWidth={columnWidth} alignments={block.alignments} />
         {block.rows.map((row, index) => <Row key={row.key} row={row} header={false} rowNumber={index + 1}
-          columnWidth={columnWidth} alignments={block.alignments} citations={citations} />)}
+          columnWidth={columnWidth} alignments={block.alignments} />)}
       </View>
     </ScrollView>
   </View>;

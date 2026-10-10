@@ -143,7 +143,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
     if (responseId === undefined) return undefined;
     const presentation = presentations[responseId];
     return presentation && hasSearchActivity(presentation)
-      ? toWebSearchPresentation(responseId, presentation) : undefined;
+      ? toWebSearchPresentation(presentation) : undefined;
   };
 
   // Search observation entries are evidence for the model, never transcript rows.
@@ -224,7 +224,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
     if (presentation && hasSearchActivity(presentation)) {
       const key = `assistant-${assistantCount++}`;
       messages.push({ id: key, role: 'assistant', text: '', createdAt, streaming: true,
-        webSearch: toWebSearchPresentation(liveSearchId, presentation) });
+        webSearch: toWebSearchPresentation(presentation) });
     }
   }
   for (const slot of state.live?.tools ?? []) {
