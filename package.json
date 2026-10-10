@@ -4,9 +4,9 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@automatalabs/expo-pi": "workspace:*",
-    "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-durable": "1.1.0",
+    "@earendil-works/chord": "file:vendor/pi/earendil-works-chord-1.1.0.tgz",
+    "@earendil-works/pi-ai": "file:vendor/pi/earendil-works-pi-ai-1.1.0.tgz",
+    "@earendil-works/pi-durable": "file:vendor/pi/earendil-works-pi-durable-1.1.0.tgz",
     "@expo/metro-runtime": "~58.0.13",
     "@expo/ui": "~58.0.14",
     "@osuki-dev/react-native-ssh": "0.3.0",
@@ -57,6 +57,14 @@
     "start": "expo start",
     "ios": "expo run:ios",
     "lint": "expo lint"
+  },
+  "pnpm": {
+    "overrides": {
+      "@earendil-works/chord": "file:vendor/pi/earendil-works-chord-1.1.0.tgz",
+      "@earendil-works/pi-ai": "file:vendor/pi/earendil-works-pi-ai-1.1.0.tgz",
+      "@earendil-works/pi-durable": "file:vendor/pi/earendil-works-pi-durable-1.1.0.tgz",
+      "@earendil-works/pi-telemetry": "file:vendor/pi/earendil-works-pi-telemetry-1.1.0.tgz"
+    }
   },
   "private": true
 }
