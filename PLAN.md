@@ -73,6 +73,14 @@ What main changes for the app (pi-durable `[Unreleased]`):
 - Scheduler performance and memory fixes; a throwing `onReport` is contained; watch-listener errors are reported.
 - pi-ai `[Unreleased]`: one Mistral timeout fix, unused by the app. chord and pi-env: no changes.
 
+The harness guide's version table names seven of these differences and defers to the CHANGELOG's `[Unreleased]`
+section as the exact diff; all seven hold for `ea448f4` (tool `output`, `SessionFailed`/`harness.closed`,
+`executeTool`, `callers`/`modelTools`, the bash `exit_code` diagnostic, image reads, `ToolHookCall`). The CHANGELOG
+at `ea448f4` adds what the guide predates: `pi.tool` v2 with live migration, `StorageRequestError`, listener throws
+reported instead of failing, `abandonOnRestart`, `abortOwned`/`ownedTasks`, `retainedOutput`, `NestedCallDoc`, and
+the scheduler, `onReport`, watch-listener and Mistral fixes. The guide's `version.check-dts` rule applies unchanged:
+code against the installed declarations, which are now the vendored main ones.
+
 Verified against main before adopting: the invocation-signal flow the per-request correlation relies on
 (`scheduler.ts` context, `generation.ts` stream options), generation's `streamSimple` dispatch, `createProvider`'s
 plain-object provider (the spread decorator), the partial's `responseId` from `response.created`, pi-ai's own
