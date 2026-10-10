@@ -1,53 +1,40 @@
 import { defineDoc } from '@earendil-works/pi-durable';
 
-import type { NativeResponseRecord } from './types';
+/** One hosted call's presentation state, in the order the provider reported it. */
+export type SearchCallPresentation = {
+  id: string;
+  status: 'running' | 'completed' | 'failed' | 'interrupted';
+  action: 'search' | 'open_page' | 'find_in_page';
+  queries?: string[];
+  url?: string;
+  pattern?: string;
+};
 
-export type NativeResponsesState = { responses: Record<string, NativeResponseRecord> };
-export type NativeLiveState = { requestId?: string; taskId?: number };
+export type SearchSource = { url: string; title?: string };
 
-/** Raw provider output remains authoritative for native state and presentation. */
-export const NativeResponsesDoc = defineDoc<NativeResponsesState>({
-  kind: 'app.openai.responses', version: 1, scope: 'conversation', history: 'rewindable', fork: 'asOf',
+/** What a chat needs to show one response's search activity, sources and citations. */
+export type SearchPresentation = {
+  calls: SearchCallPresentation[];
+  /** Sources found, first occurrence kept: action sources, then results. */
+  sources: SearchSource[];
+  /** Pages the answer cited, in citation order. */
+  cited: SearchSource[];
+};
+
+export type SearchPresentationsState = {
+  /** Keyed by `responseId`, which pi-ai sets from `response.created` before any search event. */
+  responses: Record<string, SearchPresentation>;
+  /** The latest request that produced search activity; the live row uses it while its run is busy. */
+  live?: { responseId: string; taskId: number };
+};
+
+/**
+ * One presentation document per chat, created in `createConversation`'s `init` (as examples 06 and 29 create a
+ * document they later read), so a chat view observes it from the start and nothing attaches late. `history: 'latest'`
+ * because nothing reads it rewindably; `fork: 'current'` so a fork keeps showing the searches of the answers it
+ * inherited.
+ */
+export const SearchPresentationsDoc = defineDoc<SearchPresentationsState>({
+  kind: 'app.openai.search', version: 1, scope: 'conversation', history: 'latest', fork: 'current',
   initial: () => ({ responses: {} }),
-});
-
-/** A fork inherits historical responses, never its parent's in-flight activity. */
-export const NativeLiveDoc = defineDoc<NativeLiveState>({
-  kind: 'app.openai.live', version: 1, scope: 'conversation', history: 'latest', fork: 'initial',
-  initial: () => ({}),
-});
-
-export type SearchObservationReference = {
-  entryId: number;
-  digest: string;
-  requestId: string;
-  nativeItemId: string;
-  responseId: string;
-  sourceEntryId?: number;
-  originEntryId?: number;
-  /** A reversible context-budget omission, distinct from a deliberate user edit. */
-  budgetExcluded?: boolean;
-  disabled?: boolean;
-};
-
-export type SearchObservationsState = {
-  observations: Record<string, SearchObservationReference>;
-  /** The newest turn edit, rejecting older requests while allowing regeneration. */
-  disabledOriginCutoffs?: Record<string, number>;
-  /** Legacy responses may have no recoverable user origin. */
-  disabledResponses?: string[];
-};
-
-/** A turn edit invalidates observations from requests pinned before that edit. */
-export function isSearchResponseInvalidated(index: SearchObservationsState, record: NativeResponseRecord): boolean {
-  if (record.responseId !== undefined && index.disabledResponses?.includes(record.responseId)) return true;
-  if (record.originEntryId === undefined) return false;
-  const invalidatedBefore = index.disabledOriginCutoffs?.[record.originEntryId];
-  return invalidatedBefore !== undefined && (record.cutoff === undefined || record.cutoff < invalidatedBefore);
-}
-
-/** Transactional index only; evidence belongs to immutable transcript entries. */
-export const SearchObservationsDoc = defineDoc<SearchObservationsState>({
-  kind: 'app.openai.search-observations', version: 1, scope: 'conversation', history: 'rewindable', fork: 'asOf',
-  initial: () => ({ observations: {} }),
 });

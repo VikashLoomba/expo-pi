@@ -7,13 +7,13 @@ import {
 
 import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-presentation';
 import type { ChatControls, ChatMessage, ChatSummary } from '../chat/types';
+import type { WebSearchPresentation } from '../chat/web-search-types';
 import type { ChatMetadata } from './chat-metadata';
 import { executionSettings, type ExecutionTargetState } from './execution/document';
 import type { ChatModelSettings } from './model-catalog';
-import type { NativeLiveState, NativeResponsesState } from './native-web-search/durable';
-import { isSearchObservationEntry } from './native-web-search/observations';
-import { nativeResponseText, projectNativeWebSearch } from './native-web-search/projection';
-import type { NativeResponseRecord } from './native-web-search/types';
+import type { SearchPresentationsState } from './native-web-search/documents';
+import { isSearchObservationEntry } from './native-web-search/entries';
+import { hasSearchActivity, toWebSearchPresentation } from './native-web-search/presentation';
 
 /** Committed state of one chat: its conversation view, app documents and the record of its latest input. */
 export type ChatState = {
@@ -22,8 +22,7 @@ export type ChatState = {
   readonly agent?: Readonly<AgentState>;
   readonly execution?: Readonly<ExecutionTargetState>;
   readonly live?: Readonly<LiveState>;
-  readonly native?: Readonly<NativeResponsesState>;
-  readonly nativeLive?: Readonly<NativeLiveState>;
+  readonly search?: Readonly<SearchPresentationsState>;
   readonly submission?: SubmissionRecord;
 };
 
@@ -89,15 +88,6 @@ export function projectControls(state: ChatState): ChatControls {
   };
 }
 
-function nativeTimestamp(record: NativeResponseRecord, fallback: number): number {
-  const createdAt = record.response?.created_at;
-  if (typeof createdAt === 'number' && Number.isFinite(createdAt)) return createdAt * 1000;
-  // The bridge generates UUIDv7 request IDs before network access; its timestamp
-  // keeps interrupted attempts in order even when no response.created arrived.
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-7/i.test(record.requestId)
-    ? Number.parseInt(record.requestId.replaceAll('-', '').slice(0, 12), 16) : fallback;
-}
-
 function userRows(message: UserMessage, key: string): ChatMessage[] {
   const text = textOf(message.content);
   return text ? [{ id: key, role: 'user', text, createdAt: message.timestamp }] : [];
@@ -116,16 +106,9 @@ function toolResultRow(message: ToolResultMessage, key: string, call: ChatMessag
 
 /** An assistant row (when it has anything to show) followed by one row per tool call. */
 function assistantRows(message: AssistantMessage, key: string, streaming: boolean,
-  native: NativeResponseRecord | undefined, nativeInterrupted: boolean): ChatMessage[] {
+  webSearch?: WebSearchPresentation): ChatMessage[] {
   const rows: ChatMessage[] = [];
-  const nativeText = native ? nativeResponseText(native) : '';
-  // A terminal envelope can contain message items absent from Pi's deltas. Use that complete native text for
-  // citation offsets, but keep Pi's partial after cancellation or failure when native snapshots are sparse.
-  const ownText = message.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('');
-  const text = nativeText && (native?.status === 'completed' || native?.status === 'incomplete')
-    ? nativeText : ownText || nativeText;
-  const webSearch = native
-    ? projectNativeWebSearch(native, text, nativeInterrupted || message.stopReason === 'aborted') : undefined;
+  const text = message.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('');
   const thinking = message.content.flatMap((part) => part.type === 'thinking' ? [part.thinking] : []).join('');
   const failed = message.stopReason === 'error';
   if (text || thinking || webSearch || failed || (streaming && message.content.length === 0)) {
@@ -146,18 +129,6 @@ function assistantRows(message: AssistantMessage, key: string, streaming: boolea
   return rows;
 }
 
-function nativeRows(record: NativeResponseRecord, key: string, interrupted: boolean, streaming: boolean,
-  fallbackTime: number): ChatMessage[] {
-  const text = nativeResponseText(record);
-  const webSearch = projectNativeWebSearch(record, text, interrupted);
-  if (!text && !webSearch) return [];
-  return [{ id: key, role: 'assistant', text, createdAt: nativeTimestamp(record, fallbackTime),
-    streaming: streaming && !interrupted,
-    ...(webSearch ? { webSearch } : {}), ...(interrupted ? { interrupted: true } : {}),
-    ...(record.status === 'failed' ? { error: record.error || 'Response failed.' } : {}),
-  }];
-}
-
 /**
  * Derive transcript rows from committed entries (ascending IDs) and live documents. Row IDs stay stable as a
  * streamed partial becomes a saved entry: assistants are numbered in order, and the partial takes the next number.
@@ -167,40 +138,19 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
   const calls = new Map<string, number>();
   let assistantCount = 0;
   const createdAt = state.metadata?.createdAt ?? 0;
-  const responses = state.native?.responses ?? {};
-  const nativeRecords = Object.values(responses);
-  const nativeByResponse = new Map(nativeRecords.flatMap((record) =>
-    record.responseId ? [[record.responseId, record] as const] : []));
-  const liveRequest = state.nativeLive?.requestId;
-  const runTask = state.live?.run?.taskId;
-  const currentNative = liveRequest !== undefined && state.nativeLive?.taskId === runTask
-    ? responses[liveRequest] : undefined;
-  // A native response still marked in progress is interrupted unless it is the live request.
-  const nativeInterrupted = (record: NativeResponseRecord) =>
-    record.status === 'in_progress' && record.requestId !== currentNative?.requestId;
-  const pushAssistant = (rows: readonly ChatMessage[], key: string, message: AssistantMessage) => {
-    const start = messages.length;
-    messages.push(...rows);
-    for (const part of message.content) {
-      if (part.type !== 'toolCall') continue;
-      const offset = rows.findIndex((row) => row.id === `${key}-tool-${part.id}`);
-      if (offset >= 0) calls.set(part.id, start + offset);
-    }
-  };
-  const appendNative = (record: NativeResponseRecord) => {
-    const key = `assistant-${assistantCount++}`;
-    const interrupted = nativeInterrupted(record) || record.status === 'interrupted';
-    messages.push(...nativeRows(record, key, interrupted, false, createdAt));
+  const presentations = state.search?.responses ?? {};
+  const webSearchFor = (responseId: string | undefined): WebSearchPresentation | undefined => {
+    if (responseId === undefined) return undefined;
+    const presentation = presentations[responseId];
+    return presentation && hasSearchActivity(presentation)
+      ? toWebSearchPresentation(responseId, presentation) : undefined;
   };
 
-  // Observation model messages are external evidence for the model. Native
-  // response metadata already supplies their visible activity and sources.
+  // Search observation entries are evidence for the model, never transcript rows.
   const visible = entries.filter((entry) => !isSearchObservationEntry(entry));
   const represented = new Set(visible.flatMap((entry) => entry.model?.flatMap((message) =>
     message.role === 'assistant' && message.responseId ? [message.responseId] : []) ?? []));
-  const orphaned = nativeRecords.filter((record) => record.requestId !== currentNative?.requestId
-    && (!record.responseId || !represented.has(record.responseId)))
-    .sort((a, b) => a.taskId - b.taskId || a.requestId.localeCompare(b.requestId));
+  const runTask = state.live?.run?.taskId;
   // pi-durable saves each failed attempt before retrying it. The attempt is not an answer while its generation
   // still runs, or once that generation saved a later response.
   const lastAssistant = new Map<number, number>();
@@ -220,11 +170,16 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
     const at = entry.head !== undefined && present.has(entry.head) ? entry.head : entry.id;
     summaries.set(at, [...summaries.get(at) ?? [], entry]);
   }
-  let nativeIndex = 0;
-  for (const entry of visible) {
-    while (nativeIndex < orphaned.length && orphaned[nativeIndex].taskId < entry.id) {
-      appendNative(orphaned[nativeIndex++]);
+  const pushAssistant = (rows: readonly ChatMessage[], key: string, message: AssistantMessage) => {
+    const start = messages.length;
+    messages.push(...rows);
+    for (const part of message.content) {
+      if (part.type !== 'toolCall') continue;
+      const offset = rows.findIndex((row) => row.id === `${key}-tool-${part.id}`);
+      if (offset >= 0) calls.set(part.id, start + offset);
     }
+  };
+  for (const entry of visible) {
     for (const summary of summaries.get(entry.id) ?? []) {
       messages.push({ id: `summary-${summary.id}`, role: 'notice', text: SUMMARIZED_NOTICE, createdAt: 0 });
     }
@@ -243,24 +198,34 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
       // Entries are append-only, so the next assistant's ordinal is known before its entry exists. Count every
       // assistant, including tool-only responses and hidden attempts, so a partial and its entry share a row ID.
       const key = `assistant-${assistantCount++}`;
-      if (message.stopReason === 'error' && retried(entry)) return;
-      const native = message.responseId ? nativeByResponse.get(message.responseId) : undefined;
-      const interrupted = native ? nativeInterrupted(native) : false;
-      pushAssistant(assistantRows(message, key, false, native, interrupted), key, message);
+      const webSearch = webSearchFor(message.responseId);
+      if (message.stopReason === 'error' && retried(entry)) {
+        // A failed attempt's answer stays hidden; its searches remain as an interrupted row.
+        if (webSearch) {
+          messages.push({ id: key, role: 'assistant', text: '', createdAt: message.timestamp,
+            streaming: false, interrupted: true, webSearch });
+        }
+        return;
+      }
+      pushAssistant(assistantRows(message, key, false, webSearch), key, message);
     });
   }
-  while (nativeIndex < orphaned.length) appendNative(orphaned[nativeIndex++]);
 
   const partial = state.live?.generation?.message;
   if (partial) {
     const key = `assistant-${assistantCount++}`;
-    const native = partial.responseId ? nativeByResponse.get(partial.responseId) : undefined;
-    pushAssistant(assistantRows(partial, key, true, native, native ? nativeInterrupted(native) : false), key, partial);
+    pushAssistant(assistantRows(partial, key, true, webSearchFor(partial.responseId)), key, partial);
   }
-  if (currentNative && (!currentNative.responseId || partial?.responseId !== currentNative.responseId)
-      && !(currentNative.responseId && represented.has(currentNative.responseId))) {
-    const key = `assistant-${assistantCount++}`;
-    messages.push(...nativeRows(currentNative, key, nativeInterrupted(currentNative), true, createdAt));
+  // A busy run whose current response has search activity but no partial yet shows a live search row.
+  const liveSearchId = runTask !== undefined && state.search?.live?.taskId === runTask
+    ? state.search.live.responseId : undefined;
+  if (liveSearchId !== undefined && liveSearchId !== partial?.responseId && !represented.has(liveSearchId)) {
+    const presentation = presentations[liveSearchId];
+    if (presentation && hasSearchActivity(presentation)) {
+      const key = `assistant-${assistantCount++}`;
+      messages.push({ id: key, role: 'assistant', text: '', createdAt, streaming: true,
+        webSearch: toWebSearchPresentation(liveSearchId, presentation) });
+    }
   }
   for (const slot of state.live?.tools ?? []) {
     const index = calls.get(slot.callId);

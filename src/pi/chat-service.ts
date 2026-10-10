@@ -21,7 +21,7 @@ import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
   type ChatModelSettings, type NewChatDefaults,
 } from './model-catalog';
-import { createNativeWebSearchBridge } from './native-web-search/durable';
+import { createNativeWebSearchBridge, SearchPresentationsDoc } from './native-web-search/durable';
 import { SESSION_EXPIRED } from './provider-credentials';
 
 /** `error` is the Harness's latest report; operations reject to their callers instead. */
@@ -79,7 +79,7 @@ export class DurableChatService {
     const { workspaces, remote } = options;
     const registry = createRegistry();
     registry.install(CodingTools);
-    const nativeSearch = createNativeWebSearchBridge(options.models);
+    const nativeSearch = createNativeWebSearchBridge((error) => service?.report(error));
     registry.install(nativeSearch.extension);
     registry.install(defineExtension({
       name: 'mobile-chat',
@@ -89,7 +89,7 @@ export class DurableChatService {
     const now = options.now ?? Date.now;
     let service: DurableChatService | undefined;
     const harness = await Harness.open(options.storage, {
-      models: nativeSearch.models, registry, now,
+      models: options.models, registry, now,
       // Each use reads the chat's committed selection, like pi's sandbox-per-conversation example.
       env: async ({ conversationId, cwd, read }, envContext) => {
         const target = (await read.snapshot(ExecutionTargetDoc, conversationId, envContext))?.target;
@@ -266,6 +266,9 @@ export class DurableChatService {
       init: async (tx, id) => {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
         (await tx.doc(ExecutionTargetDoc, id)).target = { kind: 'local' };
+        // A new document is adopted even unmodified (transaction semantics), so the chat view
+        // observes the presentation document from the start and nothing attaches late.
+        await tx.doc(SearchPresentationsDoc, id);
       },
     }, context);
     await this.watchChat(conversation.id);
