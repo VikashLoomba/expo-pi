@@ -61,11 +61,23 @@ function useChatRuntime() {
       let storage: Storage | undefined;
       try {
         storage = await openExpoSqliteStorage();
-        state.service = await DurableChatService.open({ storage, models, remote, workspaces,
+        const opened = await DurableChatService.open({ storage, models, remote, workspaces,
           newChat: NEW_CHAT_DEFAULTS,
           authError: (providerId) => credentials.getProviderSnapshot(providerId).error,
+          onClosed: (end) => {
+            // pi-durable "Errors": a storage error ends the Harness; reopen to recover.
+            if (end.reason !== 'failed') return;
+            serialize(async () => {
+              if (state.service !== opened) return;
+              state.service = undefined;
+              setService(undefined);
+              await opened.close().catch(() => {});
+            });
+            open();
+          },
         });
-        setService(state.service);
+        state.service = opened;
+        setService(opened);
         setOpenError(undefined);
       } catch (error) {
         // Release the database so a later attempt never holds two connections. Closing again is a no-op.

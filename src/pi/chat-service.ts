@@ -2,7 +2,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { ModelsError, uuidv7, type Models } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
-  type ConversationId, type Cursor, type DocumentState, type Storage, type SubmissionId,
+  type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
 } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 
@@ -73,6 +73,8 @@ export class DurableChatService {
     newChat?: NewChatDefaults;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */
     authError?: (providerId: string) => string | undefined;
+    /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
+    onClosed?: (end: SessionEnd) => void;
   }): Promise<DurableChatService> {
     const { workspaces, remote } = options;
     const registry = createRegistry();
@@ -121,6 +123,11 @@ export class DurableChatService {
     }
     // Continue work the last process left unfinished. A chat whose provider cannot authenticate fails on its own.
     harness.resume();
+    // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
+    void harness.closed.then((end) => {
+      if (end.reason === 'failed') service.report(end.error);
+      options.onClosed?.(end);
+    });
     return service;
   }
 
@@ -358,13 +365,13 @@ export class DurableChatService {
     for (const state of this.chats.values()) state.dispose();
     this.listeners.clear();
     this.closePromise = (async () => {
-      // Harness close seals admission and aborts running work at once; the remote owner then closes its
-      // connections, so a command the daemon cannot cancel does not hold the Harness open.
-      const results = await Promise.allSettled([this.harness.close(context), this.remote.close()]);
-      const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-      if (failures.length) {
-        throw new AggregateError(failures.map((result) => result.reason), 'Chat storage could not close cleanly.');
-      }
+      // close.order: the Harness closes first; it aborts and waits for running task code, which still uses
+      // the environments. The remote owner closes its connections afterwards. A close after the Harness
+      // failed on its own returns the same settled close.
+      const failures: unknown[] = [];
+      await this.harness.close(context).catch((error: unknown) => failures.push(error));
+      await this.remote.close().catch((error: unknown) => failures.push(error));
+      if (failures.length) throw new AggregateError(failures, 'Chat storage could not close cleanly.');
     })();
     return this.closePromise;
   }
