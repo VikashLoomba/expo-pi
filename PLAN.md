@@ -34,7 +34,15 @@ before the next release; packed as 1.1.0). npm has no newer release and the repo
 `package.json` points the three direct dependencies at the tarballs, and `pnpm.overrides` pins every
 `@earendil-works/*` package, including the transitive `pi-telemetry`, to the same files, so one instance of each
 exists. pi-env is not an app dependency: the daemon assets come from npm pi-env 1.1.0, and its `[Unreleased]` is
-empty, so the ported remote environment and the shipped daemon match main.
+empty, so the ported remote environment and the shipped daemon match main. When the next npm release ships, delete
+`vendor/` and the overrides and go back to registry versions.
+
+Why tarballs and not `git+https`: pnpm does install monorepo subdirectories (`#<sha>&path:packages/durable`), but
+the repo checks in neither `dist/` nor a `prepare` script, so a git install cannot resolve the packages' `dist`
+exports (verified with pnpm 10.33: `MODULE_NOT_FOUND`). The `"source"` export condition does not help: pi-ai's
+checked-in `.models.ts` files import `./data/*.json`, and those catalog files are generated at build time and never
+committed. Upstream publishes no canary dist-tag and no per-package tarballs on GitHub releases. The only git-URL
+route, a fork with `dist` and data committed, is more to maintain than regenerating tarballs from a pinned sha.
 
 Regenerate from a clone at the wanted revision:
 
