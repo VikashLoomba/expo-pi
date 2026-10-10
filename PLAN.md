@@ -105,14 +105,14 @@ descriptor call, `getRandomValues`). Examples 20 and 29 are unchanged from 1.1.0
 - Plan re-audit fixes: `70e9169`, `1ef9e52`.
 - pi main `ea448f4` as vendored tarballs: `27ee82e`; close order and `harness.closed` reopen: `159669d`.
 - `node:zlib` resolved empty for just-bash; stub deleted: `78eb811`.
-- WS-1 web search data side: `40021dc`. Old chats' web-search records live in documents it replaced; clear app data.
+- WS-1 web search data side: `40021dc`; WS-2 rendering: `d8fe9a9`. Old chats' web-search records live in documents they replaced; clear app data.
 
 ## Open items
 
 | Item | What it is | Status and next step |
 | --- | --- | --- |
 | Upgrade device check | The main revision changes bundle-level code, and `harness.closed` reopen is new. Run an ordinary chat, a bash tool call and a web search on device; if a storage failure can be forced, watch chats close and reopen. | Next device session. |
-| Web search and Markdown (WS-1, WS-2) | Replace about 1,900 lines with pi-ai's documented stream decorator, one app entry per search and one presentation document; citations render as the Markdown links the model already writes. | WS-1 done (`40021dc`); WS-2 next, then independent review, typecheck, lint and a commit. |
+| Web search and Markdown (WS-1, WS-2) | Replace about 1,900 lines with pi-ai's documented stream decorator, one app entry per search and one presentation document; citations render as the Markdown links the model already writes. | Done: WS-1 `40021dc`, WS-2 `d8fe9a9`. Device checks next. |
 | Device checks | Every "Done when" device check. So far only a Release build was installed and one web search was sent (2026-10-09). | After WS-1 and WS-2. |
 | `MessageRow` and `CodeBlock` lost `memo` in `70e9169` | React Compiler does not compile them (a `throw` inside `try/catch`). Nothing depends on their identity, and FlatList's cell renderer already skips unchanged rows. | No action unless a device run shows a problem. |
 
@@ -182,6 +182,164 @@ it follows (see the map).
   - `remove` without `recursive` refuses directories;
   - `absolutePath` accepts `file://` URLs, and `joinPath` keeps a trailing slash;
   - check for abort after each read and write, as `NodeExecutionEnv` does.
+
+Known limits: truncate rewrites the file, `flushFile` cannot fsync, no symlinks, directory info has no size or mtime,
+directory listing is a snapshot, output arrives when the command ends, `watch` returns `not_supported`. **No work is
+required for these known limitations. Do not implement any code, comments, tests, or otherwise. Leave the current
+behaviour for them as it is. These limits are enumerated here just to make it clear they are not meant to be dealt
+with.**
+
+### Remote environment
+
+`MobileRemoteExecutionEnv` is pi-env 1.1.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
+`Connection` spawns `ssh`. It matches upstream's `remote-env.ts` and `watch.ts` method by method, and differs only in
+the SSH transport and Hermes replacements for Node modules.
+
+**Connections**
+
+- [x] One `Connection` per machine, keyed by machine id. Build `{ connection, id, cwd }` environments on it at each
+  use, as the pi-env README and `test/ssh-external.test.ts` do. The owner forgets a connection when it closes it; the
+  next resolve creates a new one.
+- [x] Admit at every connection start: `openChannel` reads the machine's credentials and trusted key each time it
+  runs, as upstream evaluates `ConnectionOptions.command` at each start (`connection.ts:256-259`). No cached admission.
+  Detect the platform once per connection, as upstream does.
+
+**Environment**
+
+- [x] `cleanup()` matches upstream's `RemoteExecutionEnv.cleanup` (`remote-env.ts:932-936`): it kills the commands it
+  started and nothing else. Shutdown closes each connection in the owner's map. Everything that left unused is
+  deleted.
+- [x] `watch` matches upstream's `RemoteExecutionEnv.watch` and `RemoteWatcher`.
+- [x] The abort signal goes only with `scanLines` and `exec`, as upstream does; `~` paths and `createTempDir` use the
+  cached `connection.info()`.
+- [x] Typed reply decoders replace the casts and non-null assertions, including the `JSON.parse` results in
+  `hosts.ts`; static imports in `channel.ts` and `daemon-assets.ts`.
+- [x] Upstream's frame handling: unknown frame types are ignored; no outbound frame-size or request-id checks.
+- [x] `SshChannelDependencies` and the other test-only injection are deleted.
+- [x] The silence clock starts when the daemon's channel opens, as pi-env's `Connection.#start` does.
+- [x] `remote/composition.ts` is `remote/owner.ts`; `remoteHostConnectionMessage` is not exported.
+- [x] Only the host test sets a connect timeout (120 s), because react-native-ssh's timeout spans `verifyHostKey`,
+  which waits there for the person comparing the fingerprint. Every other connection uses the library default.
+
+Known limits: upstream's write constants stay, so a single write over about 4 MiB can overflow react-native-ssh's write
+queue (`QUEUE_FULL`) and drop that machine's connection. A reconnect while the phone is locked fails, because admission
+reads the Keychain. No work for these.
+
+**Settings UI**
+
+- [x] A remote working directory is optional and saving it needs no network. Blank is stored as `cwd: null`, and the
+  environment uses `(await connection.info()).home`, as pi-env's `test/ssh-external.test.ts` does.
+  `resolveRemoteWorkingDirectory` and its UI are deleted.
+
+**Keep:** automatic daemon provisioning; host-key checks (algorithm, fingerprint and public key); `quotePosix`;
+hex-validated tokens; SecureStore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`.
+
+### Chat service and runtime
+
+Built on pi-durable's conversations, entries and documents, read through `viewState()` and `subscribeCommits` (map row
+"Chats and UI state"). The title, rename, delete and ordering rules below are product decisions.
+
+**Chat list and chat actions**
+
+- [x] The chat list reads each chat's `ChatMetadataDoc` (README "Your Own State"). The document holds `title`,
+  `preview`, `updatedAt`, `createdAt`, `lastInput` and `deleted`. The list skips deleted chats and orders by
+  `updatedAt`.
+- [x] Send: one commit right after `submit()` returns sets `lastInput`, `updatedAt` and `preview`, and `title` if it is
+  unset. Each draft keeps one `requestId`, so a resend returns the existing submission (README "Persist and Resume").
+- [x] Rename: a commit that sets `title`. It applies at once, even while the chat is busy.
+- [x] Delete chat: `conversation.abort()`, then a commit that sets `deleted`, then remove the chat's workspace
+  directories through `Workspaces.remove(id)`. A failed removal raises `WorkspaceRemovalError` and shows as an alert;
+  the chat stays deleted. Deleting the open chat goes back to the list. Archive is gone.
+- [x] The chat options are native iOS menus: `Stack.Toolbar.Menu` in the chat header and `Link.Menu` on list rows
+  (Model settings, Rename, Delete). Delete confirms with `Alert.alert`; Rename uses `Alert.prompt`. The shared error
+  banner can be dismissed.
+- [x] Latest outcome: on connect, read `lastInput`, then `harness.submission(id)`, and follow its `status()` and
+  `wait()` (example 20). Show only outcomes the transcript does not already show.
+- [x] The chat's `ExecutionTargetDoc` is created in `createChat`'s `init`, as examples 06 and 29 create a document they
+  later read.
+
+**Auth and runtime**
+
+- [x] Expired sessions: keep the credential, as pi-ai documents (`getAuth` rejects with ModelsError `oauth`; re-login
+  fixes it). A refused refresh marks the provider "Session expired — sign in again" in memory; a send shows that
+  message only while the mark is set. Signing in replaces the credential and clears the mark.
+- [x] API keys: the account screen's Save writes the key with `credentials.modify(providerId, async () =>
+  ({ type: 'api_key', key }))`, the `CredentialStore` contract's only write path; `models.login` ends in the same
+  `modify`. The account screen does not change.
+- [x] Sign-in single-flight lives only in the account hook. `ChatRuntime` is folded into the provider.
+- [x] One error model: operations return their own errors to the screen that started them. The runtime keeps only
+  "chats could not open" and harness reports.
+
+Keep the app-written OAuth adapter and Swift loopback module, the manual-entry fallback when the callback receiver
+cannot start, and `transport: 'sse'`.
+
+### Web search and Markdown
+
+Web search keeps showing search activity, sources and citation links, and the model sees the findings on later turns.
+
+**Recorded on 2026-10-09** from the app's own archive on the owner's iPhone (one ChatGPT response: 4 searches, 83
+results, 3 citations; sanitized copy in `docs/web-search-recording.json`):
+
+| Question | Answer |
+| --- | --- |
+| Where completed searches arrive | `response.output_item.done` during the stream, with `action` (`queries`, `sources`) and `results`. `response.completed` has an empty `output`. |
+| Shape of a result | `{ type: 'text_result', title, url, snippet }`. `open_page` calls carry a `url` and page-text results; `find_in_page` never appeared. |
+| Where citations arrive | `response.output_text.annotation.added`, repeated in the message's `output_item.done`. |
+| Citation markers in the text | None. The answer already contains one Markdown link `([domain](url))` per `url_citation` span. |
+| Offsets | Unicode code points, end exclusive, per message item. Not needed for rendering. |
+| Messages | A short "commentary" message, then the final answer; pi-ai stores them as separate text blocks. |
+| ChatGPT sign-in | Results and sources come back. |
+| Cited URLs | OpenAI appends `?utm_source=openai` to cited URLs. |
+
+**WS-1: data side**
+
+- [x] Keep the spread-based provider decorator; it is pi-ai's exported-code form for decorating a built provider.
+  `createProvider` returns a plain object, so `withNativeWebSearch(openaiProvider())` spreads it and overrides only
+  `stream`/`streamSimple`, preserving auth, catalog, `refreshModels`, `filterAllModels` and the `openai-decisions`
+  classifiers. `azureStreams` and `opencode-headers.ts` wrap `ProviderStreams` when building a provider from parts;
+  a built provider's original streams are not reachable, so rebuilding one from parts would lose the classifiers.
+  Checked against pi-ai `models.ts` at the vendored revision.
+  - `onPayload`: append `{ type: 'web_search' }` to `tools`, and `web_search_call.results` and
+    `web_search_call.action.sources` to `include`, keeping what pi-ai set. Never add `reasoning.encrypted_content`.
+  - `onProviderStreamEvent`, as the recording shows: `response.output_item.added` with a `web_search_call` item marks
+    that call running; `response.output_item.done` with a `web_search_call` item is the completed call, with its
+    `action` (`search` with `queries` and `sources`, or `open_page` with `url`) and its `results` (each
+    `{ type: 'text_result', title, url, snippet }`); `response.output_text.annotation.added` with a `url_citation` is a
+    citation. `response.completed` carries no output items; read nothing from it. Decode every field with small typed
+    decoders, no casts.
+  - Only requests bound to a chat get the tool; compaction requests don't.
+- [x] Keep `bindings.ts`'s per-request correlation through the request's `AbortSignal`; the bound state is only the
+  chat id and a way to write, and the `{ error }` scope variant goes with the budget machinery. Verified at the
+  vendored revision: the generation hook's `context.abortSignal` is the stream options' `signal`
+  (`scheduler.ts`, `generation.ts`).
+- [x] The `beforeRequest` hook only binds, for every generation request: the decorator wraps only the OpenAI provider,
+  which is single-API (`openai-responses`), so every bound request through it is an OpenAI Responses request;
+  compaction runs a `CompactionTask` whose hooks never fire here, and other `Models` calls carry unbound signals. No
+  `getTask`, no pinned-checkpoint read and no `as GenerationCheckpoint` cast (AGENTS.md forbids casts), no `prepared`
+  return, and no `afterResponse`.
+- [x] Each completed search call becomes one app entry, written with
+  `conversation.submit({ type: 'write', entry, requestId: <the search item id> })` (README "Busy Conversations",
+  example 20): `data` holds the action, `model` holds the call's results as one user message of readable text. No
+  budgets or caps (AGENTS.md: library defaults); a provider context overflow takes pi-durable's own
+  compact-and-retry path. Don't await it in the stream handler; pass a failure to the Harness's `onReport` unless the
+  request was aborted, as pi-durable does with its own streaming commits (`src/harness/generation.ts`). The transcript
+  hides this one entry kind; there are no change entries.
+- [x] One small presentation document per chat, `history: 'latest', fork: 'current'`, keyed by `responseId`, holding
+  each search call's status, the sources (each result's title and URL) and the cited URLs. pi-ai sets
+  `AssistantMessage.responseId` from `response.created`, before any search event, and `onProviderStreamEvent` observes
+  it before pi-ai processes it, so the keying works for the streaming partial too; a retried request gets a new
+  response and a new key. Create the document with the chat in `createConversation({ init })`, as examples 06 and 29
+  create a document they later read. Commit when a call starts, when it completes, and when the decorator's stream
+  ends, stopped streams included. The chat projection reads only this document. Delete `ChatView`'s late-document
+  attach — the whole `subscribeCommits`/`observe` path goes, because every document the view reads now exists from the
+  creating commit — and the native rendering paths in `chat-projection.ts`: `nativeRows`, `appendNative`, `orphaned`,
+  `nativeByResponse`, `currentNative`, `nativeInterrupted`, `nativeTimestamp` and `ChatState.native/nativeLive`. An
+  assistant row's `webSearch` is the document's entry for `message.responseId`, the streaming partial included.
+- [x] Delete what this replaces: `wrapper-stream.ts`, `normalization.ts`, `archive.ts`, `migration.ts`, `budget.ts`
+  (with the Models proxy passed to `Harness.open`; pass the plain `models`), `edits.ts` (already dead code today),
+  `lifecycle.ts`, `persistence.ts`, `evidence.ts`, the digest index and change entries, turn-origin capture, the
+  `disabled*` fields, the pre-request work and `afterResponse` in `durable.ts`, the UUIDv7 timestamp parsing, the
+  duplicated helpers and the test-only exports.
 
 Known limits: truncate rewrites the file, `flushFile` cannot fsync, no symlinks, directory info has no size or mtime,
 directory listing is a snapshot, output arrives when the command ends, `watch` returns `not_supported`. **No work is
