@@ -105,13 +105,14 @@ descriptor call, `getRandomValues`). Examples 20 and 29 are unchanged from 1.1.0
 - Plan re-audit fixes: `70e9169`, `1ef9e52`.
 - pi main `ea448f4` as vendored tarballs: `27ee82e`; close order and `harness.closed` reopen: `159669d`.
 - `node:zlib` resolved empty for just-bash; stub deleted: `78eb811`.
+- WS-1 web search data side: `40021dc`. Old chats' web-search records live in documents it replaced; clear app data.
 
 ## Open items
 
 | Item | What it is | Status and next step |
 | --- | --- | --- |
 | Upgrade device check | The main revision changes bundle-level code, and `harness.closed` reopen is new. Run an ordinary chat, a bash tool call and a web search on device; if a storage failure can be forced, watch chats close and reopen. | Next device session. |
-| Web search and Markdown (WS-1, WS-2) | Replace about 1,900 lines with pi-ai's documented stream decorator, one app entry per search and one presentation document; citations render as the Markdown links the model already writes. | Prompts written below; waiting for the owner's go. Each prompt is followed by an independent review, typecheck, lint and a commit. |
+| Web search and Markdown (WS-1, WS-2) | Replace about 1,900 lines with pi-ai's documented stream decorator, one app entry per search and one presentation document; citations render as the Markdown links the model already writes. | WS-1 done (`40021dc`); WS-2 next, then independent review, typecheck, lint and a commit. |
 | Device checks | Every "Done when" device check. So far only a Release build was installed and one web search was sent (2026-10-09). | After WS-1 and WS-2. |
 | `MessageRow` and `CodeBlock` lost `memo` in `70e9169` | React Compiler does not compile them (a `throw` inside `try/catch`). Nothing depends on their identity, and FlatList's cell renderer already skips unchanged rows. | No action unless a device run shows a problem. |
 
@@ -292,7 +293,7 @@ results, 3 citations; sanitized copy in `docs/web-search-recording.json`):
 
 **WS-1: data side**
 
-- [ ] Keep the spread-based provider decorator; it is pi-ai's exported-code form for decorating a built provider.
+- [x] Keep the spread-based provider decorator; it is pi-ai's exported-code form for decorating a built provider.
   `createProvider` returns a plain object, so `withNativeWebSearch(openaiProvider())` spreads it and overrides only
   `stream`/`streamSimple`, preserving auth, catalog, `refreshModels`, `filterAllModels` and the `openai-decisions`
   classifiers. `azureStreams` and `opencode-headers.ts` wrap `ProviderStreams` when building a provider from parts;
@@ -307,23 +308,23 @@ results, 3 citations; sanitized copy in `docs/web-search-recording.json`):
     citation. `response.completed` carries no output items; read nothing from it. Decode every field with small typed
     decoders, no casts.
   - Only requests bound to a chat get the tool; compaction requests don't.
-- [ ] Keep `bindings.ts`'s per-request correlation through the request's `AbortSignal`; the bound state is only the
+- [x] Keep `bindings.ts`'s per-request correlation through the request's `AbortSignal`; the bound state is only the
   chat id and a way to write, and the `{ error }` scope variant goes with the budget machinery. Verified at the
   vendored revision: the generation hook's `context.abortSignal` is the stream options' `signal`
   (`scheduler.ts`, `generation.ts`).
-- [ ] The `beforeRequest` hook only binds, for every generation request: the decorator wraps only the OpenAI provider,
+- [x] The `beforeRequest` hook only binds, for every generation request: the decorator wraps only the OpenAI provider,
   which is single-API (`openai-responses`), so every bound request through it is an OpenAI Responses request;
   compaction runs a `CompactionTask` whose hooks never fire here, and other `Models` calls carry unbound signals. No
   `getTask`, no pinned-checkpoint read and no `as GenerationCheckpoint` cast (AGENTS.md forbids casts), no `prepared`
   return, and no `afterResponse`.
-- [ ] Each completed search call becomes one app entry, written with
+- [x] Each completed search call becomes one app entry, written with
   `conversation.submit({ type: 'write', entry, requestId: <the search item id> })` (README "Busy Conversations",
   example 20): `data` holds the action, `model` holds the call's results as one user message of readable text. No
   budgets or caps (AGENTS.md: library defaults); a provider context overflow takes pi-durable's own
   compact-and-retry path. Don't await it in the stream handler; pass a failure to the Harness's `onReport` unless the
   request was aborted, as pi-durable does with its own streaming commits (`src/harness/generation.ts`). The transcript
   hides this one entry kind; there are no change entries.
-- [ ] One small presentation document per chat, `history: 'latest', fork: 'current'`, keyed by `responseId`, holding
+- [x] One small presentation document per chat, `history: 'latest', fork: 'current'`, keyed by `responseId`, holding
   each search call's status, the sources (each result's title and URL) and the cited URLs. pi-ai sets
   `AssistantMessage.responseId` from `response.created`, before any search event, and `onProviderStreamEvent` observes
   it before pi-ai processes it, so the keying works for the streaming partial too; a retried request gets a new
@@ -334,7 +335,7 @@ results, 3 citations; sanitized copy in `docs/web-search-recording.json`):
   creating commit — and the native rendering paths in `chat-projection.ts`: `nativeRows`, `appendNative`, `orphaned`,
   `nativeByResponse`, `currentNative`, `nativeInterrupted`, `nativeTimestamp` and `ChatState.native/nativeLive`. An
   assistant row's `webSearch` is the document's entry for `message.responseId`, the streaming partial included.
-- [ ] Delete what this replaces: `wrapper-stream.ts`, `normalization.ts`, `archive.ts`, `migration.ts`, `budget.ts`
+- [x] Delete what this replaces: `wrapper-stream.ts`, `normalization.ts`, `archive.ts`, `migration.ts`, `budget.ts`
   (with the Models proxy passed to `Harness.open`; pass the plain `models`), `edits.ts` (already dead code today),
   `lifecycle.ts`, `persistence.ts`, `evidence.ts`, the digest index and change entries, turn-origin capture, the
   `disabled*` fields, the pre-request work and `afterResponse` in `durable.ts`, the UUIDv7 timestamp parsing, the
