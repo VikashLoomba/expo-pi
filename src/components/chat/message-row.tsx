@@ -1,3 +1,4 @@
+import type { SubmissionId } from '@earendil-works/pi-durable';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -11,12 +12,14 @@ import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
 import { collectSearchSources } from './web-search-presentation';
 
-export function MessageRow({ message, stopping = false }: {
+export function MessageRow({ message, stopping = false, onSteerQueued }: {
   message: ChatMessage; stopping?: boolean;
+  onSteerQueued?: (submissionId: SubmissionId, text: string) => void;
 }) {
   const colors = useChatColors();
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [steering, setSteering] = useState(false);
   const sources = message.webSearch ? collectSearchSources(message.webSearch) : [];
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timeout.current), []);
@@ -28,8 +31,29 @@ export function MessageRow({ message, stopping = false }: {
       timeout.current = setTimeout(() => setCopied(false), 2000);
     } catch { Alert.alert('Could not copy', 'You can select the message and copy it manually.'); }
   };
+  const steer = async () => {
+    if (!message.queued || !onSteerQueued || steering) return;
+    setSteering(true);
+    try { await onSteerQueued(message.queued.submissionId, message.text); }
+    finally { setSteering(false); }
+  };
   if (message.role === 'tool' && message.tool) return <View style={styles.toolWrapper}><ToolCard message={message} /></View>;
   if (message.role === 'notice') return <Text selectable testID={`message-${message.id}`} style={[styles.notice, { color: colors.secondary }]}>{message.text}</Text>;
+  if (message.role === 'user' && message.queued) return <View style={styles.userQueuedRow}>
+    <View style={[styles.userBubble, { backgroundColor: colors.user }]}>
+      <Text testID={`message-${message.id}`} selectable style={[styles.userText, { color: colors.text }]}>{message.text}</Text>
+    </View>
+    <View style={styles.queuedMeta}>
+      <Text style={[styles.queuedMetaText, { color: colors.muted }]}>
+        {message.queued.mode === 'steer' ? 'Queued · steer' : 'Queued · follow-up'}
+      </Text>
+      {message.queued.mode === 'followUp' && onSteerQueued ? <Pressable testID={`steer-${message.id}`}
+        accessibilityRole="button" accessibilityLabel="Send as steer" disabled={steering}
+        onPress={() => { void steer(); }} style={[styles.steerAction, { opacity: steering ? 0.5 : 1 }]}>
+        <Text style={[styles.steerActionText, { color: colors.accent }]}>Send as steer</Text>
+      </Pressable> : null}
+    </View>
+  </View>;
   if (message.role === 'user') return <View style={styles.userRow}>
     <View style={[styles.userBubble, { backgroundColor: colors.user }]}>
       <Text testID={`message-${message.id}`} selectable style={[styles.userText, { color: colors.text }]}>{message.text}</Text>
@@ -68,7 +92,12 @@ export function MessageRow({ message, stopping = false }: {
 
 const styles = StyleSheet.create({
   userRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 10, paddingBottom: 21 },
+  userQueuedRow: { alignItems: 'flex-end', paddingTop: 10, paddingBottom: 21 },
   userBubble: { maxWidth: '88%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 22, borderBottomRightRadius: 7 },
+  queuedMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
+  queuedMetaText: { fontSize: 12 },
+  steerAction: { minHeight: 32, justifyContent: 'center' },
+  steerActionText: { fontSize: 12, fontWeight: '500' },
   userText: { fontSize: 16, lineHeight: 24 },
   assistant: { paddingVertical: 6, paddingBottom: 17, gap: 13 },
   assistantIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -1,5 +1,5 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
-import type { ConversationId } from '@earendil-works/pi-durable';
+import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance } from 'react-native';
@@ -41,6 +41,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   }, []);
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [steering, setSteering] = useState(false);
   const [localError, setLocalError] = useState<string>();
   const actions = useChatActions(setLocalError);
   const [headerOffset, setHeaderOffset] = useState(0);
@@ -70,7 +71,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   }, [changeDraft]);
   const sendMessage = async () => {
     const text = draft.text.trim();
-    if (id === undefined || !service || !text || admitting || !access.ready || !access.connected || busy) return;
+    if (id === undefined || !service || !text || admitting || !access.ready || !access.connected) return;
     if (settingsError) return;
     setAdmitting(true);
     setLocalError(undefined);
@@ -82,6 +83,17 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
       setLocalError(cause instanceof Error ? cause.message : 'Your message could not be sent. Try again.');
     } finally {
       setAdmitting(false);
+    }
+  };
+  const steerQueued = async (submissionId: SubmissionId, text: string) => {
+    if (id === undefined || !service || steering) return;
+    setSteering(true);
+    setLocalError(undefined);
+    try { await service.steerQueued(id, submissionId, text); }
+    catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'The message could not be sent as a steer. Try again.');
+    } finally {
+      setSteering(false);
     }
   };
   const stop = async () => {
@@ -123,7 +135,8 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     </Stack.Toolbar>
     <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
       <SafeAreaView style={styles.screen} edges={['bottom']}>
-        <ChatTranscript ref={transcript} view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} />
+        <ChatTranscript ref={transcript} view={view} ready={ready} stopping={stopping} onChoose={choosePrompt}
+          onSteerQueued={steerQueued} />
         {settingsError && <View style={styles.banner}><InlineNotice testID="conversation-settings-error" message={settingsError}
           action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} /></View>}
         {messageError && messageError !== settingsError && <View style={styles.banner}>

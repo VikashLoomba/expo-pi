@@ -1,3 +1,4 @@
+import type { SubmissionId } from '@earendil-works/pi-durable';
 import { router } from 'expo-router';
 import { memo, useImperativeHandle, type Ref } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -42,8 +43,9 @@ export interface ChatTranscriptHandle { scrollToLatest: () => void }
  * Only this subtree subscribes to text deltas. `memo` stays because the chat screen that renders it is not compiled
  * by React Compiler (it contains `try … finally`).
  */
-export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, ref }: {
+export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, onSteerQueued, ref }: {
   view: ChatView | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
+  onSteerQueued?: (submissionId: SubmissionId, text: string) => void;
   ref: Ref<ChatTranscriptHandle>;
 }) {
   const colors = useChatColors();
@@ -53,7 +55,7 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
   const status = useChatStatus(view);
   const error = useChatError(view);
   const renderMessage = ({ item }: { item: ChatMessage }) =>
-    <MessageRow message={item} stopping={stopping && !!item.streaming} />;
+    <MessageRow message={item} stopping={stopping && !!item.streaming} onSteerQueued={onSteerQueued} />;
   const working = stopping ? 'Stopping…' : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
   const { list, onScroll, onContentSizeChange, onLayout, scrollToLatest, showScrollDown } = useTranscriptScroll();
   useImperativeHandle(ref, () => ({ scrollToLatest }), [scrollToLatest]);

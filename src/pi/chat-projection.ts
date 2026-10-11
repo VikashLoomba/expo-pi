@@ -1,8 +1,8 @@
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai';
 import {
-  AgentDoc, CompactionEntry, LiveDoc, ResetEntry,
-  type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord, type LiveState,
-  type SubmissionRecord,
+  AgentDoc, CompactionEntry, InboxDoc, LiveDoc, ResetEntry,
+  type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord,
+  type InboxState, type LiveState, type SubmissionRecord,
 } from '@earendil-works/pi-durable';
 
 import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-presentation';
@@ -22,6 +22,7 @@ export type ChatState = {
   readonly agent?: Readonly<AgentState>;
   readonly execution?: Readonly<ExecutionTargetState>;
   readonly live?: Readonly<LiveState>;
+  readonly inbox?: Readonly<InboxState>;
   readonly search?: Readonly<SearchPresentationsState>;
   readonly submission?: SubmissionRecord;
 };
@@ -37,6 +38,7 @@ export function readConversationView(view: ConversationView) {
   return {
     live: view.docs[LiveDoc.definition.kind] as LiveState | undefined,
     agent: view.docs[AgentDoc.definition.kind] as AgentState | undefined,
+    inbox: view.docs[InboxDoc.definition.kind] as InboxState | undefined,
   };
 }
 
@@ -242,6 +244,12 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
     && entry.model?.some((message) => message.role === 'assistant' && message.stopReason === 'aborted'));
   if (last?.status === 'unanswered' && last.reason === 'aborted' && !partialSaved) {
     messages.push({ id: `submission-${last.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 });
+  }
+  // Queued inputs wait in the inbox for a turn boundary; write items are evidence for the model, never rows.
+  for (const item of state.inbox?.items ?? []) {
+    if (item.mode === 'write') continue;
+    messages.push({ id: `queued-${item.id}`, role: 'user', text: textOf(item.content), createdAt: 0,
+      queued: { submissionId: item.id, mode: item.mode } });
   }
   return messages;
 }

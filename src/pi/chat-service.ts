@@ -342,7 +342,7 @@ export class DurableChatService {
     if (!content) throw new Error('Enter a message.');
     const conversation = await this.conversation(id);
     await this.requireAuth(settingsOf(await this.harness.snapshot(AgentDoc, id, context)));
-    const submission = await conversation.submit({ type: 'input', content, whenBusy: 'reject', requestId }, context);
+    const submission = await conversation.submit({ type: 'input', content, requestId }, context);
     // pi-durable has no public way to write this in the submission's own commit, so it follows in the next one, and
     // a retry of the same request writes it again. The list shows it without reading the transcript; an untitled
     // chat is named after its first message.
@@ -354,6 +354,25 @@ export class DurableChatService {
       chat.updatedAt = this.options.now();
     }, context);
     return submission.id;
+  }
+
+  /**
+   * Turns one queued follow-up into a steer, as pi-durable's busy queueing allows: withdraw the submission, then
+   * submit the same text again with `whenBusy: 'steer'`. A follow-up a boundary placed meanwhile is left alone.
+   */
+  async steerQueued(id: ConversationId, submissionId: SubmissionId, text: string): Promise<void> {
+    const conversation = await this.conversation(id);
+    const result = await this.harness.abortSubmission(submissionId, context, id);
+    if (result === 'already_placed') return;
+    if (result === 'settled' || result === 'not_found') throw new Error('That message already left the queue.');
+    // A new request ID: the withdrawn submission is settled, and its ID would return that aborted submission.
+    const submission = await conversation.submit(
+      { type: 'input', content: text, whenBusy: 'steer', requestId: uuidv7() }, context);
+    await conversation.commit(async (tx) => {
+      const chat = await tx.doc(ChatMetadataDoc, id);
+      chat.lastInput = submission.id;
+      chat.updatedAt = this.options.now();
+    }, context);
   }
 
   /** Withdraws queued input and aborts the running work; resolves once the chat is idle. */

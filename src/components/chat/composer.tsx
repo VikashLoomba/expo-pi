@@ -21,15 +21,16 @@ export function Composer({ value, onChange, onSend, onStop, onConnect, busy, adm
         placeholder={busy ? 'Write a follow-up…' : 'Message Pi…'} placeholderTextColor={colors.muted}
         multiline maxLength={30000} editable={!admitting} style={[styles.input, { color: colors.text }]}
         selectionColor={colors.accent} />
-      {busy ? <Pressable testID="stop-generation" accessibilityRole="button" accessibilityLabel="Stop response" onPress={onStop} disabled={disabled}
-        style={({ pressed }) => [styles.send, { backgroundColor: colors.accentSoft, opacity: pressed || disabled ? 0.5 : 1 }]}>
-        <ChatIcon name="stop" color={colors.accent} size={17} />
-      </Pressable> : <Pressable testID="send-message" accessibilityRole="button" accessibilityLabel="Send message" disabled={!canSend} onPress={onSend}
+      <Pressable testID="send-message" accessibilityRole="button" accessibilityLabel="Send message" disabled={!canSend} onPress={onSend}
         style={({ pressed }) => [styles.send, { backgroundColor: canSend ? colors.accent : colors.subtle, opacity: pressed ? 0.65 : 1 }]}>
         {admitting ? <ActivityIndicator color={colors.secondary} size="small" /> : <ChatIcon name="send" color={canSend ? colors.onAccent : colors.muted} size={20} />}
+      </Pressable>
+      {busy && <Pressable testID="stop-generation" accessibilityRole="button" accessibilityLabel="Stop response" onPress={onStop} disabled={disabled}
+        style={({ pressed }) => [styles.send, { backgroundColor: colors.accentSoft, opacity: pressed || disabled ? 0.5 : 1 }]}>
+        <ChatIcon name="stop" color={colors.accent} size={17} />
       </Pressable>}
     </View>
-    <Text style={[styles.footnote, { color: colors.muted }]}>{busy ? 'Pi is working. You can stop at any time.' : 'Pi can make mistakes. Check important details.'}</Text>
+    <Text style={[styles.footnote, { color: colors.muted }]}>{busy ? 'Pi is working. Send a follow-up, or stop at any time.' : 'Pi can make mistakes. Check important details.'}</Text>
   </View>;
 }
 

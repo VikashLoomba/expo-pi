@@ -1,4 +1,4 @@
-import type { ConversationId } from '@earendil-works/pi-durable';
+import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
 
 import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { FileToolPresentation } from './file-tool-presentation';
@@ -23,6 +23,8 @@ export interface ChatMessage {
   webSearch?: WebSearchPresentation;
   tool?: { name: string; args: string; status: 'running' | 'completed' | 'error'; output: string; file?: FileToolPresentation };
   error?: string;
+  /** An input queued in the view's `pi.inbox`, waiting for pi-durable to place it. */
+  queued?: { submissionId: SubmissionId; mode: 'followUp' | 'steer' };
 }
 
 /** What the header, composer and settings need; it does not change while text streams. */
