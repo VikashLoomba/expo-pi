@@ -529,7 +529,7 @@ On-device data: old chats' web-search records live in documents WS-1 replaces; c
 
 ## P2: Product features
 
-- [ ] Sending while busy, as Claude Code does:
+- [x] Sending while busy, as Claude Code does (`b7e4a68`; follow-up and steer on device pending):
   - A message sent while a response runs is queued as a follow-up (`whenBusy: 'followUp'`) and shown as a queued
     bubble from the view's `pi.inbox`. The composer no longer refuses to send while busy (today `sendMessage` guards
     on `busy` and `Composer` disables); the metadata commit and the `lastInput` follow already work for a queued
