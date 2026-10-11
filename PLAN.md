@@ -111,9 +111,8 @@ descriptor call, `getRandomValues`). Examples 20 and 29 are unchanged from 1.1.0
 
 | Item | What it is | Status and next step |
 | --- | --- | --- |
-| Upgrade device check | The main revision changes bundle-level code, and `harness.closed` reopen is new. Run an ordinary chat, a bash tool call and a web search on device; if a storage failure can be forced, watch chats close and reopen. | Next device session. |
-| Web search and Markdown (WS-1, WS-2) | Replace about 1,900 lines with pi-ai's documented stream decorator, one app entry per search and one presentation document; citations render as the Markdown links the model already writes. | Done: WS-1 `40021dc`, WS-2 `d8fe9a9`. Device checks next. |
-| Device checks | Every "Done when" device check. So far only a Release build was installed and one web search was sent (2026-10-09). | After WS-1 and WS-2. |
+| Web search and Markdown (WS-1, WS-2) | Replace about 1,900 lines with pi-ai's documented stream decorator, one app entry per search and one presentation document; citations render as the Markdown links the model already writes. | Done: WS-1 `40021dc`, WS-2 `d8fe9a9`. |
+| Device checks | Every "Done when" device check. Verified on the owner's iPhone (2026-10-10, Release build through `d8fe9a9`): ordinary chat, bash, a real ChatGPT search (activity, sources, Markdown-link citations), a follow-up using the results, stop mid-search, rename/delete; no regressions from the main upgrade. | Remaining: spill-file readback and `/tmp` isolation, the remote-host checks (real-host tools, one daemon session shared by two chats, credential change at next connection start), and a forced storage failure closing and reopening chats. |
 | `MessageRow` and `CodeBlock` lost `memo` in `70e9169` | React Compiler does not compile them (a `throw` inside `try/catch`). Nothing depends on their identity, and FlatList's cell renderer already skips unchanged rows. | No action unless a device run shows a problem. |
 
 ## P1: Delete and replace known-bad code
