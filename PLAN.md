@@ -544,7 +544,7 @@ On-device data: old chats' web-search records live in documents WS-1 replaces; c
 
 ## Docs
 
-- [ ] Rewrite `README.md` to match the code. Stale lines: :3 (new-chat default); :4 (exact-pins to 1.1.0; the
+- [x] Rewrite `README.md` to match the code (done in the README's own commit). Stale lines: :3 (new-chat default); :4 (exact-pins to 1.1.0; the
   packages are now vendored builds of main); :5, :59 and :84 (Android); :16 and :75 ("Open **Providers**"; the screen
   is Account); :19 (archiving); :25 ("Finish or stop pending work"; there are no busy guards); :41 (the deleted
   native-search test suite); :49 (the in-memory `/tmp` and the old `pi-workspaces.db` note); :61 and :74
