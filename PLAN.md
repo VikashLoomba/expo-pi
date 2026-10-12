@@ -554,17 +554,19 @@ On-device data: old chats' web-search records live in documents WS-1 replaces; c
 ## Later: Background keep-alive
 
 Keep the app running while any agent works in the background, using a Live Activity plus background location, as
-Termius does. Build it after the phases above.
+Termius does. Implemented in `bfecd03`; the checks below remain before shipping the feature.
 
-- **Busy signal:** `harness.taskGraph()`, which lists every live task. Exclude tasks blocked by a missing definition
-  (`harness.inspect()`), or keep-alive may never stop.
-- **Live Activity:** use `expo-widgets` (SDK 58 `createLiveActivity`, config plugin) rather than a hand-written
-  ActivityKit target. It creates an App Group; keep the database out of it.
-- **Background location:** use expo-location's config-plugin flags with an expo-task-manager task and
-  `startLocationUpdatesAsync(task)`.
-- **Before relying on location:** compare iOS 26's `BGContinuedProcessingTask` (Apple's API for continuing user-started
+- [x] **Busy signal:** `harness.taskGraph()`, which lists every live task. Exclude tasks blocked by a missing definition
+  (`harness.inspect()`), or keep-alive may never stop. (`busyConversations` in `src/keep-alive/controller.ts`.)
+- [x] **Live Activity:** `expo-widgets`' `createLiveActivity`, registered at runtime by the library's built-in target,
+  so no `widgets[]` entry and no hand-written ActivityKit target. It creates an App Group; the database stays in the
+  app container, out of it. (`src/keep-alive/agent-activity.tsx`.)
+- [x] **Background location:** expo-location's `isIosBackgroundLocationEnabled` with an expo-task-manager task defined
+  at top level and `startLocationUpdatesAsync` at `Accuracy.Lowest`, 3 km interval, indicator on; locations unused.
+- [x] **Opt-in:** off by default; the Account screen's Background work card explains the location use and asks for
+  Always-location permission on enable. Persists in the kv-store. Keychain class decided in `c9cc326`.
+- [ ] **Before shipping:** compare iOS 26's `BGContinuedProcessingTask` (Apple's API for continuing user-started
   work; it would need a small custom Expo module), check App Review guideline 2.5.4, and measure battery impact.
-- **Opt-in:** off by default, with a setting that explains the location use.
 
 Decided before building: both stores use `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, the standard class for secrets an
 app needs in the background (Apple's guidance and the practice of background-capable apps). OAuth refresh completes
