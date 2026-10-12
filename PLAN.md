@@ -566,9 +566,13 @@ Termius does. Build it after the phases above.
   work; it would need a small custom Expo module), check App Review guideline 2.5.4, and measure battery impact.
 - **Opt-in:** off by default, with a setting that explains the location use.
 
-Open question before building: provider and SSH credentials are Keychain items with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`,
-so SSH reconnects and token-refresh saves fail while the phone is locked. Choose `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`
-(existing data: clear app data) or hold the admission in memory, which reverses P1's "no cached admission".
+Decided before building: both stores use `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, the standard class for secrets an
+app needs in the background (Apple's guidance and the practice of background-capable apps). OAuth refresh completes
+and persists while locked, and SSH reconnects read admission while locked, so P1's "admit at every connection
+start" stands. `THIS_DEVICE_ONLY` keeps credentials off backups and other devices. The alternatives lost: holding
+admission in memory fixes SSH only, dies with the process and reverses "no cached admission"; deferring the
+persistence loses a rotated refresh token when iOS kills the app while locked, forcing re-login. Existing items
+keep the old class, so clear app data on first run after the change.
 
 **Done when:** a long agent run, local or over SSH, finishes with the phone locked for 10 minutes. The Live Activity
 shows progress and ends when the work does.

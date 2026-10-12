@@ -8,7 +8,9 @@ import { RemoteHostRepository } from './hosts';
 export function createRemoteHostRepository(): RemoteHostRepository {
   const options: SecureStore.SecureStoreOptions = {
     keychainService: 'com.vikashloomba.piagent.ssh',
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    // Readable while locked (after the first unlock since boot), so a dropped SSH connection can read
+    // its admission and reconnect during background work; the items never leave this device.
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
     requireAuthentication: false,
   };
   return new RemoteHostRepository({
