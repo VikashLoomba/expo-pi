@@ -1,6 +1,7 @@
+import * as Location from 'expo-location';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp } from '@/chat/chat-provider';
@@ -89,6 +90,49 @@ function ProviderAccountCard({ provider }: { provider: ProviderOption }) {
   </View>;
 }
 
+/** The keep-alive opt-in, with the location use explained where it is switched on (App Review 2.5.4). */
+function BackgroundWorkCard() {
+  const colors = useChatColors();
+  const { keepAliveSettings } = useChatApp();
+  const enabled = useSyncExternalStore(keepAliveSettings.subscribe, keepAliveSettings.getSnapshot,
+    keepAliveSettings.getSnapshot);
+  const [asking, setAsking] = useState(false);
+  const change = async (value: boolean) => {
+    if (!value) {
+      keepAliveSettings.setEnabled(false);
+      return;
+    }
+    setAsking(true);
+    try {
+      const permission = await Location.requestBackgroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Allow location access to keep work running',
+          'Pi Agent holds a background location stream to keep agent work running while your phone is locked. '
+          + 'Your location is never read, stored, or sent anywhere. Allow “Always” location access to use this.',
+          [{ text: 'Not now', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => { void Linking.openSettings(); } }]);
+        return;
+      }
+      keepAliveSettings.setEnabled(true);
+    } finally {
+      setAsking(false);
+    }
+  };
+  return <View style={[styles.connection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={styles.connectionHeader}>
+      <View style={styles.connectionCopy}>
+        <Text style={[styles.providerName, { color: colors.text }]}>Background work</Text>
+        <Text style={[styles.privacyText, { color: colors.secondary }]}>
+          Keep agent work running while your phone is locked. Pi Agent holds a background location stream to stay
+          alive — your location is never read, stored, or sent anywhere — and shows progress in a Live Activity.
+          Off by default.
+        </Text>
+      </View>
+      <Switch testID="keep-alive-toggle" value={enabled} disabled={asking} onValueChange={(value) => { void change(value); }} />
+    </View>
+  </View>;
+}
+
 export default function AccountScreen() {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
@@ -112,6 +156,7 @@ export default function AccountScreen() {
       {focusedProvider && <ProviderAccountCard key={focusedProvider.id} provider={focusedProvider} />}
       {catalog.filter((provider) => provider.id !== focusedProvider?.id).map((provider) =>
         <ProviderAccountCard key={provider.id} provider={provider} />)}
+      <BackgroundWorkCard />
       <View style={styles.privacy}>
         <ChatIcon name="phone" color={colors.muted} size={19} />
         <View style={styles.privacyCopy}>

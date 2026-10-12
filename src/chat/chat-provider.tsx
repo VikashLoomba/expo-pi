@@ -6,6 +6,7 @@ import React, {
 } from 'react';
 import { AppState } from 'react-native';
 
+import { createKeepAliveSettings } from '../keep-alive/settings';
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
 import type { ChatView, ChatViewSnapshot } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
@@ -35,6 +36,7 @@ function useChatRuntime() {
   const [remote] = useState(() => createRemoteExecution(remoteHosts));
   const [workspaces] = useState(() => createDeviceWorkspaces());
   const [credentials] = useState(createChatCredentialStore);
+  const [keepAliveSettings] = useState(createKeepAliveSettings);
   const [models] = useState(() => {
     const session = createChatModels(credentials);
     credentials.registerProviders(session.getProviders().map((provider) => provider.id));
@@ -62,7 +64,7 @@ function useChatRuntime() {
       try {
         storage = await openExpoSqliteStorage();
         const opened = await DurableChatService.open({ storage, models, remote, workspaces,
-          newChat: NEW_CHAT_DEFAULTS,
+          newChat: NEW_CHAT_DEFAULTS, keepAlive: keepAliveSettings,
           authError: (providerId) => credentials.getProviderSnapshot(providerId).error,
           onClosed: (end) => {
             // pi-durable "Errors": a storage error ends the Harness; reopen to recover.
@@ -96,8 +98,8 @@ function useChatRuntime() {
         await closing?.close();
       });
     };
-  }, [credentials, models, remote, remoteHosts, workspaces]);
-  return { remoteHosts, credentials, models, service, openError, setOpenError };
+  }, [credentials, keepAliveSettings, models, remote, remoteHosts, workspaces]);
+  return { remoteHosts, credentials, keepAliveSettings, models, service, openError, setOpenError };
 }
 
 /** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
@@ -199,7 +201,7 @@ function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: 
 }
 
 function useChatController() {
-  const { remoteHosts, credentials, models, service, openError, setOpenError } = useChatRuntime();
+  const { remoteHosts, credentials, keepAliveSettings, models, service, openError, setOpenError } = useChatRuntime();
   const serviceState = useSyncExternalStore(service?.subscribe ?? subscribeNothing,
     service?.getSnapshot ?? getClosedService, service?.getSnapshot ?? getClosedService);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
@@ -266,7 +268,7 @@ function useChatController() {
   // screen that started them.
   return { service, ready: service !== undefined, chats: serviceState.chats, error: openError ?? serviceState.error,
     dismissError, signOutPending, disconnectingProvider,
-    ...signIn, remoteHosts, catalog, refreshCatalog, providerAccess,
+    ...signIn, remoteHosts, catalog, refreshCatalog, providerAccess, keepAliveSettings,
     hasConnectedProvider: catalog.some((provider) => providerAccess(provider.id).connected),
     providerOAuth, retryAuth, saveProviderKey, disconnectProvider };
 }

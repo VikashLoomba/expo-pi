@@ -3,7 +3,9 @@
     "name": "pi-agent",
     "slug": "pi-agent",
     "version": "1.0.0",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "piagent",
@@ -28,7 +30,16 @@
       "expo-web-browser",
       "expo-sqlite",
       "expo-secure-store",
-      "expo-asset"
+      "expo-asset",
+      "expo-widgets",
+      [
+        "expo-location",
+        {
+          "isIosBackgroundLocationEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "Allow Pi Agent to keep agent work running in the background. Location updates are only used to keep the app alive while work runs.",
+          "locationWhenInUsePermission": "Allow Pi Agent to keep agent work running in the background. Location updates are only used to keep the app alive while work runs."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
