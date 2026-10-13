@@ -8,7 +8,7 @@ then Docs, then Later. A phase is done when its "Done when" holds and typecheck,
 ## How the app fits pi
 
 The app runs pi-durable, pi-ai and chord on iOS, and pi-env's daemon on remote hosts. Each library defines a seam, and
-the app plugs an Expo implementation into it. "Upstream" means those libraries at the vendored pi-repo revision (see
+the app plugs an Expo implementation into it. "Upstream" means those libraries at the installed release (see
 "Upstream revision"): their types, READMEs and `test/examples`. pi's coding-agent app is not a reference.
 
 | Seam | pi contract | Expo / iOS | App code |
@@ -23,70 +23,40 @@ the app plugs an Expo implementation into it. "Upstream" means those libraries a
 | Tools | pi-durable `CodingTools` | none | `chat-service.ts` |
 | Prompt | pi-durable extensions and sections; README "System Prompt" | none | the `assistant` section |
 | Local execution | pi-durable `ExecutionEnv`, reference `NodeExecutionEnv`; the `env` resolver, example 29 | expo-file-system, just-bash, the cache directory for `/tmp` | `src/pi/workspace/` |
-| Remote execution | pi-env 1.1.0's daemon protocol, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
+| Remote execution | pi-env 1.2.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
 | Web search | pi-ai provider decorator: the built provider spread with `stream`/`streamSimple` overridden (plain object from `createProvider`); pi-durable write entries | none | `src/pi/native-web-search/` |
 | Keep-alive (Later) | pi-durable `resume()`, `taskGraph()` | expo-widgets, expo-location, expo-task-manager | none |
 
 ## Upstream revision
 
-The vendored tarballs in `vendor/pi/` are built from the pi repo's `main` at `ea448f4` (2026-10-10, after 1.1.0,
-before the next release; packed as 1.1.0). npm has no newer release and the repo publishes no canary.
-`package.json` points the three direct dependencies at the tarballs, and `pnpm.overrides` pins every
-`@earendil-works/*` package, including the transitive `pi-telemetry`, to the same files, so one instance of each
-exists. pi-env is not an app dependency: the daemon assets come from npm pi-env 1.1.0, and its `[Unreleased]` is
-empty, so the ported remote environment and the shipped daemon match main. When the next npm release ships, delete
-`vendor/` and the overrides and go back to registry versions.
+The app uses registry pi-ai, pi-durable and chord **1.2.0**, with transitive pi-telemetry **1.2.0**. Source assessment
+uses tag `v1.2.0`, commit `06a466935536f8c9bcacb2d5efc0fc021be1bdff` (2026-10-12), and the published npm declarations.
+The temporary `ea448f4` tarballs and `pnpm.overrides` are deleted; their regeneration recipe is no longer needed.
 
-Why tarballs and not `git+https`: pnpm does install monorepo subdirectories (`#<sha>&path:packages/durable`), but
-the repo checks in neither `dist/` nor a `prepare` script, so a git install cannot resolve the packages' `dist`
-exports (verified with pnpm 10.33: `MODULE_NOT_FOUND`). The `"source"` export condition does not help: pi-ai's
-checked-in `.models.ts` files import `./data/*.json`, and those catalog files are generated at build time and never
-committed. Upstream publishes no canary dist-tag and no per-package tarballs on GitHub releases. The only git-URL
-route, a fork with `dist` and data committed, is more to maintain than regenerating tarballs from a pinned sha.
+pi-env is not an app dependency. Its **1.2.0** daemon binaries come from the npm artifact pinned by version and
+SHA-512 in `scripts/sync-pi-daemon-assets.mjs`; that script generates the per-platform SHA-256/size manifest.
+Run it to reproduce the assets, or pass `--check` to verify them. The wire protocol is still **v1**. The mobile
+client's existing file, exec and watch methods remain compatible; the new optional file-tree and PTY APIs have no
+production caller and are not ported.
 
-Regenerate from a clone at the wanted revision:
+Contracts reviewed at this release:
 
-```sh
-git clone https://github.com/earendil-works/pi.git /tmp/pi-upstream && cd /tmp/pi-upstream
-git checkout <revision> && npm install
-cp -r <app>/node_modules/@earendil-works/pi-ai/dist/providers/data packages/ai/src/providers/data
-for p in chord telemetry ai durable; do (cd packages/$p && npm run build:offline 2>/dev/null || npm run build); done
-for p in chord telemetry ai durable; do (cd packages/$p && npm pack --ignore-scripts --pack-destination <app>/vendor/pi); done
-```
+- The portable SQLite driver, `Harness.open`/`close`/`closed`, conversation views and submissions retain their
+  integration contracts. Examples 20 (inbox), 21 (late join) and 29 (conversation environments) are unchanged from
+  `ea448f4`. Storage failure still ends the Harness with `SessionFailed`; the app reopens it.
+- pi-ai's provider-publication and OAuth contracts are unchanged for this app. The web-search decorator retains
+  generation's invocation-signal correlation, `streamSimple` dispatch, provider callbacks and `responseId`.
+- Chord replaces its facet/service runtime, which the app does not use. Context and replicated-state APIs remain;
+  its array descriptor call still matches the expo-pi Hermes transform. No transform or native configuration change.
+- pi-durable's README "Compaction", example 25 and `LiveState` define running `compactions` and persistent
+  `compactionFailure`. A failed blocking compaction settles inputs `unanswered` / `model_error` without an assistant
+  error entry. Presentation is a separate follow-up; SDK compaction and retry settings remain at their defaults.
+- Per-key OpenRouter catalogs, codemode and deferred tools are opt-in and are not enabled by this upgrade.
 
-Model data is hydrated from the previously installed pi-ai, so the catalog the owner verified is the one that ships.
-`npm run build` in `packages/ai` would fetch live model data instead; that is a separate decision with an app-facing
-catalog change (`NEW_CHAT_DEFAULTS` pins model ids). `build:offline` exists only in pi-ai; the other packages have a
-plain `build`.
-
-What main changes for the app (pi-durable `[Unreleased]`):
-
-- A storage error ends the Harness: every call rejects with `SessionFailed`, running tasks get their abort signal,
-  and `harness.closed` settles `{ reason: 'failed', error }`; reopen to recover (README "Errors"). Adopted in
-  `159669d`. A `close()` after the Harness failed on its own returns the same settled close.
-- `bash` answers a nonzero exit with an error result carrying an `exit_code` diagnostic instead of throwing
-  `tool_error`; the tool card renders pi's error result as before.
-- `read` returns image blocks for common image types. The app's envs already return bytes, and a chat whose model
-  takes no images gets pi's placeholder diagnostic; the transcript projects text only.
-- Nested tool calls (`api.executeTool`), `callers`/`modelTools`, `structuredOutput`, `abandonOnRestart`: additive,
-  unused by the app.
-- Scheduler performance and memory fixes; a throwing `onReport` is contained; watch-listener errors are reported.
-- pi-ai `[Unreleased]`: one Mistral timeout fix, unused by the app. chord and pi-env: no changes.
-
-The harness guide's version table names seven of these differences and defers to the CHANGELOG's `[Unreleased]`
-section as the exact diff; all seven hold for `ea448f4` (tool `output`, `SessionFailed`/`harness.closed`,
-`executeTool`, `callers`/`modelTools`, the bash `exit_code` diagnostic, image reads, `ToolHookCall`). The CHANGELOG
-at `ea448f4` adds what the guide predates: `pi.tool` v2 with live migration, `StorageRequestError`, listener throws
-reported instead of failing, `abandonOnRestart`, `abortOwned`/`ownedTasks`, `retainedOutput`, `NestedCallDoc`, and
-the scheduler, `onReport`, watch-listener and Mistral fixes. The guide's `version.check-dts` rule applies unchanged:
-code against the installed declarations, which are now the vendored main ones.
-
-Verified against main before adopting: the invocation-signal flow the per-request correlation relies on
-(`scheduler.ts` context, `generation.ts` stream options), generation's `streamSimple` dispatch, `createProvider`'s
-plain-object provider (the spread decorator), the partial's `responseId` from `response.created`, pi-ai's own
-`include` for active reasoning, write submissions with `requestId` (example 20), the fire-and-forget commit report
-(`generation.ts`), idempotent `close()`, and the expo-pi transform's targets (variable `import()`, chord's
-descriptor call, `getRandomValues`). Examples 20 and 29 are unchanged from 1.1.0.
+Ownership is unchanged: the app service owns the Harness and SQLite storage; a shown `ChatView` borrows its views
+and documents, cancels only its submission wait, and disposes its subscriptions on disconnect. The remote owner
+owns shared SSH connections; shutdown closes the Harness before those connections. Operation cancellation does
+not delete workspace or temporary files. No new resources or ownership policies are introduced.
 
 ## Done
 

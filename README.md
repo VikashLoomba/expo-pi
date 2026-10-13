@@ -2,7 +2,13 @@
 
 An on-device chat app for iOS built with Pi's **durable `Harness`**, Expo SQLite, and Pi's provider registry. Connect OpenAI with ChatGPT or an API key, or use Anthropic, Google, OpenRouter, or xAI with an API key. Continue independent conversations across app restarts, each with its own provider, model, reasoning effort, and execution environment (a private on-device workspace, or a remote machine over SSH). A new chat continues with the most recently active chat's model and effort while that provider is connected; otherwise it uses the first connected provider's default entry in `src/pi/models.ts`.
 
-The app runs `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@earendil-works/pi-telemetry` and `@earendil-works/chord` built from the pi repo's `main` at `ea448f4`, vendored as tarballs in [`vendor/pi/`](vendor/pi) and pinned through `pnpm.overrides` (npm has no newer release and the repo publishes no canary; see the regeneration recipe in `PLAN.md`'s "Upstream revision"). When the next npm release ships, `vendor/` and the overrides are deleted. The daemon for remote execution comes from npm `@earendil-works/pi-env` 1.1.0, whose protocol is unchanged on `main`. [`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge needed to run Pi in Expo on iOS.
+The app uses published `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@earendil-works/pi-telemetry` and
+`@earendil-works/chord` **1.2.0**, reviewed against pi's
+[`v1.2.0`](https://github.com/earendil-works/pi/tree/v1.2.0) tag (`06a4669`). The temporary vendored tarballs and
+`pnpm.overrides` have been removed. The remote daemon ships from npm `@earendil-works/pi-env` **1.2.0**, with
+artifact integrity and binary hashes pinned by `scripts/sync-pi-daemon-assets.mjs`.
+[`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge
+needed to run Pi in Expo on iOS.
 
 ## Run
 
