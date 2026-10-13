@@ -61,29 +61,33 @@ export function summarizeChat(id: ConversationId, metadata: Readonly<ChatMetadat
     updatedAt: Math.max(metadata.createdAt, metadata.updatedAt ?? 0) };
 }
 
-/**
- * Why the latest input went unanswered, unless the transcript already shows it: a model error's detail is the failed
- * assistant entry's message, and a stop has its own notice.
- */
-function submissionError(submission?: SubmissionRecord): string | undefined {
-  if (submission?.status !== 'unanswered') return undefined;
-  if (submission.reason === 'aborted' || submission.reason === 'model_error') return undefined;
-  const { detail } = submission;
-  if (typeof detail === 'string' && detail) return detail;
-  if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.message === 'string') {
-    return detail.message;
+/** Why the latest input went unanswered, unless a saved assistant entry or stop notice already shows it. */
+function submissionError(submission: SubmissionRecord | undefined, entries: readonly EntryRecord[]): string | undefined {
+  if (submission?.status !== 'unanswered' || submission.reason === 'aborted') return undefined;
+  const { detail, entry: placed } = submission;
+  let error = `The response could not finish (${submission.reason}). You can send another message to continue.`;
+  if (typeof detail === 'string' && detail) error = detail;
+  else if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.message === 'string') {
+    error = detail.message;
   }
-  return `The response could not finish (${submission.reason}). You can send another message to continue.`;
+  // A blocking compaction can fail without an assistant entry, so model_error alone cannot hide an error.
+  const represented = submission.reason === 'model_error' && placed !== undefined && entries.some((entry) =>
+    entry.id > placed && entry.model?.some((message) => message.role === 'assistant' && message.stopReason === 'error'
+      && (!message.errorMessage || message.errorMessage === error)));
+  return represented ? undefined : error;
 }
 
-export function projectControls(state: ChatState): ChatControls {
-  const error = submissionError(state.submission);
+export function projectControls(state: ChatState, entries: readonly EntryRecord[]): ChatControls {
+  const failure = state.live?.compactionFailure;
+  const error = submissionError(state.submission, entries)
+    ?? (failure ? `Could not summarize earlier messages: ${failure.error}` : undefined);
   return {
     id: state.id,
     title: state.metadata?.title || 'New chat',
     settings: settingsOf(state.agent),
     execution: executionSettings(state.execution, state.agent),
     busy: state.live?.run !== undefined,
+    compacting: (state.live?.compactions?.length ?? 0) > 0,
     // pi-durable waits before retrying a failed request; the failed attempt is not an answer.
     retrying: state.live?.generation?.retry !== undefined,
     ...(error ? { error } : {}),

@@ -50,7 +50,8 @@ Contracts reviewed at this release:
   its array descriptor call still matches the expo-pi Hermes transform. No transform or native configuration change.
 - pi-durable's README "Compaction", example 25 and `LiveState` define running `compactions` and persistent
   `compactionFailure`. A failed blocking compaction settles inputs `unanswered` / `model_error` without an assistant
-  error entry. Presentation is a separate follow-up; SDK compaction and retry settings remain at their defaults.
+  error entry. The transcript footer projects running compactions, and the error banner projects persistent
+  failures and unanswered inputs not represented by assistant errors. SDK compaction and retry settings stay default.
 - Per-key OpenRouter catalogs, codemode and deferred tools are opt-in and are not enabled by this upgrade.
 
 Ownership is unchanged: the app service owns the Harness and SQLite storage; a shown `ChatView` borrows its views
@@ -74,6 +75,7 @@ not delete workspace or temporary files. No new resources or ownership policies 
 - iOS only (Android target removed): `f5ad9c7`.
 - Plan re-audit fixes: `70e9169`, `1ef9e52`.
 - pi main `ea448f4` as vendored tarballs: `27ee82e`; close order and `harness.closed` reopen: `159669d`.
+- Registry pi 1.2.0 and bundled pi-env 1.2.0: `b0229d6`; vendor tarballs and overrides removed.
 - `node:zlib` resolved empty for just-bash; stub deleted: `78eb811`.
 - WS-1 web search data side: `40021dc`; WS-2 rendering: `d8fe9a9`. Old chats' web-search records live in documents they replaced; clear app data.
 

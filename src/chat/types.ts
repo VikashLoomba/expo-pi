@@ -34,6 +34,7 @@ export interface ChatControls {
   settings: ChatModelSettings;
   execution: ChatExecutionSettings;
   busy: boolean;
+  compacting: boolean;
   /** A request failed and is waiting to be tried again. */
   retrying: boolean;
   error?: string;

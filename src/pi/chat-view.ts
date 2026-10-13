@@ -212,11 +212,13 @@ export class ChatView {
     const state: ChatState = { id: this.id, ...readConversationView(view), metadata: metadata ?? undefined,
       execution: this.target?.value ?? undefined, search: this.search?.value ?? undefined,
       submission: this.submission };
-    this.controls = projectControls(state);
     if (this.transcript) {
       for (const entry of view.entries) this.entries.set(entry.id, entry);
-      this.messages = projectMessages(state, [...this.entries.values()].sort((left, right) => left.id - right.id));
     }
+    const entries = this.transcript
+      ? [...this.entries.values()].sort((left, right) => left.id - right.id) : view.entries;
+    this.controls = projectControls(state, entries);
+    if (this.transcript) this.messages = projectMessages(state, entries);
     this.publish({ status: 'ready' });
   }
 

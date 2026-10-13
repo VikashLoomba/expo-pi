@@ -56,10 +56,12 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
   const error = useChatError(view);
   const renderMessage = ({ item }: { item: ChatMessage }) =>
     <MessageRow message={item} stopping={stopping && !!item.streaming} onSteerQueued={onSteerQueued} />;
-  const working = stopping ? 'Stopping…' : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
+  const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
+    : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
   const { list, onScroll, onContentSizeChange, onLayout, scrollToLatest, showScrollDown } = useTranscriptScroll();
   useImperativeHandle(ref, () => ({ scrollToLatest }), [scrollToLatest]);
-  const showWorking = busy && !messages.some((message) => message.streaming || message.tool?.status === 'running');
+  const showWorking = controls?.compacting
+    || (busy && !messages.some((message) => message.streaming || message.tool?.status === 'running'));
   const unavailable = status === 'missing' || status === 'failed' || (ready && !view);
   if (!messages.length) return <View style={styles.transcript}>
     {unavailable ? <View style={styles.loading}>
@@ -80,7 +82,7 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
       onScroll={onScroll} onContentSizeChange={onContentSizeChange} onLayout={onLayout}
       ListFooterComponent={<View style={styles.working}>
         {showWorking && <><ActivityIndicator color={colors.accent} size="small" />
-          <Text style={[styles.workingText, { color: colors.secondary }]}>{working}</Text></>}
+          <Text testID="conversation-working" style={[styles.workingText, { color: colors.secondary }]}>{working}</Text></>}
       </View>}
     />
     {showScrollDown && <Pressable testID="scroll-to-latest" accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={scrollToLatest}
