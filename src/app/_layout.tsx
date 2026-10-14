@@ -1,3 +1,6 @@
+// Installs `crypto.getRandomValues` for Pi before any Pi module can run; side effect only.
+import '@/pi/random-values';
+
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 

@@ -7,8 +7,8 @@ The app uses published `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@
 [`v1.2.0`](https://github.com/earendil-works/pi/tree/v1.2.0) tag (`06a4669`). The temporary vendored tarballs and
 `pnpm.overrides` have been removed. The remote daemon ships from npm `@earendil-works/pi-env` **1.2.0**, with
 artifact integrity and binary hashes pinned by `scripts/sync-pi-daemon-assets.mjs`.
-[`@automatalabs/expo-pi`](packages/expo-pi/README.md) supplies the Metro transform and secure-random bridge
-needed to run Pi in Expo on iOS.
+[`babel-plugins/pi-compat.js`](babel-plugins/pi-compat.js) makes Pi's published modules bundle and run on
+Hermes, and `src/pi/random-values.ts` installs `crypto.getRandomValues` from expo-crypto at startup.
 
 ## Run
 
@@ -122,4 +122,5 @@ npx expo export --platform ios --source-maps --clear
 - `src/pi/execution/remote/`: the pi-env daemon client over react-native-ssh — connection, provisioning, the remote execution environment, host settings and admission.
 - `src/pi/openai-auth/`: modern OpenAI `OAuthAuth` adapter, installation identity, issued-client token exchange, callback/browser coordination, and same-attempt manual fallback.
 - `modules/pi-oauth-callback/`: Swift-only Expo Modules 2.0 loopback receiver using Apple Network; local module autolinking keeps native code outside generated projects.
-- `packages/expo-pi/`: Metro compatibility transform and secure-random bridge; also usable with Pi's in-memory `Agent` API.
+- `babel-plugins/pi-compat.js`: the two Babel edits Pi needs on Hermes — variable-specifier `import()` calls become rejected promises, and chord's indexed descriptor lookup uses a string key.
+- `src/pi/random-values.ts`: installs `crypto.getRandomValues` from expo-crypto at startup, which Hermes lacks and Pi's id generation needs.

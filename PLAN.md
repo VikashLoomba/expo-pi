@@ -13,7 +13,7 @@ the app plugs an Expo implementation into it. "Upstream" means those libraries a
 
 | Seam | pi contract | Expo / iOS | App code |
 | --- | --- | --- | --- |
-| Run in Hermes | pi-ai "Browser Usage": side-effect-free entry points that bundle cleanly | Metro, Hermes, expo-crypto | `packages/expo-pi` |
+| Run in Hermes | pi-ai "Browser Usage": side-effect-free entry points that bundle cleanly | Metro, Hermes, expo-crypto | `babel-plugins/pi-compat.js`, `src/pi/random-values.ts` |
 | Conversation storage | pi-durable "Storage": the portable SQLite core over an async `SqliteDatabase` facade | expo-sqlite | `src/pi/storage/` |
 | Credentials | pi-ai `CredentialStore` (`read`, `list`, `modify`, `delete`), injected with `createModels({ credentials })`; README "Credential Store" | expo-secure-store (Keychain) | `provider-credentials.ts`, `secure-storage.ts` |
 | Provider sign-in | pi-ai `OAuthAuth` (`login`, `refresh`, `toAuth`) run by `models.login(provider, 'oauth', interaction)` | expo-auth-session, expo-web-browser, the Swift loopback module | `src/pi/openai-auth/`, `modules/pi-oauth-callback` |
@@ -50,7 +50,7 @@ Contracts reviewed at this release:
 - pi-ai's provider-publication and OAuth contracts are unchanged for this app. The web-search decorator retains
   generation's invocation-signal correlation, `streamSimple` dispatch, provider callbacks and `responseId`.
 - Chord replaces its facet/service runtime, which the app does not use. Context and replicated-state APIs remain;
-  its array descriptor call still matches the expo-pi Hermes transform. No transform or native configuration change.
+  its array descriptor call still matches the Babel plugin's string-key rewrite. No native configuration change.
 - pi-durable's README "Compaction", example 25 and `LiveState` define running `compactions` and persistent
   `compactionFailure`. A failed blocking compaction settles inputs `unanswered` / `model_error` without an assistant
   error entry. The transcript footer projects running compactions, and the error banner projects persistent

@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
-    "@automatalabs/expo-pi": "workspace:*",
     "@earendil-works/chord": "1.2.0",
     "@earendil-works/pi-ai": "1.2.0",
     "@earendil-works/pi-durable": "1.2.0",
@@ -54,6 +53,7 @@
   "devDependencies": {
     "@types/mdast": "4.0.4",
     "@types/react": "~19.3.0",
+    "babel-preset-expo": "~58.0.13",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~58.0.4",
     "typescript": "~6.0.3"
