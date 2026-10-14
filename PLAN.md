@@ -81,6 +81,7 @@ not delete workspace or temporary files. No new resources or ownership policies 
 - Registry pi 1.2.0 and bundled pi-env 1.2.0: `b0229d6`; vendor tarballs and overrides removed.
 - `node:zlib` resolved empty for just-bash; stub deleted: `78eb811`.
 - WS-1 web search data side: `40021dc`; WS-2 rendering: `d8fe9a9`. Old chats' web-search records live in documents they replaced; clear app data.
+- Pi Hermes compat is one Babel plugin; `packages/expo-pi` deleted: `28e1bf9`.
 
 ## Open items
 
