@@ -18,7 +18,7 @@ export interface RemoteHostTestOptions {
 export interface RemoteHostTestResult { version: string; os: string; arch: string; home: string }
 
 /** Stable, sanitized user feedback. Never display native errors containing secret input or remote stderr. */
-function remoteHostConnectionMessage(error: unknown): string {
+export function remoteHostConnectionMessage(error: unknown): string {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   if (code === 'AUTH_FAILED') return 'SSH authentication failed. Check the SSH username and password or private key in this machine’s settings.';
   if (code === 'KEY') return 'The SSH private key could not be unlocked. Check the key format and passphrase.';

@@ -22,6 +22,7 @@ const symbols = {
   arrowDown: 'arrow.down',
   idea: 'lightbulb',
   number: 'number',
+  folder: 'folder',
 } as const;
 
 export type ChatIconName = keyof typeof symbols;

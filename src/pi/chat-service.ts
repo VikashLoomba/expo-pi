@@ -1,10 +1,10 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { ModelsError, uuidv7, type Models } from '@earendil-works/pi-ai';
+import { ModelsError, uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
   type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
 } from '@earendil-works/pi-durable';
-import { CodingTools } from '@earendil-works/pi-durable/tools';
+import { createCodingTools } from '@earendil-works/pi-durable/tools';
 
 import type { ChatSummary } from '../chat/types';
 import { KeepAliveController } from '../keep-alive/controller';
@@ -12,6 +12,7 @@ import type { KeepAliveSettings } from '../keep-alive/settings';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
+import { createExpoImages } from './images';
 import { WorkspaceDoc } from './workspace/document';
 import { WorkspaceExecutionEnv } from './workspace/execution-env';
 import type { Workspaces } from './workspace/storage';
@@ -25,6 +26,7 @@ import {
 } from './model-catalog';
 import { createNativeWebSearchBridge, SearchPresentationsDoc } from './native-web-search/durable';
 import { SESSION_EXPIRED } from './provider-credentials';
+import { imagesOf, textOf } from './user-input';
 
 /** `error` is the Harness's latest report; operations reject to their callers instead. */
 export interface ChatServiceSnapshot { chats: ChatSummary[]; error?: string }
@@ -83,7 +85,8 @@ export class DurableChatService {
   }): Promise<DurableChatService> {
     const { workspaces, remote } = options;
     const registry = createRegistry();
-    registry.install(CodingTools);
+    // With a processor, `read` turns photos upright and shrinks them to the model's limits (pi-durable "Images").
+    registry.install(createCodingTools({ images: createExpoImages() }));
     const nativeSearch = createNativeWebSearchBridge((error) => service?.report(error));
     registry.install(nativeSearch.extension);
     registry.install(defineExtension({
@@ -342,22 +345,26 @@ export class DurableChatService {
 
   /**
    * The caller keeps one `requestId` for every attempt to send the same draft. pi-durable returns the existing
-   * submission for a repeated one, so a retry after a failure does not submit twice.
+   * submission for a repeated one, so a retry after a failure does not submit twice. The content is pi-ai's user
+   * message content: text, or text and image parts.
    */
-  async send(id: ConversationId, text: string, requestId: string): Promise<SubmissionId> {
-    const content = text.trim();
-    if (!content) throw new Error('Enter a message.');
+  async send(id: ConversationId, input: UserMessage['content'], requestId: string): Promise<SubmissionId> {
+    const content = typeof input === 'string' ? input.trim() : input;
+    const text = textOf(content).trim();
+    const images = imagesOf(content).length;
+    if (!text && !images) throw new Error('Enter a message or attach a photo.');
     const conversation = await this.conversation(id);
     await this.requireAuth(settingsOf(await this.harness.snapshot(AgentDoc, id, context)));
     const submission = await conversation.submit({ type: 'input', content, requestId }, context);
     // pi-durable has no public way to write this in the submission's own commit, so it follows in the next one, and
     // a retry of the same request writes it again. The list shows it without reading the transcript; an untitled
     // chat is named after its first message.
+    const photos = images === 1 ? 'Photo' : `${images} photos`;
     await conversation.commit(async (tx) => {
       const chat = await tx.doc(ChatMetadataDoc, id);
       chat.lastInput = submission.id;
-      chat.title ||= oneLine(content, 64);
-      chat.preview = oneLine(content, 120);
+      chat.title ||= oneLine(text, 64) || photos;
+      chat.preview = oneLine(text, 120) || photos;
       chat.updatedAt = this.options.now();
     }, context);
     return submission.id;
@@ -367,14 +374,14 @@ export class DurableChatService {
    * Turns one queued follow-up into a steer, as pi-durable's busy queueing allows: withdraw the submission, then
    * submit the same text again with `whenBusy: 'steer'`. A follow-up a boundary placed meanwhile is left alone.
    */
-  async steerQueued(id: ConversationId, submissionId: SubmissionId, text: string): Promise<void> {
+  async steerQueued(id: ConversationId, submissionId: SubmissionId, content: UserMessage['content']): Promise<void> {
     const conversation = await this.conversation(id);
     const result = await this.harness.abortSubmission(submissionId, context, id);
     if (result === 'already_placed') return;
     if (result === 'settled' || result === 'not_found') throw new Error('That message already left the queue.');
     // A new request ID: the withdrawn submission is settled, and its ID would return that aborted submission.
     const submission = await conversation.submit(
-      { type: 'input', content: text, whenBusy: 'steer', requestId: uuidv7() }, context);
+      { type: 'input', content, whenBusy: 'steer', requestId: uuidv7() }, context);
     await conversation.commit(async (tx) => {
       const chat = await tx.doc(ChatMetadataDoc, id);
       chat.lastInput = submission.id;

@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai';
+import type { AssistantMessage, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai';
 import {
   AgentDoc, CompactionEntry, InboxDoc, LiveDoc, ResetEntry,
   type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord,
@@ -14,6 +14,7 @@ import type { ChatModelSettings } from './model-catalog';
 import type { SearchPresentationsState } from './native-web-search/documents';
 import { isSearchObservationEntry } from './native-web-search/entries';
 import { hasSearchActivity, toWebSearchPresentation } from './native-web-search/presentation';
+import { imagesOf, textOf } from './user-input';
 
 /** Committed state of one chat: its conversation view, app documents and the record of its latest input. */
 export type ChatState = {
@@ -41,9 +42,6 @@ export function readConversationView(view: ConversationView) {
     inbox: view.docs[InboxDoc.definition.kind] as InboxState | undefined,
   };
 }
-
-const textOf = (content: Message['content']) => typeof content === 'string' ? content
-  : content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('');
 
 /** Collapse whitespace for one-line titles and previews. */
 export const oneLine = (text: string, length: number) => text.replace(/\s+/g, ' ').trim().slice(0, length);
@@ -96,17 +94,21 @@ export function projectControls(state: ChatState, entries: readonly EntryRecord[
 
 function userRows(message: UserMessage, key: string): ChatMessage[] {
   const text = textOf(message.content);
-  return text ? [{ id: key, role: 'user', text, createdAt: message.timestamp }] : [];
+  const images = imagesOf(message.content);
+  if (!text && !images.length) return [];
+  return [{ id: key, role: 'user', text, createdAt: message.timestamp, ...(images.length ? { images } : {}) }];
 }
 
+/** `read` answers an image file with one image block; the diagnostics that follow it stay the text output. */
 function toolResultRow(message: ToolResultMessage, key: string, call: ChatMessage | undefined): ChatMessage {
   const output = textOf(message.content);
+  const images = imagesOf(message.content);
   const status = message.isError ? 'error' : 'completed';
   if (!call?.tool) {
-    return { id: key, role: 'tool', text: output, createdAt: message.timestamp,
+    return { id: key, role: 'tool', text: output, createdAt: message.timestamp, ...(images.length ? { images } : {}),
       tool: { name: message.toolName, args: '', output, status } };
   }
-  return { ...call, text: output,
+  return { ...call, text: output, ...(images.length ? { images } : {}),
     tool: { ...call.tool, output, status, file: withFileToolDetails(call.tool.file, message.details) } };
 }
 
@@ -252,8 +254,9 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
   // Queued inputs wait in the inbox for a turn boundary; write items are evidence for the model, never rows.
   for (const item of state.inbox?.items ?? []) {
     if (item.mode === 'write') continue;
+    const images = imagesOf(item.content);
     messages.push({ id: `queued-${item.id}`, role: 'user', text: textOf(item.content), createdAt: 0,
-      queued: { submissionId: item.id, mode: item.mode } });
+      ...(images.length ? { images } : {}), queued: { submissionId: item.id, mode: item.mode } });
   }
   return messages;
 }

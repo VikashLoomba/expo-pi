@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import type { ChatMessage } from '@/chat/types';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
+import { MessageImages } from './message-images';
 
 export function ToolCard({ message }: { message: ChatMessage }) {
   const colors = useChatColors();
@@ -36,9 +37,10 @@ export function ToolCard({ message }: { message: ChatMessage }) {
         <Text selectable style={[styles.output, { color: colors.secondary }]}>{tool.args}</Text>
       </> : null}
       <Text style={[styles.label, { color: colors.muted }]}>RESULT</Text>
-      <Text selectable testID={`tool-output-${message.id}`} style={[styles.output, { color: colors.text }]}>
+      {message.images?.length ? <MessageImages images={message.images} messageId={message.id} /> : null}
+      {tool.output || !message.images?.length ? <Text selectable testID={`tool-output-${message.id}`} style={[styles.output, { color: colors.text }]}>
         {tool.output || (tool.status === 'running' ? 'Waiting for a result…' : 'No text output.')}
-      </Text>
+      </Text> : null}
       {file?.diff !== undefined ? <>
         <Text style={[styles.label, { color: colors.muted }]}>CHANGES{file.firstChangedLine ? ` · LINE ${file.firstChangedLine}` : ''}</Text>
         <Text selectable testID={`tool-diff-${message.id}`} style={[styles.output, { color: colors.text }]}>{file.diff}</Text>

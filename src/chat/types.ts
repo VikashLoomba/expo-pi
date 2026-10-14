@@ -3,6 +3,7 @@ import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
 import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { FileToolPresentation } from './file-tool-presentation';
 import type { ChatModelSettings } from '../pi/model-catalog';
+import type { ChatImage } from '../pi/user-input';
 import type { WebSearchPresentation } from './web-search-types';
 
 export interface ChatSummary {
@@ -20,6 +21,8 @@ export interface ChatMessage {
   streaming?: boolean;
   interrupted?: boolean;
   thinking?: string;
+  /** The image parts of a user message or a tool result, as the model received them. */
+  images?: readonly ChatImage[];
   webSearch?: WebSearchPresentation;
   tool?: { name: string; args: string; status: 'running' | 'completed' | 'error'; output: string; file?: FileToolPresentation };
   error?: string;

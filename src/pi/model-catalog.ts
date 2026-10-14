@@ -1,5 +1,10 @@
-import { getSupportedThinkingLevels, type Models, type ModelThinkingLevel } from '@earendil-works/pi-ai';
+import {
+  getSupportedThinkingLevels, type Api, type Model, type Models, type ModelThinkingLevel,
+} from '@earendil-works/pi-ai';
 import type { ModelRef } from '@earendil-works/pi-durable';
+import { DEFAULT_IMAGE_LIMITS } from '@earendil-works/pi-durable/tools';
+
+import { DEFAULT_JPEG_QUALITY } from './images';
 
 export type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 
@@ -9,6 +14,16 @@ export type ChatModelSettings = {
   thinkingLevel: ModelThinkingLevel;
 };
 
+/** What an attached photo is fitted to before it is sent, from the model's `inputLimits.images`. */
+export interface ImageInput {
+  readonly maxWidth: number;
+  readonly maxHeight: number;
+  /** Most bytes of base64 per image. */
+  readonly maxBytes: number;
+  readonly jpegQuality: number;
+  readonly maxPerMessage?: number;
+}
+
 export interface ModelOption {
   readonly id: string;
   readonly provider: string;
@@ -16,6 +31,21 @@ export interface ModelOption {
   readonly reasoning: boolean;
   readonly thinkingLevels: readonly ModelThinkingLevel[];
   readonly contextWindow: number;
+  /** Undefined when the model takes no images. */
+  readonly images?: ImageInput;
+}
+
+/** The limits pi-durable's `read` tool fits an image to for this model: its own, else pi-durable's defaults. */
+function imageInput(model: Model<Api>): ImageInput | undefined {
+  if (!model.input.includes('image')) return undefined;
+  const limits = model.inputLimits?.images;
+  return {
+    maxWidth: limits?.resize?.maxWidth ?? DEFAULT_IMAGE_LIMITS.maxWidth,
+    maxHeight: limits?.resize?.maxHeight ?? DEFAULT_IMAGE_LIMITS.maxHeight,
+    maxBytes: limits?.resize?.maxBytes ?? DEFAULT_IMAGE_LIMITS.maxBytes,
+    jpegQuality: limits?.resize?.jpegQuality ?? DEFAULT_JPEG_QUALITY,
+    ...(limits?.maxPerMessage === undefined ? {} : { maxPerMessage: limits.maxPerMessage }),
+  };
 }
 
 export interface ProviderOption {
@@ -49,6 +79,7 @@ export function buildModelCatalog(models: Pick<Models, 'getProviders' | 'getMode
       reasoning: model.reasoning,
       thinkingLevels: getSupportedThinkingLevels(model),
       contextWindow: model.contextWindow,
+      ...(model.input.includes('image') ? { images: imageInput(model) } : {}),
     })).sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
   })).sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 }

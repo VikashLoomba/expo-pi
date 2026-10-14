@@ -45,9 +45,13 @@ The modern **OpenAI** provider makes Responses' hosted `web_search` tool availab
 
 Each completed search call becomes one durable write entry, admitted with the search item's id so a replay can never duplicate it, and placed at the next turn boundary; its results reach the model as one readable message. A small presentation document per chat, created in `createConversation`'s `init` and keyed by the response's `responseId`, holds each call's status, the sources, and the cited URLs. The chat projection reads only this document. Commits are fire-and-forget, with failures reported through the Harness's `onReport`, as pi-durable reports its own streaming commits.
 
+## Images
+
+The attach control in the composer offers **Take Photo** and **Choose Photos**. Each photo is fitted to the chat model's image limits (`inputLimits.images`, or pi-durable's defaults of 2000x2000 pixels and 4.5 MB of base64) with `expo-image-manipulator`: decoded no larger than the limits, saved as JPEG at the model's quality, and shrunk while it is still over the byte limit. The message is sent as pi-ai `UserMessage` content with text and image parts, so the photos are saved in the conversation and shown in the sent bubble. A model without image input disables the control. When the `read` tool reads an image file, pi-durable returns one image block, which the tool card shows next to its diagnostics text. `read` runs with an app image processor (`createCodingTools({ images })`) built on `expo-image-manipulator`, so a file over the model's limits is turned upright, shrunk and re-encoded as JPEG rather than refused; the same function fits attached photos.
+
 ## Remote execution
 
-Each chat can run its tools on a remote machine over SSH instead of the on-device workspace. Add machines in **Remote machines**: the app tests the connection, shows the server's host-key fingerprint for out-of-band comparison, and provisions the pi-env daemon automatically (verified by SHA-256, uploaded once per daemon version). SSH passwords and private keys live in the Keychain; host metadata lives in app settings storage. A chat's remote working directory is optional — blank runs in the account's home directory. One SSH connection per machine is shared by every chat and working directory on it, and a credential or host-key change applies at the machine's next connection start. The error copy points at Tailscale for connectivity, but any reachable SSH host works.
+Each chat can run its tools on a remote machine over SSH instead of the on-device workspace. Add machines in **Remote machines**: the app tests the connection, shows the server's host-key fingerprint for out-of-band comparison, and provisions the pi-env daemon automatically (verified by SHA-256, uploaded once per daemon version). SSH passwords and private keys live in the Keychain; host metadata lives in app settings storage. A chat's remote working directory is optional — blank runs in the account's home directory, and **Choose a folder** browses the machine one folder at a time in a native list, with a search that runs `find` a few levels below the shown folder, so a path never has to be remembered. One SSH connection per machine is shared by every chat and working directory on it, and a credential or host-key change applies at the machine's next connection start. The error copy points at Tailscale for connectivity, but any reachable SSH host works.
 
 ## Persistent chats and lifecycle
 
@@ -98,7 +102,8 @@ npx expo export --platform ios --source-maps --clear
 ## Main files
 
 - `src/app/index.tsx`: saved chat list, search, creation, and chat actions.
-- `src/app/chat/[id].tsx`: conversation transcript, composer, follow-up queueing, tool output, and cancellation.
+- `src/app/chat/[id].tsx`: conversation transcript, composer, photo attachments, follow-up queueing, tool output, and cancellation.
+- `src/chat/photo-attachments.ts`: photos from the camera or library, fitted to the model's image limits; `src/pi/user-input.ts` builds and reads pi-ai user content; `src/pi/images.ts` is the image processor `read` runs with, on `expo-image-manipulator`; `src/components/chat/message-images.tsx` renders saved images.
 - `src/app/chat-settings/[id].tsx`: staged per-chat provider, model, reasoning, and execution settings.
 - `src/app/remote-hosts.tsx`: remote machine settings, connection tests, and host-key verification.
 - `src/app/account.tsx`: provider API keys, ChatGPT sign-in, browser actions, connection retry, and disconnecting accounts.

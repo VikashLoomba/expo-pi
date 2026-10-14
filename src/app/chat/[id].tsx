@@ -1,4 +1,4 @@
-import { uuidv7 } from '@earendil-works/pi-ai';
+import { uuidv7, type UserMessage } from '@earendil-works/pi-ai';
 import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -6,6 +6,7 @@ import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View, type TextInput
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
+import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { useChatActions } from '@/components/chat/chat-actions';
 import { Composer } from '@/components/chat/composer';
 import { ChatIcon } from '@/components/chat/icon';
@@ -14,6 +15,7 @@ import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { findCatalogModel, getModelSettingsError } from '@/pi/model-catalog';
+import { userInput } from '@/pi/user-input';
 
 export default function ConversationRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -35,10 +37,15 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     else if (status === 'missing' && shown.current) router.back();
   }, [status]);
   // A draft keeps one request ID for every attempt to send it, so a resend after a failure does not submit twice.
-  const [draft, setDraft] = useState(() => ({ text: '', requestId: uuidv7() }));
+  const emptyDraft = () => ({ text: '', images: [] as readonly PhotoAttachment[], requestId: uuidv7() });
+  const [draft, setDraft] = useState(emptyDraft);
   const changeDraft = useCallback((text: string) => {
-    setDraft((current) => current.text === text ? current : { text, requestId: uuidv7() });
+    setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
   }, []);
+  const removeImage = useCallback((imageId: string) => {
+    setDraft((current) => ({ ...current, images: current.images.filter((image) => image.id !== imageId), requestId: uuidv7() }));
+  }, []);
+  const [attaching, setAttaching] = useState(false);
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [steering, setSteering] = useState(false);
@@ -69,15 +76,32 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     changeDraft(text);
     input.current?.focus();
   }, [changeDraft]);
+  const attach = async (source: PhotoSource) => {
+    if (!model?.images || attaching) return;
+    setAttaching(true);
+    setLocalError(undefined);
+    try {
+      const photos = await pickPhotos(source, model.images);
+      if (photos.length) setDraft((current) => ({ ...current, images: [...current.images, ...photos], requestId: uuidv7() }));
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'The photo could not be attached. Try again.');
+    } finally {
+      setAttaching(false);
+    }
+  };
   const sendMessage = async () => {
     const text = draft.text.trim();
-    if (id === undefined || !service || !text || admitting || !access.ready || !access.connected) return;
+    if (id === undefined || !service || (!text && !draft.images.length) || admitting || !access.ready || !access.connected) return;
     if (settingsError) return;
+    if (draft.images.length && !model?.images) {
+      setLocalError(`${model?.name || 'This model'} does not accept images. Remove the photos or choose another model.`);
+      return;
+    }
     setAdmitting(true);
     setLocalError(undefined);
     try {
-      await service.send(id, text, draft.requestId);
-      setDraft({ text: '', requestId: uuidv7() });
+      await service.send(id, userInput(text, draft.images), draft.requestId);
+      setDraft(emptyDraft());
       transcript.current?.scrollToLatest();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : 'Your message could not be sent. Try again.');
@@ -85,11 +109,11 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
       setAdmitting(false);
     }
   };
-  const steerQueued = async (submissionId: SubmissionId, text: string) => {
+  const steerQueued = async (submissionId: SubmissionId, content: UserMessage['content']) => {
     if (id === undefined || !service || steering) return;
     setSteering(true);
     setLocalError(undefined);
-    try { await service.steerQueued(id, submissionId, text); }
+    try { await service.steerQueued(id, submissionId, content); }
     catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : 'The message could not be sent as a steer. Try again.');
     } finally {
@@ -149,7 +173,9 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
           onStop={() => { void stop(); }}
           onConnect={openAccount} busy={busy} admitting={admitting} connected={access.connected}
           disabled={!ready || !conversation || stopping || (!busy && (!access.ready || !!settingsError))}
-          accountStatus={accountStatus} inputRef={input} />
+          accountStatus={accountStatus} inputRef={input}
+          attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
+          attaching={attaching} imagesSupported={!!model?.images} />
       </SafeAreaView>
     </KeyboardAvoidingView>
   </View>;

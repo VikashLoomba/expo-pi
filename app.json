@@ -33,6 +33,14 @@
       "expo-asset",
       "expo-widgets",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Pi Agent to attach photos from your library to messages.",
+          "cameraPermission": "Allow Pi Agent to take photos to attach to messages.",
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-location",
         {
           "isIosBackgroundLocationEnabled": true,

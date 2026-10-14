@@ -35,6 +35,8 @@ export interface RemoteInfo {
   cwd: string;
   driveCwds: Record<string, string>;
   pid: number;
+  /** Operations added to protocol 1 that this daemon supports, such as `listFiles`; absent from older daemons. */
+  features?: string[];
 }
 
 export interface Reply { json: Json; payload: Uint8Array; session: number }
@@ -106,7 +108,7 @@ function secureToken(): string {
 function remoteInfo(json: Json): RemoteInfo {
   const incompatible = () => lost(
     'Pi daemon returned an incompatible hello response. Test this machine again to verify automatic remote setup.');
-  const { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds, pid } = json;
+  const { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds, pid, features } = json;
   if (protocol !== 1 || typeof version !== 'string' || typeof os !== 'string' || typeof arch !== 'string'
     || typeof home !== 'string' || typeof tmpdir !== 'string' || typeof cwd !== 'string'
     || (separator !== '/' && separator !== '\\') || typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1
@@ -118,7 +120,12 @@ function remoteInfo(json: Json): RemoteInfo {
     if (typeof value !== 'string') throw incompatible();
     drives[drive] = value;
   }
-  return { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds: drives, pid };
+  const info: RemoteInfo = { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds: drives, pid };
+  if (features !== undefined) {
+    if (!Array.isArray(features) || !features.every((feature) => typeof feature === 'string')) throw incompatible();
+    info.features = features;
+  }
+  return info;
 }
 
 /**

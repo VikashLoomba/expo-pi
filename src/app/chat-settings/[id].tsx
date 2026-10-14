@@ -6,6 +6,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
 import { ActionButton, InlineNotice } from '@/components/chat/primitives';
+import {
+  RemoteDirectoryPicker, displayPath, parentPath, useRemoteFolder,
+} from '@/components/chat/remote-directory-picker';
 import { SettingRow, SettingsChoices, thinkingLevelLabel, type SettingsChoice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { ChatView } from '@/pi/chat-view';
@@ -15,7 +18,7 @@ import {
 
 import { sameExecution, validateExecution, type ChatExecutionSettings } from '@/pi/execution/document';
 
-type Picker = 'provider' | 'model' | 'effort' | 'environment';
+type Picker = 'provider' | 'model' | 'effort' | 'environment' | 'directory';
 
 function dismissSettings(id: string | ConversationId) {
   if (router.canGoBack()) router.back();
@@ -48,7 +51,7 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
 }) {
   const colors = useChatColors();
   const insets = useSafeAreaInsets();
-  const { service, catalog, providerAccess, refreshCatalog, remoteHosts } = useChatApp();
+  const { service, catalog, providerAccess, refreshCatalog, remoteHosts, remote } = useChatApp();
   const conversation = useChatControls(view);
   const hosts = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   const [execution, setExecution] = useState<ChatExecutionSettings>(initialExecution);
@@ -62,6 +65,13 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   const [draft, setDraft] = useState<ChatModelSettings>(initialSettings);
   const [picker, setPicker] = useState<Picker>();
   const [search, setSearch] = useState('');
+  // The absolute folder the picker shows, `null` for the machine's home; undefined starts at the draft directory.
+  const [directoryPath, setDirectoryPath] = useState<string | null>();
+  const browsing = picker === 'directory' && target.kind === 'ssh' ? target.machineId : undefined;
+  const browsePath = directoryPath === undefined ? execution.cwd : directoryPath;
+  // One request per shown folder; the header's Back and Choose read the same answer the picker lists.
+  const { state: folder, reload: reloadFolder } = useRemoteFolder(remote, browsing, browsePath);
+  const shownFolder = folder.status === 'ready' ? folder : undefined;
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
@@ -84,7 +94,12 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   const disabled = blocked || saving || refreshing;
   const changed = draft.model.provider !== initialSettings.model.provider || draft.model.modelId !== initialSettings.model.modelId || draft.thinkingLevel !== initialSettings.thinkingLevel;
   const canSave = !disabled && (changed || executionChanged) && (!changed || !settingsError) && !executionError;
-  const choosePage = (next?: Picker) => { setSearch(''); setPicker(next); setError(undefined); };
+  const choosePage = (next?: Picker) => { setSearch(''); setDirectoryPath(undefined); setPicker(next); setError(undefined); };
+  const chooseDirectory = () => {
+    if (!shownFolder) return;
+    setExecution({ ...execution, cwd: shownFolder.path });
+    choosePage();
+  };
   const refresh = async () => {
     if (disabled) return;
     setRefreshing(true); setError(undefined);
@@ -131,15 +146,27 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
       ? (provider?.models ?? []).map((entry) => ({ id: entry.id, title: entry.name, description: `${entry.id} · ${entry.reasoning ? 'Reasoning available' : 'No reasoning control'}` })).filter(matches)
       : (model?.thinkingLevels ?? []).map((level) => ({ id: level, title: thinkingLevelLabel(level) }));
   const selectedId = picker === 'environment' ? execution.target.kind === 'local' ? 'local' : execution.target.machineId : picker === 'provider' ? draft.model.provider : picker === 'model' ? draft.model.modelId : draft.thinkingLevel;
-  const title = picker === 'environment' ? 'Execution environment' : picker === 'provider' ? 'Provider' : picker === 'model' ? 'Model' : picker === 'effort' ? 'Reasoning effort' : 'Chat settings';
+  const shownName = shownFolder && displayPath(shownFolder.path, shownFolder.home);
+  const title = picker === 'directory' ? (shownName === undefined || shownName === '~' ? selectedHost?.name ?? 'Folders' : shownName.slice(shownName.lastIndexOf('/') + 1))
+    : picker === 'environment' ? 'Execution environment' : picker === 'provider' ? 'Provider' : picker === 'model' ? 'Model' : picker === 'effort' ? 'Reasoning effort' : 'Chat settings';
 
   return <View testID="chat-settings-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
     <Stack.Screen options={{ title, gestureEnabled: !saving, headerBackVisible: false,
       headerLeft: () => <HeaderAction testID={picker ? 'settings-back' : 'cancel-chat-settings'} title={picker ? 'Back' : 'Cancel'} disabled={saving}
-        onPress={() => { if (picker) choosePage(); else dismissSettings(id); }} />,
-      headerRight: () => !picker ? <HeaderAction testID="save-chat-settings" title="Save" disabled={!canSave} loading={saving} onPress={() => { void save(); }} /> : null,
+        onPress={() => {
+          // In the folder picker, Back climbs to the parent folder first, as the Files app does.
+          const parent = shownFolder && parentPath(shownFolder.path);
+          if (picker === 'directory' && parent !== undefined) setDirectoryPath(parent);
+          else if (picker) choosePage();
+          else dismissSettings(id);
+        }} />,
+      headerRight: () => !picker ? <HeaderAction testID="save-chat-settings" title="Save" disabled={!canSave} loading={saving} onPress={() => { void save(); }} />
+        : picker === 'directory' ? <HeaderAction testID="choose-directory" title="Choose" disabled={!shownFolder} onPress={chooseDirectory} /> : null,
     }} />
-    {picker ? <SettingsChoices choices={choices} selectedId={selectedId} disabled={disabled} bottomInset={insets.bottom}
+    {picker === 'directory' && browsing !== undefined ? <RemoteDirectoryPicker remote={remote} machineId={browsing}
+      hostName={selectedHost?.name ?? 'this machine'} path={browsePath} folder={folder} onOpen={setDirectoryPath}
+      onRetry={reloadFolder} />
+    : picker ? <SettingsChoices choices={choices} selectedId={selectedId} disabled={disabled} bottomInset={insets.bottom}
       search={search} onSearch={picker === 'effort' ? undefined : setSearch} searchPlaceholder={picker === 'environment' ? 'Search machines' : picker === 'provider' ? 'Search providers' : 'Search models'}
       description={picker === 'environment' ? 'Choose where this chat reads, edits and runs commands. Files are not copied when you switch.' : picker === 'provider' ? 'Choose the provider for this chat.' : picker === 'model' ? `Choose a model from ${provider?.name || draft.model.provider}.` : 'Higher effort can take longer. The available levels depend on this model.'}
       onSelect={(value) => {
@@ -182,7 +209,11 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
             onChangeText={(cwd) => setExecution({ ...execution, cwd: cwd.trim() ? cwd : null })}
             editable={!disabled} autoCapitalize="none" autoCorrect={false} placeholder={execution.target.kind === 'ssh' ? 'Remote home directory' : '/workspace'} placeholderTextColor={colors.muted}
             style={[styles.directoryInput, { color: colors.text, borderColor: colors.border }]} />
-          {execution.target.kind === 'ssh' && <Text style={[styles.caption, { color: colors.muted }]}>Enter an absolute path on this machine, or leave blank to use the machine’s home directory.</Text>}
+          {execution.target.kind === 'ssh' && <>
+            <ActionButton testID="browse-directories" title="Choose a folder" secondary icon="folder" disabled={disabled || !selectedHost}
+              onPress={() => choosePage('directory')} />
+            <Text style={[styles.caption, { color: colors.muted }]}>Choose a folder on this machine, or enter an absolute path. Leave blank to use the machine’s home directory.</Text>
+          </>}
         </View>
       </View>
       {executionError && <InlineNotice testID="settings-execution-error" message={executionError} />}

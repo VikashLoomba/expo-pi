@@ -1,3 +1,4 @@
+import type { UserMessage } from '@earendil-works/pi-ai';
 import type { SubmissionId } from '@earendil-works/pi-durable';
 import { router } from 'expo-router';
 import { memo, useImperativeHandle, type Ref } from 'react';
@@ -45,7 +46,7 @@ export interface ChatTranscriptHandle { scrollToLatest: () => void }
  */
 export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, onSteerQueued, ref }: {
   view: ChatView | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
-  onSteerQueued?: (submissionId: SubmissionId, text: string) => void;
+  onSteerQueued?: (submissionId: SubmissionId, content: UserMessage['content']) => void;
   ref: Ref<ChatTranscriptHandle>;
 }) {
   const colors = useChatColors();

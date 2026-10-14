@@ -1,4 +1,4 @@
-// Adapted from Pi Env 1.1.0 remote-env.ts (MIT); the daemon wire contract is unchanged.
+// Adapted from Pi Env 1.2.0 remote-env.ts (MIT); the daemon wire contract is protocol 1.
 import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
 import { posix, resolveRemotePath } from "./paths";
@@ -11,7 +11,9 @@ import {
 	err,
 	FileError,
 	type FileInfo,
+	type FileListing,
 	type FileWatcher,
+	type ListFilesOptions,
 	ok,
 	type Result,
 	type ShellExecOptions,
@@ -24,6 +26,7 @@ import {
 } from "@earendil-works/pi-durable/env";
 import { type Connection, type Json, RemoteError, type RemoteInfo } from "./connection";
 import { abortResult, toFileError } from "./errors";
+import { listFilesOver } from "./list-files";
 import { invalidReply, jsonField, numberField, stringField } from "./protocol";
 import {
   Handle, READ_DEPTH, RemoteBinaryReader, RemoteDirReader, RemoteTextLineReader, readRange, toDirEntries, toInfo,
@@ -400,6 +403,21 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 			}
 			return infos;
 		});
+	}
+
+	/** Through the daemon; `not_supported` with a daemon released before `listFiles`. */
+	async listFiles(
+		path: string,
+		options: ListFilesOptions | undefined,
+		context: Context,
+	): Promise<Result<FileListing, FileError>> {
+		let resolved: string;
+		try {
+			resolved = await this.#resolve(path);
+		} catch (error) {
+			return err(toFileError(error, path));
+		}
+		return listFilesOver(this.connection, resolved, options, context);
 	}
 
 	async #openDir(resolved: string): Promise<{ handle: Handle }> {

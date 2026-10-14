@@ -25,6 +25,7 @@ the app plugs an Expo implementation into it. "Upstream" means those libraries a
 | Local execution | pi-durable `ExecutionEnv`, reference `NodeExecutionEnv`; the `env` resolver, example 29 | expo-file-system, just-bash, the cache directory for `/tmp` | `src/pi/workspace/` |
 | Remote execution | pi-env 1.2.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
 | Web search | pi-ai provider decorator: the built provider spread with `stream`/`streamSimple` overridden (plain object from `createProvider`); pi-durable write entries | none | `src/pi/native-web-search/` |
+| Images | pi-ai `UserMessage.content` image parts, submitted as pi-durable input `content`; `createCodingTools({ images })` takes any `ImageProcessor` (`prepare(bytes, mimeType, limits)`), of which Photon is upstream's own implementation (README "Images") | expo-image-manipulator as the processor, expo-image-picker, expo-image | `src/pi/images.ts`, `src/chat/photo-attachments.ts`, `src/pi/user-input.ts`, `message-images.tsx` |
 | Keep-alive (Later) | pi-durable `resume()`, `taskGraph()` | expo-widgets, expo-location, expo-task-manager | none |
 
 ## Upstream revision
@@ -36,7 +37,9 @@ The temporary `ea448f4` tarballs and `pnpm.overrides` are deleted; their regener
 pi-env is not an app dependency. Its **1.2.0** daemon binaries come from the npm artifact pinned by version and
 SHA-512 in `scripts/sync-pi-daemon-assets.mjs`; that script generates the per-platform SHA-256/size manifest.
 Run it to reproduce the assets, or pass `--check` to verify them. The wire protocol is still **v1**. The mobile
-client's existing file, exec and watch methods remain compatible; the new optional file-tree and PTY APIs have no
+client's existing file, exec and watch methods remain compatible. pi-env 1.2.0's `listFiles` is ported
+(`remote/list-files.ts`, `MobileRemoteExecutionEnv.listFiles`) as part of the environment contract; the folder
+picker lists one folder at a time instead, because the recursive listing has no paging. The PTY APIs have no
 production caller and are not ported.
 
 Contracts reviewed at this release:
@@ -162,9 +165,9 @@ with.**
 
 ### Remote environment
 
-`MobileRemoteExecutionEnv` is pi-env 1.1.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
-`Connection` spawns `ssh`. It matches upstream's `remote-env.ts` and `watch.ts` method by method, and differs only in
-the SSH transport and Hermes replacements for Node modules.
+`MobileRemoteExecutionEnv` is pi-env 1.2.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
+`Connection` spawns `ssh`. It matches upstream's `remote-env.ts`, `list-files.ts` and `watch.ts` method by method,
+and differs only in the SSH transport and Hermes replacements for Node modules.
 
 **Connections**
 
@@ -188,7 +191,8 @@ the SSH transport and Hermes replacements for Node modules.
 - [x] Upstream's frame handling: unknown frame types are ignored; no outbound frame-size or request-id checks.
 - [x] `SshChannelDependencies` and the other test-only injection are deleted.
 - [x] The silence clock starts when the daemon's channel opens, as pi-env's `Connection.#start` does.
-- [x] `remote/composition.ts` is `remote/owner.ts`; `remoteHostConnectionMessage` is not exported.
+- [x] `remote/composition.ts` is `remote/owner.ts`. `remoteHostConnectionMessage` is exported for one other caller,
+  the folder picker's error state.
 - [x] Only the host test sets a connect timeout (120 s), because react-native-ssh's timeout spans `verifyHostKey`,
   which waits there for the person comparing the fingerprint. Every other connection uses the library default.
 
@@ -201,6 +205,12 @@ reads the Keychain. No work for these.
 - [x] A remote working directory is optional and saving it needs no network. Blank is stored as `cwd: null`, and the
   environment uses `(await connection.info()).home`, as pi-env's `test/ssh-external.test.ts` does.
   `resolveRemoteWorkingDirectory` and its UI are deleted.
+- [x] "Choose a folder" browses the machine one folder at a time with `listDir` (the daemon's paged `opendir`/`readdir`)
+  through the owner's `listFolder`, on the shared connection the chat's tools use; a recursive `listFiles` of a
+  large home hits the daemon's 50,000-entry bound before most folders, and the operation has no paging or filter.
+  Search runs `find` through the environment's argv `exec` (four levels, 10 s, hidden folders pruned) after typing
+  pauses; a timeout keeps the partial matches. The picker is a SwiftUI `List` from `@expo/ui`: tap opens a folder,
+  the header's Back climbs to the parent and Choose fills the working directory field, which stays for typing.
 
 **Keep:** automatic daemon provisioning; host-key checks (algorithm, fingerprint and public key); `quotePosix`;
 hex-validated tokens; SecureStore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`.
@@ -320,9 +330,9 @@ with.**
 
 ### Remote environment
 
-`MobileRemoteExecutionEnv` is pi-env 1.1.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
-`Connection` spawns `ssh`. It matches upstream's `remote-env.ts` and `watch.ts` method by method, and differs only in
-the SSH transport and Hermes replacements for Node modules.
+`MobileRemoteExecutionEnv` is pi-env 1.2.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
+`Connection` spawns `ssh`. It matches upstream's `remote-env.ts`, `list-files.ts` and `watch.ts` method by method,
+and differs only in the SSH transport and Hermes replacements for Node modules.
 
 **Connections**
 
@@ -346,7 +356,8 @@ the SSH transport and Hermes replacements for Node modules.
 - [x] Upstream's frame handling: unknown frame types are ignored; no outbound frame-size or request-id checks.
 - [x] `SshChannelDependencies` and the other test-only injection are deleted.
 - [x] The silence clock starts when the daemon's channel opens, as pi-env's `Connection.#start` does.
-- [x] `remote/composition.ts` is `remote/owner.ts`; `remoteHostConnectionMessage` is not exported.
+- [x] `remote/composition.ts` is `remote/owner.ts`. `remoteHostConnectionMessage` is exported for one other caller,
+  the folder picker's error state.
 - [x] Only the host test sets a connect timeout (120 s), because react-native-ssh's timeout spans `verifyHostKey`,
   which waits there for the person comparing the fingerprint. Every other connection uses the library default.
 
@@ -359,6 +370,12 @@ reads the Keychain. No work for these.
 - [x] A remote working directory is optional and saving it needs no network. Blank is stored as `cwd: null`, and the
   environment uses `(await connection.info()).home`, as pi-env's `test/ssh-external.test.ts` does.
   `resolveRemoteWorkingDirectory` and its UI are deleted.
+- [x] "Choose a folder" browses the machine one folder at a time with `listDir` (the daemon's paged `opendir`/`readdir`)
+  through the owner's `listFolder`, on the shared connection the chat's tools use; a recursive `listFiles` of a
+  large home hits the daemon's 50,000-entry bound before most folders, and the operation has no paging or filter.
+  Search runs `find` through the environment's argv `exec` (four levels, 10 s, hidden folders pruned) after typing
+  pauses; a timeout keeps the partial matches. The picker is a SwiftUI `List` from `@expo/ui`: tap opens a folder,
+  the header's Back climbs to the parent and Choose fills the working directory field, which stays for typing.
 
 **Keep:** automatic daemon provisioning; host-key checks (algorithm, fingerprint and public key); `quotePosix`;
 hex-validated tokens; SecureStore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`.
@@ -510,8 +527,29 @@ On-device data: old chats' web-search records live in documents WS-1 replaces; c
     `whenBusy: 'steer'`; an `already_placed` answer means the follow-up was placed meanwhile, so it is left alone.
 - [x] New-chat default: the most recently active chat's model and effort when its provider is connected, else the first
   connected provider's entry in `models.ts`.
+- [x] Remote folder picker: **Choose a folder** in chat settings browses an SSH machine one folder at a time
+  (`listDir`) with a `find`-based search; the pi-env 1.2.0 `listFiles` port stays in the remote environment as part
+  of the env contract.
+- [x] Images (device checks pending):
+  - Transcript: the image parts of a user message and of a tool result (`read` on a PNG, JPEG, GIF or WebP file
+    returns one image block followed by pi-durable's diagnostics text) are projected as `images` on the row and
+    rendered with expo-image from base64 data URIs, in the user bubble and in the tool card's result.
+  - Composer: an attach control offers Take Photo and Choose Photos (`ActionSheetIOS`, expo-image-picker). Each
+    photo is fitted to the chat model's `inputLimits.images` (pi-durable's `DEFAULT_IMAGE_LIMITS` when the model
+    declares none) with expo-image-manipulator: decoded no larger than the limits, saved as JPEG at the model's
+    `jpegQuality`, shrunk while its base64 exceeds `maxBytes`. The draft's thumbnails can be removed; the send goes
+    through `service.send(id, userInput(text, images), requestId)` as pi-ai `UserMessage` content. A model without
+    image input disables the control and refuses a send with photos; `maxPerMessage` caps the picker's selection.
+  - `read` runs with an app `ImageProcessor` (`createCodingTools({ images })`): `src/pi/images.ts` writes the bytes
+    `read` hands over to a cache file and fits it with expo-image-manipulator, decoded no larger than the limits
+    (which turns it upright and reads any format iOS decodes), saved as JPEG, shrunk by 3/4 while its base64 is over
+    `maxBytes`, as upstream's Photon processor does. The same `fitImage` prepares attached photos. A file over the
+    model's limits is shrunk instead of refused; the harness still sends a placeholder to a model without image input.
+    Upstream's Photon processor is WebAssembly, which this Hermes build has no `WebAssembly` global for (checked on
+    the simulator); the preview in the Hermes author's blog is not in a React Native release.
 
-**Done when:** follow-up, steer and the new-chat default behave as above on device; typecheck, lint and
+**Done when:** follow-up, steer and the new-chat default behave as above on device; a library photo and a camera
+photo reach the model and show in the sent bubble, `read` of an image shows it in the tool card; typecheck, lint and
 `git diff --check` pass.
 
 ## Docs

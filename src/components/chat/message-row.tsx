@@ -1,3 +1,4 @@
+import type { UserMessage } from '@earendil-works/pi-ai';
 import type { SubmissionId } from '@earendil-works/pi-durable';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
@@ -5,8 +6,10 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 
 import type { ChatMessage } from '@/chat/types';
 import { useChatColors } from '@/hooks/use-chat-colors';
+import { userInput } from '@/pi/user-input';
 import { ChatIcon } from './icon';
 import { MessageContent } from './message-content';
+import { MessageImages } from './message-images';
 import { PiMark } from './primitives';
 import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
@@ -14,7 +17,7 @@ import { collectSearchSources } from './web-search-presentation';
 
 export function MessageRow({ message, stopping = false, onSteerQueued }: {
   message: ChatMessage; stopping?: boolean;
-  onSteerQueued?: (submissionId: SubmissionId, text: string) => void;
+  onSteerQueued?: (submissionId: SubmissionId, content: UserMessage['content']) => void;
 }) {
   const colors = useChatColors();
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
@@ -34,15 +37,17 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
   const steer = async () => {
     if (!message.queued || !onSteerQueued || steering) return;
     setSteering(true);
-    try { await onSteerQueued(message.queued.submissionId, message.text); }
+    try { await onSteerQueued(message.queued.submissionId, userInput(message.text, message.images ?? [])); }
     finally { setSteering(false); }
   };
+  const userBubble = <View style={[styles.userBubble, { backgroundColor: colors.user }]}>
+    {message.images?.length ? <MessageImages images={message.images} messageId={message.id} /> : null}
+    {message.text ? <Text testID={`message-${message.id}`} selectable style={[styles.userText, { color: colors.text }]}>{message.text}</Text> : null}
+  </View>;
   if (message.role === 'tool' && message.tool) return <View style={styles.toolWrapper}><ToolCard message={message} /></View>;
   if (message.role === 'notice') return <Text selectable testID={`message-${message.id}`} style={[styles.notice, { color: colors.secondary }]}>{message.text}</Text>;
   if (message.role === 'user' && message.queued) return <View style={styles.userQueuedRow}>
-    <View style={[styles.userBubble, { backgroundColor: colors.user }]}>
-      <Text testID={`message-${message.id}`} selectable style={[styles.userText, { color: colors.text }]}>{message.text}</Text>
-    </View>
+    {userBubble}
     <View style={styles.queuedMeta}>
       <Text style={[styles.queuedMetaText, { color: colors.muted }]}>
         {message.queued.mode === 'steer' ? 'Queued · steer' : 'Queued · follow-up'}
@@ -54,11 +59,7 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
       </Pressable> : null}
     </View>
   </View>;
-  if (message.role === 'user') return <View style={styles.userRow}>
-    <View style={[styles.userBubble, { backgroundColor: colors.user }]}>
-      <Text testID={`message-${message.id}`} selectable style={[styles.userText, { color: colors.text }]}>{message.text}</Text>
-    </View>
-  </View>;
+  if (message.role === 'user') return <View style={styles.userRow}>{userBubble}</View>;
   return <View testID={`message-${message.id}`} style={styles.assistant}>
     <View style={styles.assistantIdentity}>
       <PiMark size={25} />
@@ -93,7 +94,7 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
 const styles = StyleSheet.create({
   userRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 10, paddingBottom: 21 },
   userQueuedRow: { alignItems: 'flex-end', paddingTop: 10, paddingBottom: 21 },
-  userBubble: { maxWidth: '88%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 22, borderBottomRightRadius: 7 },
+  userBubble: { maxWidth: '88%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 22, borderBottomRightRadius: 7, gap: 10 },
   queuedMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
   queuedMetaText: { fontSize: 12 },
   steerAction: { minHeight: 32, justifyContent: 'center' },

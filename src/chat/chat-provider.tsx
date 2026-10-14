@@ -99,7 +99,7 @@ function useChatRuntime() {
       });
     };
   }, [credentials, keepAliveSettings, models, remote, remoteHosts, workspaces]);
-  return { remoteHosts, credentials, keepAliveSettings, models, service, openError, setOpenError };
+  return { remoteHosts, remote, credentials, keepAliveSettings, models, service, openError, setOpenError };
 }
 
 /** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
@@ -201,7 +201,8 @@ function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: 
 }
 
 function useChatController() {
-  const { remoteHosts, credentials, keepAliveSettings, models, service, openError, setOpenError } = useChatRuntime();
+  const { remoteHosts, remote, credentials, keepAliveSettings, models, service, openError, setOpenError } =
+    useChatRuntime();
   const serviceState = useSyncExternalStore(service?.subscribe ?? subscribeNothing,
     service?.getSnapshot ?? getClosedService, service?.getSnapshot ?? getClosedService);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
@@ -268,7 +269,7 @@ function useChatController() {
   // screen that started them.
   return { service, ready: service !== undefined, chats: serviceState.chats, error: openError ?? serviceState.error,
     dismissError, signOutPending, disconnectingProvider,
-    ...signIn, remoteHosts, catalog, refreshCatalog, providerAccess, keepAliveSettings,
+    ...signIn, remoteHosts, remote, catalog, refreshCatalog, providerAccess, keepAliveSettings,
     hasConnectedProvider: catalog.some((provider) => providerAccess(provider.id).connected),
     providerOAuth, retryAuth, saveProviderKey, disconnectProvider };
 }
