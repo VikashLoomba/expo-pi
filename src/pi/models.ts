@@ -1,5 +1,6 @@
 import { createModels, type CredentialStore } from '@earendil-works/pi-ai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
+import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { googleProvider } from '@earendil-works/pi-ai/providers/google';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
@@ -21,6 +22,7 @@ export const NEW_CHAT_DEFAULTS: NewChatDefaults = {
   models: {
     openai: 'gpt-6-sol',
     anthropic: 'claude-sonnet-5-5',
+    deepseek: 'deepseek-flash',
     google: 'gemini-3.8-flash',
     xai: 'grok-4.7',
     openrouter: 'anthropic/claude-sonnet-5.5',
@@ -36,7 +38,7 @@ export function createChatModels(credentials: CredentialStore) {
   const openai = withNativeWebSearch(openaiProvider());
   models.setProvider({ ...openai, auth: { ...openai.auth, oauth: createNativeOpenAIOAuth() } });
   // Individual imports preserve Metro's lazy, mobile-safe SDK boundaries.
-  for (const provider of [anthropicProvider(), googleProvider(), openrouterProvider(), xaiProvider()]) {
+  for (const provider of [anthropicProvider(), deepseekProvider(), googleProvider(), openrouterProvider(), xaiProvider()]) {
     models.setProvider({ ...provider, auth: { apiKey: provider.auth.apiKey } });
   }
   return models;
