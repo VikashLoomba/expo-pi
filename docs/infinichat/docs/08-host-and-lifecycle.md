@@ -20,6 +20,8 @@ Use native cancellation and task ownership. `abort()` records intent for the sol
 
 ## Expo host
 
+InfiniChat is a tab of expo-router’s native tabs (`expo-router/native-tabs` in SDK 58; https://docs.expo.dev/router/advanced/native-tabs/), titled InfiniChat with the SF symbol `infinity`. Each tab holds its own native Stack, which the native-tabs documentation requires for headers and pushed screens: the Chats tab keeps the existing chat routes, the InfiniChat tab shows the single conversation and has no list, and the account, chat settings and remote machines modals stay reachable.
+
 The Expo application opens OptChat on its own SQLite database file with its existing `openExpoSqliteStorage` opener and that opener’s defaults, and on its own Harness beside the application’s chat Harness. Harness settings are process-wide run policy: OptChat’s sequential tool execution, steer-all queueing and disabled native compaction must not reach ordinary chats. One iOS process owns the file. The root conversation’s `init` creates the documents the application’s environment resolver reads, as the application’s own chat creation does. The application’s keep-alive controller counts OptChat’s summary builds and private agents as work although they are background tasks, and never the coordinator, which is always live.
 
 The InfiniChat settings screen selects the main model and thinking level with pi-durable’s `configure`, and the summary model and thinking level as the `summary` of `ConfigDoc`, from the user’s configured providers, in one commit on the root conversation. There is no default: nothing is sent and nothing is built until both are set.
