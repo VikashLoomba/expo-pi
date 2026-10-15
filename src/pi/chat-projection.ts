@@ -249,14 +249,23 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
   const partialSaved = placed !== undefined && visible.some((entry) => entry.id > placed
     && entry.model?.some((message) => message.role === 'assistant' && message.stopReason === 'aborted'));
   if (last?.status === 'unanswered' && last.reason === 'aborted' && !partialSaved) {
-    messages.push({ id: `submission-${last.id}`, role: 'notice', text: 'Response stopped', createdAt: 0 });
+    messages.push(stoppedNotice(`submission-${last.id}`));
   }
   // Queued inputs wait in the inbox for a turn boundary; write items are evidence for the model, never rows.
   for (const item of state.inbox?.items ?? []) {
     if (item.mode === 'write') continue;
-    const images = imagesOf(item.content);
-    messages.push({ id: `queued-${item.id}`, role: 'user', text: textOf(item.content), createdAt: 0,
-      ...(images.length ? { images } : {}), queued: { submissionId: item.id, mode: item.mode } });
+    messages.push(queuedRow(`queued-${item.id}`, item.content, { submissionId: item.id, mode: item.mode }));
   }
   return messages;
+}
+
+/** The notice that a stop ended the latest input before it was answered. */
+export const stoppedNotice = (id: string): ChatMessage =>
+  ({ id, role: 'notice', text: 'Response stopped', createdAt: 0 });
+
+/** An input that waits to be placed, shown as the user sent it. */
+export function queuedRow(id: string, content: UserMessage['content'],
+  queued: NonNullable<ChatMessage['queued']>): ChatMessage {
+  const images = imagesOf(content);
+  return { id, role: 'user', text: textOf(content), createdAt: 0, ...(images.length ? { images } : {}), queued };
 }

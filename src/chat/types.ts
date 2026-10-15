@@ -26,8 +26,11 @@ export interface ChatMessage {
   webSearch?: WebSearchPresentation;
   tool?: { name: string; args: string; status: 'running' | 'completed' | 'error'; output: string; file?: FileToolPresentation };
   error?: string;
-  /** An input queued in the view's `pi.inbox`, waiting for pi-durable to place it. */
-  queued?: { submissionId: SubmissionId; mode: 'followUp' | 'steer' };
+  /**
+   * An input queued in the view's `pi.inbox`, waiting for pi-durable to place it, or one InfiniChat accepted and has
+   * not submitted yet, which has no submission.
+   */
+  queued?: { submissionId: SubmissionId; mode: 'followUp' | 'steer' } | { mode: 'pending' };
 }
 
 /** What the header, composer and settings need; it does not change while text streams. */

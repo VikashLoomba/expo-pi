@@ -7,6 +7,7 @@ import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
 import type { RemoteHostRepository } from './execution/remote/hosts';
 import type { RemoteExecution } from './execution/remote/owner';
+import { InfiniChatView } from './infinichat-view';
 import { openOptChat, type OptChat } from './infinichat/app';
 import { createDevices, deviceTools, type Devices } from './infinichat/devices';
 import { ConfigDoc } from './infinichat/summary';
@@ -139,6 +140,12 @@ export class InfiniChatService {
       await configure(tx, root.id, selectedMain);
       (await tx.doc(ConfigDoc, root.id)).summary = selectedSummary;
     }, context);
+  }
+
+  /** InfiniChat's conversation for a screen that shows it; it attaches while something subscribes. */
+  view(): InfiniChatView {
+    return new InfiniChatView(this.chat.harness, this.chat.root.id,
+      (requestId, waitContext) => this.waitForAnswer(requestId, waitContext));
   }
 
   /** The native receipt of an accepted input once it is submitted; rejects when a stop cancelled it first. */

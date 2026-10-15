@@ -19,13 +19,21 @@ export type ChatViewSnapshot = {
   error?: string;
 };
 
+/** What screens read from a conversation's view; InfiniChat's view extends the controls. */
+export interface ChatViewSource<C extends ChatControls = ChatControls> {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly getSnapshot: () => ChatViewSnapshot;
+  readonly getControls: () => C | undefined;
+  readonly getMessages: () => readonly ChatMessage[];
+}
+
 /**
  * A chat while something shows it. The first subscriber attaches pi-durable's conversation view and the chat's
  * app document states — every one of them exists from the creating commit, so nothing attaches late — and the
  * last one to leave disposes them. With `transcript`, it also reads the chat's whole history once, so messages
  * from before a compaction stay visible.
  */
-export class ChatView {
+export class ChatView implements ChatViewSource {
   private readonly listeners = new Set<() => void>();
   /** Each connection counts up; asynchronous work from a disposed connection is dropped. */
   private connection = 0;

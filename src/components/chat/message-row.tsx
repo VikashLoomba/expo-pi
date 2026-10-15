@@ -35,7 +35,7 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
     } catch { Alert.alert('Could not copy', 'You can select the message and copy it manually.'); }
   };
   const steer = async () => {
-    if (!message.queued || !onSteerQueued || steering) return;
+    if (message.queued?.mode !== 'followUp' || !onSteerQueued || steering) return;
     setSteering(true);
     try { await onSteerQueued(message.queued.submissionId, userInput(message.text, message.images ?? [])); }
     finally { setSteering(false); }
@@ -50,7 +50,8 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
     {userBubble}
     <View style={styles.queuedMeta}>
       <Text style={[styles.queuedMetaText, { color: colors.muted }]}>
-        {message.queued.mode === 'steer' ? 'Queued · steer' : 'Queued · follow-up'}
+        {message.queued.mode === 'steer' ? 'Queued · steer'
+          : message.queued.mode === 'followUp' ? 'Queued · follow-up' : 'Queued'}
       </Text>
       {message.queued.mode === 'followUp' && onSteerQueued ? <Pressable testID={`steer-${message.id}`}
         accessibilityRole="button" accessibilityLabel="Send as steer" disabled={steering}

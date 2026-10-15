@@ -7,7 +7,7 @@ import Animated from 'react-native-reanimated';
 
 import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@/chat/chat-provider';
 import type { ChatMessage } from '@/chat/types';
-import type { ChatView } from '@/pi/chat-view';
+import type { ChatViewSource } from '@/pi/chat-view';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { useTranscriptScroll } from '@/hooks/use-transcript-scroll';
 import { ChatIcon, type ChatIconName } from './icon';
@@ -45,7 +45,7 @@ export interface ChatTranscriptHandle { scrollToLatest: () => void }
  * by React Compiler (it contains `try … finally`).
  */
 export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, onSteerQueued, ref }: {
-  view: ChatView | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
+  view: ChatViewSource | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
   onSteerQueued?: (submissionId: SubmissionId, content: UserMessage['content']) => void;
   ref: Ref<ChatTranscriptHandle>;
 }) {

@@ -8,10 +8,11 @@ import { AppState } from 'react-native';
 
 import { createKeepAliveSettings } from '../keep-alive/settings';
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
-import type { ChatView, ChatViewSnapshot } from '../pi/chat-view';
+import type { ChatView, ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
 import { InfiniChatService } from '../pi/infinichat-service';
+import type { InfiniChatView } from '../pi/infinichat-view';
 import { buildModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
@@ -350,23 +351,36 @@ export function useChatView(id: ConversationId | undefined, transcript = false):
   return useMemo(() => id !== undefined ? service?.chat(id, { transcript }) : undefined, [service, id, transcript]);
 }
 
-export function useChatControls(view: ChatView | undefined): ChatControls | undefined {
+export function useChatControls<C extends ChatControls>(view: ChatViewSource<C> | undefined): C | undefined {
   return useSyncExternalStore(view?.subscribe ?? subscribeNothing, view?.getControls ?? noControls,
     view?.getControls ?? noControls);
 }
 
-export function useChatMessages(view: ChatView | undefined): readonly ChatMessage[] {
+export function useChatMessages(view: ChatViewSource | undefined): readonly ChatMessage[] {
   return useSyncExternalStore(view?.subscribe ?? subscribeNothing, view?.getMessages ?? getNoMessages,
     view?.getMessages ?? getNoMessages);
 }
 
-export function useChatStatus(view: ChatView | undefined): ChatViewSnapshot['status'] {
+export function useChatStatus(view: ChatViewSource | undefined): ChatViewSnapshot['status'] {
   const getStatus = () => view?.getSnapshot().status ?? 'loading';
   return useSyncExternalStore(view?.subscribe ?? subscribeNothing, getStatus, getStatus);
 }
 
 /** Why the chat could not be opened, when it could not. */
-export function useChatError(view: ChatView | undefined): string | undefined {
+export function useChatError(view: ChatViewSource | undefined): string | undefined {
   const getError = () => view?.getSnapshot().error;
   return useSyncExternalStore(view?.subscribe ?? subscribeNothing, getError, getError);
+}
+
+/** InfiniChat's conversation for the calling screen, once its service is open; the hooks above read it. */
+export function useInfiniChatView(): InfiniChatView | undefined {
+  const { infiniChat } = useChatApp();
+  return useMemo(() => infiniChat?.view(), [infiniChat]);
+}
+
+/** InfiniChat's Harness's latest report, until it is dismissed. */
+export function useInfiniChatError(): string | undefined {
+  const { infiniChat } = useChatApp();
+  const getError = () => infiniChat?.getSnapshot().error;
+  return useSyncExternalStore(infiniChat?.subscribe ?? subscribeNothing, getError, getError);
 }

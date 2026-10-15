@@ -3,7 +3,7 @@ import { awaitWithContext, withAbortSignal } from '@earendil-works/chord/context
 import type { ImageContent, Models } from '@earendil-works/pi-ai';
 import {
   AgentDoc as NativeAgentDoc, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID, ResetEntry,
-  createRegistry, defineDoc, defineDocFamily, defineExtension, defineTask,
+  createRegistry, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask,
   type Conversation, type ConversationId, type ConversationInit, type EntryId, type EnvTarget, type HarnessOptions,
   type Storage, type Submission, type TaskId, type ToolHookCall, type ToolRegistration, type Tx, type UserInput,
 } from '@earendil-works/pi-durable';
@@ -35,7 +35,9 @@ export const InputDoc = defineDocFamily<{ value: Admission | null }, Admission |
   family: true,
   initial: (value) => ({ value }),
 });
-export const AppDoc = defineDoc<{
+/** The entry a dispatched input is placed as. Its user message carries the envelope; the input is in `InputDoc`. */
+export const DeliveryEntry = defineEntry<{ requestId: string; kind: Admission['kind'] }>('optchat.delivery');
+export type AppState = {
   epoch: number;
   open: boolean;
   started: boolean;
@@ -47,7 +49,8 @@ export const AppDoc = defineDoc<{
   stop: number;
   stopped: number;
   stopPending: string[];
-}>({
+};
+export const AppDoc = defineDoc<AppState>({
   kind: 'optchat.app',
   version: 1,
   scope: 'conversation',
@@ -357,7 +360,7 @@ const CoordinatorTask = defineTask<Record<string, never>, CoordinatorState, null
             requestId: nativeRequest(requestId),
             content: prepared.envelope,
             whenBusy: 'steer',
-            entry: { kind: 'optchat.delivery', data: { requestId, kind: prepared.kind } },
+            entry: { kind: DeliveryEntry.kind, data: { requestId, kind: prepared.kind } },
           }, context);
           await runtime.commit(async (tx) => {
             const app = await tx.doc(AppDoc, root);
