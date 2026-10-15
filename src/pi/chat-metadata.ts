@@ -8,6 +8,11 @@ export type ChatMetadata = {
   updatedAt?: number;
   /** The latest input the user sent; a chat reads its outcome from pi-durable when it opens. */
   lastInput?: SubmissionId;
+  /**
+   * InfiniChat's latest accepted input. Its coordinator submits the native input later, so the view follows the
+   * request rather than a submission.
+   */
+  lastRequest?: string;
   deleted: boolean;
 };
 

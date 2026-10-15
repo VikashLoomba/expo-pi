@@ -11,6 +11,7 @@ import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service
 import type { ChatView, ChatViewSnapshot } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
+import { InfiniChatService } from '../pi/infinichat-service';
 import { buildModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
@@ -25,6 +26,7 @@ const subscribeNothing = () => () => {};
 const closedService: ChatServiceSnapshot = { chats: [] };
 const getClosedService = () => closedService;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+const INFINICHAT_DATABASE = 'infinichat.db';
 
 /**
  * App-lifetime objects. Chats open at launch and stay open in the background until the provider unmounts.
@@ -43,9 +45,11 @@ function useChatRuntime() {
     return session;
   });
   const [service, setService] = useState<DurableChatService>();
+  const [infiniChat, setInfiniChat] = useState<InfiniChatService>();
   const [openError, setOpenError] = useState<string>();
   // Opening and closing storage apply in order, also across a remount, so two connections never coexist.
-  const lifecycle = useRef<{ queue: Promise<void>; service?: DurableChatService }>({ queue: Promise.resolve() });
+  const lifecycle = useRef<{ queue: Promise<void>; service?: DurableChatService; infiniChat?: InfiniChatService }>(
+    { queue: Promise.resolve() });
   useEffect(() => {
     const state = lifecycle.current;
     const serialize = (step: () => Promise<void>) => {
@@ -57,35 +61,67 @@ function useChatRuntime() {
     // Account restoration does not depend on SQLite, so a database failure leaves sign-in usable. A provider whose
     // credential cannot be read reports it in its own access state.
     void credentials.restore().catch(() => {});
-    // Returning to the app retries a failed open; an open service ignores the call.
-    const open = () => serialize(async () => {
-      if (state.service) return;
+    const authError = (providerId: string) => credentials.getProviderSnapshot(providerId).error;
+    // Release the database when its service does not open, so a later attempt never holds two connections.
+    const withStorage = async <T,>(databaseName: string | undefined, open: (storage: Storage) => Promise<T>) => {
       let storage: Storage | undefined;
       try {
-        storage = await openExpoSqliteStorage();
-        const opened = await DurableChatService.open({ storage, models, remote, workspaces,
-          newChat: NEW_CHAT_DEFAULTS, keepAlive: keepAliveSettings,
-          authError: (providerId) => credentials.getProviderSnapshot(providerId).error,
-          onClosed: (end) => {
-            // pi-durable "Errors": a storage error ends the Harness; reopen to recover.
-            if (end.reason !== 'failed') return;
-            serialize(async () => {
-              if (state.service !== opened) return;
-              state.service = undefined;
-              setService(undefined);
-              await opened.close().catch(() => {});
-            });
-            open();
-          },
-        });
-        state.service = opened;
-        setService(opened);
-        setOpenError(undefined);
+        storage = await openExpoSqliteStorage(databaseName);
+        return await open(storage);
       } catch (error) {
-        // Release the database so a later attempt never holds two connections. Closing again is a no-op.
+        // Closing again is a no-op.
         await storage?.close(BACKGROUND_CONTEXT).catch(() => {});
-        setOpenError(errorText(error));
+        throw error;
       }
+    };
+    // Returning to the app retries a failed open; an open service ignores the call. InfiniChat has its own database
+    // and Harness, opened in the same step.
+    const open = () => serialize(async () => {
+      const failures: string[] = [];
+      if (!state.service) {
+        try {
+          const opened = await withStorage(undefined, (storage) => DurableChatService.open({
+            storage, models, remote, workspaces, newChat: NEW_CHAT_DEFAULTS, keepAlive: keepAliveSettings, authError,
+            onClosed: (end) => {
+              // pi-durable "Errors": a storage error ends the Harness; reopen to recover.
+              if (end.reason !== 'failed') return;
+              serialize(async () => {
+                if (state.service !== opened) return;
+                state.service = undefined;
+                setService(undefined);
+                await opened.close().catch(() => {});
+              });
+              open();
+            },
+          }));
+          state.service = opened;
+          setService(opened);
+        } catch (error) {
+          failures.push(errorText(error));
+        }
+      }
+      if (!state.infiniChat) {
+        try {
+          const opened = await withStorage(INFINICHAT_DATABASE, (storage) => InfiniChatService.open({
+            storage, models, workspaces, remote, remoteHosts, authError,
+            onClosed: (end) => {
+              if (end.reason !== 'failed') return;
+              serialize(async () => {
+                if (state.infiniChat !== opened) return;
+                state.infiniChat = undefined;
+                setInfiniChat(undefined);
+                await opened.close().catch(() => {});
+              });
+              open();
+            },
+          }));
+          state.infiniChat = opened;
+          setInfiniChat(opened);
+        } catch (error) {
+          failures.push(`InfiniChat: ${errorText(error)}`);
+        }
+      }
+      setOpenError(failures.length ? failures.join('\n') : undefined);
     });
     open();
     const subscription = AppState.addEventListener('change', (appState) => { if (appState === 'active') open(); });
@@ -93,13 +129,21 @@ function useChatRuntime() {
       subscription.remove();
       serialize(async () => {
         const closing = state.service;
+        const closingInfiniChat = state.infiniChat;
         state.service = undefined;
+        state.infiniChat = undefined;
         setService(undefined);
-        await closing?.close();
+        setInfiniChat(undefined);
+        // InfiniChat's tools borrow the remote connections the chat service closes, so its Harness stops first.
+        try {
+          await closingInfiniChat?.close();
+        } finally {
+          await closing?.close();
+        }
       });
     };
   }, [credentials, keepAliveSettings, models, remote, remoteHosts, workspaces]);
-  return { remoteHosts, remote, credentials, keepAliveSettings, models, service, openError, setOpenError };
+  return { remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, openError, setOpenError };
 }
 
 /** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
@@ -201,8 +245,9 @@ function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: 
 }
 
 function useChatController() {
-  const { remoteHosts, remote, credentials, keepAliveSettings, models, service, openError, setOpenError } =
-    useChatRuntime();
+  const {
+    remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, openError, setOpenError,
+  } = useChatRuntime();
   const serviceState = useSyncExternalStore(service?.subscribe ?? subscribeNothing,
     service?.getSnapshot ?? getClosedService, service?.getSnapshot ?? getClosedService);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
@@ -267,7 +312,8 @@ function useChatController() {
 
   // Only a failed open and the Harness's own reports reach every screen; operations return their errors to the
   // screen that started them.
-  return { service, ready: service !== undefined, chats: serviceState.chats, error: openError ?? serviceState.error,
+  return { service, infiniChat, ready: service !== undefined, chats: serviceState.chats,
+    error: openError ?? serviceState.error,
     dismissError, signOutPending, disconnectingProvider,
     ...signIn, remoteHosts, remote, catalog, refreshCatalog, providerAccess, keepAliveSettings,
     hasConnectedProvider: catalog.some((provider) => providerAccess(provider.id).connected),

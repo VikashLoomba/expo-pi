@@ -1,0 +1,198 @@
+import type { Context } from '@earendil-works/chord';
+import { Type, type ImageContent, type TextContent } from '@earendil-works/pi-ai';
+import {
+  GenerationTask, InboxDoc, ToolTask, defineExtension, defineTool, hook, wrapTool,
+  type ConversationId, type Cursor, type ToolHookCall, type ToolRegistration,
+} from '@earendil-works/pi-durable';
+import { getOrThrow, type ExecutionEnv } from '@earendil-works/pi-durable/env';
+
+import { PrivateAgentDoc } from './agents';
+import { MessageDoc, NodeDoc, clipToolText, key, nodeLine } from './memory';
+
+const PAGE = 29_000;
+
+function pageText(text: string, page = 0): string {
+  const chars = Array.from(text);
+  const count = Math.max(1, Math.ceil(chars.length / PAGE));
+  if (!Number.isSafeInteger(page) || page < 0 || page >= count) {
+    throw new Error(`Page must be between 0 and ${count - 1}`);
+  }
+  const next = page + 1 < count ? `; call zoom again with page=${page + 1}` : '';
+  return `Page ${page + 1}/${count}${next}\n` + chars.slice(page * PAGE, (page + 1) * PAGE).join('');
+}
+
+export function memoryTools(root: ConversationId) {
+  const zoom = defineTool({
+    name: 'zoom',
+    description: 'Open line id+n into its two children; n=1 gives the complete message with images, in pages. '
+      + 'A string id opens the named agent’s separate chat. Use page=0 first.',
+    replay: 'safe',
+    parameters: Type.Object({
+      id: Type.Union([Type.Integer({ minimum: 0 }), Type.String({ minLength: 1 })]),
+      n: Type.Optional(Type.Integer({ minimum: 1 })),
+      page: Type.Optional(Type.Integer({ minimum: 0 })),
+    }),
+    outputLimits: { maxBytes: 120_000, maxLines: 30_000 },
+    async execute({ id, n = 1, page = 0 }, api, context) {
+      const images: ImageContent[] = [];
+      let text: string;
+      if (typeof id === 'number' && !Number.isSafeInteger(id)) throw new Error('id must be a safe integer');
+      if (typeof id === 'string') {
+        const agent = await api.snapshot(PrivateAgentDoc, root, id, context);
+        if (!agent?.conversationId) throw new Error(`No transcript for agent ${id}`);
+        const conversationId = agent.conversationId;
+        const parts: string[] = [];
+        let cursor: Cursor | undefined;
+        do {
+          const batch = await api.commit(
+            (tx) => tx.scanEntries({ conversationId, order: 'ascending' }, 100, cursor), context);
+          for (const entry of batch.items) {
+            for (const message of entry.model ?? []) {
+              if (message.role === 'system') continue;
+              if (typeof message.content === 'string') {
+                parts.push(`${message.role}: ${message.content}`);
+              } else {
+                const content: string[] = [];
+                for (const item of message.content) {
+                  if (item.type === 'text') content.push(item.text);
+                  else if (item.type === 'toolCall') content.push(`${item.name} ${JSON.stringify(item.arguments)}`);
+                  else if (item.type === 'image') images.push(item);
+                }
+                parts.push(`${message.role}: ${content.join('\n')}`);
+              }
+            }
+          }
+          cursor = batch.next;
+        } while (cursor);
+        text = parts.join('\n\n');
+      } else {
+        if (!Number.isSafeInteger(n) || n < 1 || !Number.isInteger(Math.log2(n)) || id % n !== 0) {
+          throw new Error('n must be a power of two and id a multiple of n');
+        }
+        if (n === 1) {
+          const message = await api.snapshot(MessageDoc, root, String(id), context);
+          if (!message) throw new Error(`Unknown message ${id}`);
+          text = `${message.kind}: ${message.text}`;
+          images.push(...message.images.map((image) => ({ type: 'image' as const, ...image })));
+        } else {
+          const l = Math.log2(n) - 1;
+          const i = id / (n / 2);
+          const left = await api.snapshot(NodeDoc, root, key([l, i]), context);
+          const right = await api.snapshot(NodeDoc, root, key([l, i + 1]), context);
+          if (!left?.value || !right?.value) throw new Error('The requested child lines have not been built');
+          text = nodeLine(left.value) + '\n' + nodeLine(right.value);
+        }
+      }
+      return { output: [{ type: 'text' as const, text: pageText(text, page) }, ...(page === 0 ? images : [])] };
+    },
+  });
+  const date = defineTool({
+    name: 'date',
+    description: 'The date and time of message id.',
+    replay: 'safe',
+    parameters: Type.Object({ id: Type.Integer({ minimum: 0 }) }),
+    async execute({ id }, api, context) {
+      if (!Number.isSafeInteger(id)) throw new Error('id must be a safe integer');
+      const message = await api.snapshot(MessageDoc, root, String(id), context);
+      if (!message) throw new Error(`Unknown message ${id}`);
+      return { output: [{ type: 'text' as const, text: message.date }] };
+    },
+  });
+  return [zoom, date];
+}
+
+/** Read a completed native bash/code-mode spill by its public filesystem API.
+ * Keep only the required end windows; do not load arbitrary-size files into RAM. */
+async function clippedSpill(env: ExecutionEnv, path: string, context: Context): Promise<string> {
+  const reader = getOrThrow(await env.openBinaryReader(path, { noFollow: true }, context));
+  try {
+    const { size } = getOrThrow(await reader.info(context));
+    if (size <= 240_000) {
+      return clipToolText(new TextDecoder().decode(getOrThrow(await reader.read(0, size, context))));
+    }
+    const head = new TextDecoder().decode(getOrThrow(await reader.read(0, 120_000, context)));
+    const tail = new TextDecoder('utf-8', { ignoreBOM: true })
+      .decode(getOrThrow(await reader.read(size - 120_000, 120_000, context)));
+    return clipToolText(head + tail);
+  } finally {
+    await reader.close(context);
+  }
+}
+
+const textOf = (content: readonly (TextContent | ImageContent)[]) => content
+  .filter((x): x is TextContent => x.type === 'text')
+  .map((x) => x.text)
+  .join('');
+
+/** The complete-output file a native bash or code-mode result names, read only under a registered contract. */
+function spillPath(value: unknown): string | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  if (!('fullOutputPath' in value) || typeof value.fullOutputPath !== 'string') return undefined;
+  return value.fullOutputPath;
+}
+
+/** Environment selection is host plumbing, not OptChat behavior. `environment`
+ * resolves the environment a completed call ran in: the conversation's, or the
+ * device the call's arguments name. Completed streaming tools must return full
+ * output or a native spill contract explicitly registered by the host. Native
+ * bash spill text is decoded from the raw stdout/stderr byte sequence, not
+ * reconstructed from separately decoded stream callbacks. Arbitrary tools must
+ * return full explicit text; discarded stream bytes cannot be reconstructed. */
+export function toolPolicy(
+  tools: readonly ToolRegistration[],
+  environment: (call: ToolHookCall, conversationId: ConversationId, context: Context) =>
+    Promise<ExecutionEnv | undefined>,
+  nativeSpillContracts: Readonly<Record<string, 'bash' | 'codemode'>> = {},
+) {
+  return defineExtension({
+    name: 'optchat.tool-policy',
+    wraps: tools.map((tool) => wrapTool(tool, (original) => ({
+      ...original,
+      executionMode: 'sequential' as const,
+      outputLimits: { maxBytes: 120_000, maxLines: 30_000, retain: 'tail' as const },
+    }))),
+    hooks: [
+      hook(ToolTask, {
+        async beforeTool(call, api, context) {
+          if (call.parent) return;
+          const inbox = await api.snapshot(InboxDoc, api.conversationId, context);
+          if (inbox?.items.some((item) => item.mode === 'steer')) {
+            return { block: 'A newer message is queued. Replan with that message before executing additional calls.' };
+          }
+        },
+        async afterTool(call, result, api, context) {
+          const contract = nativeSpillContracts[call.name];
+          const path = contract === 'bash' ? spillPath(result.structuredOutput)
+            : contract === 'codemode' ? spillPath(result.details) : undefined;
+          const env = path === undefined ? undefined : await environment(call, api.conversationId, context);
+          if (path !== undefined && !env) {
+            throw new Error('Native spill output requires the conversation execution environment');
+          }
+          const text = path !== undefined && env
+            ? await clippedSpill(env, path, context)
+            : clipToolText(textOf(result.output ?? []));
+          return {
+            ...result,
+            output: [
+              { type: 'text' as const, text },
+              ...(result.output ?? []).filter((x): x is ImageContent => x.type === 'image'),
+            ],
+          };
+        },
+      }),
+      hook(GenerationTask, {
+        beforeRequest({ messages }) {
+          return {
+            messages: messages.map((message) => message.role !== 'toolResult' ? message : {
+              ...message,
+              content: [
+                { type: 'text' as const, text: clipToolText(textOf(message.content)) },
+                ...message.content.filter((x): x is ImageContent => x.type === 'image'),
+              ],
+            }),
+          };
+        },
+      }),
+    ],
+  });
+}

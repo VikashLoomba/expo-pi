@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { ModelsError, uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
+import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
   type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
@@ -20,12 +20,12 @@ import {
   ExecutionTargetDoc, validateExecution, type ChatExecutionSettings,
 } from './execution/document';
 import type { RemoteExecution } from './execution/remote/owner';
+import { requireModelAuth } from './model-auth';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
   type ChatModelSettings, type NewChatDefaults,
 } from './model-catalog';
 import { createNativeWebSearchBridge, SearchPresentationsDoc } from './native-web-search/durable';
-import { SESSION_EXPIRED } from './provider-credentials';
 import { imagesOf, textOf } from './user-input';
 
 /** `error` is the Harness's latest report; operations reject to their callers instead. */
@@ -181,29 +181,9 @@ export class DurableChatService {
 
   private assertOpen() { if (this.closed) throw new Error('Chat storage is closed.'); }
 
-  /** The one pre-send check: the chat's provider is registered and authenticated and offers its model. */
+  /** The one pre-send check, then whether the service closed while it ran. */
   private async requireAuth(settings: ChatModelSettings) {
-    assertModelSettings(buildModelCatalog(this.models), settings);
-    const provider = this.models.getProvider(settings.model.provider);
-    if (!provider) throw new Error(`The provider ${settings.model.provider} is unavailable.`);
-    const signIn = () => new Error(this.options.authError?.(provider.id)
-      || `Sign in or connect ${provider.name} in Account to send a message.`);
-    // Resolving refreshes an expiring token now, so a failed refresh never becomes failed durable work. pi-ai keeps
-    // the credential when the refresh fails; signing in again replaces it.
-    const auth = await this.models.getAuth(provider.id).catch((error: unknown) => {
-      // Only a refresh the provider refused carries the expired mark; any other OAuth failure keeps pi-ai's message.
-      const expired = this.options.authError?.(provider.id) === SESSION_EXPIRED;
-      if (error instanceof ModelsError && error.code === 'oauth' && expired) {
-        throw new Error(SESSION_EXPIRED, { cause: error });
-      }
-      throw error;
-    });
-    if (!auth) throw signIn();
-    const available = await this.models.getAvailable(provider.id);
-    if (!available.some((model) => model.id === settings.model.modelId)) {
-      throw new Error(`${settings.model.modelId} is not available for this account. `
-        + 'Choose another model in chat settings.');
-    }
+    await requireModelAuth(this.models, settings, this.options.authError);
     this.assertOpen();
   }
 
