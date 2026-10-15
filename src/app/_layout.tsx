@@ -6,25 +6,25 @@ import { StatusBar } from 'expo-status-bar';
 
 import { ChatProvider } from '@/chat/chat-provider';
 import { useChatColors } from '@/hooks/use-chat-colors';
+import { useStackScreenOptions } from '@/hooks/use-stack-screen-options';
 
+// A modal opened from a link has the tabs beneath it to return to.
+export const unstable_settings = { anchor: '(tabs)' };
+
+/** The tabs, with the modals every tab opens presented above them. */
 export default function RootLayout() {
   const colors = useChatColors();
+  const screenOptions = useStackScreenOptions();
   const baseTheme = colors.dark ? DarkTheme : DefaultTheme;
   return (
-    <ThemeProvider value={{ ...baseTheme, colors: { ...baseTheme.colors, primary: colors.accent, background: colors.background, card: colors.background, text: colors.text, border: colors.border } }}>
+    <ThemeProvider value={{ ...baseTheme, colors: { ...baseTheme.colors, primary: colors.accent,
+      background: colors.background, card: colors.background, text: colors.text, border: colors.border } }}>
       <ChatProvider>
         <StatusBar style={colors.dark ? 'light' : 'dark'} />
-        <Stack screenOptions={{
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.accent,
-          headerTitleStyle: { color: colors.text, fontSize: 17, fontWeight: '600' },
-          headerShadowVisible: false,
-          headerBackButtonDisplayMode: 'minimal',
-          contentStyle: { backgroundColor: colors.background },
-        }}>
-          <Stack.Screen name="index" options={{ title: 'Chats' }} />
-          <Stack.Screen name="chat/[id]" options={{ title: 'New chat' }} />
+        <Stack screenOptions={screenOptions}>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="chat-settings/[id]" options={{ title: 'Chat settings', presentation: 'modal' }} />
+          <Stack.Screen name="infinichat-settings" options={{ title: 'InfiniChat settings', presentation: 'modal' }} />
           <Stack.Screen name="remote-hosts" options={{ title: 'Remote machines', presentation: 'modal' }} />
           <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
         </Stack>

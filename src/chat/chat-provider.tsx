@@ -6,6 +6,7 @@ import React, {
 } from 'react';
 import { AppState } from 'react-native';
 
+import { KeepAliveController } from '../keep-alive/controller';
 import { createKeepAliveSettings } from '../keep-alive/settings';
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
@@ -57,6 +58,11 @@ function useChatRuntime() {
       // Teardown has no screen left to report a failed close to; an open reports its own failure.
       state.queue = state.queue.then(step).catch(() => {});
     };
+    // One controller for both services' Harnesses, so there is one Live Activity and one location stream. It
+    // outlives a service reopened after a storage failure, and starts and closes in order with storage, so an
+    // earlier mount's controller has ended its Live Activity before this one adopts any.
+    const keepAlive = new KeepAliveController(keepAliveSettings);
+    serialize(async () => keepAlive.start());
     // The repository reports a failed restore in its own snapshot.
     void remoteHosts.restore().catch(() => {});
     // Account restoration does not depend on SQLite, so a database failure leaves sign-in usable. A provider whose
@@ -82,7 +88,7 @@ function useChatRuntime() {
       if (!state.service) {
         try {
           const opened = await withStorage(undefined, (storage) => DurableChatService.open({
-            storage, models, remote, workspaces, newChat: NEW_CHAT_DEFAULTS, keepAlive: keepAliveSettings, authError,
+            storage, models, remote, workspaces, newChat: NEW_CHAT_DEFAULTS, keepAlive, authError,
             onClosed: (end) => {
               // pi-durable "Errors": a storage error ends the Harness; reopen to recover.
               if (end.reason !== 'failed') return;
@@ -104,7 +110,7 @@ function useChatRuntime() {
       if (!state.infiniChat) {
         try {
           const opened = await withStorage(INFINICHAT_DATABASE, (storage) => InfiniChatService.open({
-            storage, models, workspaces, remote, remoteHosts, authError,
+            storage, models, workspaces, remote, remoteHosts, keepAlive, authError,
             onClosed: (end) => {
               if (end.reason !== 'failed') return;
               serialize(async () => {
@@ -139,7 +145,11 @@ function useChatRuntime() {
         try {
           await closingInfiniChat?.close();
         } finally {
-          await closing?.close();
+          try {
+            await closing?.close();
+          } finally {
+            await keepAlive.close();
+          }
         }
       });
     };

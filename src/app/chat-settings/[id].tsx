@@ -1,7 +1,7 @@
 import type { ConversationId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams, usePreventRemove } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
@@ -9,7 +9,9 @@ import { ActionButton, InlineNotice } from '@/components/chat/primitives';
 import {
   RemoteDirectoryPicker, displayPath, parentPath, useRemoteFolder,
 } from '@/components/chat/remote-directory-picker';
-import { SettingRow, SettingsChoices, thinkingLevelLabel, type SettingsChoice } from '@/components/chat/settings-controls';
+import {
+  HeaderAction, ModelSettingRows, SettingRow, SettingsChoices, modelChoices, type SettingsChoice,
+} from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { ChatView } from '@/pi/chat-view';
 import {
@@ -89,7 +91,6 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   const model = findCatalogModel(catalog, draft.model);
   const access = providerAccess(draft.model.provider);
   const settingsError = getModelSettingsError(catalog, draft);
-  const canChooseEffort = !!model?.thinkingLevels.length && (model.thinkingLevels.length > 1 || !model.thinkingLevels.includes(draft.thinkingLevel));
   const blocked = !service || !conversation;
   const disabled = blocked || saving || refreshing;
   const changed = draft.model.provider !== initialSettings.model.provider || draft.model.modelId !== initialSettings.model.modelId || draft.thinkingLevel !== initialSettings.thinkingLevel;
@@ -140,11 +141,8 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   const matches = (choice: SettingsChoice) => `${choice.title} ${choice.description || ''}`.toLocaleLowerCase().includes(query);
   const choices: SettingsChoice[] = picker === 'environment'
     ? [{ id: 'local', title: 'On this device', description: 'This chat’s local workspace' }, ...hosts.hosts.map((host) => ({ id: host.id, title: host.name, description: `${host.username}@${host.hostname} · SSH over Tailscale` }))].filter(matches)
-    : picker === 'provider'
-    ? catalog.map((entry) => ({ id: entry.id, title: entry.name, description: entry.models.length ? `${entry.models.length} ${entry.models.length === 1 ? 'model' : 'models'}` : 'No models available', disabled: entry.models.length === 0 })).filter(matches)
-    : picker === 'model'
-      ? (provider?.models ?? []).map((entry) => ({ id: entry.id, title: entry.name, description: `${entry.id} · ${entry.reasoning ? 'Reasoning available' : 'No reasoning control'}` })).filter(matches)
-      : (model?.thinkingLevels ?? []).map((level) => ({ id: level, title: thinkingLevelLabel(level) }));
+    : picker === 'provider' || picker === 'model' ? modelChoices(catalog, draft, picker).filter(matches)
+      : modelChoices(catalog, draft, 'effort');
   const selectedId = picker === 'environment' ? execution.target.kind === 'local' ? 'local' : execution.target.machineId : picker === 'provider' ? draft.model.provider : picker === 'model' ? draft.model.modelId : draft.thinkingLevel;
   const shownName = shownFolder && displayPath(shownFolder.path, shownFolder.home);
   const title = picker === 'directory' ? (shownName === undefined || shownName === '~' ? selectedHost?.name ?? 'Folders' : shownName.slice(shownName.lastIndexOf('/') + 1))
@@ -193,12 +191,8 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
       {error && <InlineNotice testID="settings-save-error" message={error} />}
       {settingsError && <InlineNotice testID="settings-unavailable" message={draft.model.modelId ? settingsError : 'Choose a model to finish changing the provider.'} />}
       <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <SettingRow testID="settings-provider" label="Provider" value={provider?.name || draft.model.provider} disabled={disabled} onPress={() => choosePage('provider')} />
-        <SettingRow testID="settings-model" label="Model" value={model?.name || draft.model.modelId || 'Choose a model'}
-          detail={model && model.id !== model.name ? model.id : undefined} disabled={disabled || !provider?.models.length} onPress={() => choosePage('model')} />
-        <SettingRow testID="settings-effort" label="Reasoning effort" value={thinkingLevelLabel(draft.thinkingLevel)}
-          detail={!model ? 'Choose an available model first.' : !model.reasoning ? 'This model does not support reasoning.' : model.thinkingLevels.length === 1 ? 'This model uses a fixed reasoning level.' : undefined}
-          disabled={disabled || !canChooseEffort} onPress={() => choosePage('effort')} />
+        <ModelSettingRows testID="settings" catalog={catalog} settings={draft} disabled={disabled}
+          onOpen={choosePage} />
       </View>
       <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <SettingRow testID="settings-environment" label="Execution environment" value={execution.target.kind === 'local' ? 'On this device' : selectedHost?.name ?? 'Unavailable machine'}
@@ -231,16 +225,6 @@ function ChatSettingsEditor({ id, view, initialSettings, initialExecution }: {
   </View>;
 }
 
-function HeaderAction({ title, onPress, disabled, loading, testID }: {
-  title: string; onPress: () => void; disabled?: boolean; loading?: boolean; testID?: string;
-}) {
-  const colors = useChatColors();
-  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: !!disabled, busy: !!loading }}
-    disabled={disabled || loading} onPress={onPress} style={({ pressed }) => [styles.headerAction, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}>
-    {loading ? <ActivityIndicator size="small" color={colors.accent} /> : <Text style={[styles.headerLabel, { color: colors.accent }]}>{title}</Text>}
-  </Pressable>;
-}
-
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
@@ -252,6 +236,4 @@ const styles = StyleSheet.create({
   caption: { fontSize: 12, lineHeight: 19, paddingHorizontal: 3 },
   directory: { padding: 16, gap: 10 },
   directoryInput: { minHeight: 44, padding: 10, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, fontSize: 15 },
-  headerAction: { minHeight: 44, minWidth: 48, justifyContent: 'center', alignItems: 'center' },
-  headerLabel: { fontSize: 16, fontWeight: '500' },
 });

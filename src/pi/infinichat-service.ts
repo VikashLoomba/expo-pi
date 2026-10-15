@@ -3,6 +3,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import { AgentDoc, configure, type SessionEnd, type Storage } from '@earendil-works/pi-durable';
 
+import { infiniChatTasks, type KeepAliveController } from '../keep-alive/controller';
 import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
 import type { RemoteHostRepository } from './execution/remote/hosts';
@@ -34,6 +35,8 @@ export class InfiniChatService {
   private snapshot: InfiniChatSnapshot = {};
   private closed = false;
   private closePromise?: Promise<void>;
+  private detachKeepAlive = () => {};
+  private shownView?: InfiniChatView;
 
   private constructor(
     private readonly chat: OptChat,
@@ -51,6 +54,8 @@ export class InfiniChatService {
     authError?: (providerId: string) => string | undefined;
     /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
     onClosed?: (end: SessionEnd) => void;
+    /** Counts InfiniChat's live work while the service is open; its owner closes it. */
+    keepAlive?: KeepAliveController;
   }): Promise<InfiniChatService> {
     const devices = createDevices(options.workspaces, options.remote, options.remoteHosts);
     let service: InfiniChatService | undefined;
@@ -71,6 +76,7 @@ export class InfiniChatService {
       },
     }, context);
     service = new InfiniChatService(chat, options.models, devices, options.authError);
+    if (options.keepAlive) service.detachKeepAlive = options.keepAlive.observe(chat.harness, infiniChatTasks);
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
       if (end.reason === 'failed') service.report(end.error);
@@ -142,10 +148,14 @@ export class InfiniChatService {
     }, context);
   }
 
-  /** InfiniChat's conversation for a screen that shows it; it attaches while something subscribes. */
+  /**
+   * InfiniChat's one conversation, shared by the screens that show it, so the settings opened over the conversation
+   * do not read its history again; it attaches while something subscribes.
+   */
   view(): InfiniChatView {
-    return new InfiniChatView(this.chat.harness, this.chat.root.id,
+    this.shownView ??= new InfiniChatView(this.chat.harness, this.chat.root.id,
       (requestId, waitContext) => this.waitForAnswer(requestId, waitContext));
+    return this.shownView;
   }
 
   /** The native receipt of an accepted input once it is submitted; rejects when a stop cancelled it first. */
@@ -158,7 +168,14 @@ export class InfiniChatService {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
     this.listeners.clear();
-    this.closePromise = this.chat.close();
+    this.closePromise = (async () => {
+      try {
+        await this.chat.close();
+      } finally {
+        // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
+        this.detachKeepAlive();
+      }
+    })();
     return this.closePromise;
   }
 }

@@ -7,8 +7,7 @@ import {
 import { createCodingTools } from '@earendil-works/pi-durable/tools';
 
 import type { ChatSummary } from '../chat/types';
-import { KeepAliveController } from '../keep-alive/controller';
-import type { KeepAliveSettings } from '../keep-alive/settings';
+import { chatTasks, type KeepAliveController } from '../keep-alive/controller';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
@@ -54,6 +53,7 @@ export class DurableChatService {
   private snapshot: ChatServiceSnapshot = { chats: [] };
   private closed = false;
   private closePromise?: Promise<void>;
+  private detachKeepAlive = () => {};
 
   private constructor(
     private readonly harness: Harness,
@@ -61,7 +61,6 @@ export class DurableChatService {
     private readonly models: Models,
     private readonly remote: RemoteExecution,
     private readonly workspaces: Workspaces | undefined,
-    private readonly keepAlive: KeepAliveController | undefined,
     private readonly options: {
       now: () => number;
       newChat: NewChatDefaults;
@@ -80,8 +79,8 @@ export class DurableChatService {
     authError?: (providerId: string) => string | undefined;
     /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
     onClosed?: (end: SessionEnd) => void;
-    /** The background keep-alive setting; the service closes the controller it builds on it. */
-    keepAlive?: KeepAliveSettings;
+    /** Counts the chats' live work while the service is open; its owner closes it. */
+    keepAlive?: KeepAliveController;
   }): Promise<DurableChatService> {
     const { workspaces, remote } = options;
     const registry = createRegistry();
@@ -121,8 +120,7 @@ export class DurableChatService {
       onReport: (error) => service?.report(error),
     }, context);
     nativeSearch.attach(harness);
-    const keepAlive = options.keepAlive ? new KeepAliveController(harness, options.keepAlive) : undefined;
-    service = new DurableChatService(harness, options.storage, options.models, remote, workspaces, keepAlive, {
+    service = new DurableChatService(harness, options.storage, options.models, remote, workspaces, {
       now, newChat: options.newChat ?? { models: {} }, authError: options.authError,
     });
     try { await service.loadChats(); }
@@ -132,7 +130,7 @@ export class DurableChatService {
     }
     // Continue work the last process left unfinished. A chat whose provider cannot authenticate fails on its own.
     harness.resume();
-    keepAlive?.start();
+    if (options.keepAlive) service.detachKeepAlive = options.keepAlive.observe(harness, chatTasks);
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void harness.closed.then((end) => {
       if (end.reason === 'failed') service.report(end.error);
@@ -387,8 +385,8 @@ export class DurableChatService {
       const failures: unknown[] = [];
       await this.harness.close(context).catch((error: unknown) => failures.push(error));
       await this.remote.close().catch((error: unknown) => failures.push(error));
-      // The keep-alive controller uses the Harness only while it runs; its own close touches none of it.
-      await this.keepAlive?.close().catch((error: unknown) => failures.push(error));
+      // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
+      this.detachKeepAlive();
       if (failures.length) throw new AggregateError(failures, 'Chat storage could not close cleanly.');
     })();
     return this.closePromise;

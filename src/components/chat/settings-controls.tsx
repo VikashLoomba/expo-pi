@@ -1,7 +1,9 @@
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { ModelThinkingLevel } from '@/pi/model-catalog';
+import {
+  findCatalogModel, type ChatModelSettings, type ModelCatalog, type ModelThinkingLevel,
+} from '@/pi/model-catalog';
 import { ChatIcon } from './icon';
 
 const thinkingLabels: Record<ModelThinkingLevel, string> = {
@@ -25,6 +27,64 @@ export function SettingRow({ label, value, detail, onPress, disabled, testID }: 
       {detail && <Text style={[styles.detail, { color: colors.muted }]}>{detail}</Text>}
     </View>
     <ChatIcon name="chevron" color={colors.muted} size={14} />
+  </Pressable>;
+}
+
+/** The pickers of one model choice. */
+export type ModelPicker = 'provider' | 'model' | 'effort';
+
+/** The provider, model and reasoning effort rows of one model choice; `testID` prefixes each row's. */
+export function ModelSettingRows({ catalog, settings, disabled, onOpen, testID }: {
+  catalog: ModelCatalog; settings: ChatModelSettings; disabled: boolean; onOpen: (picker: ModelPicker) => void;
+  testID: string;
+}) {
+  const provider = catalog.find((entry) => entry.id === settings.model.provider);
+  const model = findCatalogModel(catalog, settings.model);
+  const canChooseEffort = !!model?.thinkingLevels.length
+    && (model.thinkingLevels.length > 1 || !model.thinkingLevels.includes(settings.thinkingLevel));
+  return <>
+    <SettingRow testID={`${testID}-provider`} label="Provider"
+      value={provider?.name || settings.model.provider || 'Choose a provider'} disabled={disabled}
+      onPress={() => onOpen('provider')} />
+    <SettingRow testID={`${testID}-model`} label="Model"
+      value={model?.name || settings.model.modelId || 'Choose a model'}
+      detail={model && model.id !== model.name ? model.id : undefined} disabled={disabled || !provider?.models.length}
+      onPress={() => onOpen('model')} />
+    <SettingRow testID={`${testID}-effort`} label="Reasoning effort" value={thinkingLevelLabel(settings.thinkingLevel)}
+      detail={!model ? 'Choose an available model first.' : !model.reasoning ? 'This model does not support reasoning.'
+        : model.thinkingLevels.length === 1 ? 'This model uses a fixed reasoning level.' : undefined}
+      disabled={disabled || !canChooseEffort} onPress={() => onOpen('effort')} />
+  </>;
+}
+
+/** A model picker's choices: the catalog's providers, the chosen provider's models, or the model's efforts. */
+export function modelChoices(
+  catalog: ModelCatalog, settings: ChatModelSettings, picker: ModelPicker,
+): SettingsChoice[] {
+  if (picker === 'provider') {
+    return catalog.map((entry) => ({ id: entry.id, title: entry.name,
+      description: entry.models.length ? `${entry.models.length} ${entry.models.length === 1 ? 'model' : 'models'}`
+        : 'No models available',
+      disabled: entry.models.length === 0 }));
+  }
+  if (picker === 'model') {
+    const provider = catalog.find((entry) => entry.id === settings.model.provider);
+    return (provider?.models ?? []).map((entry) => ({ id: entry.id, title: entry.name,
+      description: `${entry.id} · ${entry.reasoning ? 'Reasoning available' : 'No reasoning control'}` }));
+  }
+  return (findCatalogModel(catalog, settings.model)?.thinkingLevels ?? [])
+    .map((level) => ({ id: level, title: thinkingLevelLabel(level) }));
+}
+
+export function HeaderAction({ title, onPress, disabled, loading, testID }: {
+  title: string; onPress: () => void; disabled?: boolean; loading?: boolean; testID?: string;
+}) {
+  const colors = useChatColors();
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={title}
+    accessibilityState={{ disabled: !!disabled, busy: !!loading }} disabled={disabled || loading} onPress={onPress}
+    style={({ pressed }) => [styles.headerAction, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}>
+    {loading ? <ActivityIndicator size="small" color={colors.accent} />
+      : <Text style={[styles.headerLabel, { color: colors.accent }]}>{title}</Text>}
   </Pressable>;
 }
 
@@ -89,4 +149,6 @@ const styles = StyleSheet.create({
   choiceTitle: { fontSize: 16, fontWeight: '500' },
   radio: { width: 23, height: 23, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   empty: { fontSize: 15, lineHeight: 22, textAlign: 'center', padding: 30 },
+  headerAction: { minHeight: 44, minWidth: 48, justifyContent: 'center', alignItems: 'center' },
+  headerLabel: { fontSize: 16, fontWeight: '500' },
 });

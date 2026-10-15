@@ -19,6 +19,8 @@ const context = BACKGROUND_CONTEXT;
 const noop = () => {};
 
 export type InfiniChatControls = ChatControls & {
+  /** The summary model and effort, or `null` until they are chosen. */
+  summary: SummarySelection | null;
   /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
   configured: boolean;
 };
@@ -300,12 +302,14 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       submission: this.submission };
     const controls = projectControls(state, shown);
     const error = controls.error ?? this.answerError;
+    const summary = this.config?.value?.summary ?? null;
     this.controls = {
       ...controls,
       // An accepted input waits for its turn's summaries or the coordinator before pi-durable runs it; a stop
       // cancels it, so the conversation is working.
       busy: controls.busy || pending.length > 0,
-      configured: docs.agent?.model !== undefined && !!this.config?.value?.summary,
+      summary,
+      configured: docs.agent?.model !== undefined && summary !== null,
       ...(error ? { error } : {}),
     };
     const messages = projectMessages(state, shown);

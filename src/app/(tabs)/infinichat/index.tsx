@@ -2,13 +2,14 @@ import { uuidv7 } from '@earendil-works/pi-ai';
 import { router, Stack } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView, StyleSheet, Text, View, type TextInputInstance, type ViewInstance,
+  KeyboardAvoidingView, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useInfiniChatError, useInfiniChatView } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { Composer } from '@/components/chat/composer';
+import { ChatIcon } from '@/components/chat/icon';
 import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { ChatTranscript, type ChatTranscriptHandle } from '@/components/chat/transcript';
@@ -59,6 +60,8 @@ export default function InfiniChatScreen() {
       : `${provider?.name || providerId} · ${model?.name || conversation.settings.model.modelId} · `
         + thinkingLevelLabel(conversation.settings.thinkingLevel);
   const openAccount = () => router.push({ pathname: '/account', params: { provider: providerId } });
+  const settingsDisabled = !ready || !conversation;
+  const openSettings = () => router.push('/infinichat-settings');
   const choosePrompt = useCallback((text: string) => {
     changeDraft(text);
     input.current?.focus();
@@ -126,21 +129,30 @@ export default function InfiniChatScreen() {
     onLayout={() => keyboardContainer.current?.measureInWindow((_x, y) => setHeaderOffset(y))}
     style={[styles.screen, { backgroundColor: colors.background }]}>
     <Stack.Screen options={{ title: TITLE,
-      headerTitle: () => <View accessibilityRole="header" style={styles.headerTitle}>
+      headerTitle: () => <Pressable testID="open-infinichat-settings" accessibilityRole="button"
+        accessibilityLabel={`InfiniChat settings. ${settingsLabel}`}
+        accessibilityHint="Choose the main and summary models and their reasoning effort."
+        accessibilityState={{ disabled: settingsDisabled }} disabled={settingsDisabled} onPress={openSettings}
+        style={styles.headerTitle}>
         <Text numberOfLines={1} style={[styles.headerName, { color: colors.text }]}>{TITLE}</Text>
-        <Text numberOfLines={1} style={[styles.headerSubtitle, { color: colors.muted }]}>
-          {busy ? `Working… · ${settingsLabel}` : settingsLabel}
-        </Text>
-      </View>,
+        <View style={styles.headerSettings}>
+          <Text numberOfLines={1} style={[styles.headerSubtitle, { color: colors.muted }]}>
+            {busy ? `Working… · ${settingsLabel}` : settingsLabel}
+          </Text>
+          <ChatIcon name="down" color={colors.muted} size={9} />
+        </View>
+      </Pressable>,
     }} />
     <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
       <SafeAreaView style={styles.screen} edges={['bottom']}>
         <ChatTranscript ref={transcript} view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} />
         {conversation && !configured && <View style={styles.banner}>
-          <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED} />
+          <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
+            action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
         </View>}
         {settingsError && <View style={styles.banner}>
-          <InlineNotice testID="infinichat-settings-error" message={settingsError} />
+          <InlineNotice testID="infinichat-settings-error" message={settingsError}
+            action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
         </View>}
         {messageError && messageError !== settingsError && <View style={styles.banner}>
           <InlineNotice testID="infinichat-error" message={messageError}
@@ -164,6 +176,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   headerTitle: { alignItems: 'center', justifyContent: 'center', maxWidth: 230, minHeight: 44 },
   headerName: { fontSize: 15, fontWeight: '600' },
-  headerSubtitle: { fontSize: 11, marginTop: 3 },
+  headerSettings: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  headerSubtitle: { fontSize: 11, flexShrink: 1 },
   banner: { paddingHorizontal: 16, paddingTop: 5, paddingBottom: 4, maxWidth: 800, width: '100%', alignSelf: 'center' },
 });
