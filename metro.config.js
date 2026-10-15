@@ -16,4 +16,9 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     ? resolveRequest(context, moduleName, platform)
     : context.resolveRequest(context, moduleName, platform);
 };
+// docs/infinichat is the OptChat implementation guide: reference TypeScript with its own package.json, never part of
+// the app bundle. Keep Metro from crawling it, or any node_modules an agent installs there to run its tests.
+const INFINICHAT_GUIDE = /[/\\]docs[/\\]infinichat[/\\]/;
+const { blockList } = config.resolver;
+config.resolver.blockList = [...(Array.isArray(blockList) ? blockList : blockList ? [blockList] : []), INFINICHAT_GUIDE];
 module.exports = config;

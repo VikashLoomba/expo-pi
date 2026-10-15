@@ -1,0 +1,38 @@
+{
+  "name": "optchat-pi-durable-reference",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test --test-concurrency=1 dist/test/*.test.mjs",
+    "demo": "npm run build && node dist/examples/demo.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-durable": "1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "@earendil-works/pi-codemode": "1.2.0",
+    "@earendil-works/pi-telemetry": "1.2.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.mts",
+      "import": "./dist/src/index.mjs"
+    },
+    "./node": {
+      "types": "./dist/src/node.d.mts",
+      "import": "./dist/src/node.mjs"
+    }
+  }
+}

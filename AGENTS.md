@@ -1,5 +1,9 @@
 This is an Expo/React Native app for iOS. Prioritize iOS-native patterns and the components Expo provides.
 
+InfiniChat, the OptChat-on-pi-durable tab, has its implementation guide at `docs/infinichat/README.md`. The guide's
+TypeScript, tests and examples are reference material with their own `package.json`; Metro, the typecheck and lint
+ignore that directory.
+
 ## Expo has changed — do not trust your training data
 
 Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
