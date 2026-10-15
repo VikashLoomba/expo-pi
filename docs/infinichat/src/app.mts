@@ -28,6 +28,7 @@ import {
   type ToolRegistration,
   type HarnessOptions,
   type Conversation,
+  type ConversationInit,
   ROOT_CONVERSATION_ID,
 } from "@earendil-works/pi-durable";
 import {
@@ -565,6 +566,8 @@ export type OptChatOptions = {
   ) => ExecutionEnv | undefined | Promise<ExecutionEnv | undefined>;
   nativeSpillContracts?: Record<string, "bash" | "codemode">;
   onReport?: HarnessOptions["onReport"];
+  /** Runs in the root conversation's creating commit after OptChat's own documents, for the host's documents. */
+  init?: ConversationInit;
 };
 
 /**
@@ -666,6 +669,7 @@ export async function openOptChat(
           background: true,
         },
       );
+      await options.init?.(tx, id);
     },
   });
   opened.resume();
