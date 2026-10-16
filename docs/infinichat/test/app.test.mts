@@ -146,7 +146,7 @@ test(
 );
 
 test(
-  "abort preserves accepted queued input and allows a new fresh turn",
+  "abort withdraws accepted queued input and allows a new fresh turn",
   { timeout: 10000 },
   async () => {
     const faux = fauxProvider({
@@ -162,7 +162,7 @@ test(
       await selectModels(chat, model);
       await chat.accept({
         requestId: "cancel-me",
-        content: "retain these words even when stopped",
+        content: "withdrawn words never enter memory",
       });
       await chat.abort();
       const memory = (await chat.harness.snapshot(
@@ -182,9 +182,9 @@ test(
         );
       assert.equal(
         messages.filter(
-          (m) => m?.text === "retain these words even when stopped",
+          (m) => m?.text === "withdrawn words never enter memory",
         ).length,
-        1,
+        0,
       );
       await chat.accept({ requestId: "after-stop", content: "continue now" });
       assert.equal((await chat.waitForAnswer("after-stop")).status, "done");

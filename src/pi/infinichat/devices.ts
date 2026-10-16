@@ -8,15 +8,12 @@ import {
   createBashTool, createEditTool, createReadTool, createWriteTool,
 } from '@earendil-works/pi-durable/tools';
 
-import type { RemoteHostRepository } from '../execution/remote/hosts';
+import { PHONE_DEVICE, type RemoteHostRepository } from '../execution/remote/hosts';
 import type { RemoteExecution } from '../execution/remote/owner';
 import { createExpoImages } from '../images';
 import { WorkspaceDoc } from '../workspace/document';
 import { WorkspaceExecutionEnv } from '../workspace/execution-env';
 import type { Workspaces } from '../workspace/storage';
-
-/** The phone's own workspace. Every other device is a remote machine, under the name the user gave it. */
-const PHONE = 'phone';
 
 export type Devices = ReturnType<typeof createDevices>;
 
@@ -28,7 +25,7 @@ export function createDevices(workspaces: Workspaces, remote: RemoteExecution, h
   async function list() {
     await hosts.restore();
     return [
-      { name: PHONE, description: 'this phone, a sandboxed workspace at /workspace', machineId: undefined },
+      { name: PHONE_DEVICE, description: 'this phone, a sandboxed workspace at /workspace', machineId: undefined },
       ...hosts.getSnapshot().hosts.map((host) => ({
         name: host.name, description: `${host.username}@${host.hostname} over SSH`, machineId: host.id,
       })),
@@ -36,11 +33,8 @@ export function createDevices(workspaces: Workspaces, remote: RemoteExecution, h
   }
   async function environment(name: string, read: DocumentReader, context: Context): Promise<ExecutionEnv> {
     const devices = await list();
-    const matches = devices.filter((device) => device.name === name);
-    if (matches.length > 1) {
-      throw new Error(`More than one device is named ${JSON.stringify(name)}. Rename one in Remote machines.`);
-    }
-    const [device] = matches;
+    // The repository keeps machine names unique and never the phone's, so a name is one device.
+    const device = devices.find((candidate) => candidate.name === name);
     if (!device) {
       const names = devices.map((candidate) => JSON.stringify(candidate.name)).join(', ');
       throw new Error(`Unknown device ${JSON.stringify(name)}. The devices are ${names}.`);

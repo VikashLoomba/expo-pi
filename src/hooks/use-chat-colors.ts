@@ -36,6 +36,9 @@ const dark: typeof light = {
   scrim: 'rgba(0, 0, 0, 0.6)',
 };
 
+/** Both palettes, for colors the native side resolves itself. */
+export const chatPalettes = { light, dark };
+
 export function useChatColors() {
   return useColorScheme() === 'dark' ? dark : light;
 }

@@ -170,6 +170,17 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
   for (const entry of entries.items) {
     if (entry.id === app.cursor) continue;
     let index = 0;
+    // A placed delivery is the gist's "log it as user": the original the admission keeps, not the envelope.
+    if (DeliveryEntry.is(entry)) {
+      const input = await storedInput(tx, root, entry.data.requestId);
+      await appendMessage(tx, root, {
+        kind: input.kind,
+        text: textOf(input.content),
+        date: input.date,
+        images: imagesOf(input.content),
+        source: `input:${input.requestId}`,
+      }, false);
+    }
     for (const message of entry.model ?? []) {
       const date = new Date('timestamp' in message ? message.timestamp : 0).toISOString();
       if (message.role === 'assistant') {
@@ -205,7 +216,7 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
           source: `${entry.id}:${index++}`,
         });
       }
-      // Application user/work originals were canonicalized before native delivery.
+      // The delivery's user message is the envelope; its original was logged above.
     }
     app.cursor = entry.id;
     progressed = true;
@@ -273,17 +284,9 @@ const CoordinatorTask = defineTask<Record<string, never>, CoordinatorState, null
           if (app.stop > app.stopped) {
             if (projection.caughtUp) {
               stop = app.stop;
+              // A withdrawn input was never handed to the model, so it never enters memory.
               for (const id of app.stopPending) {
                 const input = await storedInput(tx, root, id);
-                if (input.phase === 'pending') {
-                  await appendMessage(tx, root, {
-                    kind: input.kind,
-                    text: textOf(input.content),
-                    date: input.date,
-                    images: imagesOf(input.content),
-                    source: `input:${input.requestId}`,
-                  }, false);
-                }
                 input.phase = 'cancelled';
                 input.envelope = null;
               }
@@ -311,15 +314,8 @@ const CoordinatorTask = defineTask<Record<string, never>, CoordinatorState, null
             } else if (projection.caughtUp && (!input.fresh || (await memoryReady(tx, root)))) {
               await settleViews(tx, root);
               const view = input.fresh ? await renderMain(tx, root) : '';
-              // Freeze the view before the original user/work message enters memory.
+              // The view is frozen here; the original enters memory once pi-durable places the delivery.
               input.envelope = envelope(view, input.content, input.date, input.turnState);
-              await appendMessage(tx, root, {
-                kind: input.kind,
-                text: textOf(input.content),
-                date: input.date,
-                images: imagesOf(input.content),
-                source: `input:${input.requestId}`,
-              }, false);
               input.phase = 'prepared';
               app.started = true;
               app.revision++;

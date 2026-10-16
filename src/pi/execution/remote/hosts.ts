@@ -31,6 +31,8 @@ export interface RemoteHostSnapshot {
 }
 interface HostIndex { version: 1; hosts: RemoteHost[]; pendingDelete: string[] }
 interface SecretRecord { version: 1; auth: RemoteCredential; trustedHostKey?: SshHostKey }
+/** InfiniChat lists the phone as a device under this name, beside the remote machines under theirs. */
+export const PHONE_DEVICE = 'phone';
 const INDEX_KEY = 'pi.remote-hosts.v1';
 const CREDENTIAL_REF = /^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/;
 
@@ -46,8 +48,11 @@ export function validateRemoteHost(input: RemoteHostInput): Omit<RemoteHostInput
   const hostname = text(input.hostname, 'Tailscale hostname or address').toLowerCase();
   if (/[\s/@?#\\]/.test(hostname)) throw new Error('Enter a Tailscale hostname or address without a URL prefix, username, or port.');
   if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) throw new Error('SSH port must be a number from 1 to 65535.');
-  return { name: text(input.name, 'machine name'), hostname, port: input.port,
-    username: text(input.username, 'SSH username') };
+  const name = text(input.name, 'machine name');
+  if (name.toLowerCase() === PHONE_DEVICE) {
+    throw new Error(`“${PHONE_DEVICE}” is this phone in InfiniChat. Choose another machine name.`);
+  }
+  return { name, hostname, port: input.port, username: text(input.username, 'SSH username') };
 }
 function credential(value: unknown): RemoteCredential {
   if (isRecord(value)) {
@@ -226,6 +231,10 @@ export class RemoteHostRepository {
     return this.enqueue(async () => {
       await this.load();
       const previous = id ? this.requireHost(id, expected) : undefined;
+      // InfiniChat's tools name the machine they run on, so no two machines share a name.
+      const taken = this.index.hosts.find((host) =>
+        host.id !== id && host.name.toLowerCase() === settings.name.toLowerCase());
+      if (taken) throw new Error(`Another machine is already named ${taken.name}. Choose another machine name.`);
       const sameEndpoint = previous?.hostname === settings.hostname && previous?.port === settings.port;
       if (previous && sameEndpoint && !auth) {
         // Name/account edits do not rewrite unchanged credentials or server trust.

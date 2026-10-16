@@ -43,7 +43,7 @@ const globLiteral = (text: string) => text.replace(/[\\*?[\]]/g, '\\$&');
 
 /**
  * Holds one SSH connection per machine, shared by the environments built on it at each use, as in pi-env's README.
- * The chat service closes it with the Harness; a resolve after that opens a new connection.
+ * The provider that creates it closes it after both Harnesses; a resolve after that opens a new connection.
  */
 export function createRemoteExecution(hosts: RemoteHostRepository) {
   const connections = new Map<string, Connection>();

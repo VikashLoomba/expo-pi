@@ -34,7 +34,16 @@ The host passes its own pi-ai `Models`. It selects the root conversation’s mai
 [Complete source](../src/index.mts)
 
 ```typescript
-export { openOptChat, InputDoc, type Admission, type OptChat, type OptChatOptions } from "./app.mjs";
+export {
+  openOptChat,
+  AppDoc,
+  DeliveryEntry,
+  InputDoc,
+  type Admission,
+  type AppState,
+  type OptChat,
+  type OptChatOptions,
+} from "./app.mjs";
 export { ConfigDoc, type SummarySelection } from "./summary.mjs";
 export { MemoryDoc, MessageDoc, NodeDoc } from "./memory.mjs";
 export { PrivateAgentDoc, AgentDirectoryDoc } from "./agents.mjs";

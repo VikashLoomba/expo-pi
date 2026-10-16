@@ -28,7 +28,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
 /**
  * Owns InfiniChat's Harness, on its own database beside the chats' one: OptChat's sequential tools, steer-all
  * queueing and disabled compaction are Harness-wide settings that must not reach ordinary chats. It borrows the
- * chats' remote machine connections; the chat service closes them.
+ * chats' remote machine connections; their creator closes them.
  */
 export class InfiniChatService {
   private readonly listeners = new Set<() => void>();
@@ -47,7 +47,7 @@ export class InfiniChatService {
 
   static async open(options: {
     storage: Storage; models: Models; workspaces: Workspaces;
-    /** The chat service's remote owner; InfiniChat uses its connections and never closes them. */
+    /** The remote owner shared with the chat service; InfiniChat uses its connections and never closes them. */
     remote: RemoteExecution;
     remoteHosts: RemoteHostRepository;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */

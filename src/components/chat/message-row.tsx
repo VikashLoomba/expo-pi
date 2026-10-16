@@ -61,10 +61,14 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
     </View>
   </View>;
   if (message.role === 'user') return <View style={styles.userRow}>{userBubble}</View>;
+  // An agent's report is the gist's work message, "[Name] …": the name heads the row and the rest is its body.
+  const report = message.role === 'work' ? /^\[([^\]\r\n]+)\]\s?([\s\S]*)$/.exec(message.text) : null;
+  const author = report?.[1] ?? 'Pi';
+  const body = report?.[2] ?? message.text;
   return <View testID={`message-${message.id}`} style={styles.assistant}>
     <View style={styles.assistantIdentity}>
       <PiMark size={25} />
-      <Text style={[styles.assistantName, { color: colors.secondary }]}>Pi</Text>
+      <Text style={[styles.assistantName, { color: colors.secondary }]}>{author}</Text>
       <Text numberOfLines={1} style={[styles.streamingLabel, { color: colors.muted }]}>
         {message.streaming ? stopping ? 'Stopping…' : 'Responding' : message.interrupted ? 'Interrupted' : ' '}
       </Text>
@@ -78,7 +82,7 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
       </Pressable>
       {thinkingExpanded && <Text selectable style={[styles.thinkingText, { color: colors.secondary, borderLeftColor: colors.border }]}>{message.thinking}</Text>}
     </View> : null}
-    {message.text ? <MessageContent text={message.text} streaming={message.streaming} />
+    {body ? <MessageContent text={body} streaming={message.streaming} />
       : message.streaming && !message.webSearch?.calls.some((call) => call.status === 'running')
         ? <View style={styles.waiting}><ActivityIndicator size="small" color={colors.accent} /></View> : null}
     <WebSearchSources sources={sources} messageId={message.id} />

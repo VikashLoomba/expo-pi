@@ -1,12 +1,16 @@
 import { NativeTabs } from 'expo-router/native-tabs';
+import { DynamicColorIOS } from 'react-native';
 
-import { useChatColors } from '@/hooks/use-chat-colors';
+import { chatPalettes } from '@/hooks/use-chat-colors';
+
+// Liquid Glass picks light or dark from what lies beneath the tab bar, not from the color scheme, so the native
+// side resolves the tint (Expo Router native tabs, "Customizing the icon color").
+const tint = DynamicColorIOS({ light: chatPalettes.light.accent, dark: chatPalettes.dark.accent });
 
 /** The app's tabs: the chats and InfiniChat, each with its own Stack for its header and pushed screens. */
 export default function TabsLayout() {
-  const colors = useChatColors();
   return (
-    <NativeTabs tintColor={colors.accent}>
+    <NativeTabs tintColor={tint}>
       <NativeTabs.Trigger name="(chats)">
         <NativeTabs.Trigger.Icon
           sf={{ default: 'bubble.left.and.bubble.right', selected: 'bubble.left.and.bubble.right.fill' }} />

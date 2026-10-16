@@ -16,7 +16,7 @@ Native commits are atomic, so a store is consistent after any interruption, and 
 
 Reopen the same native storage and register the same document/task definitions. Restore exact saved views and native checkpoints; do not rebuild views, rescan all history for work, run duplicate timers, or maintain a second scheduler.
 
-Use native cancellation and task ownership. `abort()` records intent for the sole coordinator, which preserves already accepted canonical inputs before cancelling foreground native work; independent summary tasks and agents remain live. Native faults surface through the host wait rather than becoming an endless busy state. Interrupted or failed summary work releases policy reservations through its native lifecycle, without claiming exactly-once model billing. Stable request IDs make native submit replay idempotent; they do not make arbitrary external tools exactly-once. Retain native tool recovery semantics rather than claiming recovery of bytes that were never committed.
+Use native cancellation and task ownership. `abort()` records intent for the sole coordinator, which cancels accepted inputs not yet placed, so they never enter canonical memory, before cancelling foreground native work; independent summary tasks and agents remain live. Native faults surface through the host wait rather than becoming an endless busy state. Interrupted or failed summary work releases policy reservations through its native lifecycle, without claiming exactly-once model billing. Stable request IDs make native submit replay idempotent; they do not make arbitrary external tools exactly-once. Retain native tool recovery semantics rather than claiming recovery of bytes that were never committed.
 
 ## Expo host
 

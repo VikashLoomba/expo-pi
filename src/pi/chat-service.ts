@@ -59,7 +59,6 @@ export class DurableChatService {
     private readonly harness: Harness,
     private readonly storage: Storage,
     private readonly models: Models,
-    private readonly remote: RemoteExecution,
     private readonly workspaces: Workspaces | undefined,
     private readonly options: {
       now: () => number;
@@ -72,7 +71,7 @@ export class DurableChatService {
     storage: Storage; models: Models; now?: () => number;
     /** Where chats' workspace directories live; without it chats have no local execution environment. */
     workspaces?: Workspaces;
-    /** Holds the SSH connections of chats that run on a remote machine; the service closes it with the Harness. */
+    /** Holds the SSH connections of chats on a remote machine; its creator closes it after both Harnesses. */
     remote: RemoteExecution;
     newChat?: NewChatDefaults;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */
@@ -109,10 +108,6 @@ export class DurableChatService {
         // system may have purged. It holds no handles between calls, so a fresh one per use needs no cleanup.
         return new WorkspaceExecutionEnv(workspaces.workspace(workspace.id), workspace.id, cwd);
       },
-      settings: {
-        // SDK retry and timeout defaults apply, so a request cut off while the app was suspended is retried.
-        stream: { transport: 'sse' },
-      },
       async conversationCreated(tx, conversation) {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
         metadata.createdAt = now();
@@ -120,7 +115,7 @@ export class DurableChatService {
       onReport: (error) => service?.report(error),
     }, context);
     nativeSearch.attach(harness);
-    service = new DurableChatService(harness, options.storage, options.models, remote, workspaces, {
+    service = new DurableChatService(harness, options.storage, options.models, workspaces, {
       now, newChat: options.newChat ?? { models: {} }, authError: options.authError,
     });
     try { await service.loadChats(); }
@@ -379,15 +374,15 @@ export class DurableChatService {
     for (const state of this.chats.values()) state.dispose();
     this.listeners.clear();
     this.closePromise = (async () => {
-      // close.order: the Harness closes first; it aborts and waits for running task code, which still uses
-      // the environments. The remote owner closes its connections afterwards. A close after the Harness
-      // failed on its own returns the same settled close.
-      const failures: unknown[] = [];
-      await this.harness.close(context).catch((error: unknown) => failures.push(error));
-      await this.remote.close().catch((error: unknown) => failures.push(error));
-      // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
-      this.detachKeepAlive();
-      if (failures.length) throw new AggregateError(failures, 'Chat storage could not close cleanly.');
+      // The Harness aborts and waits for running task code, which still uses the environments; the provider closes
+      // the shared remote owner after both Harnesses. A close after the Harness failed on its own returns the same
+      // settled close.
+      try {
+        await this.harness.close(context);
+      } finally {
+        // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
+        this.detachKeepAlive();
+      }
     })();
     return this.closePromise;
   }

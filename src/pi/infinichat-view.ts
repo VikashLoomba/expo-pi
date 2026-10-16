@@ -3,7 +3,7 @@ import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
 import {
   ResetEntry,
   type Conversation, type ConversationId, type ConversationView, type Cursor, type DocumentState, type EntryId,
-  type EntryRecord, type Harness, type InboxItem, type InboxState, type SettledSubmissionRecord, type UserInput,
+  type EntryRecord, type Harness, type InboxItem, type InboxState, type SettledSubmissionRecord,
 } from '@earendil-works/pi-durable';
 
 import type { ChatControls, ChatMessage } from '../chat/types';
@@ -12,11 +12,12 @@ import {
   projectControls, projectMessages, queuedRow, readConversationView, stoppedNotice, type ChatState,
 } from './chat-projection';
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
-import { AppDoc, DeliveryEntry, InputDoc, type AppState } from './infinichat/app';
+import { AppDoc, DeliveryEntry, InputDoc, type Admission, type AppState } from './infinichat/app';
 import { ConfigDoc, type SummarySelection } from './infinichat/summary';
 
 const context = BACKGROUND_CONTEXT;
 const noop = () => {};
+const workRow = (message: ChatMessage): ChatMessage => ({ ...message, role: 'work' });
 
 export type InfiniChatControls = ChatControls & {
   /** The summary model and effort, or `null` until they are chosen. */
@@ -47,25 +48,25 @@ function deliveredRequests(entries: readonly EntryRecord[], inbox: InboxState | 
  * InfiniChat's entries as the transcript shows them. A delivery shows the input the user sent, never the saved view
  * and turn state ahead of it, and the reset that begins each fresh turn summarizes nothing.
  */
-function shownEntries(entries: readonly EntryRecord[], originals: ReadonlyMap<string, UserInput>): EntryRecord[] {
+function shownEntries(entries: readonly EntryRecord[], originals: ReadonlyMap<string, Admission>): EntryRecord[] {
   return entries.flatMap((entry): EntryRecord[] => {
     if (ResetEntry.is(entry)) return [];
     if (!DeliveryEntry.is(entry)) return [entry];
     const original = originals.get(entry.data.requestId);
     const delivered = entry.model?.[0];
     if (original === undefined || delivered?.role !== 'user') return [];
-    return [{ ...entry, model: [{ ...delivered, content: original }] }];
+    return [{ ...entry, model: [{ ...delivered, content: original.content }] }];
   });
 }
 
 /** The inbox with each queued delivery showing its original input, as `shownEntries` does once it is placed. */
-function shownInbox(inbox: InboxState | undefined, originals: ReadonlyMap<string, UserInput>): InboxState | undefined {
+function shownInbox(inbox: InboxState | undefined, originals: ReadonlyMap<string, Admission>): InboxState | undefined {
   return inbox && { items: inbox.items.flatMap((item): InboxItem[] => {
     if (item.mode === 'write') return [item];
     const requestId = queuedRequest(item.entry);
     if (requestId === undefined) return [item];
     const original = originals.get(requestId);
-    return original === undefined ? [] : [{ ...item, content: original }];
+    return original === undefined ? [] : [{ ...item, content: original.content }];
   }) };
 }
 
@@ -89,8 +90,8 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   private loaded = false;
   private scheduled = false;
   private readonly entries = new Map<EntryId, EntryRecord>();
-  /** Each request's original input, which its `InputDoc` keeps unchanged, so a later subscriber reuses it. */
-  private readonly originals = new Map<string, UserInput>();
+  /** Each request's admission, whose input and kind its `InputDoc` keeps unchanged, so a later subscriber reuses it. */
+  private readonly originals = new Map<string, Admission>();
   private readonly reading = new Set<string>();
   /** The latest accepted request, followed until it settles; disconnecting or a newer request cancels the wait. */
   private followed?: { requestId: string; cancel: (reason?: unknown) => void };
@@ -216,7 +217,7 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       try {
         const admission = await this.harness.snapshot(InputDoc, this.id, requestId, context);
         if (!admission?.value) return false;
-        this.originals.set(requestId, admission.value.content);
+        this.originals.set(requestId, admission.value);
         return true;
       } finally {
         this.reading.delete(requestId);
@@ -312,12 +313,17 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       configured: docs.agent?.model !== undefined && summary !== null,
       ...(error ? { error } : {}),
     };
-    const messages = projectMessages(state, shown);
+    // An agent's report is the gist's work message; its delivery row is the agent's, not the user's.
+    const workRows = new Set(shown.flatMap((entry) =>
+      DeliveryEntry.is(entry) && entry.data.kind === 'work' ? [`${entry.id}-0`] : []));
+    const messages = projectMessages(state, shown).map((message) =>
+      workRows.has(message.id) ? workRow(message) : message);
     if (this.stopped && lastRequest !== undefined) messages.push(stoppedNotice(`stopped-${lastRequest}`));
     for (const requestId of pending) {
       const original = this.originals.get(requestId);
       if (original === undefined || delivered.has(requestId)) continue;
-      messages.push(queuedRow(`pending-${requestId}`, original, { mode: 'pending' }));
+      const row = queuedRow(`pending-${requestId}`, original.content, { mode: 'pending' });
+      messages.push(original.kind === 'work' ? workRow(row) : row);
     }
     this.messages = messages;
     this.publish({ status: 'ready' });

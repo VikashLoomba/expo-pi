@@ -141,16 +141,14 @@ function useChatRuntime() {
         state.infiniChat = undefined;
         setService(undefined);
         setInfiniChat(undefined);
-        // InfiniChat's tools borrow the remote connections the chat service closes, so its Harness stops first.
-        try {
-          await closingInfiniChat?.close();
-        } finally {
-          try {
-            await closing?.close();
-          } finally {
-            await keepAlive.close();
-          }
+        // Both Harnesses stop before the remote owner they share closes its connections. Every step runs; the
+        // first failure is reported once the rest are done.
+        let failure: unknown;
+        for (const step of [() => closingInfiniChat?.close(), () => closing?.close(), () => remote.close(),
+          () => keepAlive.close()]) {
+          try { await step(); } catch (error) { failure ??= error; }
         }
+        if (failure !== undefined) throw failure;
       });
     };
   }, [credentials, keepAliveSettings, models, remote, remoteHosts, workspaces]);
