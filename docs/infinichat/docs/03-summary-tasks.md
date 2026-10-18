@@ -23,10 +23,13 @@ Permanent message/node records live at conversation scope. Task-local scratch li
 [Complete source](../src/summary.mts)
 
 ```typescript
+import type { Context } from "@earendil-works/chord";
 import {
   defineDoc,
   defineTask,
+  type Agent,
   type ConversationId,
+  type DocumentReader,
   type ModelRef,
   type TaskId,
   type Tx,
@@ -325,6 +328,28 @@ type Phase =
   | {
       phase: "publish";
     };
+/** A turn's system sections as pi-durable renders them: the text tagged `<key>` unless the section opts out. */
+async function renderedSections(
+  agent: Agent,
+  conversationId: ConversationId,
+  read: DocumentReader,
+  context: Context,
+): Promise<Record<string, string>> {
+  const sections: Record<string, string> = {};
+  for (const section of agent.sections) {
+    const text = await section.render(
+      { conversationId, agent, env: undefined, shown: {}, read },
+      context,
+    );
+    if (text === undefined) continue;
+    sections[section.key] =
+      section.tag === false
+        ? text
+        : `<${section.key}>\n${text}\n</${section.key}>`;
+  }
+  return sections;
+}
+
 export const BuildNode = defineTask<
   {
     ref: NodeRef;
@@ -365,9 +390,7 @@ export const BuildNode = defineTask<
           {
             role: "system",
             content: "",
-            sections: {
-              instructions: `<instructions>\n${agent.instructions ?? ""}\n</instructions>`,
-            },
+            sections: await renderedSections(agent, r.conversationId, r, ctx),
             toolsAdded: agent.tools.map(({ name, description, parameters }) => ({
               name,
               description,

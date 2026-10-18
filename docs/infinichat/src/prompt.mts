@@ -88,13 +88,12 @@ absent item can never be found. Copy names, numbers, ids, paths and errors
 exactly. Tag each item with its kind ("user: ...; echo: ..."), and credit quoted
 text to its real author. Never make anything look further along than it was. If
 told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.`;
-export function sharedPrompt(agentName: string, hasDeviceTools: boolean, userInstructions = ""): string {
+export function sharedPrompt(agentName: string, hasDeviceTools: boolean): string {
   let prompt = originalPrompt;
   if (!hasDeviceTools) {
     const start = prompt.indexOf("The user's computers");
     const end = prompt.indexOf("# Compactions", start);
     prompt = prompt.slice(0, start) + prompt.slice(end);
   }
-  prompt = prompt.replaceAll("Unii", agentName);
-  return prompt + (userInstructions ? "\n\n" + userInstructions : "");
+  return prompt.replaceAll("Unii", agentName);
 }

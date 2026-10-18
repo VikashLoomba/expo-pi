@@ -10,8 +10,7 @@ import { originalPrompt, sharedPrompt } from '../src/prompt.mjs';
 test('shared system prompt retains exact guide text unless permitted options substitute it', () => {
   assert.equal(sharedPrompt('Unii', true), originalPrompt);
   assert.ok(sharedPrompt('OptChat', true).includes('- unii: OptChat'));
-  assert.equal(sharedPrompt('Dot', false, 'My files live here.').includes("The user's computers"), false);
-  assert.ok(sharedPrompt('Dot', false, 'My files live here.').endsWith('My files live here.'));
+  assert.equal(sharedPrompt('Dot', false).includes("The user's computers"), false);
 });
 test('Unicode pages return every scalar without clipping or overlap',()=>{
  const source='😀'.repeat(60_000);let rebuilt='';for(let i=0;i<3;i++)rebuilt+=pageText(source,i).split('\n').slice(1).join('\n');assert.equal(rebuilt,source);

@@ -133,8 +133,11 @@ export class InfiniChatService {
     return this.chat.abort();
   }
 
-  /** The main model and effort with pi-durable's `configure`, and the summary model and effort, in one commit. */
-  async updateSettings(main: ChatModelSettings, summary: ChatModelSettings): Promise<void> {
+  /**
+   * The main model and effort with pi-durable's `configure`, the summary model and effort, and the user's own
+   * instructions, in one commit.
+   */
+  async updateSettings(main: ChatModelSettings, summary: ChatModelSettings, instructions: string): Promise<void> {
     const catalog = buildModelCatalog(this.models);
     const selectedMain = { model: { ...main.model }, thinkingLevel: main.thinkingLevel };
     const selectedSummary = { model: { ...summary.model }, thinkingLevel: summary.thinkingLevel };
@@ -145,6 +148,7 @@ export class InfiniChatService {
     await root.commit(async (tx) => {
       await configure(tx, root.id, selectedMain);
       (await tx.doc(ConfigDoc, root.id)).summary = selectedSummary;
+      await this.chat.setInstructions(tx, instructions);
     }, context);
   }
 

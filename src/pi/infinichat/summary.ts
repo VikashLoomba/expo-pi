@@ -1,8 +1,9 @@
 import type {
   AssistantMessage, Context as ModelContext, ModelThinkingLevel, StopReason,
 } from '@earendil-works/pi-ai';
+import type { Context } from '@earendil-works/chord';
 import {
-  defineDoc, defineTask, type ConversationId, type ModelRef, type TaskId, type Tx,
+  defineDoc, defineTask, type Agent, type ConversationId, type DocumentReader, type ModelRef, type TaskId, type Tx,
 } from '@earendil-works/pi-durable';
 
 import {
@@ -240,6 +241,19 @@ async function release(tx: Tx, root: ConversationId, ref: NodeRef, id: TaskId<st
 
 type Phase = { phase: 'prepare' } | { phase: 'request'; attempt: number } | { phase: 'publish' };
 
+/** A turn's system sections as pi-durable renders them: the text tagged `<key>` unless the section opts out. */
+async function renderedSections(
+  agent: Agent, conversationId: ConversationId, read: DocumentReader, context: Context,
+): Promise<Record<string, string>> {
+  const sections: Record<string, string> = {};
+  for (const section of agent.sections) {
+    const text = await section.render({ conversationId, agent, env: undefined, shown: {}, read }, context);
+    if (text === undefined) continue;
+    sections[section.key] = section.tag === false ? text : `<${section.key}>\n${text}\n</${section.key}>`;
+  }
+  return sections;
+}
+
 export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
   name: 'optchat.build-node',
   version: 1,
@@ -268,7 +282,7 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
           {
             role: 'system',
             content: '',
-            sections: { instructions: `<instructions>\n${agent.instructions ?? ''}\n</instructions>` },
+            sections: await renderedSections(agent, r.conversationId, r, ctx),
             toolsAdded: agent.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
             timestamp: 0,
           },

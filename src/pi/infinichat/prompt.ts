@@ -89,14 +89,13 @@ exactly. Tag each item with its kind ("user: ...; echo: ..."), and credit quoted
 text to its real author. Never make anything look further along than it was. If
 told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.`;
 
-/** Renames the agent, drops the device paragraph without device tools, and appends the user's instructions. */
-export function sharedPrompt(agentName: string, hasDeviceTools: boolean, userInstructions = ''): string {
+/** Renames the agent and drops the device paragraph without device tools; the user's instructions follow it. */
+export function sharedPrompt(agentName: string, hasDeviceTools: boolean): string {
   let prompt = originalPrompt;
   if (!hasDeviceTools) {
     const start = prompt.indexOf("The user's computers");
     const end = prompt.indexOf('# Compactions', start);
     prompt = prompt.slice(0, start) + prompt.slice(end);
   }
-  prompt = prompt.replaceAll('Unii', agentName);
-  return prompt + (userInstructions ? '\n\n' + userInstructions : '');
+  return prompt.replaceAll('Unii', agentName);
 }

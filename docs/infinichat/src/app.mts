@@ -8,6 +8,7 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import {
   AgentDoc as NativeAgentDoc,
   Harness,
+  configure,
   createRegistry,
   defineExtension,
   defineDoc,
@@ -17,6 +18,7 @@ import {
   LiveDoc,
   InboxDoc,
   ResetEntry,
+  section,
   type ConversationId,
   type EntryId,
   type EnvTarget,
@@ -78,7 +80,11 @@ export const DeliveryEntry = defineEntry<{
   requestId: string;
   kind: Admission["kind"];
 }>("optchat.delivery");
+/** 2: the prompt is the extension's section and `instructions` hold only the user's text; 1 composed both. */
+const PROMPT_VERSION = 2;
 export type AppState = {
+  /** The prompt layout the conversation's instructions were written for, `PROMPT_VERSION` once current. */
+  promptVersion: number;
   epoch: number;
   open: boolean;
   started: boolean;
@@ -93,11 +99,17 @@ export type AppState = {
 };
 export const AppDoc = defineDoc<AppState>({
   kind: "optchat.app",
-  version: 1,
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "current",
+  // Version 1 had every field but the prompt version; its instructions hold the composed prompt.
+  migrate: (value) => ({
+    ...(value as Omit<AppState, "promptVersion">),
+    promptVersion: 1,
+  }),
   initial: () => ({
+    promptVersion: PROMPT_VERSION,
     epoch: 0,
     open: false,
     started: false,
@@ -553,7 +565,6 @@ export const CoordinatorTask = defineTask<{}, CoordinatorState, null>({
 export type OptChatOptions = {
   models: Models;
   name?: string;
-  instructions?: string;
   hasDeviceTools?: boolean;
   tools?: readonly ToolRegistration[];
   env?: HarnessOptions["env"];
@@ -583,6 +594,11 @@ export type OptChat = {
     date?: string;
     turnState?: string;
   }): Promise<string>;
+  /**
+   * The user's own instructions, pi-durable's `instructions` section rendered after the prompt, in the host's
+   * settings commit; empty text clears them. The host shows them from the agent document.
+   */
+  setInstructions(tx: Tx, text: string): Promise<void>;
   waitForAnswer(
     requestId: string,
     context?: Context,
@@ -596,22 +612,21 @@ export async function openOptChat(
   context: Context,
 ): Promise<OptChat> {
   const registry = createRegistry();
-  const instructions = sharedPrompt(
+  const prompt = sharedPrompt(
     options.name ?? "OptChat",
     options.hasDeviceTools ?? false,
-    options.instructions,
   );
   const tools: ToolRegistration[] = [
     ...memoryTools(ROOT_CONVERSATION_ID),
     agentTool(ROOT_CONVERSATION_ID),
     ...(options.tools ?? []),
   ];
-  const modelTools = tools.filter(
-    (tool) => !tool.callers || tool.callers.includes("model"),
-  );
+  // The prompt is the extension's own section and the offered tools follow the host, so an edited prompt or tool
+  // set reaches an existing conversation as pi-durable's system entry instead of staying as created.
   registry.install(
     defineExtension({
       name: "optchat",
+      sections: [section("optchat", () => prompt, { tag: false })],
       tools,
       tasks: [CoordinatorTask, BuildNode, AgentTask],
     }),
@@ -653,7 +668,6 @@ export async function openOptChat(
   );
   harness = opened;
   const root = await opened.root(context, {
-    agent: { instructions, modelTools },
     init: async (tx, id) => {
       await tx.doc(MemoryDoc, id);
       await tx.doc(AgentDirectoryDoc, id);
@@ -671,6 +685,14 @@ export async function openOptChat(
       await options.init?.(tx, id);
     },
   });
+  // A conversation from before version 2 holds the composed prompt as its instructions; clearing them once leaves
+  // the prompt to the section. pi-durable migrates the document on read, so its version is what tells.
+  await root.commit(async (tx) => {
+    const app = await tx.doc(AppDoc, root.id);
+    if (app.promptVersion === PROMPT_VERSION) return;
+    await configure(tx, root.id, { instructions: null });
+    app.promptVersion = PROMPT_VERSION;
+  }, context);
   opened.resume();
   return {
     harness: opened,
@@ -695,6 +717,9 @@ export async function openOptChat(
         context,
       );
       return input.requestId;
+    },
+    async setInstructions(tx: Tx, text: string) {
+      await configure(tx, root.id, { instructions: text || null });
     },
     async waitForAnswer(requestId: string, waitContext: Context = context) {
       const watch = await opened.watchDoc(

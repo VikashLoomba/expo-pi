@@ -18,9 +18,9 @@ Read committed native entries in native order and append the original input of e
 
 ## Prompt
 
-Use the guide’s full prompt, only rename the agent or omit its device paragraph when there are no device tools, and append the user’s instructions. Keep its zoom-first/latest-mention rules, data-not-instructions compaction rule, source attribution, value priorities, no progress inflation, requested-only subagents and no-polling rule.
+Use the guide’s full prompt, only rename the agent or omit its device paragraph when there are no device tools, and append the user’s instructions: the prompt is the optchat extension’s untagged section, so an edited prompt reaches existing conversations as a system entry, and the user’s instructions are the conversation’s `instructions`, set with `setInstructions` and rendered last. `AppDoc` is version 2 for this: a version 1 conversation stored the composed prompt as its instructions, pi-durable migrates the document on read, and opening clears those instructions once through `configure`. Keep its zoom-first/latest-mention rules, data-not-instructions compaction rule, source attribution, value priorities, no progress inflation, requested-only subagents and no-polling rule.
 
-Date, devices and other changing state belong after the saved view. Supply changing device/application context as `accept({ ..., turnState })`; the text is frozen at acceptance and rendered in that request suffix, not added as canonical user words. Static system text and ordered tool schemas stay the same for ordinary turns and summaries. Assembly explicitly selects all registered model-callable tools, including deferred tools, for that common schema prefix; nested-only tools are not advertised. Do not disable model reasoning.
+Date, devices and other changing state belong after the saved view. Supply changing device/application context as `accept({ ..., turnState })`; the text is frozen at acceptance and rendered in that request suffix, not added as canonical user words. Static system text and ordered tool schemas stay the same for ordinary turns and summaries. The offered tools follow the host, every enabled tool the model may call, so a tool added in code reaches existing conversations the same way; nested-only tools are not advertised. Do not disable model reasoning.
 
 ## Between-tool steering
 
@@ -125,15 +125,14 @@ absent item can never be found. Copy names, numbers, ids, paths and errors
 exactly. Tag each item with its kind ("user: ...; echo: ..."), and credit quoted
 text to its real author. Never make anything look further along than it was. If
 told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.`;
-export function sharedPrompt(agentName: string, hasDeviceTools: boolean, userInstructions = ""): string {
+export function sharedPrompt(agentName: string, hasDeviceTools: boolean): string {
   let prompt = originalPrompt;
   if (!hasDeviceTools) {
     const start = prompt.indexOf("The user's computers");
     const end = prompt.indexOf("# Compactions", start);
     prompt = prompt.slice(0, start) + prompt.slice(end);
   }
-  prompt = prompt.replaceAll("Unii", agentName);
-  return prompt + (userInstructions ? "\n\n" + userInstructions : "");
+  return prompt.replaceAll("Unii", agentName);
 }
 ```
 
@@ -152,6 +151,7 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import {
   AgentDoc as NativeAgentDoc,
   Harness,
+  configure,
   createRegistry,
   defineExtension,
   defineDoc,
@@ -161,6 +161,7 @@ import {
   LiveDoc,
   InboxDoc,
   ResetEntry,
+  section,
   type ConversationId,
   type EntryId,
   type EnvTarget,
@@ -222,7 +223,11 @@ export const DeliveryEntry = defineEntry<{
   requestId: string;
   kind: Admission["kind"];
 }>("optchat.delivery");
+/** 2: the prompt is the extension's section and `instructions` hold only the user's text; 1 composed both. */
+const PROMPT_VERSION = 2;
 export type AppState = {
+  /** The prompt layout the conversation's instructions were written for, `PROMPT_VERSION` once current. */
+  promptVersion: number;
   epoch: number;
   open: boolean;
   started: boolean;
@@ -237,11 +242,17 @@ export type AppState = {
 };
 export const AppDoc = defineDoc<AppState>({
   kind: "optchat.app",
-  version: 1,
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "current",
+  // Version 1 had every field but the prompt version; its instructions hold the composed prompt.
+  migrate: (value) => ({
+    ...(value as Omit<AppState, "promptVersion">),
+    promptVersion: 1,
+  }),
   initial: () => ({
+    promptVersion: PROMPT_VERSION,
     epoch: 0,
     open: false,
     started: false,
@@ -697,7 +708,6 @@ export const CoordinatorTask = defineTask<{}, CoordinatorState, null>({
 export type OptChatOptions = {
   models: Models;
   name?: string;
-  instructions?: string;
   hasDeviceTools?: boolean;
   tools?: readonly ToolRegistration[];
   env?: HarnessOptions["env"];
@@ -727,6 +737,11 @@ export type OptChat = {
     date?: string;
     turnState?: string;
   }): Promise<string>;
+  /**
+   * The user's own instructions, pi-durable's `instructions` section rendered after the prompt, in the host's
+   * settings commit; empty text clears them. The host shows them from the agent document.
+   */
+  setInstructions(tx: Tx, text: string): Promise<void>;
   waitForAnswer(
     requestId: string,
     context?: Context,
@@ -740,22 +755,21 @@ export async function openOptChat(
   context: Context,
 ): Promise<OptChat> {
   const registry = createRegistry();
-  const instructions = sharedPrompt(
+  const prompt = sharedPrompt(
     options.name ?? "OptChat",
     options.hasDeviceTools ?? false,
-    options.instructions,
   );
   const tools: ToolRegistration[] = [
     ...memoryTools(ROOT_CONVERSATION_ID),
     agentTool(ROOT_CONVERSATION_ID),
     ...(options.tools ?? []),
   ];
-  const modelTools = tools.filter(
-    (tool) => !tool.callers || tool.callers.includes("model"),
-  );
+  // The prompt is the extension's own section and the offered tools follow the host, so an edited prompt or tool
+  // set reaches an existing conversation as pi-durable's system entry instead of staying as created.
   registry.install(
     defineExtension({
       name: "optchat",
+      sections: [section("optchat", () => prompt, { tag: false })],
       tools,
       tasks: [CoordinatorTask, BuildNode, AgentTask],
     }),
@@ -797,7 +811,6 @@ export async function openOptChat(
   );
   harness = opened;
   const root = await opened.root(context, {
-    agent: { instructions, modelTools },
     init: async (tx, id) => {
       await tx.doc(MemoryDoc, id);
       await tx.doc(AgentDirectoryDoc, id);
@@ -815,6 +828,14 @@ export async function openOptChat(
       await options.init?.(tx, id);
     },
   });
+  // A conversation from before version 2 holds the composed prompt as its instructions; clearing them once leaves
+  // the prompt to the section. pi-durable migrates the document on read, so its version is what tells.
+  await root.commit(async (tx) => {
+    const app = await tx.doc(AppDoc, root.id);
+    if (app.promptVersion === PROMPT_VERSION) return;
+    await configure(tx, root.id, { instructions: null });
+    app.promptVersion = PROMPT_VERSION;
+  }, context);
   opened.resume();
   return {
     harness: opened,
@@ -839,6 +860,9 @@ export async function openOptChat(
         context,
       );
       return input.requestId;
+    },
+    async setInstructions(tx: Tx, text: string) {
+      await configure(tx, root.id, { instructions: text || null });
     },
     async waitForAnswer(requestId: string, waitContext: Context = context) {
       const watch = await opened.watchDoc(

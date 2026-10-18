@@ -22,6 +22,8 @@ const workRow = (message: ChatMessage): ChatMessage => ({ ...message, role: 'wor
 export type InfiniChatControls = ChatControls & {
   /** The summary model and effort, or `null` until they are chosen. */
   summary: SummarySelection | null;
+  /** The user's own instructions that follow the prompt; empty until written. */
+  instructions: string;
   /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
   configured: boolean;
 };
@@ -310,6 +312,7 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       // cancels it, so the conversation is working.
       busy: controls.busy || pending.length > 0,
       summary,
+      instructions: docs.agent?.instructions ?? '',
       configured: docs.agent?.model !== undefined && summary !== null,
       ...(error ? { error } : {}),
     };

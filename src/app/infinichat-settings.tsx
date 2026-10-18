@@ -1,6 +1,6 @@
 import { router, Stack, usePreventRemove } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useChatError, useChatStatus, useInfiniChatView } from '@/chat/chat-provider';
@@ -16,7 +16,7 @@ import {
 
 /** The main model answers and works; the summary model writes the memory's summaries in the background. */
 type Role = 'main' | 'summary';
-type Draft = Record<Role, ChatModelSettings>;
+type Draft = Record<Role, ChatModelSettings> & { instructions: string };
 type Picker = { role: Role; page: ModelPicker };
 
 const TITLE = 'InfiniChat settings';
@@ -24,6 +24,8 @@ const roleNames: Record<Role, string> = { main: 'the main model', summary: 'the 
 const pageTitles: Record<ModelPicker, string> = { provider: 'Provider', model: 'Model', effort: 'Reasoning effort' };
 /** OptChat has no default model; an unchosen one is shown as such until the user picks it. */
 const unchosen: ChatModelSettings = { model: { provider: '', modelId: '' }, thinkingLevel: 'off' };
+/** The gist's description of the user's own instructions, which follow the prompt. */
+const INSTRUCTIONS_PLACEHOLDER = 'Who you are, how your files are organized and how you want work done.';
 
 const sameSettings = (left: ChatModelSettings, right: ChatModelSettings) => left.model.provider === right.model.provider
   && left.model.modelId === right.model.modelId && left.thinkingLevel === right.thinkingLevel;
@@ -49,7 +51,8 @@ export default function InfiniChatSettingsRoute() {
   // Draft state belongs to this editor session; incoming snapshots do not overwrite choices before the user saves
   // or cancels.
   return <InfiniChatSettingsEditor view={view}
-    initial={{ main: conversation.settings, summary: conversation.summary ?? unchosen }} />;
+    initial={{ main: conversation.settings, summary: conversation.summary ?? unchosen,
+      instructions: conversation.instructions }} />;
 }
 
 function InfiniChatSettingsEditor({ view, initial }: { view: InfiniChatView | undefined; initial: Draft }) {
@@ -79,7 +82,8 @@ function InfiniChatSettingsEditor({ view, initial }: { view: InfiniChatView | un
   });
   const blocked = !service || !conversation;
   const disabled = blocked || saving || refreshing;
-  const changed = !sameSettings(draft.main, initial.main) || !sameSettings(draft.summary, initial.summary);
+  const changed = !sameSettings(draft.main, initial.main) || !sameSettings(draft.summary, initial.summary)
+    || draft.instructions !== initial.instructions;
   const errors: Record<Role, string | undefined> = {
     main: getModelSettingsError(catalog, draft.main), summary: getModelSettingsError(catalog, draft.summary),
   };
@@ -109,8 +113,9 @@ function InfiniChatSettingsEditor({ view, initial }: { view: InfiniChatView | un
     setSaving(true);
     setError(undefined);
     try {
-      // One commit: the main model with pi-durable's `configure`, and the summary model in OptChat's ConfigDoc.
-      await service.updateSettings(draft.main, draft.summary);
+      // One commit: the main model and the instructions with pi-durable's `configure`, and the summary model in
+      // OptChat's ConfigDoc.
+      await service.updateSettings(draft.main, draft.summary, draft.instructions.trim());
       if (!mounted.current) return;
       setSaving(false);
       disableRemovalPrevention();
@@ -179,7 +184,8 @@ function InfiniChatSettingsEditor({ view, initial }: { view: InfiniChatView | un
       bottomInset={insets.bottom} search={search} onSearch={picker.page === 'effort' ? undefined : setSearch}
       searchPlaceholder={picker.page === 'provider' ? 'Search providers' : 'Search models'} description={description}
       onSelect={select} />
-    : <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}>
+    : <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets
+      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}>
       <View style={styles.intro}>
         <Text style={[styles.title, { color: colors.text }]}>InfiniChat</Text>
         <Text style={[styles.description, { color: colors.secondary }]}>
@@ -219,6 +225,15 @@ function InfiniChatSettingsEditor({ view, initial }: { view: InfiniChatView | un
         }} />)}
       <ActionButton testID="refresh-infinichat-models" title="Refresh models" secondary icon="retry"
         loading={refreshing} disabled={blocked || saving} onPress={() => { void refresh(); }} />
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.secondary }]}>INSTRUCTIONS</Text>
+        <TextInput testID="infinichat-instructions" accessibilityLabel="Instructions" value={draft.instructions}
+          onChangeText={(instructions) => setDraft((current) => ({ ...current, instructions }))}
+          editable={!disabled} multiline scrollEnabled={false} placeholder={INSTRUCTIONS_PLACEHOLDER}
+          placeholderTextColor={colors.muted}
+          style={[styles.instructions,
+            { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]} />
+      </View>
       <Text style={[styles.caption, { color: colors.muted }]}>
         InfiniChat runs each command on this phone or on one of your remote machines, choosing for each command.
         Changing models keeps InfiniChat’s memory and history.
@@ -238,4 +253,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 10, fontWeight: '600', letterSpacing: 1.1, paddingHorizontal: 3 },
   group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, overflow: 'hidden' },
   caption: { fontSize: 12, lineHeight: 19, paddingHorizontal: 3 },
+  instructions: {
+    borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, minHeight: 120, padding: 16, fontSize: 15, lineHeight: 22,
+  },
 });
