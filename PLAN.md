@@ -23,34 +23,43 @@ the app plugs an Expo implementation into it. "Upstream" means those libraries a
 | Tools | pi-durable `CodingTools` | none | `chat-service.ts` |
 | Prompt | pi-durable extensions and sections; README "System Prompt" | none | the `assistant` section |
 | Local execution | pi-durable `ExecutionEnv`, reference `NodeExecutionEnv`; the `env` resolver, example 29 | expo-file-system, just-bash, the cache directory for `/tmp` | `src/pi/workspace/` |
-| Remote execution | pi-env 1.2.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
+| Remote execution | pi-env 1.3.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
 | Web search | pi-ai provider decorator: the built provider spread with `stream`/`streamSimple` overridden (plain object from `createProvider`); pi-durable write entries | none | `src/pi/native-web-search/` |
 | Images | pi-ai `UserMessage.content` image parts, submitted as pi-durable input `content`; `createCodingTools({ images })` takes any `ImageProcessor` (`prepare(bytes, mimeType, limits)`), of which Photon is upstream's own implementation (README "Images") | expo-image-manipulator as the processor, expo-image-picker, expo-image | `src/pi/images.ts`, `src/chat/photo-attachments.ts`, `src/pi/user-input.ts`, `message-images.tsx` |
 | Keep-alive (Later) | pi-durable `resume()`, `taskGraph()` | expo-widgets, expo-location, expo-task-manager | none |
 
 ## Upstream revision
 
-The app uses registry pi-ai, pi-durable and chord **1.2.0**, with transitive pi-telemetry **1.2.0**. Source assessment
-uses tag `v1.2.0`, commit `06a466935536f8c9bcacb2d5efc0fc021be1bdff` (2026-10-12), and the published npm declarations.
-The temporary `ea448f4` tarballs and `pnpm.overrides` are deleted; their regeneration recipe is no longer needed.
+The app uses registry pi-ai, pi-durable and chord **1.3.0**, with transitive pi-telemetry and pi-codemode **1.3.0**.
+Source assessment uses tag `v1.3.0`, commit `71023aec1546d6d677a65669c5665c0927ce0dd0` (2026-10-15), and the
+published npm declarations.
 
-pi-env is not an app dependency. Its **1.2.0** daemon binaries come from the npm artifact pinned by version and
+pi-env is not an app dependency. Its **1.3.0** daemon binaries come from the npm artifact pinned by version and
 SHA-512 in `scripts/sync-pi-daemon-assets.mjs`; that script generates the per-platform SHA-256/size manifest.
 Run it to reproduce the assets, or pass `--check` to verify them. The wire protocol is still **v1**. The mobile
-client's existing file, exec and watch methods remain compatible. pi-env 1.2.0's `listFiles` is ported
+client's existing file, exec and watch methods remain compatible. pi-env 1.3.0's `listFiles` is ported
 (`remote/list-files.ts`, `MobileRemoteExecutionEnv.listFiles`) as part of the environment contract; the folder
 picker lists one folder at a time instead, because the recursive listing has no paging. The PTY APIs have no
 production caller and are not ported.
 
-Contracts reviewed at this release:
+Contracts reviewed at this release (1.2.0 to 1.3.0):
 
-- The portable SQLite driver, `Harness.open`/`close`/`closed`, conversation views and submissions retain their
-  integration contracts. Examples 20 (inbox), 21 (late join) and 29 (conversation environments) are unchanged from
-  `ea448f4`. Storage failure still ends the Harness with `SessionFailed`; the app reopens it.
-- pi-ai's provider-publication and OAuth contracts are unchanged for this app. The web-search decorator retains
-  generation's invocation-signal correlation, `streamSimple` dispatch, provider callbacks and `responseId`.
-- Chord replaces its facet/service runtime, which the app does not use. Context and replicated-state APIs remain;
-  its array descriptor call still matches the Babel plugin's string-key rewrite. No native configuration change.
+- The portable SQLite driver contract (`SqliteDatabase`) is unchanged. `SqliteStorage.open(database, { prefix })`
+  adds an optional table prefix for shared databases; the app owns its database files and passes none, and the
+  default table names and schema version 1 are unchanged, so existing databases open as before. `Harness`,
+  conversation views, submissions and examples 20, 21 and 29 are unchanged.
+- pi-durable's compaction or reset baseline now leads the model context when the kept history has assistant messages
+  (#10904); the app had no workaround. Prompt section rendering is unchanged, so InfiniChat's summary requests still
+  render sections as turns do. `toBase64` uses `btoa`, which Hermes provides. The output buffer helpers moved to
+  `@earendil-works/chord/output`; the app imports none of them.
+- pi-ai's provider-publication and OAuth contracts are unchanged (`auth/`, `providers/openai.ts` and `models.ts`).
+  The web-search decorator retains generation's invocation-signal correlation, `streamSimple` dispatch, provider
+  callbacks and `responseId`. The removed `AssistantMessageFrame` helpers were unused. Switching models now drops
+  thinking blocks an earlier model wrote (#10995); malformed tool arguments now fail validation with
+  `argumentsError`.
+- Chord 1.3.0 renames and reworks its host, serve and link runtime, which the app does not use. `Context`,
+  `chord/context` and the replicated-state types are unchanged; `json.ts` is unchanged, so its array descriptor call
+  still matches the Babel plugin's string-key rewrite. No native configuration change.
 - pi-durable's README "Compaction", example 25 and `LiveState` define running `compactions` and persistent
   `compactionFailure`. A failed blocking compaction settles inputs `unanswered` / `model_error` without an assistant
   error entry. The transcript footer projects running compactions, and the error banner projects persistent
@@ -166,7 +175,7 @@ with.**
 
 ### Remote environment
 
-`MobileRemoteExecutionEnv` is pi-env 1.2.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
+`MobileRemoteExecutionEnv` is pi-env 1.3.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
 `Connection` spawns `ssh`. It matches upstream's `remote-env.ts`, `list-files.ts` and `watch.ts` method by method,
 and differs only in the SSH transport and Hermes replacements for Node modules.
 
@@ -331,7 +340,7 @@ with.**
 
 ### Remote environment
 
-`MobileRemoteExecutionEnv` is pi-env 1.2.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
+`MobileRemoteExecutionEnv` is pi-env 1.3.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
 `Connection` spawns `ssh`. It matches upstream's `remote-env.ts`, `list-files.ts` and `watch.ts` method by method,
 and differs only in the SSH transport and Hermes replacements for Node modules.
 
@@ -529,7 +538,7 @@ On-device data: old chats' web-search records live in documents WS-1 replaces; c
 - [x] New-chat default: the most recently active chat's model and effort when its provider is connected, else the first
   connected provider's entry in `models.ts`.
 - [x] Remote folder picker: **Choose a folder** in chat settings browses an SSH machine one folder at a time
-  (`listDir`) with a `find`-based search; the pi-env 1.2.0 `listFiles` port stays in the remote environment as part
+  (`listDir`) with a `find`-based search; the pi-env 1.3.0 `listFiles` port stays in the remote environment as part
   of the env contract.
 - [x] Images (device checks pending):
   - Transcript: the image parts of a user message and of a tool result (`read` on a PNG, JPEG, GIF or WebP file

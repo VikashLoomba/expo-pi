@@ -1,4 +1,4 @@
-// Adapted from Pi Env 1.2.0 remote-env.ts (MIT); the daemon wire contract is protocol 1.
+// Adapted from Pi Env 1.3.0 remote-env.ts (MIT); the daemon wire contract is protocol 1.
 import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
 import { posix, resolveRemotePath } from "./paths";

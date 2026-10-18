@@ -1,4 +1,4 @@
-// Adapted from Pi Env 1.2.0 list-files.ts (MIT): `listFilesOver` over the app's SSH-backed connection.
+// Adapted from Pi Env 1.3.0 list-files.ts (MIT): `listFilesOver` over the app's SSH-backed connection.
 import type { Context } from '@earendil-works/chord';
 import {
   err, FileError, ok, type FileKind, type FileListEntry, type FileListing, type ListFilesOptions, type Result,
