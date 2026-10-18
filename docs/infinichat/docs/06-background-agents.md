@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native conversation ownership](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L1977-L2257), [background-agent example](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/test/examples/23-subagent-background.ts).
+Sources: [OptChat §6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native conversation ownership](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1989-L2269), [background-agent example](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/test/examples/23-subagent-background.ts).
 
 Subagents are optional and used only when the user requests them. Each native background task owns a private conversation. Its first request contains the frozen main memory view followed by its task. Its intermediate replies and tools stay in its private transcript and never become main-chat memory.
 

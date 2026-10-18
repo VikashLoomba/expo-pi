@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §§1–3](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native document scopes and lifetime](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L971-L1323), [transactions](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L1577-L1643).
+Sources: [OptChat §§1–3](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native document scopes and lifetime](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [transactions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1589-L1655).
 
 ## Canonical records
 

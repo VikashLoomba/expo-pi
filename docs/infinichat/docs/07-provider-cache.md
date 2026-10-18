@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §3.3](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native prompt API](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L3419-L3547), [Pi AI public API](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/ai/src/index.ts).
+Sources: [OptChat §3.3](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native prompt API](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L3431-L3559), [Pi AI public API](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/ai/src/index.ts).
 
 Provider prompt caching is pi-ai’s own. Each conversation’s persisted provider session identity is forwarded with every request, the Anthropic adapter marks the static system/tools prefix and the request end itself, and other providers cache prefixes without marks. OptChat keeps the request prefix cacheable: tools, then the static system prompt, then the saved view as one text block, then the new message or compaction task. Date, device and other per-turn state follow the view. Summaries use the same system prompt and offered tool schemas as turns, so turns and compactions share that static prefix.
 

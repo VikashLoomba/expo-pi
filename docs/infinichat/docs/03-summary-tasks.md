@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §4](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native tasks](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L1645-L1921), [task-local documents](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L971-L1323), [terminal transitions](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L1940-L1975).
+Sources: [OptChat §4](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native tasks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1657-L1933), [task-local documents](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [terminal transitions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1952-L1987).
 
 A summary task freezes its complete source and permitted built-only contextual view when admitted. It uses the same static system prompt and offered tool schemas as a normal turn, resolved from the root conversation’s agent when each request is made, with tool use disabled. It does not invoke the agent’s effectful tools. The summary model and thinking level are the host’s `ConfigDoc` selection; nothing is admitted while it is unset.
 

@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §§1 and 6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native hooks](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L2669-L2794), [native tool tasks](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/durable/docs/spec.md#L2796-L3417).
+Sources: [OptChat §§1 and 6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native hooks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2681-L2806), [native tool tasks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2808-L3429).
 
 `zoom(id,n)` validates that `n` is a positive power of two and `id` is aligned. For `n>1`, return its two immediate children, not a fresh summary. For `n=1`, return the original message and its images. `date(id)` returns the original stored timestamp. Long recall has explicit lossless pagination. `zoom(name)` reads the named private transcript, with no semantic thinking content.
 

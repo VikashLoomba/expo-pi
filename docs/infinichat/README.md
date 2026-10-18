@@ -1,4 +1,4 @@
-# OptChat with pi-durable 1.2.0
+# OptChat with pi-durable 1.3.0
 
 A linked implementation guide and source package for one ongoing OptChat conversation, using native pi-durable documents, tasks, conversations and extension APIs. The behavioral source is [Victor Taelin’s OptChat / UniiChat guide](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449).
 
