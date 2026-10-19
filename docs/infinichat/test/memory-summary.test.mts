@@ -13,6 +13,7 @@ import {
   MemoryStorage,
   createRegistry,
   defineExtension,
+  type HarnessSettings,
 } from "@earendil-works/pi-durable";
 import {
   MemoryDoc,
@@ -26,8 +27,8 @@ import {
   advanceMessageProgress,
   clipToolText,
 } from "../src/memory.mjs";
-import { BuildNode, ConfigDoc, pumpBuilds } from "../src/summary.mjs";
-async function fixture() {
+import { BuildNode, BuildScratchDoc, ConfigDoc, prefixUtf8, pumpBuilds } from "../src/summary.mjs";
+async function fixture(settings?: HarnessSettings) {
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
@@ -35,7 +36,11 @@ async function fixture() {
   registry.install(
     defineExtension({ name: "memory-tests", tasks: [BuildNode] }),
   );
-  const h = await Harness.open(new MemoryStorage(), { models, registry }, ctx);
+  const h = await Harness.open(
+    new MemoryStorage(),
+    { models, registry, settings },
+    ctx,
+  );
   const model = { provider: "faux", modelId: faux.getModel().id };
   const root = await h.root(ctx, {
     agent: { instructions: "Shared static system" },
@@ -112,7 +117,7 @@ test("lossless scalar chunking and exact complete echo clipping", async () => {
     await f.h.close(ctx);
   }
 });
-test("five native responses retain shortest, preserve reasoning, freeze cutoff", async () => {
+test("five native responses retain shortest, resend only the last line's size note, freeze cutoff", async () => {
   const f = await fixture();
   try {
     await f.add("old");
@@ -144,8 +149,14 @@ test("five native responses retain shortest, preserve reasoning, freeze cutoff",
       timestamp: 0,
     });
     assert.ok(!JSON.stringify(seen).includes("FUTURE MUST NOT LEAK"));
-    assert.ok(JSON.stringify(seen[1]).includes("thinkingSignature"));
-    assert.ok(JSON.stringify(seen[1]).includes("700 bytes"));
+    // Never a try's words or thoughts: each retry is the view, the task and one note on the last line.
+    for (const request of seen.slice(1)) {
+      assert.equal(request.messages.length, 2);
+      assert.ok(!JSON.stringify(request).includes("reasoning"));
+    }
+    assert.ok(JSON.stringify(seen[1]).includes("your last line for this <input> was 700 bytes"));
+    assert.ok(JSON.stringify(seen[2]).includes("was 660 bytes"));
+    assert.ok(!JSON.stringify(seen[2]).includes("700 bytes"));
   } finally {
     await f.h.close(ctx);
   }
@@ -216,33 +227,59 @@ test("sawtooth views measure rendered UTF-8 bytes and preserve prefixes between 
   }
 });
 
-test("token-limit interruption is not a completed candidate or correction attempt", async () => {
+test("a cut reply publishes the source, newlines flattened, cut to 512 bytes", async () => {
   const f = await fixture();
   try {
-    await f.add("source ".repeat(200));
+    await f.add("source\n".repeat(200));
     const partial = fauxAssistantMessage([fauxText("unfinished summary")]);
     partial.stopReason = "length";
     f.faux.setResponses([partial]);
     const [id] = await f.pump();
-    const settled = await f.h.waitForTask(id!, ctx);
-    assert.equal(settled.state.outcome.status, "failed");
-    assert.equal(
-      (await f.h.snapshot(NodeDoc, f.root.id, "0:0", ctx))?.value,
-      null,
-    );
-    assert.equal(f.faux.state.callCount, 1);
-    assert.equal((await f.pump()).length, 0);
-    await f.h.commit((tx) => advanceMessageProgress(tx, f.root.id), ctx);
-    f.faux.setResponses([fauxAssistantMessage([fauxText("complete summary")])]);
-    const [retry] = await f.pump();
-    assert.ok(retry);
-    await f.h.waitForTask(retry, ctx);
+    assert.ok(id);
+    const settled = await f.h.waitForTask(id, ctx);
+    assert.equal(settled.state.outcome.status, "completed");
+    const flat = ("user: " + "source\n".repeat(200)).replace(/\s*\n\s*/g, " ");
     assert.equal(
       (await f.h.snapshot(NodeDoc, f.root.id, "0:0", ctx))?.value?.text,
-      "complete summary",
+      prefixUtf8(flat, 512),
     );
-    assert.equal(f.faux.state.callCount, 2);
+    assert.equal(f.faux.state.callCount, 1);
   } finally {
     await f.h.close(ctx);
   }
+});
+
+test("a retryable provider error waits pi-ai's backoff and asks again past pi-durable's bound", async () => {
+  const f = await fixture({ retry: { baseDelayMs: 1, maxRetries: 0 } });
+  try {
+    await f.add("source ".repeat(200));
+    const overloaded = () =>
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 overloaded" });
+    f.faux.setResponses([overloaded(), overloaded(), fauxAssistantMessage([fauxText("summary")])]);
+    const [id] = await f.pump();
+    assert.ok(id);
+    const settled = await f.h.waitForTask(id, ctx);
+    assert.equal(settled.state.outcome.status, "completed");
+    assert.equal(
+      (await f.h.snapshot(NodeDoc, f.root.id, "0:0", ctx))?.value?.text,
+      "summary",
+    );
+    assert.equal(f.faux.state.callCount, 3);
+  } finally {
+    await f.h.close(ctx);
+  }
+});
+
+test("an earlier build's scratch and checkpoint migrate as pi-durable reads them", () => {
+  const scratch = { source: "s", task: "t", view: "v", selection: null, shortest: "b" };
+  // The next try needs only the last too-long line.
+  assert.deepEqual(
+    BuildScratchDoc.definition.migrate?.({ ...scratch, replies: [{ text: "a" }, { text: "b" }] }, 1),
+    { ...scratch, last: "b" },
+  );
+  assert.deepEqual(BuildScratchDoc.definition.migrate?.({ ...scratch, replies: [] }, 1), { ...scratch, last: null });
+  assert.deepEqual(
+    BuildNode.definition.migrate?.({ ref: [0, 1] }, { phase: "request", attempt: 2 }, 1)?.checkpoint,
+    { phase: "request", attempt: 2, retries: 0 },
+  );
 });

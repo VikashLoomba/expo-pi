@@ -11,17 +11,41 @@ import {
   wrapTool,
   ToolTask,
   GenerationTask,
-  InboxDoc,
   type ConversationId,
   type Cursor,
   type ToolHookCall,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { type ExecutionEnv, getOrThrow } from "@earendil-works/pi-durable/env";
-import { MessageDoc, NodeDoc, key, nodeLine, clipToolText } from "./memory.mjs";
+import {
+  MemoryDoc,
+  MessageDoc,
+  NodeDoc,
+  key,
+  nodeLine,
+  clipToolText,
+  shownMessage,
+  type NodeRef,
+} from "./memory.mjs";
 import { PrivateAgentDoc } from "./agents.mjs";
 
 const PAGE = 29_000;
+/** The tree's roots over `count` messages, largest first, as UniiChat's zoom lists them for a line that isn't one. */
+function roots(count: number): string {
+  const out: string[] = [];
+  for (let l = 30, id = 0; l >= 0; l--) {
+    if (id + 2 ** l <= count) {
+      out.push(`${id}+${2 ** l}`);
+      id += 2 ** l;
+    }
+  }
+  return out.join(", ");
+}
+/**
+ * pi-durable built-ins by the name the host registers them under: bash and code mode spill their complete output to a
+ * file, and read pages itself, so its page is never clipped (a clipped page would lose the lines its offset skips).
+ */
+export type NativeContracts = Readonly<Record<string, "bash" | "codemode" | "read">>;
 export function pageText(text: string, page = 0): string {
   const chars = Array.from(text),
     count = Math.max(1, Math.ceil(chars.length / PAGE));
@@ -47,10 +71,14 @@ export function memoryTools(root: ConversationId) {
       page: Type.Optional(Type.Integer({ minimum: 0 })),
     }),
     outputLimits: { maxBytes: 120_000, maxLines: 30_000 },
-    async execute({ id, n = 1, page = 0 }, api, context) {
+    async execute({ id: given, n = 1, page = 0 }, api, context) {
       const images: ImageContent[] = [];
       let text: string;
-      if (typeof id === "number" && !Number.isSafeInteger(id)) throw new Error('id must be a safe integer');
+      // Only a name starts with a letter: a model may pass a message id as a string.
+      const id =
+        typeof given === "string" && !/^[A-Za-z]/.test(given)
+          ? Number(given)
+          : given;
       if (typeof id === "string") {
         const agent = await api.snapshot(PrivateAgentDoc, root, id, context);
         if (!agent?.conversationId)
@@ -90,22 +118,32 @@ export function memoryTools(root: ConversationId) {
         } while (cursor);
         text = parts.join("\n\n");
       } else {
-        if (
-          !Number.isSafeInteger(n) ||
-          n < 1 ||
-          !Number.isInteger(Math.log2(n)) ||
-          id % n !== 0
-        )
-          throw new Error("n must be a power of two and id a multiple of n");
-        if (n === 1) {
-          const message = await api.snapshot(
-            MessageDoc,
-            root,
-            String(id),
-            context,
-          );
-          if (!message) throw new Error(`Unknown message ${id}`);
-          text = `${message.kind}: ${message.text}`;
+        const count =
+          (await api.snapshot(MemoryDoc, root, context))?.nextMessage ?? 0;
+        const line =
+          Number.isSafeInteger(id) &&
+          id >= 0 &&
+          Number.isInteger(Math.log2(n)) &&
+          id % n === 0 &&
+          id + n <= count;
+        const message =
+          line && n === 1
+            ? await api.snapshot(MessageDoc, root, String(id), context)
+            : undefined;
+        if (!line || (n === 1 && !message))
+          // A wrong line is an answer, not a failure: the roots show where the tree starts.
+          return {
+            output: [
+              {
+                type: "text" as const,
+                text:
+                  `No line ${id}+${n}: n is a power of 2, id a multiple of n. ` +
+                  `The tree's roots: ${roots(count)}.`,
+              },
+            ],
+          };
+        if (message) {
+          text = shownMessage(message);
           images.push(
             ...message.images.map((image) => ({
               type: "image" as const,
@@ -113,18 +151,21 @@ export function memoryTools(root: ConversationId) {
             })),
           );
         } else {
-          const l = Math.log2(n) - 1,
-            i = id / (n / 2);
-          const left = await api.snapshot(NodeDoc, root, key([l, i]), context);
-          const right = await api.snapshot(
-            NodeDoc,
-            root,
-            key([l, i + 1]),
-            context,
-          );
-          if (!left?.value || !right?.value)
-            throw new Error("The requested child lines have not been built");
-          text = nodeLine(left.value) + "\n" + nodeLine(right.value);
+          const l = Math.log2(n) - 1;
+          const halves: NodeRef[] = [
+            [l, id / (n / 2)],
+            [l, id / (n / 2) + 1],
+          ];
+          const lines: string[] = [];
+          for (const half of halves) {
+            const node = await api.snapshot(NodeDoc, root, key(half), context);
+            lines.push(
+              node?.value
+                ? nodeLine(node.value)
+                : `${half[1] * 2 ** l}+${2 ** l}|(not summarized yet: zoom it)`,
+            );
+          }
+          text = lines.join("\n");
         }
       }
       return {
@@ -141,10 +182,13 @@ export function memoryTools(root: ConversationId) {
     replay: "safe",
     parameters: Type.Object({ id: Type.Integer({ minimum: 0 }) }),
     async execute({ id }, api, context) {
-      if (!Number.isSafeInteger(id)) throw new Error('id must be a safe integer');
-      const message = await api.snapshot(MessageDoc, root, String(id), context);
-      if (!message) throw new Error(`Unknown message ${id}`);
-      return { output: [{ type: "text" as const, text: message.date }] };
+      const message = Number.isSafeInteger(id)
+        ? await api.snapshot(MessageDoc, root, String(id), context)
+        : undefined;
+      // As UniiChat's date: the device's local time, and an answer, not a failure, for a message there isn't. It is
+      // how the model learns the time, which no turn states.
+      const text = message ? new Date(message.date).toLocaleString("sv-SE") : `No message ${id}.`;
+      return { output: [{ type: "text" as const, text }] };
     },
   });
   return [zoom, date];
@@ -204,7 +248,7 @@ export function toolPolicy(
     conversationId: ConversationId,
     context: Context,
   ) => Promise<ExecutionEnv | undefined>,
-  nativeSpillContracts: Readonly<Record<string, 'bash' | 'codemode'>> = {},
+  nativeContracts: NativeContracts = {},
 ) {
   return defineExtension({
     name: "optchat.tool-policy",
@@ -221,21 +265,9 @@ export function toolPolicy(
     ),
     hooks: [
       hook(ToolTask, {
-        async beforeTool(call, api, context) {
-          if (call.parent) return;
-          const inbox = await api.snapshot(
-            InboxDoc,
-            api.conversationId,
-            context,
-          );
-          if (inbox?.items.some((item) => item.mode === "steer"))
-            return {
-              block:
-                "A newer message is queued. Replan with that message before executing additional calls.",
-            };
-        },
         async afterTool(call, result, api, context) {
-          const contract = nativeSpillContracts[call.name];
+          const contract = nativeContracts[call.name];
+          if (contract === "read") return undefined;
           const path =
             contract === "bash"
               ? spillPath(result.structuredOutput)
@@ -269,7 +301,8 @@ export function toolPolicy(
         beforeRequest({ messages }) {
           return {
             messages: messages.map((message) =>
-              message.role !== "toolResult"
+              message.role !== "toolResult" ||
+              nativeContracts[message.toolName] === "read"
                 ? message
                 : {
                     ...message,

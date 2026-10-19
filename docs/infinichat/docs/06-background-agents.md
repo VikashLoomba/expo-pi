@@ -2,11 +2,11 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native conversation ownership](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1989-L2269), [background-agent example](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/test/examples/23-subagent-background.ts).
+Sources: [OptChat §6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native conversation ownership](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1989-L2269), [background-agent example](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/test/examples/23-subagent-background.ts#L186-L197), [UniiChat’s subagent prompt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L123-L190) and [agents at work](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L259-L265).
 
-Subagents are optional and used only when the user requests them. Each native background task owns a private conversation. Its first request contains the frozen main memory view followed by its task. Its intermediate replies and tools stay in its private transcript and never become main-chat memory.
+Subagents are optional and used only when the user requests them. The `agent` tool creates the native background task; as the task starts, its create phase creates the private conversation it owns, configured as pi-durable’s background-subagent example configures one: a copy of the root’s agent without the `optchat.master` extension, so without the master’s prompt or the `agent` tool, and with the subagents’ prompt followed by the user’s instructions. That prompt is UniiChat’s (`SUB_HEAD`, `VIEW_DOC` and `DEVICES`), its second paragraph rewritten for a conversation that is only given its task, renamed and without the devices paragraph as the master’s is. Its first message is the frozen main memory view, the host’s turn state, then its task. The task reads the turn state outside its commit as it starts, reporting a failure and going on without it, and keeps it in its `run` checkpoint with the frozen view. The task is version 2: pi-durable migrates a version 1 task saved in its `run` phase with an empty turn state, so an agent already running goes on as it began, and one saved in `create` starts as above. Its intermediate replies and tools stay in its private transcript and never become main-chat memory.
 
-The complete final reply is admitted once as a work event, prefixed `[Name] `. Do not summarize the report again before admission. Long non-tool report text may occupy consecutive canonical records while remaining one logical report event. When the main agent is active, deliver it as native steering; when idle, start a fresh logical turn through the same admission path as other messages.
+The complete final reply is admitted once as a work event, prefixed `[Name] `. A subagent whose input ends unanswered reports `[Name] failed: <detail or reason>` the same way, as [pi-durable’s background subagents](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/test/examples/23-subagent-background.ts#L95-L97) report a failure; a stopped one reports nothing. Do not summarize the report again before admission. Long non-tool report text may occupy consecutive canonical records while remaining one logical report event. When the main agent is active, deliver it as native steering; when idle, start a fresh logical turn through the same admission path as other messages. A fresh turn’s message lists the agents at work, read from pi-durable’s task records.
 
 The main agent does not wait or poll for the background result. Native task lifecycle and durable report admission own completion. Foreground abort must not silently cancel independent background work. Permanent named transcript access survives task-local scratch retirement, allowing `zoom(name)` after completion and reopening.
 
@@ -20,11 +20,15 @@ The main agent does not wait or poll for the background result. Native task life
 
 ```typescript
 import {
+  AgentDoc,
+  configure,
   defineDoc,
   defineDocFamily,
   defineTask,
   defineTool,
   type ConversationId,
+  type Cursor,
+  type Extension,
   type TaskId,
   type Tx,
 } from "@earendil-works/pi-durable";
@@ -39,6 +43,15 @@ export type AgentInput = { name: string; task: string } & (
   | { frozenView: string }
   | { cutoff: number }
 );
+/** What a subagent's conversation is set up from. */
+export type SubagentSetup = {
+  /** The extension of the master's prompt and of the agent tool, which a subagent goes without. */
+  master: () => Extension;
+  /** The subagents' prompt; the user's instructions follow it. */
+  prompt: string;
+  /** The host's device list, read as a subagent starts. */
+  turnState: () => Promise<string>;
+};
 export type AgentStatus =
   | "starting"
   | "running"
@@ -84,7 +97,17 @@ export const AgentReportDoc = defineDocFamily<
   fork: "current",
   initial: (value) => ({ ...value, consumed: false }),
 });
+/** `turnState`: the host's device list as the agent started, which its first message gives after the view. */
 type Checkpoint =
+  | { phase: "create" }
+  | {
+      phase: "run";
+      conversationId: ConversationId;
+      requestId: string;
+      frozenView: string;
+      turnState: string;
+    };
+type CheckpointV1 =
   | { phase: "create" }
   | {
       phase: "run";
@@ -98,175 +121,264 @@ type Result = {
   conversationId: ConversationId;
 };
 
+/** The agent task's registered kind, by which the agents at work count it. */
+export const AGENT_TASK = "optchat.private-agent";
+
 /** The independent task, not the main generation, waits for its private run. */
-export const AgentTask = defineTask<AgentInput, Checkpoint, Result>({
-  name: "optchat.private-agent",
-  version: 1,
-  initial: () => ({ phase: "create" }),
-  phases: {
-    async create(task, runtime, context) {
-      if ("cutoff" in task.input) {
-        const cutoff = task.input.cutoff;
-        const invocation = withAbortSignal(runtime.signal, context);
-        const watch = await runtime.watchDoc(
-          MemoryDoc,
-          runtime.conversationId,
-          invocation,
-        );
-        if (!watch)
-          throw new Error(
-            "MemoryDoc must be initialized before launching an agent",
-          );
-        try {
-          await awaitWithContext(
-            new Promise<void>((resolve, reject) => {
-              watch.start(async (value) => {
-                if (value && value.frontier >= cutoff) resolve();
-              });
-              if (watch.value && watch.value.frontier >= cutoff) resolve();
-              void watch.closed.then((end) => {
-                if (
-                  end.reason === "session_failed" ||
-                  end.reason === "listener_error"
-                )
-                  reject(end.error);
-                else reject(new Error(`Agent memory watch ended: ${end.reason}`));
-              });
-            }),
+export const agentTask = (setup: SubagentSetup) =>
+  defineTask<AgentInput, Checkpoint, Result>({
+    name: AGENT_TASK,
+    version: 2,
+    // Version 1 gave its first message no device list, so an agent it started goes on without one.
+    migrate: (input, checkpoint) => {
+      const saved = checkpoint as CheckpointV1;
+      return {
+        input: input as AgentInput,
+        checkpoint: saved.phase === "run" ? { ...saved, turnState: "" } : saved,
+      };
+    },
+    initial: () => ({ phase: "create" }),
+    phases: {
+      async create(task, runtime, context) {
+        if ("cutoff" in task.input) {
+          const cutoff = task.input.cutoff;
+          const invocation = withAbortSignal(runtime.signal, context);
+          const watch = await runtime.watchDoc(
+            MemoryDoc,
+            runtime.conversationId,
             invocation,
           );
-        } finally {
-          await watch.stop();
+          if (!watch)
+            throw new Error(
+              "MemoryDoc must be initialized before launching an agent",
+            );
+          try {
+            await awaitWithContext(
+              new Promise<void>((resolve, reject) => {
+                watch.start(async (value) => {
+                  if (value && value.frontier >= cutoff) resolve();
+                });
+                if (watch.value && watch.value.frontier >= cutoff) resolve();
+                void watch.closed.then((end) => {
+                  if (
+                    end.reason === "session_failed" ||
+                    end.reason === "listener_error"
+                  )
+                    reject(end.error);
+                  else reject(new Error(`Agent memory watch ended: ${end.reason}`));
+                });
+              }),
+              invocation,
+            );
+          } finally {
+            await watch.stop();
+          }
         }
-      }
-      await runtime.commit(async (tx) => {
-        const frozenView =
-          "frozenView" in task.input
-            ? task.input.frozenView
-            : await renderMain(tx, runtime.conversationId, task.input.cutoff);
-        // Native task ownership copies pi.agent from the root conversation, including
-        // model, reasoning, instructions, tool and extension selection. Do not fork history.
-        const child = await tx.createConversation({
-          ownership: { kind: "task", taskId: task.id },
+        // Read outside the commit; a host that can't tell (a locked keychain) is reported, and the agent starts
+        // without it rather than never.
+        const turnState = await setup.turnState().catch((error: unknown) => {
+          runtime.report(error);
+          return "";
         });
-        const agent = await tx.doc(
-          PrivateAgentDoc,
-          runtime.conversationId,
-          task.input.name,
-          task.id,
-        );
-        agent.conversationId = child.id;
-        agent.status = "running";
-        return {
-          status: "running",
-          checkpoint: {
-            phase: "run",
-            frozenView,
-            conversationId: child.id,
-            requestId: `optchat:agent:${task.id}:initial`,
+        await runtime.commit(async (tx) => {
+          const frozenView =
+            "frozenView" in task.input
+              ? task.input.frozenView
+              : await renderMain(tx, runtime.conversationId, task.input.cutoff);
+          // Native task ownership copies pi.agent from the root conversation: model, reasoning, instructions, tool
+          // and extension selection. As pi-durable's subagent example sets one up, it goes without the master's
+          // extension, so without the master's prompt and the agent tool, and its own prompt leads the user's
+          // instructions. Do not fork history.
+          const child = await tx.createConversation({
+            ownership: { kind: "task", taskId: task.id },
+          });
+          const instructions = (await tx.doc(AgentDoc, runtime.conversationId))
+            .instructions;
+          await configure(tx, child.id, {
+            extensions: { remove: [setup.master()] },
+            instructions: instructions
+              ? `${setup.prompt}\n\n${instructions}`
+              : setup.prompt,
+          });
+          const agent = await tx.doc(
+            PrivateAgentDoc,
+            runtime.conversationId,
+            task.input.name,
+            task.id,
+          );
+          agent.conversationId = child.id;
+          agent.status = "running";
+          return {
+            status: "running",
+            checkpoint: {
+              phase: "run",
+              frozenView,
+              turnState,
+              conversationId: child.id,
+              requestId: `optchat:agent:${task.id}:initial`,
+            },
+          };
+        }, context);
+      },
+      async run(task, runtime, context) {
+        const { conversationId, requestId, frozenView, turnState } =
+          task.state.checkpoint;
+        const { name } = task.input;
+        const child = await runtime.conversation(conversationId, context);
+        if (!child) throw new Error("The private conversation is missing");
+        // Frozen at launch, never re-rendered during recovery. Re-submitting this
+        // native request ID recovers the same receipt after a lost acknowledgement.
+        const receipt = await child.submit(
+          {
+            type: "input",
+            requestId,
+            content: [
+              { type: "text", text: frozenView },
+              ...(turnState
+                ? [{ type: "text" as const, text: `\n${turnState}\n\n` }]
+                : []),
+              { type: "text", text: task.input.task },
+            ],
           },
-        };
-      }, context);
-    },
-    async run(task, runtime, context) {
-      const { conversationId, requestId } = task.state.checkpoint;
-      const child = await runtime.conversation(conversationId, context);
-      if (!child) throw new Error("The private conversation is missing");
-      // Frozen at launch, never re-rendered during recovery. Re-submitting this
-      // native request ID recovers the same receipt after a lost acknowledgement.
-      const receipt = await child.submit(
-        {
-          type: "input",
-          requestId,
-          content: [
-            { type: "text", text: task.state.checkpoint.frozenView },
-            { type: "text", text: task.input.task },
-          ],
-        },
-        context,
-      );
-      const settled = await receipt.wait(context);
-      await runtime.commit(async (tx) => {
-        const agent = await tx.doc(
-          PrivateAgentDoc,
-          runtime.conversationId,
-          task.input.name,
-          task.id,
+          context,
         );
-        if (settled.type !== "input" || settled.status !== "done") {
-          agent.status = "unanswered";
+        const settled = await receipt.wait(context);
+        await runtime.commit(async (tx) => {
+          const agent = await tx.doc(
+            PrivateAgentDoc,
+            runtime.conversationId,
+            name,
+            task.id,
+          );
+          if (settled.type !== "input" || settled.status !== "done") {
+            agent.status = "unanswered";
+            // As pi-durable's background subagents report: a stopped agent nothing, a failed one that it failed.
+            if (settled.status === "unanswered" && settled.reason !== "aborted") {
+              const why =
+                typeof settled.detail === "string" ? settled.detail : settled.reason;
+              await publishReport(
+                tx,
+                runtime.conversationId,
+                name,
+                `[${name}] failed: ${why}`,
+                task.id,
+              );
+            }
+            return {
+              status: "terminal",
+              outcome: {
+                status: "completed",
+                result: {
+                  name: task.input.name,
+                  status: "unanswered",
+                  conversationId,
+                },
+              },
+            };
+          }
+          const entry = await tx.entry(settled.answer);
+          if (!entry)
+            throw new Error("Native answered submission has no answer entry");
+          // Keep full reasoning/tool history in the native private transcript. Only
+          // final visible assistant text is a work message; no shortening or summarizing.
+          const text = (entry.model ?? [])
+            .flatMap((message) =>
+              message.role === "assistant"
+                ? message.content
+                    .filter((block) => block.type === "text")
+                    .map((block) => block.text)
+                : [],
+            )
+            .join("");
+          await publishReport(
+            tx,
+            runtime.conversationId,
+            name,
+            `[${name}] ${text}`,
+            task.id,
+          );
+          agent.status = "completed";
+          // Publication and terminality are one native commit, so restart cannot
+          // publish the report twice. The coordinator consumes it with input admission.
           return {
             status: "terminal",
             outcome: {
               status: "completed",
               result: {
                 name: task.input.name,
-                status: "unanswered",
+                status: "completed",
                 conversationId,
               },
             },
           };
-        }
-        const entry = await tx.entry(settled.answer);
-        if (!entry)
-          throw new Error("Native answered submission has no answer entry");
-        // Keep full reasoning/tool history in the native private transcript. Only
-        // final visible assistant text is a work message; no shortening or summarizing.
-        const text = (entry.model ?? [])
-          .flatMap((message) =>
-            message.role === "assistant"
-              ? message.content
-                  .filter((block) => block.type === "text")
-                  .map((block) => block.text)
-              : [],
+        }, context);
+      },
+    },
+    async abort(task, runtime, context) {
+      await runtime.commit(async (tx) => {
+        (
+          await tx.doc(
+            PrivateAgentDoc,
+            runtime.conversationId,
+            task.input.name,
+            task.id,
           )
-          .join("");
-        await tx.doc(AgentReportDoc, runtime.conversationId, task.input.name, {
-          text: `[${task.input.name}] ${text}`,
-          requestId: `optchat:agent:${task.id}:report`,
-        });
-        const directory = await tx.doc(
-          AgentDirectoryDoc,
-          runtime.conversationId,
-        );
-        directory.pendingReports.push(task.input.name);
-        agent.status = "completed";
-        // Publication and terminality are one native commit, so restart cannot
-        // publish the report twice. The coordinator consumes it with input admission.
-        return {
-          status: "terminal",
-          outcome: {
-            status: "completed",
-            result: {
-              name: task.input.name,
-              status: "completed",
-              conversationId,
-            },
-          },
-        };
+        ).status = "aborted";
+        return { status: "terminal", outcome: { status: "aborted" } };
       }, context);
     },
-  },
-  async abort(task, runtime, context) {
-    await runtime.commit(async (tx) => {
-      (
-        await tx.doc(
-          PrivateAgentDoc,
-          runtime.conversationId,
-          task.input.name,
-          task.id,
+  });
+type AgentTask = ReturnType<typeof agentTask>;
+
+/** The agents at work now, by name, read from pi-durable's own task records so the list can't drift from them. */
+export async function agentsAtWork(
+  tx: Tx,
+  root: ConversationId,
+): Promise<string[]> {
+  const names: string[] = [];
+  for (const status of ["pending", "running", "waiting"] as const) {
+    let cursor: Cursor | undefined;
+    do {
+      const page = await tx.scanTasks(
+        { conversationId: root, kind: AGENT_TASK, status },
+        100,
+        cursor,
+      );
+      for (const { input } of page.items)
+        if (
+          typeof input === "object" &&
+          input !== null &&
+          !Array.isArray(input) &&
+          typeof input.name === "string"
         )
-      ).status = "aborted";
-      return { status: "terminal", outcome: { status: "aborted" } };
-    }, context);
-  },
-});
+          names.push(input.name);
+      cursor = page.next;
+    } while (cursor);
+  }
+  return names;
+}
+
+/** The work message of an agent's end, published with its task's terminal commit so a restart publishes it once. */
+async function publishReport(
+  tx: Tx,
+  root: ConversationId,
+  name: string,
+  text: string,
+  id: TaskId,
+): Promise<void> {
+  await tx.doc(AgentReportDoc, root, name, {
+    text,
+    requestId: `optchat:agent:${id}:report`,
+  });
+  (await tx.doc(AgentDirectoryDoc, root)).pendingReports.push(name);
+}
 
 /** Names identify permanent separate transcripts; duplicate names are not reused. */
 export async function launchAgent(
   tx: Tx,
   rootId: ConversationId,
   input: AgentInput,
+  task: AgentTask,
 ): Promise<TaskId<Result>> {
   if (!input.name.trim() || /[\r\n\[\]]/.test(input.name))
     throw new Error(
@@ -275,7 +387,7 @@ export async function launchAgent(
   const directory = await tx.doc(AgentDirectoryDoc, rootId);
   if (directory.names.includes(input.name))
     throw new Error(`Agent name already exists: ${input.name}`);
-  const id = await tx.createTask(AgentTask, input, {
+  const id = await tx.createTask(task, input, {
     conversationId: rootId,
     ownership: { kind: "conversation" },
     background: true,
@@ -319,8 +431,8 @@ const AgentLaunchDoc = defineDocFamily<
   initial: () => ({ taskId: null, name: "" }),
 });
 
-/** Register only when the user has enabled subagents for this conversation. */
-export function agentTool(rootId: ConversationId) {
+/** The master's tool, in the extension a subagent's conversation goes without; the prompt keeps it to user requests. */
+export function agentTool(rootId: ConversationId, task: AgentTask) {
   return defineTool({
     name: "agent",
     description:
@@ -342,10 +454,12 @@ export function agentTool(rootId: ConversationId) {
         );
         if (launch.taskId !== null) return launch.name;
         const memory = await tx.doc(MemoryDoc, rootId);
-        launch.taskId = await launchAgent(tx, rootId, {
-          ...input,
-          cutoff: memory.nextMessage,
-        });
+        launch.taskId = await launchAgent(
+          tx,
+          rootId,
+          { ...input, cutoff: memory.nextMessage },
+          task,
+        );
         launch.name = input.name;
         return input.name;
       }, context);

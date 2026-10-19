@@ -2,11 +2,11 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §§1 and 6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native hooks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2681-L2806), [native tool tasks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2808-L3429).
+Sources: [OptChat §§1 and 6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [UniiChat zoom](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1028-L1040), [native hooks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2681-L2806), [native tool tasks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2808-L3429).
 
-`zoom(id,n)` validates that `n` is a positive power of two and `id` is aligned. For `n>1`, return its two immediate children, not a fresh summary. For `n=1`, return the original message and its images. `date(id)` returns the original stored timestamp. Long recall has explicit lossless pagination. `zoom(name)` reads the named private transcript, with no semantic thinking content.
+`zoom(id,n)` opens a line of the tree: `n` a power of two, `id` a multiple of `n`, and the line within the messages logged. A line that isn’t one is an answer, not a failed call: it lists the tree’s roots, as UniiChat’s zoom does. For `n>1`, return its two immediate children, not a fresh summary; a child not built yet shows `(not summarized yet: zoom it)`. For `n=1`, return the original message, an `[image]` line for each image, and its images. An `id` that does not start with a letter is a message id, since a model may pass one as a string. `date(id)` returns the message’s date and time in the device’s local time, formatted as UniiChat’s (`sv-SE`, such as `2026-10-19 15:40:12`), and `No message N.` for a message there isn’t. No turn states the current time, as in UniiChat: the model learns it with `date` on the newest message. Long recall has explicit lossless pagination. `zoom(name)` reads the named private transcript, with no semantic thinking content.
 
-Tool output keeps head and tail within **30,000 Unicode scalar characters total**, including any clipping marker and presented diagnostic text. Other long text is not clipped. A native retention window that discarded the middle/tail cannot reconstruct a complete source; obtain a complete explicit return or a documented native spill before clipping. Keep provider-native output metadata and tool result pairing. Configure `nativeSpillContracts` only for known native bash/code-mode tool registrations. A spill is read through the environment the call ran in: the host’s `callEnv`, or the conversation’s environment when the host supplies none. An arbitrary custom tool returning a `fullOutputPath` is not permission to read that path; unrecognized output metadata is not treated as a trusted native spill.
+Tool output keeps head and tail within **30,000 Unicode scalar characters total**, including any clipping marker and presented diagnostic text. Other long text is not clipped. A native retention window that discarded the middle/tail cannot reconstruct a complete source; obtain a complete explicit return or a documented native spill before clipping. Keep provider-native output metadata and tool result pairing. `nativeContracts` names the host’s registrations of pi-durable built-ins. A `bash` or `codemode` result is clipped from its native spill. A `read` result is not clipped: read pages itself at 50 KB or 2,000 lines and names the offset to continue from, which a clipped page would skip past. Its echo in memory is clipped like any other. A spill is read through the environment the call ran in: the host’s `callEnv`, or the conversation’s environment when the host supplies none. An arbitrary custom tool returning a `fullOutputPath` is not permission to read that path; unrecognized output metadata is not treated as a trusted native spill.
 
 Native `afterTool` can transform a completed explicit result; `wrapTool` can configure output limits without replacing the execution API. Abort/recovery paths retain native semantics and do not guarantee uncommitted external output recovery. A raw interleaved stdout/stderr spill may differ from per-stream decoded callback text when Unicode bytes split across streams.
 
@@ -34,17 +34,41 @@ import {
   wrapTool,
   ToolTask,
   GenerationTask,
-  InboxDoc,
   type ConversationId,
   type Cursor,
   type ToolHookCall,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { type ExecutionEnv, getOrThrow } from "@earendil-works/pi-durable/env";
-import { MessageDoc, NodeDoc, key, nodeLine, clipToolText } from "./memory.mjs";
+import {
+  MemoryDoc,
+  MessageDoc,
+  NodeDoc,
+  key,
+  nodeLine,
+  clipToolText,
+  shownMessage,
+  type NodeRef,
+} from "./memory.mjs";
 import { PrivateAgentDoc } from "./agents.mjs";
 
 const PAGE = 29_000;
+/** The tree's roots over `count` messages, largest first, as UniiChat's zoom lists them for a line that isn't one. */
+function roots(count: number): string {
+  const out: string[] = [];
+  for (let l = 30, id = 0; l >= 0; l--) {
+    if (id + 2 ** l <= count) {
+      out.push(`${id}+${2 ** l}`);
+      id += 2 ** l;
+    }
+  }
+  return out.join(", ");
+}
+/**
+ * pi-durable built-ins by the name the host registers them under: bash and code mode spill their complete output to a
+ * file, and read pages itself, so its page is never clipped (a clipped page would lose the lines its offset skips).
+ */
+export type NativeContracts = Readonly<Record<string, "bash" | "codemode" | "read">>;
 export function pageText(text: string, page = 0): string {
   const chars = Array.from(text),
     count = Math.max(1, Math.ceil(chars.length / PAGE));
@@ -70,10 +94,14 @@ export function memoryTools(root: ConversationId) {
       page: Type.Optional(Type.Integer({ minimum: 0 })),
     }),
     outputLimits: { maxBytes: 120_000, maxLines: 30_000 },
-    async execute({ id, n = 1, page = 0 }, api, context) {
+    async execute({ id: given, n = 1, page = 0 }, api, context) {
       const images: ImageContent[] = [];
       let text: string;
-      if (typeof id === "number" && !Number.isSafeInteger(id)) throw new Error('id must be a safe integer');
+      // Only a name starts with a letter: a model may pass a message id as a string.
+      const id =
+        typeof given === "string" && !/^[A-Za-z]/.test(given)
+          ? Number(given)
+          : given;
       if (typeof id === "string") {
         const agent = await api.snapshot(PrivateAgentDoc, root, id, context);
         if (!agent?.conversationId)
@@ -113,22 +141,32 @@ export function memoryTools(root: ConversationId) {
         } while (cursor);
         text = parts.join("\n\n");
       } else {
-        if (
-          !Number.isSafeInteger(n) ||
-          n < 1 ||
-          !Number.isInteger(Math.log2(n)) ||
-          id % n !== 0
-        )
-          throw new Error("n must be a power of two and id a multiple of n");
-        if (n === 1) {
-          const message = await api.snapshot(
-            MessageDoc,
-            root,
-            String(id),
-            context,
-          );
-          if (!message) throw new Error(`Unknown message ${id}`);
-          text = `${message.kind}: ${message.text}`;
+        const count =
+          (await api.snapshot(MemoryDoc, root, context))?.nextMessage ?? 0;
+        const line =
+          Number.isSafeInteger(id) &&
+          id >= 0 &&
+          Number.isInteger(Math.log2(n)) &&
+          id % n === 0 &&
+          id + n <= count;
+        const message =
+          line && n === 1
+            ? await api.snapshot(MessageDoc, root, String(id), context)
+            : undefined;
+        if (!line || (n === 1 && !message))
+          // A wrong line is an answer, not a failure: the roots show where the tree starts.
+          return {
+            output: [
+              {
+                type: "text" as const,
+                text:
+                  `No line ${id}+${n}: n is a power of 2, id a multiple of n. ` +
+                  `The tree's roots: ${roots(count)}.`,
+              },
+            ],
+          };
+        if (message) {
+          text = shownMessage(message);
           images.push(
             ...message.images.map((image) => ({
               type: "image" as const,
@@ -136,18 +174,21 @@ export function memoryTools(root: ConversationId) {
             })),
           );
         } else {
-          const l = Math.log2(n) - 1,
-            i = id / (n / 2);
-          const left = await api.snapshot(NodeDoc, root, key([l, i]), context);
-          const right = await api.snapshot(
-            NodeDoc,
-            root,
-            key([l, i + 1]),
-            context,
-          );
-          if (!left?.value || !right?.value)
-            throw new Error("The requested child lines have not been built");
-          text = nodeLine(left.value) + "\n" + nodeLine(right.value);
+          const l = Math.log2(n) - 1;
+          const halves: NodeRef[] = [
+            [l, id / (n / 2)],
+            [l, id / (n / 2) + 1],
+          ];
+          const lines: string[] = [];
+          for (const half of halves) {
+            const node = await api.snapshot(NodeDoc, root, key(half), context);
+            lines.push(
+              node?.value
+                ? nodeLine(node.value)
+                : `${half[1] * 2 ** l}+${2 ** l}|(not summarized yet: zoom it)`,
+            );
+          }
+          text = lines.join("\n");
         }
       }
       return {
@@ -164,10 +205,13 @@ export function memoryTools(root: ConversationId) {
     replay: "safe",
     parameters: Type.Object({ id: Type.Integer({ minimum: 0 }) }),
     async execute({ id }, api, context) {
-      if (!Number.isSafeInteger(id)) throw new Error('id must be a safe integer');
-      const message = await api.snapshot(MessageDoc, root, String(id), context);
-      if (!message) throw new Error(`Unknown message ${id}`);
-      return { output: [{ type: "text" as const, text: message.date }] };
+      const message = Number.isSafeInteger(id)
+        ? await api.snapshot(MessageDoc, root, String(id), context)
+        : undefined;
+      // As UniiChat's date: the device's local time, and an answer, not a failure, for a message there isn't. It is
+      // how the model learns the time, which no turn states.
+      const text = message ? new Date(message.date).toLocaleString("sv-SE") : `No message ${id}.`;
+      return { output: [{ type: "text" as const, text }] };
     },
   });
   return [zoom, date];
@@ -227,7 +271,7 @@ export function toolPolicy(
     conversationId: ConversationId,
     context: Context,
   ) => Promise<ExecutionEnv | undefined>,
-  nativeSpillContracts: Readonly<Record<string, 'bash' | 'codemode'>> = {},
+  nativeContracts: NativeContracts = {},
 ) {
   return defineExtension({
     name: "optchat.tool-policy",
@@ -244,21 +288,9 @@ export function toolPolicy(
     ),
     hooks: [
       hook(ToolTask, {
-        async beforeTool(call, api, context) {
-          if (call.parent) return;
-          const inbox = await api.snapshot(
-            InboxDoc,
-            api.conversationId,
-            context,
-          );
-          if (inbox?.items.some((item) => item.mode === "steer"))
-            return {
-              block:
-                "A newer message is queued. Replan with that message before executing additional calls.",
-            };
-        },
         async afterTool(call, result, api, context) {
-          const contract = nativeSpillContracts[call.name];
+          const contract = nativeContracts[call.name];
+          if (contract === "read") return undefined;
           const path =
             contract === "bash"
               ? spillPath(result.structuredOutput)
@@ -292,7 +324,8 @@ export function toolPolicy(
         beforeRequest({ messages }) {
           return {
             messages: messages.map((message) =>
-              message.role !== "toolResult"
+              message.role !== "toolResult" ||
+              nativeContracts[message.toolName] === "read"
                 ? message
                 : {
                     ...message,

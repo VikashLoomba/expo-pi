@@ -1,16 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
-import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
+import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, type Context as ModelContext } from '@earendil-works/pi-ai';
 import { Harness, MemoryStorage, createRegistry, defineExtension } from '@earendil-works/pi-durable';
 import { memoryTools, pageText, toolPolicy } from '../src/tools.mjs';
-import { MessageDoc, clipToolText } from '../src/memory.mjs';
-import { originalPrompt, sharedPrompt } from '../src/prompt.mjs';
+import { MemoryDoc, MessageDoc, clipToolText } from '../src/memory.mjs';
+import { originalPrompt, sharedPrompt, subagentPrompt } from '../src/prompt.mjs';
 
 test('shared system prompt retains exact guide text unless permitted options substitute it', () => {
-  assert.equal(sharedPrompt('Unii', true), originalPrompt);
+  // The program a device runs is the agent too; the kind "unii" of the agent's replies stays.
+  assert.equal(sharedPrompt('Unii', true), originalPrompt.replace('have unii open', 'have Unii open'));
   assert.ok(sharedPrompt('OptChat', true).includes('- unii: OptChat'));
+  assert.ok(sharedPrompt('OptChat', true).includes('have OptChat open now'));
   assert.equal(sharedPrompt('Dot', false).includes("The user's computers"), false);
+  assert.ok(subagentPrompt('OptChat', true).includes("unii\n(OptChat's replies)"));
+  assert.ok(subagentPrompt('OptChat', true).includes('runs OptChat on'));
+  assert.equal(subagentPrompt('Dot', false).includes('Devices:'), false);
+  assert.ok(subagentPrompt('Dot', false).includes('view below, then your task.'));
+  assert.equal(subagentPrompt('Dot', false).includes('devices open now'), false);
 });
 test('Unicode pages return every scalar without clipping or overlap',()=>{
  const source='😀'.repeat(60_000);let rebuilt='';for(let i=0;i<3;i++)rebuilt+=pageText(source,i).split('\n').slice(1).join('\n');assert.equal(rebuilt,source);
@@ -21,13 +28,16 @@ test('real native zoom/date tools read permanent docs and preserve original imag
  try {
   const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});
   const tools=memoryTools(root.id);registry.install(defineExtension({name:'memory',tools}));registry.install(toolPolicy(tools,async()=>undefined));
-  await root.commit(async tx=>{await tx.doc(MessageDoc,root.id,'0',{i:0,kind:'user',text:'Original 😀',bytes:13,date:'2026-10-15T00:00:00Z',source:'input',images:[{data:'YWJj',mimeType:'image/png'}]});},context);
+  await root.commit(async tx=>{(await tx.doc(MemoryDoc,root.id)).nextMessage=1;await tx.doc(MessageDoc,root.id,'0',{i:0,kind:'user',text:'Original 😀',bytes:13,date:'2026-10-15T00:00:00Z',source:'input',images:[{data:'YWJj',mimeType:'image/png'}]});},context);
   let seen:any;
-  faux.setResponses([fauxAssistantMessage([fauxToolCall('zoom',{id:0,n:1}),fauxToolCall('date',{id:0})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
+  faux.setResponses([fauxAssistantMessage([fauxToolCall('zoom',{id:0,n:1}),fauxToolCall('date',{id:0}),fauxToolCall('zoom',{id:1,n:2})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
   assert.equal((await(await root.submit({type:'input',content:'read memory'},context)).wait(context)).status,'done');
-  const results=seen.messages.filter((m:any)=>m.role==='toolResult');assert.equal(results.length,2);
-  assert.ok(results[0].content.some((x:any)=>x.type==='text'&&x.text.includes('Original 😀')));assert.ok(results[0].content.some((x:any)=>x.type==='image'&&x.data==='YWJj'));
-  assert.ok(results[1].content.some((x:any)=>x.text==='2026-10-15T00:00:00Z'));
+  const results=seen.messages.filter((m:any)=>m.role==='toolResult');assert.equal(results.length,3);
+  assert.ok(results[0].content.some((x:any)=>x.type==='text'&&x.text.includes('user: Original 😀\n[image]')));assert.ok(results[0].content.some((x:any)=>x.type==='image'&&x.data==='YWJj'));
+  assert.ok(results[1].content.some((x:any)=>x.text===new Date('2026-10-15T00:00:00Z').toLocaleString('sv-SE')));
+  // A line that isn't one is an answer listing the tree's roots, not a failed call.
+  assert.equal(results[2].isError,false);
+  assert.ok(results[2].content.some((x:any)=>x.text==="No line 1+2: n is a power of 2, id a multiple of n. The tree's roots: 0+1."));
  }finally{await harness.close(context);}
 });
 
@@ -40,14 +50,14 @@ test('native output hook keeps exact Unicode head and tail including diagnostic-
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false}}},context);
  try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.equal(Array.from(text).length,30_000);assert.ok(text.startsWith('HEAD'));const entry=(await root.entries({order:'ascending'},100,undefined,context)).items.find(e=>e.kind==='pi.tool-result')!;const raw=entry.model![0]!;assert.equal(raw.role,'toolResult');if(raw.role==='toolResult')assert.equal(text,clipToolText(raw.content.filter(x=>x.type==='text').map(x=>x.text).join('')));assert.ok(text.includes('d'.repeat(100)));}finally{await harness.close(context);}
 });
-test('native sequential beforeTool admits steer after current call and blocks stale remaining calls',async()=>{
+test('native sequential tools finish the round, then the steer is delivered before the next request',async()=>{
  const { defineTool }=await import('@earendil-works/pi-durable');const {Type}=await import('@earendil-works/pi-ai');
  let started!:()=>void,release!:()=>void;const began=new Promise<void>(r=>started=r),go=new Promise<void>(r=>release=r);const calls:string[]=[];
  const tool=defineTool({name:'work',description:'work',parameters:Type.Object({name:Type.String()}),async execute({name}){calls.push(name);if(name==='a'){started();await go;}return{output:[{type:'text' as const,text:name}]};}});
  const faux=fauxProvider({models:[{id:'test'}],tokensPerSecond:1e9});const models=createModels();models.setProvider(faux.provider);const registry=createRegistry();registry.install(defineExtension({name:'tools',tools:[tool]}));registry.install(toolPolicy([tool],async()=>undefined));let seen:any;
  faux.setResponses([fauxAssistantMessage([fauxToolCall('work',{name:'a'}),fauxToolCall('work',{name:'b'}),fauxToolCall('work',{name:'c'})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false},toolExecution:'sequential',steeringMode:'all'}},context);
- try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});const first=await root.submit({type:'input',content:'run'},context);await began;const steer=await root.submit({type:'input',content:'change plans',whenBusy:'steer'},context);release();await first.wait(context);await steer.wait(context);assert.deepEqual(calls,['a']);assert.ok(seen.messages.some((m:any)=>m.role==='user'&&JSON.stringify(m.content).includes('change plans')));assert.equal(seen.messages.filter((m:any)=>m.role==='toolResult').length,3);}finally{await harness.close(context);}
+ try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});const first=await root.submit({type:'input',content:'run'},context);await began;const steer=await root.submit({type:'input',content:'change plans',whenBusy:'steer'},context);release();await first.wait(context);await steer.wait(context);assert.deepEqual(calls,['a','b','c']);const steered=seen.messages.findIndex((m:any)=>m.role==='user'&&JSON.stringify(m.content).includes('change plans'));assert.ok(steered>=0);assert.equal(seen.messages.filter((m:any)=>m.role==='toolResult').length,3);assert.ok(seen.messages.slice(0,steered).filter((m:any)=>m.role==='toolResult').length===3);}finally{await harness.close(context);}
 });
 
 test('completed native bash spill recovers full Unicode head and tail through public environment API',async()=>{
@@ -66,4 +76,33 @@ for (const body of ['😀'.repeat(40_000), '\n'.repeat(40_000)]) test('native bo
  faux.setResponses([fauxAssistantMessage([fauxToolCall('boundary',{})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false}}},context);
  try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const entry=(await root.entries({order:'ascending'},100,undefined,context)).items.find(e=>e.kind==='pi.tool-result')!;const original=entry.model![0]!;assert.equal(original.role,'toolResult');if(original.role!=='toolResult')throw new Error('Missing tool result');const raw=original.content.filter(x=>x.type==='text').map(x=>x.text).join('');assert.ok(raw.startsWith('HEAD'));assert.ok(raw.includes('TAIL'));const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.equal(text,clipToolText(raw));assert.equal(Array.from(text).length,30_000);assert.ok(text.startsWith('HEAD'));assert.ok(text.includes('TAIL'));}finally{await harness.close(context);}
+});
+
+test('a read registered as native pages itself and reaches the model unclipped', async () => {
+  const { defineTool } = await import('@earendil-works/pi-durable');
+  const { Type } = await import('@earendil-works/pi-ai');
+  const page = 'r'.repeat(40_000);
+  const tool = defineTool({
+    name: 'read', description: 'read', parameters: Type.Object({}),
+    async execute() { return { output: [{ type: 'text' as const, text: page }] }; },
+  });
+  const faux = fauxProvider({ models: [{ id: 'test', contextWindow: 1_000_000 }], tokensPerSecond: 1e9 });
+  const models = createModels(); models.setProvider(faux.provider);
+  const registry = createRegistry();
+  registry.install(defineExtension({ name: 'tools', tools: [tool] }));
+  registry.install(toolPolicy([tool], async () => undefined, { read: 'read' }));
+  const seen: ModelContext[] = [];
+  faux.setResponses([
+    fauxAssistantMessage([fauxToolCall('read', {})], { stopReason: 'toolUse' }),
+    (request: ModelContext) => { seen.push(request); return fauxAssistantMessage('done'); },
+  ]);
+  const harness = await Harness.open(new MemoryStorage(), { models, registry, settings: { compaction: { enabled: false } } }, context);
+  try {
+    const root = await harness.root(context, { agent: { model: { provider: 'faux', modelId: 'test' } } });
+    await (await root.submit({ type: 'input', content: 'run' }, context)).wait(context);
+    const texts = seen.flatMap((request) => request.messages)
+      .flatMap((message) => message.role === 'toolResult' ? message.content : [])
+      .flatMap((block) => block.type === 'text' ? [block.text] : []);
+    assert.deepEqual(texts, [page]);
+  } finally { await harness.close(context); }
 });

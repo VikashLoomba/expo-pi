@@ -13,8 +13,11 @@ import type {
   AssistantMessage,
   Context as ModelContext,
   ModelThinkingLevel,
-  StopReason,
 } from "@earendil-works/pi-ai";
+import {
+  isRetryableAssistantError,
+  retryDelayMs,
+} from "@earendil-works/pi-ai/utils/retry";
 import {
   MemoryDoc,
   readMessage,
@@ -25,6 +28,7 @@ import {
   key,
   first,
   end,
+  shownMessage,
   type NodeRef,
 } from "./memory.mjs";
 
@@ -41,45 +45,32 @@ export const ConfigDoc = defineDoc<{ summary: SummarySelection | null }>({
   fork: "current",
   initial: () => ({ summary: null }),
 });
-/** A native reply copied field by field: documents hold strict JSON, and provider objects may carry `undefined`. */
-type StoredReply = {
-  text: string;
-  content: (
-    | { type: "text"; text: string; textSignature: string | null }
-    | {
-        type: "thinking";
-        thinking: string;
-        thinkingSignature: string | null;
-        redacted: boolean;
-      }
-  )[];
-  api: string;
-  provider: string;
-  model: string;
-  responseModel: string | null;
-  responseId: string | null;
-  providerThinkingLevel: string | null;
-  thinkingLevel: ModelThinkingLevel | null;
-  stopReason: StopReason;
-  timestamp: number;
-};
-export const BuildScratchDoc = defineDoc<{
+type BuildScratch = {
   source: string;
   task: string;
   view: string;
   selection: SummarySelection | null;
-  replies: StoredReply[];
+  /** The last line, when it was too long: the next try adds only a note of its size and where the limit cuts it. */
+  last: string | null;
   shortest: string | null;
-}>({
+};
+export const BuildScratchDoc = defineDoc<BuildScratch>({
   kind: "optchat.build-scratch",
-  version: 1,
+  version: 2,
   scope: "task",
+  // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
+  migrate: (value) => {
+    const { replies, ...scratch } = value as Omit<BuildScratch, "last"> & {
+      replies: { text: string }[];
+    };
+    return { ...scratch, last: replies.at(-1)?.text ?? null };
+  },
   initial: () => ({
     source: "",
     task: "",
     view: "",
     selection: null,
-    replies: [],
+    last: null,
     shortest: null,
   }),
 });
@@ -94,8 +85,14 @@ export function prefixUtf8(text: string, budget: number): string {
   }
   return out;
 }
-export function correction(text: string): string {
-  return `Too long: your line is ${bytes(text)} bytes, over the 512-byte limit. Write\nthe whole line again for the same <input>, cutting just enough of the\nleast valuable items to fit before this cut:\n${prefixUtf8(text, 512)}| ← LIMIT`;
+const flat = (text: string): string => text.replace(/\s*\n\s*/g, " ");
+function tooLong(line: string): string {
+  return (
+    `Too long: your last line for this <input> was ${bytes(line)} bytes,\n` +
+    "over the 512-byte limit. Write the whole line again, cutting just\n" +
+    "enough of the least valuable items to fit before this cut:\n" +
+    `${prefixUtf8(line, 512)}| ← LIMIT`
+  );
 }
 const replyText = (reply: AssistantMessage): string =>
   reply.content
@@ -104,84 +101,15 @@ const replyText = (reply: AssistantMessage): string =>
     .join("")
     .replace(/\r\n|\r|\n/g, " ")
     .trim();
-function storedReply(reply: AssistantMessage, text: string): StoredReply {
-  const content: StoredReply["content"] = [];
-  for (const block of reply.content) {
-    if (block.type === "text")
-      content.push({
-        type: "text",
-        text: block.text,
-        textSignature: block.textSignature ?? null,
-      });
-    else if (block.type === "thinking")
-      content.push({
-        type: "thinking",
-        thinking: block.thinking,
-        thinkingSignature: block.thinkingSignature ?? null,
-        redacted: block.redacted ?? false,
-      });
-    // A reply with a tool call fails the attempt before it could be stored.
-  }
-  return {
-    text,
-    content,
-    api: reply.api,
-    provider: reply.provider,
-    model: reply.model,
-    responseModel: reply.responseModel ?? null,
-    responseId: reply.responseId ?? null,
-    providerThinkingLevel: reply.providerThinkingLevel ?? null,
-    thinkingLevel: reply.thinkingLevel ?? null,
-    stopReason: reply.stopReason,
-    timestamp: reply.timestamp,
-  };
-}
-function nativeReply(stored: StoredReply): AssistantMessage {
-  return {
-    role: "assistant",
-    content: stored.content.map((block) =>
-      block.type === "text"
-        ? {
-            type: "text",
-            text: block.text,
-            ...(block.textSignature === null
-              ? {}
-              : { textSignature: block.textSignature }),
-          }
-        : {
-            type: "thinking",
-            thinking: block.thinking,
-            ...(block.thinkingSignature === null
-              ? {}
-              : { thinkingSignature: block.thinkingSignature }),
-            ...(block.redacted ? { redacted: true } : {}),
-          },
-    ),
-    api: stored.api,
-    provider: stored.provider,
-    model: stored.model,
-    ...(stored.responseModel === null
-      ? {}
-      : { responseModel: stored.responseModel }),
-    ...(stored.responseId === null ? {} : { responseId: stored.responseId }),
-    ...(stored.providerThinkingLevel === null
-      ? {}
-      : { providerThinkingLevel: stored.providerThinkingLevel }),
-    ...(stored.thinkingLevel === null
-      ? {}
-      : { thinkingLevel: stored.thinkingLevel }),
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: stored.stopReason,
-    timestamp: stored.timestamp,
-  };
-}
+/**
+ * The model answered without a line: a refusal or another stop reason, a cut, an empty reply or a tool call. Asked
+ * again it fails alike, so the summary is made without it.
+ */
+const unanswerable = (reply: AssistantMessage, text: string): boolean =>
+  reply.stopReason === "length" ||
+  (reply.stopReason === "error" && reply.rawStopReason !== undefined) ||
+  reply.content.some((block) => block.type === "toolCall") ||
+  (reply.stopReason !== "error" && reply.stopReason !== "aborted" && !text);
 async function freeze(
   tx: Tx,
   root: ConversationId,
@@ -191,7 +119,7 @@ async function freeze(
   const ruler = "-".repeat(512);
   if (ref[0] === 0) {
     const m = await readMessage(tx, root, ref[1]);
-    source = `${m.kind}: ${m.text}`;
+    source = shownMessage(m);
     task = `Compaction: compress message ${m.i} into one line of at most 512 bytes\n(about 70 words), the length of this ruler:\n${ruler}\n<input>\n${source}\n</input>`;
   } else {
     const a = await readNode(tx, root, [ref[0] - 1, ref[1] * 2]),
@@ -292,17 +220,16 @@ async function release(
   if (ref[0] > 0) s.readyParents.push(ref);
   s.revision++;
 }
+/** `attempt` counts the lines the model wrote; `retries`, the provider failures since its last answer. */
 type Phase =
-  | {
-      phase: "prepare";
-    }
-  | {
-      phase: "request";
-      attempt: number;
-    }
-  | {
-      phase: "publish";
-    };
+  | { phase: "prepare" }
+  | { phase: "request"; attempt: number; retries: number }
+  | { phase: "retry"; attempt: number; retries: number; until: number }
+  | { phase: "publish" };
+type PhaseV1 =
+  | { phase: "prepare" }
+  | { phase: "request"; attempt: number }
+  | { phase: "publish" };
 /** A turn's system sections as pi-durable renders them: the text tagged `<key>` unless the section opts out. */
 async function renderedSections(
   agent: Agent,
@@ -333,7 +260,15 @@ export const BuildNode = defineTask<
   string
 >({
   name: "optchat.build-node",
-  version: 1,
+  version: 2,
+  // Version 1 had no retry phase: a request it saved has had no provider failure since its last answer.
+  migrate: (input, checkpoint) => {
+    const saved = checkpoint as PhaseV1;
+    return {
+      input: input as { ref: NodeRef },
+      checkpoint: saved.phase === "request" ? { ...saved, retries: 0 } : saved,
+    };
+  },
   initial: () => ({ phase: "prepare" }),
   phases: {
     prepare: async (task, r, ctx) => {
@@ -345,11 +280,12 @@ export const BuildNode = defineTask<
         }
         return {
           status: "running",
-          checkpoint: { phase: "request", attempt: 0 },
+          checkpoint: { phase: "request", attempt: 0, retries: 0 },
         };
       }, ctx);
     },
     request: async (task, r, ctx) => {
+      const { attempt, retries } = task.state.checkpoint;
       const saved = await r.snapshot(BuildScratchDoc, task.id, ctx);
       if (!saved?.selection) throw new Error("Missing native task scratch");
       const { selection } = saved;
@@ -376,19 +312,15 @@ export const BuildNode = defineTask<
           {
             role: "user",
             timestamp: 0,
+            // Never a try's words or thoughts: a line too long comes back as one note on its size and cut.
             content: [
               { type: "text", text: saved.view },
               { type: "text", text: saved.task },
+              ...(saved.last === null
+                ? []
+                : [{ type: "text" as const, text: tooLong(saved.last) }]),
             ],
           },
-          ...saved.replies.flatMap((reply) => [
-            nativeReply(reply),
-            {
-              role: "user" as const,
-              timestamp: 0,
-              content: correction(reply.text),
-            },
-          ]),
         ],
       };
       let failure: string | undefined;
@@ -402,47 +334,69 @@ export const BuildNode = defineTask<
           signal: r.signal,
         });
         r.signal.throwIfAborted();
-        if (
-          reply.stopReason === "error" ||
-          reply.stopReason === "aborted" ||
-          reply.stopReason === "length" ||
-          reply.content.some((c) => c.type === "toolCall")
-        )
-          failure =
-            reply.errorMessage ??
-            "Summary model did not produce a successful text response";
       } catch (error) {
         r.signal.throwIfAborted();
         failure = error instanceof Error ? error.message : String(error);
       }
       const answer = reply;
-      const text = answer ? replyText(answer) : "";
-      if (!text) failure ??= "Summary model returned empty text";
+      // An outage only delays a summary, as UniiChat's patient calls do: provider failures retry past pi-durable's
+      // bounded policy, at pi-ai's backoff, which caps at a minute.
+      const { retry } = r.settings;
+      const until = r.now() + retryDelayMs(retry, retries + 1);
       await r.commit(async (tx) => {
-        if (failure !== undefined || answer === undefined) {
+        if (
+          retry.enabled &&
+          answer !== undefined &&
+          answer.stopReason === "error" &&
+          isRetryableAssistantError(answer)
+        )
+          return {
+            status: "running",
+            checkpoint: { phase: "retry", attempt, retries: retries + 1, until },
+          };
+        const d = await tx.doc(BuildScratchDoc, task.id);
+        const text = answer ? replyText(answer) : "";
+        if (answer !== undefined && unanswerable(answer, text)) {
+          // The best line a try wrote, else the source cut to the limit.
+          d.shortest ??= prefixUtf8(flat(d.source), 512);
+          return { status: "running", checkpoint: { phase: "publish" } };
+        }
+        if (
+          answer === undefined ||
+          answer.stopReason === "error" ||
+          answer.stopReason === "aborted"
+        ) {
+          // Not the model's doing nor passing, as a missing credential: tried again at the next message.
           await release(tx, r.conversationId, task.input.ref, task.id);
+          const message =
+            failure ?? answer?.errorMessage ?? "Summary model returned no reply";
           return {
             status: "terminal",
-            outcome: {
-              status: "failed",
-              error: { message: failure ?? "Summary model returned no reply" },
-            },
+            outcome: { status: "failed", error: { message } },
           };
         }
-        const d = await tx.doc(BuildScratchDoc, task.id);
         if (d.shortest === null || bytes(text) < bytes(d.shortest))
           d.shortest = text;
-        const attempt = task.state.checkpoint.attempt + 1;
-        const done = bytes(text) <= 512 || attempt >= 5;
-        // The oversized native reply stays in the same saved conversation, followed by its correction.
-        if (!done) d.replies.push(storedReply(answer, text));
+        const done = bytes(text) <= 512 || attempt + 1 >= 5;
+        if (!done) d.last = text;
         return {
           status: "running",
           checkpoint: done
             ? { phase: "publish" }
-            : { phase: "request", attempt },
+            : { phase: "request", attempt: attempt + 1, retries: 0 },
         };
       }, ctx);
+    },
+    retry: async (task, r, ctx) => {
+      const { attempt, retries, until } = task.state.checkpoint;
+      await r.sleep(until, ctx);
+      await r.commit(
+        () => ({
+          status: "running",
+          checkpoint: { phase: "request", attempt, retries },
+        }),
+        ctx,
+      );
     },
     publish: async (task, r, ctx) => {
       await r.commit(async (tx) => {

@@ -32,6 +32,7 @@ import {
   type HarnessOptions,
   type Conversation,
   type ConversationInit,
+  type Extension,
   ROOT_CONVERSATION_ID,
 } from "@earendil-works/pi-durable";
 import {
@@ -44,20 +45,20 @@ import {
 } from "./memory.mjs";
 import { BuildNode, ConfigDoc, pumpBuilds } from "./summary.mjs";
 import {
+  agentTask,
   agentTool,
-  AgentTask,
+  agentsAtWork,
   AgentDirectoryDoc,
   takeAgentReports,
 } from "./agents.mjs";
-import { sharedPrompt } from "./prompt.mjs";
-import { memoryTools, toolPolicy } from "./tools.mjs";
+import { sharedPrompt, subagentPrompt } from "./prompt.mjs";
+import { memoryTools, toolPolicy, type NativeContracts } from "./tools.mjs";
 
 export type Admission = {
   requestId: string;
   kind: "user" | "work" | "note";
   content: JsonRepresentation<UserInput>;
   date: string;
-  turnState: string;
   epoch: number;
   fresh: boolean;
   phase: "pending" | "prepared" | "submitted" | "cancelled";
@@ -68,11 +69,20 @@ export const InputDoc = defineDocFamily<
   Admission | null
 >({
   kind: "optchat.input",
-  version: 1,
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "current",
   family: true,
+  // Version 1 kept the turn state each input was accepted with; a turn now reads it as it starts.
+  migrate: (value) => {
+    const stored = (
+      value as { value: (Admission & { turnState: string }) | null }
+    ).value;
+    if (stored === null) return { value: null };
+    const { turnState: _accepted, ...admission } = stored;
+    return { value: admission };
+  },
   initial: (value) => ({ value }),
 });
 /** The entry a dispatched input is placed as. Its user message carries the envelope; the input is in `InputDoc`. */
@@ -96,18 +106,29 @@ export type AppState = {
   stop: number;
   stopped: number;
   stopPending: string[];
+  /** The note a stop that cut a running turn leaves in memory, once the turn's last entries are there. */
+  stopNote: string | null;
+  /** Tool calls projected but not logged yet: each is logged right before its result, as UniiChat logs them. */
+  held: Record<string, { text: string; date: string; source: string }>;
 };
 export const AppDoc = defineDoc<AppState>({
   kind: "optchat.app",
-  version: 2,
+  version: 3,
   scope: "conversation",
   history: "latest",
   fork: "current",
-  // Version 1 had every field but the prompt version; its instructions hold the composed prompt.
-  migrate: (value) => ({
-    ...(value as Omit<AppState, "promptVersion">),
-    promptVersion: 1,
-  }),
+  migrate: (value, fromVersion) => {
+    // Version 1 had no prompt version; its instructions hold the composed prompt.
+    const stored =
+      fromVersion < 2
+        ? {
+            ...(value as Omit<AppState, "promptVersion" | "stopNote" | "held">),
+            promptVersion: 1,
+          }
+        : (value as Omit<AppState, "stopNote" | "held">);
+    // Version 2 logged a call with its assistant message, so no call waits for its result, and noted no stop.
+    return { ...stored, stopNote: null, held: {} };
+  },
   initial: () => ({
     promptVersion: PROMPT_VERSION,
     epoch: 0,
@@ -121,6 +142,8 @@ export const AppDoc = defineDoc<AppState>({
     stop: 0,
     stopped: 0,
     stopPending: [],
+    stopNote: null,
+    held: {},
   }),
 });
 
@@ -182,7 +205,6 @@ export async function admitInput(
     kind: "user" | "work" | "note";
     content: UserInput;
     date: string;
-    turnState?: string;
   },
 ): Promise<void> {
   const stored = await tx.doc(InputDoc, root, input.requestId, null);
@@ -200,7 +222,6 @@ export async function admitInput(
   if (input.kind === "note") {
     stored.value = {
       ...input,
-      turnState: input.turnState ?? "",
       content: input.content,
       epoch: app.epoch,
       fresh: false,
@@ -221,7 +242,6 @@ export async function admitInput(
   }
   stored.value = {
     ...input,
-    turnState: input.turnState ?? "",
     content: input.content,
     epoch: app.epoch,
     fresh,
@@ -290,24 +310,29 @@ async function projectEntries(
           if (block.type === "text") text += block.text;
           else if (block.type === "toolCall") {
             await flush();
-            await appendMessage(tx, root, {
-              kind: "tool",
+            // pi-durable gives every call a result, an aborted one too, so a held call is always logged.
+            app.held[block.id] = {
               text: `${block.name} ${JSON.stringify(block.arguments)}`,
               date,
-              images: [],
               source: `${entry.id}:${index++}`,
-            });
+            };
           }
           // Thinking remains in native history/provider context but not semantic memory.
         }
         await flush();
       } else if (message.role === "toolResult") {
+        const call = app.held[message.toolCallId];
+        if (call) {
+          await appendMessage(tx, root, { kind: "tool", ...call, images: [] });
+          delete app.held[message.toolCallId];
+        }
+        const text = message.content
+          .filter((x) => x.type === "text")
+          .map((x) => x.text)
+          .join("");
         await appendMessage(tx, root, {
           kind: "echo",
-          text: message.content
-            .filter((x) => x.type === "text")
-            .map((x) => x.text)
-            .join(""),
+          text: `${message.isError ? "error: " : ""}${text || "(no output)"}`,
           date,
           images: message.content.filter(
             (x): x is ImageContent => x.type === "image",
@@ -339,18 +364,23 @@ async function consumeReports(
   }
 }
 
+/**
+ * A fresh turn's message, as UniiChat's: the view, the host's turn state and the agents at work, which change, so
+ * they follow the cached view and never enter the prompt; then the head that tells a turn from a compaction.
+ */
 function envelope(
   view: string,
   content: UserInput,
-  date: string,
   turnState: string,
+  agents: string[],
 ): UserInput {
-  // Dynamic date belongs after the saved view, never in instructions/tool schemas.
+  const state = turnState ? `${turnState}\n\n` : "";
+  const working = agents.length ? agents.join(", ") : "none";
   return [
-    ...(view ? [{ type: "text" as const, text: view }] : []),
+    { type: "text", text: view },
     {
       type: "text",
-      text: `\n<turn date="${date}"/>\n${turnState}${turnState ? "\n" : ""}`,
+      text: `\n${state}Agents at work now: ${working}.\n\nTurn: the user's new message:\n\n`,
     },
     ...(typeof content === "string"
       ? [{ type: "text" as const, text: content }]
@@ -359,208 +389,247 @@ function envelope(
 }
 
 type CoordinatorState = { phase: "coordinate"; tick: number };
-export const CoordinatorTask = defineTask<{}, CoordinatorState, null>({
-  name: "optchat.coordinator",
-  version: 1,
-  initial: () => ({ phase: "coordinate", tick: 0 }),
-  phases: {
-    async coordinate(task, runtime, context) {
-      const root = runtime.conversationId;
-      const invocation = withAbortSignal(runtime.signal, context);
-      const acquired = await Promise.all([
-        runtime.watchDoc(AppDoc, root, invocation),
-        runtime.watchDoc(MemoryDoc, root, invocation),
-        runtime.watchDoc(LiveDoc, root, invocation),
-        runtime.watchDoc(InboxDoc, root, invocation),
-        runtime.watchDoc(AgentDirectoryDoc, root, invocation),
-      ]);
-      if (acquired.some((watch) => !watch)) {
-        await Promise.all(acquired.map((watch) => watch?.stop()));
-        throw new Error("OptChat documents were not initialized");
-      }
-      const watches = acquired.flatMap((watch) => (watch ? [watch] : []));
-      const changed = new Promise<void>((resolve) => {
-        for (const watch of watches) {
-          const seen = JSON.stringify(watch.value);
-          watch.start(async (value) => {
-            if (JSON.stringify(value) !== seen) resolve();
-          });
+/** `turnState` is the host's; a turn reads it as it starts. */
+const coordinatorTask = (turnState: () => Promise<string>) =>
+  defineTask<Record<string, never>, CoordinatorState, null>({
+    name: "optchat.coordinator",
+    version: 1,
+    initial: () => ({ phase: "coordinate", tick: 0 }),
+    phases: {
+      async coordinate(task, runtime, context) {
+        const root = runtime.conversationId;
+        const invocation = withAbortSignal(runtime.signal, context);
+        // Read only while an input or a report waits, outside the commit; a host that can't tell (a locked
+        // keychain) is reported, and the turn starts without it rather than never.
+        const pending =
+          (await runtime.snapshot(AppDoc, root, invocation))?.pending.length ?? 0;
+        const reports =
+          (await runtime.snapshot(AgentDirectoryDoc, root, invocation))
+            ?.pendingReports.length ?? 0;
+        const read = pending + reports > 0;
+        const state = !read
+          ? ""
+          : await turnState().catch((error: unknown) => {
+              runtime.report(error);
+              return "";
+            });
+        const acquired = await Promise.all([
+          runtime.watchDoc(AppDoc, root, invocation),
+          runtime.watchDoc(MemoryDoc, root, invocation),
+          runtime.watchDoc(LiveDoc, root, invocation),
+          runtime.watchDoc(InboxDoc, root, invocation),
+          runtime.watchDoc(AgentDirectoryDoc, root, invocation),
+        ]);
+        if (acquired.some((watch) => !watch)) {
+          await Promise.all(acquired.map((watch) => watch?.stop()));
+          throw new Error("OptChat documents were not initialized");
         }
-      });
-      let dispatchId: string | undefined;
-      let stop = 0;
-      let progressed = false;
-      try {
-        await runtime.commit(async (tx) => {
-          // All native table reads happen before reset/task creation table writes.
-          const projection = await projectEntries(tx, root);
-          progressed = projection.progressed;
-          await consumeReports(tx, root, new Date(runtime.now()).toISOString());
-          await closeSettledEpoch(tx, root);
-          const app = await tx.doc(AppDoc, root);
-          const next = app.pending[0];
-          if (app.stop > app.stopped) {
-            if (projection.caughtUp) {
-              stop = app.stop;
-              // A withdrawn input was never handed to the model, so it never enters memory.
-              for (const id of app.stopPending) {
-                const input = await storedInput(tx, root, id);
-                input.phase = "cancelled";
-                input.envelope = null;
-              }
-              app.pending = app.pending.filter(
-                (id) => !app.stopPending.includes(id),
-              );
-              app.stopPending = [];
-              app.revision++;
-              progressed = true;
-            }
-          } else if (next !== undefined) {
-            const input = await storedInput(tx, root, next);
-            if (input.kind === "note" && projection.caughtUp) {
-              await appendMessage(
-                tx,
-                root,
-                {
-                  kind: "note",
-                  text: textOf(input.content),
-                  date: input.date,
-                  images: imagesOf(input.content),
-                  source: `input:${input.requestId}`,
-                },
-                false,
-              );
-              input.phase = "submitted";
-              app.pending.shift();
-              app.revision++;
-              progressed = true;
-            } else if (input.phase === "prepared") dispatchId = input.requestId;
-            else if (
-              projection.caughtUp &&
-              (!input.fresh || (await memoryReady(tx, root)))
-            ) {
-              await settleViews(tx, root);
-              const view = input.fresh ? await renderMain(tx, root) : "";
-              // The view is frozen here; the original enters memory once pi-durable places the delivery.
-              input.envelope = envelope(
-                view,
-                input.content,
-                input.date,
-                input.turnState,
-              );
-              input.phase = "prepared";
-              app.started = true;
-              app.revision++;
-              if (input.fresh)
-                await tx.appendEntry(ResetEntry, root, { head: "self" });
-              dispatchId = input.requestId;
-              progressed = true;
-            }
+        const watches = acquired.flatMap((watch) => (watch ? [watch] : []));
+        const changed = new Promise<void>((resolve) => {
+          for (const watch of watches) {
+            const seen = JSON.stringify(watch.value);
+            watch.start(async (value) => {
+              if (JSON.stringify(value) !== seen) resolve();
+            });
           }
-          const launched = await pumpBuilds(tx, root);
-          if (launched.length > 0) progressed = true;
-          // Effect must run outside this native commit; checkpoint the preparation first.
-          if (dispatchId !== undefined || progressed)
-            return {
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 1,
-              },
-            };
-        }, context);
-        if (stop) {
-          const conversation = await runtime.conversation(root, context);
-          if (!conversation)
-            throw new Error("OptChat root conversation is missing");
-          await conversation.abort(context);
+        });
+        let dispatchId: string | undefined;
+        let stop = 0;
+        let progressed = false;
+        try {
           await runtime.commit(async (tx) => {
+            // All native table reads happen before reset/task creation table writes.
+            const projection = await projectEntries(tx, root);
+            progressed = projection.progressed;
+            const now = new Date(runtime.now()).toISOString();
+            await consumeReports(tx, root, now);
+            await closeSettledEpoch(tx, root);
             const app = await tx.doc(AppDoc, root);
-            app.stopped = stop;
-            app.revision++;
-            return {
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 2,
-              },
-            };
+            if (
+              app.stopNote !== null &&
+              app.stopped >= app.stop &&
+              projection.caughtUp &&
+              !(await tx.doc(LiveDoc, root)).run
+            ) {
+              await appendMessage(tx, root, {
+                kind: "note",
+                text: app.stopNote,
+                date: now,
+                images: [],
+                source: `stop:${app.stop}`,
+              });
+              app.stopNote = null;
+              app.revision++;
+              progressed = true;
+            }
+            const next = app.pending[0];
+            if (app.stop > app.stopped) {
+              if (projection.caughtUp) {
+                stop = app.stop;
+                // A withdrawn input was never handed to the model, so it never enters memory.
+                for (const id of app.stopPending) {
+                  const input = await storedInput(tx, root, id);
+                  input.phase = "cancelled";
+                  input.envelope = null;
+                }
+                app.pending = app.pending.filter(
+                  (id) => !app.stopPending.includes(id),
+                );
+                app.stopPending = [];
+                app.revision++;
+                progressed = true;
+              }
+            } else if (next !== undefined) {
+              const input = await storedInput(tx, root, next);
+              if (input.kind === "note" && projection.caughtUp) {
+                await appendMessage(
+                  tx,
+                  root,
+                  {
+                    kind: "note",
+                    text: textOf(input.content),
+                    date: input.date,
+                    images: imagesOf(input.content),
+                    source: `input:${input.requestId}`,
+                  },
+                  false,
+                );
+                input.phase = "submitted";
+                app.pending.shift();
+                app.revision++;
+                progressed = true;
+              } else if (input.phase === "prepared") dispatchId = input.requestId;
+              else if (input.fresh && !read)
+                // Accepted after the turn state was skipped: the next tick reads it.
+                progressed = true;
+              else if (
+                projection.caughtUp &&
+                (!input.fresh || (await memoryReady(tx, root)))
+              ) {
+                await settleViews(tx, root);
+                // The view is frozen here; the original enters memory once pi-durable places the delivery. A message
+                // sent while a turn runs goes to it as it is, between its tool calls.
+                input.envelope = input.fresh
+                  ? envelope(
+                      await renderMain(tx, root),
+                      input.content,
+                      state,
+                      await agentsAtWork(tx, root),
+                    )
+                  : input.content;
+                input.phase = "prepared";
+                app.started = true;
+                app.revision++;
+                if (input.fresh)
+                  await tx.appendEntry(ResetEntry, root, { head: "self" });
+                dispatchId = input.requestId;
+                progressed = true;
+              }
+            }
+            const launched = await pumpBuilds(tx, root);
+            if (launched.length > 0) progressed = true;
+            // Effect must run outside this native commit; checkpoint the preparation first.
+            if (dispatchId !== undefined || progressed)
+              return {
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 1,
+                },
+              };
           }, context);
-        } else if (dispatchId !== undefined) {
-          const requestId = dispatchId;
-          // The prepared admission is read back committed: a draft is not readable after its commit.
-          const prepared = (
-            await runtime.snapshot(InputDoc, root, requestId, context)
-          )?.value;
-          if (!prepared?.envelope)
-            throw new Error(`Prepared input has no envelope: ${requestId}`);
-          const conversation = await runtime.conversation(root, context);
-          if (!conversation)
-            throw new Error("OptChat root conversation is missing");
-          await conversation.submit(
-            {
-              type: "input",
-              requestId: nativeRequest(requestId),
-              content: prepared.envelope,
-              whenBusy: "steer",
-              entry: {
-                kind: DeliveryEntry.kind,
-                data: { requestId, kind: prepared.kind },
+          if (stop) {
+            const conversation = await runtime.conversation(root, context);
+            if (!conversation)
+              throw new Error("OptChat root conversation is missing");
+            await conversation.abort(context);
+            await runtime.commit(async (tx) => {
+              const app = await tx.doc(AppDoc, root);
+              app.stopped = stop;
+              app.revision++;
+              return {
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 2,
+                },
+              };
+            }, context);
+          } else if (dispatchId !== undefined) {
+            const requestId = dispatchId;
+            // The prepared admission is read back committed: a draft is not readable after its commit.
+            const prepared = (
+              await runtime.snapshot(InputDoc, root, requestId, context)
+            )?.value;
+            if (!prepared?.envelope)
+              throw new Error(`Prepared input has no envelope: ${requestId}`);
+            const conversation = await runtime.conversation(root, context);
+            if (!conversation)
+              throw new Error("OptChat root conversation is missing");
+            await conversation.submit(
+              {
+                type: "input",
+                requestId: nativeRequest(requestId),
+                content: prepared.envelope,
+                whenBusy: "steer",
+                entry: {
+                  kind: DeliveryEntry.kind,
+                  data: { requestId, kind: prepared.kind },
+                },
               },
-            },
-            context,
-          );
-          await runtime.commit(async (tx) => {
-            const app = await tx.doc(AppDoc, root);
-            const saved = await storedInput(tx, root, requestId);
-            saved.phase = "submitted";
-            saved.envelope = null;
-            const position = app.pending.indexOf(requestId);
-            if (position >= 0) app.pending.splice(position, 1);
-            app.revision++;
-            return {
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 2,
+              context,
+            );
+            await runtime.commit(async (tx) => {
+              const app = await tx.doc(AppDoc, root);
+              const saved = await storedInput(tx, root, requestId);
+              saved.phase = "submitted";
+              saved.envelope = null;
+              const position = app.pending.indexOf(requestId);
+              if (position >= 0) app.pending.splice(position, 1);
+              app.revision++;
+              return {
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 2,
+                },
+              };
+            }, context);
+          } else if (!progressed) {
+            const ended = Promise.race(watches.map((watch) => watch.closed)).then(
+              (end) => {
+                if (
+                  end.reason === "session_failed" ||
+                  end.reason === "listener_error"
+                )
+                  throw end.error;
+                throw new Error(`OptChat watch ended: ${end.reason}`);
               },
-            };
-          }, context);
-        } else if (!progressed) {
-          const ended = Promise.race(watches.map((watch) => watch.closed)).then(
-            (end) => {
-              if (
-                end.reason === "session_failed" ||
-                end.reason === "listener_error"
-              )
-                throw end.error;
-              throw new Error(`OptChat watch ended: ${end.reason}`);
-            },
-          );
-          await awaitWithContext(Promise.race([changed, ended]), invocation);
-          await runtime.commit(
-            () => ({
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 1,
-              },
-            }),
-            context,
-          );
+            );
+            await awaitWithContext(Promise.race([changed, ended]), invocation);
+            await runtime.commit(
+              () => ({
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 1,
+                },
+              }),
+              context,
+            );
+          }
+        } finally {
+          await Promise.all(watches.map((watch) => watch.stop()));
         }
-      } finally {
-        await Promise.all(watches.map((watch) => watch.stop()));
-      }
+      },
     },
-  },
-  async abort(_task, runtime, context) {
-    await runtime.commit(
-      () => ({ status: "terminal", outcome: { status: "aborted" } }),
-      context,
-    );
-  },
-});
+    async abort(_task, runtime, context) {
+      await runtime.commit(
+        () => ({ status: "terminal", outcome: { status: "aborted" } }),
+        context,
+      );
+    },
+  });
 
 export type OptChatOptions = {
   models: Models;
@@ -574,7 +643,9 @@ export type OptChatOptions = {
     target: EnvTarget,
     context: Context,
   ) => ExecutionEnv | undefined | Promise<ExecutionEnv | undefined>;
-  nativeSpillContracts?: Record<string, "bash" | "codemode">;
+  nativeContracts?: NativeContracts;
+  /** What changes between turns, such as the devices: read as a turn or a subagent starts, it follows the view. */
+  turnState?: () => Promise<string>;
   onReport?: HarnessOptions["onReport"];
   /** Runs in the root conversation's creating commit after OptChat's own documents, for the host's documents. */
   init?: ConversationInit;
@@ -592,7 +663,6 @@ export type OptChat = {
     content: UserInput;
     kind?: "user" | "work" | "note";
     date?: string;
-    turnState?: string;
   }): Promise<string>;
   /**
    * The user's own instructions, pi-durable's `instructions` section rendered after the prompt, in the host's
@@ -612,42 +682,57 @@ export async function openOptChat(
   context: Context,
 ): Promise<OptChat> {
   const registry = createRegistry();
-  const prompt = sharedPrompt(
-    options.name ?? "OptChat",
-    options.hasDeviceTools ?? false,
-  );
+  const name = options.name ?? "OptChat";
+  const hasDeviceTools = options.hasDeviceTools ?? false;
+  const turnState = async () => (await options.turnState?.()) ?? "";
+  const coordinator = coordinatorTask(turnState);
   const tools: ToolRegistration[] = [
     ...memoryTools(ROOT_CONVERSATION_ID),
-    agentTool(ROOT_CONVERSATION_ID),
     ...(options.tools ?? []),
   ];
-  // The prompt is the extension's own section and the offered tools follow the host, so an edited prompt or tool
-  // set reaches an existing conversation as pi-durable's system entry instead of staying as created.
+  const agents = agentTask({
+    master: () => master,
+    prompt: subagentPrompt(name, hasDeviceTools),
+    turnState,
+  });
+  const agent = agentTool(ROOT_CONVERSATION_ID, agents);
+  // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
+  // reaches an existing conversation as pi-durable's system entry instead of staying as created. The master's prompt
+  // and agent tool are an extension of their own, which a subagent's conversation goes without.
+  const master: Extension = defineExtension({
+    name: "optchat.master",
+    sections: [
+      section("optchat", () => sharedPrompt(name, hasDeviceTools), {
+        tag: false,
+      }),
+    ],
+    tools: [agent],
+  });
   registry.install(
     defineExtension({
       name: "optchat",
-      sections: [section("optchat", () => prompt, { tag: false })],
       tools,
-      tasks: [CoordinatorTask, BuildNode, AgentTask],
+      tasks: [coordinator, BuildNode, agents],
     }),
   );
+  registry.install(master);
   let harness: Harness | undefined;
   registry.install(
     toolPolicy(
-      tools,
+      [...tools, agent],
       async (call, conversationId, ctx) => {
         if (!harness) throw new Error("OptChat is still opening");
-        const agent = await harness.snapshot(
+        const stored = await harness.snapshot(
           NativeAgentDoc,
           conversationId,
           ctx,
         );
-        const target: EnvTarget = { conversationId, cwd: agent?.cwd, read: harness };
+        const target: EnvTarget = { conversationId, cwd: stored?.cwd, read: harness };
         return options.callEnv
           ? options.callEnv(call, target, ctx)
           : options.env?.(target, ctx);
       },
-      options.nativeSpillContracts,
+      options.nativeContracts,
     ),
   );
   const opened = await Harness.open(
@@ -674,7 +759,7 @@ export async function openOptChat(
       await tx.doc(ConfigDoc, id);
       const app = await tx.doc(AppDoc, id);
       app.coordinator = await tx.createTask(
-        CoordinatorTask,
+        coordinator,
         {},
         {
           conversationId: id,
@@ -702,7 +787,6 @@ export async function openOptChat(
       content: UserInput;
       kind?: "user" | "work" | "note";
       date?: string;
-      turnState?: string;
     }) {
       if (!input.requestId)
         throw new Error("Provide a stable request ID for each original input");
@@ -797,6 +881,9 @@ export async function openOptChat(
     async abort() {
       const requested = await opened.commit(async (tx) => {
         const app = await tx.doc(AppDoc, root.id);
+        // A stop that cuts a running turn tells later turns so, as UniiChat's note does.
+        if ((await tx.doc(LiveDoc, root.id)).run)
+          app.stopNote = `Stopped by the user: ${name}'s turn.`;
         app.stop++;
         app.stopPending.push(...app.pending);
         app.open = false;

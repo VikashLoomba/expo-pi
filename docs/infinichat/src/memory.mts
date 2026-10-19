@@ -112,6 +112,9 @@ export async function readMessage(
 ): Promise<CanonicalMessage> {
   return await tx.doc(MessageDoc, root, String(i), null);
 }
+/** A message as a compaction and zoom show it: an image's line tells the model there is one to zoom into. */
+export const shownMessage = (m: CanonicalMessage): string =>
+  `${m.kind}: ${m.text}${m.images.map(() => "\n[image]").join("")}`;
 export async function readNode(
   tx: Tx,
   root: ConversationId,
@@ -242,11 +245,11 @@ export async function settleViews(tx: Tx, root: ConversationId): Promise<void> {
     s.main.refs.push([0, i]);
     s.compact.refs.push([0, i]);
     const T = i + 1;
+    // Each view batches on its own size only, so a chat batch leaves the compactions' cached view alone.
     if (bytes(await rendered(tx, root, s.main.refs)) > 128000)
       s.main.reducing = true;
-    const mainBatch = s.main.reducing;
-    if (mainBatch) await reduceView(tx, root, s.main, T, 64000);
-    if (mainBatch || bytes(await rendered(tx, root, s.compact.refs)) > 32000)
+    if (s.main.reducing) await reduceView(tx, root, s.main, T, 64000);
+    if (bytes(await rendered(tx, root, s.compact.refs)) > 32000)
       s.compact.reducing = true;
     if (s.compact.reducing) await reduceView(tx, root, s.compact, T, 16000);
     s.revision++;

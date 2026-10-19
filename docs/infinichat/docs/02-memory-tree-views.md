@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §§1–3](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native document scopes and lifetime](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [transactions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1589-L1655).
+Sources: [OptChat §§1–3](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [UniiChat Memory.ts](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1-L35), [native document scopes and lifetime](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [transactions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1589-L1655).
 
 ## Canonical records
 
@@ -14,7 +14,7 @@ Thinking is not OptChat semantic memory. Preserve native reasoning/signatures ne
 
 `node(0,i)` covers message `i`. `node(l,i)` covers the `2^l` messages starting at `i*2^l`; its children are `(l-1,2i)` and `(l-1,2i+1)`. The external address is `id+n`, where `id=i*2^l` and `n=2^l`.
 
-A leaf source is the exact `kind: text`. A parent source is the exact left and right node text joined by one newline. If that source fits in 512 UTF-8 bytes, publish it without a model call. Once published, node content is immutable.
+A leaf source is the exact `kind: text`, followed by an `[image]` line for each image the message holds, the line `zoom(id,1)` shows; the image itself stays in the record. A parent source is the exact left and right node text joined by one newline. If that source fits in 512 UTF-8 bytes, publish it without a model call. Once published, node content is immutable.
 
 ## Saved main view
 
@@ -26,7 +26,7 @@ Persist exact view references and pending-batch state. Reopening or beginning a 
 
 ## Saved compaction view
 
-Compaction has its own saved view: initially reduce toward 16,000 bytes, append later lines, and reduce again when over 32,000 bytes or when the main view batches. Its context contains only built lines and stops at the first missing leaf. A leaf build sees only earlier messages; a parent build may see detail through its own final message, never future context.
+Compaction has its own saved view: initially reduce toward 16,000 bytes, append later lines, and reduce again when over 32,000 bytes. Each view batches on its own size only, as UniiChat’s two views do, so a batch of the main view leaves the compactions’ cached view alone. Its context contains only built lines and stops at the first missing leaf. A leaf build sees only earlier messages; a parent build may see detail through its own final message, never future context.
 
 Ready queues, the contiguous built frontier and targeted parent enqueueing drive work. A growing history must not be repeatedly scanned to rediscover unbuilt nodes.
 
@@ -153,6 +153,9 @@ export async function readMessage(
 ): Promise<CanonicalMessage> {
   return await tx.doc(MessageDoc, root, String(i), null);
 }
+/** A message as a compaction and zoom show it: an image's line tells the model there is one to zoom into. */
+export const shownMessage = (m: CanonicalMessage): string =>
+  `${m.kind}: ${m.text}${m.images.map(() => "\n[image]").join("")}`;
 export async function readNode(
   tx: Tx,
   root: ConversationId,
@@ -283,11 +286,11 @@ export async function settleViews(tx: Tx, root: ConversationId): Promise<void> {
     s.main.refs.push([0, i]);
     s.compact.refs.push([0, i]);
     const T = i + 1;
+    // Each view batches on its own size only, so a chat batch leaves the compactions' cached view alone.
     if (bytes(await rendered(tx, root, s.main.refs)) > 128000)
       s.main.reducing = true;
-    const mainBatch = s.main.reducing;
-    if (mainBatch) await reduceView(tx, root, s.main, T, 64000);
-    if (mainBatch || bytes(await rendered(tx, root, s.compact.refs)) > 32000)
+    if (s.main.reducing) await reduceView(tx, root, s.main, T, 64000);
+    if (bytes(await rendered(tx, root, s.compact.refs)) > 32000)
       s.compact.reducing = true;
     if (s.compact.reducing) await reduceView(tx, root, s.compact, T, 16000);
     s.revision++;

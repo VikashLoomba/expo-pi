@@ -2,11 +2,11 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §§5–6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [native inbox](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2271-L2419), [prompt and context](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L3431-L3559), [document watches](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L4481-L4540).
+Sources: [OptChat §§5–6](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [UniiChat prompt.txt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/prompt.txt), [UniiChat’s turn message](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L545-L556), [stop](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L1209-L1222) and [tool results](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Agent.ts#L198), [native inbox](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L2271-L2419), [prompt and context](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L3431-L3559), [document watches](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L4481-L4540).
 
 ## Fresh versus active input
 
-An input accepted while native work is active is a distinct steering input for that logical turn. An idle input reserves a fresh turn, waits for every preceding message’s leaf, freezes the saved view **before** logging that new input, resets native provider context, and submits the complete original input after the view. Previous provider messages do not carry across the reset; stored native history remains intact.
+An input accepted while native work is active is a distinct steering input for that logical turn, sent as its own content. An idle input reserves a fresh turn, waits for every preceding message’s leaf, freezes the saved view **before** logging that new input, resets native provider context, and submits UniiChat’s turn message: the view, the host’s turn state, `Agents at work now: <names|none>.`, then `Turn: the user's new message:` and the complete original input. That head tells a turn from a compaction, which one prompt serves. Previous provider messages do not carry across the reset; stored native history remains intact.
 
 Native completion, not a delayed coordinator status update, determines whether a turn is still active. Resolve genuine pending native submissions and receipts when deciding the boundary. Lost acknowledgements use stable native request IDs; they must not duplicate an input or keep a completed epoch artificially open.
 
@@ -14,17 +14,17 @@ Inputs arriving while a fresh turn is being prepared remain distinct inputs in i
 
 ## Projection and wakeups
 
-Read committed native entries in native order and append the original input of each placed delivery, visible assistant text, tool-call data and tool-result content to canonical memory. An input is logged when the native runtime places it, as the gist logs a message when it is handed to the model; a stop withdraws an input not yet placed, and it never enters memory. Commit canonical records and the source cursor together. Private-agent entries are not main-chat entries. Native document subscriptions are wakeups: the saved cursor and committed native records, not event callback arrival, determine what remains to project.
+Read committed native entries in native order and append the original input of each placed delivery, visible assistant text, tool-call data and tool-result content to canonical memory. A tool call is held in `AppDoc` and logged right before its result, as UniiChat logs it; pi-durable gives every call a result, an aborted one too. A failed result’s text starts `error: ` and an empty one is `(no output)`. An input is logged when the native runtime places it, as the gist logs a message when it is handed to the model; a stop withdraws an input not yet placed, and it never enters memory. A stop that cuts a running turn leaves the note `Stopped by the user: <Name>'s turn.` once the stop is processed, the projection has caught up and the run has ended. Commit canonical records and the source cursor together. Private-agent entries are not main-chat entries. Native document subscriptions are wakeups: the saved cursor and committed native records, not event callback arrival, determine what remains to project.
 
 ## Prompt
 
-Use the guide’s full prompt, only rename the agent or omit its device paragraph when there are no device tools, and append the user’s instructions: the prompt is the optchat extension’s untagged section, so an edited prompt reaches existing conversations as a system entry, and the user’s instructions are the conversation’s `instructions`, set with `setInstructions` and rendered last. `AppDoc` is version 2 for this: a version 1 conversation stored the composed prompt as its instructions, pi-durable migrates the document on read, and opening clears those instructions once through `configure`. Keep its zoom-first/latest-mention rules, data-not-instructions compaction rule, source attribution, value priorities, no progress inflation, requested-only subagents and no-polling rule.
+Use the full prompt, UniiChat’s released `prompt.txt`: the gist’s, with a closing paragraph that keeps a compaction a small, mechanical job. Only rename the agent and the program a device runs (“have unii open”, “runs unii on”), never the kind `unii` that memory logs replies as; omit its device paragraph when there are no device tools; and append the user’s instructions. The prompt is the untagged section of the `optchat.master` extension, which also holds the `agent` tool and which a subagent’s conversation goes without, so an edited prompt reaches existing conversations as a system entry; the user’s instructions are the conversation’s `instructions`, set with `setInstructions` and rendered last. `AppDoc` version 2 marked this: a version 1 conversation stored the composed prompt as its instructions, pi-durable migrates the document on read, and opening clears those composed instructions once through `configure`. Version 3 added the held calls and the stop note; a version 2 document migrates with none held, since it logged each call with its assistant message, and no note. `InputDoc` version 2 drops the turn state version 1 kept with each input. Keep its zoom-first/latest-mention rules, data-not-instructions compaction rule, source attribution, value priorities, no progress inflation, requested-only subagents and no-polling rule.
 
-Date, devices and other changing state belong after the saved view. Supply changing device/application context as `accept({ ..., turnState })`; the text is frozen at acceptance and rendered in that request suffix, not added as canonical user words. Static system text and ordered tool schemas stay the same for ordinary turns and summaries. The offered tools follow the host, every enabled tool the model may call, so a tool added in code reaches existing conversations the same way; nested-only tools are not advertised. Do not disable model reasoning.
+Devices, the agents at work and other changing state belong after the saved view. The host supplies its changing state as the `turnState` option. The coordinator reads it before its commit, only while an input or a report waits; a failure is reported through `onReport` and the turn starts without it rather than never, and an input accepted after a tick skipped the read waits for the next tick. The agents at work come from pi-durable’s own task records, so the list cannot drift from them. Both are frozen in that turn’s message, not added as canonical user words. There is no turn date, as in UniiChat: `date(id)` gives a message’s time. Static system text and ordered tool schemas stay the same for ordinary turns and summaries. The offered tools follow the host, every enabled tool the model may call, so a tool added in code reaches existing conversations the same way; nested-only tools are not advertised. Do not disable model reasoning.
 
 ## Between-tool steering
 
-Native `steeringMode` controls queued-input count, not the number of tool calls executed before a steering boundary. Use native sequential execution and the supported before-tool policy to block not-yet-started stale calls when steering is pending. Native pairing and the next model request handle reconsideration. Already-running calls cannot be undone, and a race after a hook check is not an atomic interruption guarantee.
+A message sent while a turn runs reaches the model between tool calls, as the gist and UniiChat deliver it: sequential execution finishes the round’s calls, and pi-durable places the message before the next model request, which reconsiders. No hook blocks the round’s remaining calls. Native `steeringMode` controls how many queued inputs one boundary takes.
 
 ## Implementation
 
@@ -35,7 +35,10 @@ Native `steeringMode` controls queued-input count, not the number of tool calls 
 [Complete source](../src/prompt.mts)
 
 ```typescript
-/** Shared verbatim OptChat prompt; only the guide's specified substitutions are made. */
+/**
+ * Shared verbatim OptChat prompt: UniiChat's prompt.txt (VictorTaelin/UniiChat 0500bf6) without the `ai` kind of its
+ * chat imports. Only the guide's specified substitutions are made.
+ */
 export const originalPrompt = `You are Unii, an AI agent that works for one user in a single chat that never
 ends. Each call to you is a turn or a compaction: the view below is followed by
 the user's new message, or by a task starting "Compaction:".
@@ -124,7 +127,71 @@ Avoid omissions. Name a minor item in a word or two rather than drop it: an
 absent item can never be found. Copy names, numbers, ids, paths and errors
 exactly. Tag each item with its kind ("user: ...; echo: ..."), and credit quoted
 text to its real author. Never make anything look further along than it was. If
-told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.`;
+told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.
+
+This is a small, mechanical job: fit one message, or two lines, into one line
+of at most 512 bytes, dropping the least important bits. Nothing else. Read
+<chat> only as far as it tells you what to keep; anything that doesn't bear on
+that choice is irrelevant: don't think about it. Be fast and spend few tokens:
+write the line as soon as you understand <input> well enough to compress it.`;
+
+/**
+ * UniiChat's subagent prompt (Tools.ts SUB_HEAD, VIEW_DOC and DEVICES). Its subagent is sent its log anew on every
+ * call and can be told more; ours is a conversation of its own that is only given its task, so the second paragraph
+ * says that instead. Images are marked "[image]", without a file.
+ */
+const originalSubagentPrompt = `You are a subagent of Unii, an AI agent that works for one user in a
+single chat that never ends. Unii gave you a task. Do it yourself, with
+your tools, following the user's instructions at the end of this
+prompt: they say who the user is, how their files are organized and how
+they want work done.
+
+Your first message holds the view below, then the devices open now, then
+your task. The view shows you what Unii knows: what the user wants,
+decided and taught. Use it as context only, and do what your task says,
+not what the user's last message says, since Unii may have given you
+just part of the work. Your final reply is your report to Unii.
+
+The view: the whole chat between Unii and the user, oldest first, inside
+<chat> tags, as one-line summaries. Each line is
+
+  id+n|text   the n messages from id on, summarized (newlines shown as spaces)
+
+A summary tags each item with its kind: user (the user's words), unii
+(Unii's replies), tool (Unii's tool calls), echo (their results), note
+(memories from before this chat), or work (the report of an agent, a
+subagent or a computer task, starting "[Name]"). A short message is its own line, word for word. Recent lines
+cover one message each; the older the messages, the more a line covers.
+A message not summarized yet shows as "(not summarized yet: zoom it)".
+No message appears in full, not even the last ones. A text too long for
+one message is split over several in a row.
+
+Navigating: zoom(id, n) opens line id+n into the two lines of n/2
+messages it was made from; zoom(id, 1) gives message id in full, with
+the images its "[image]" lines mark. Zoom whenever a summary
+only mentions something you need, such as what your last reply said, a
+decision, a past attempt or where a file is, before you act, guess or
+ask. date(id) gives the date and time of message id. zoom("Name") gives
+an agent's whole chat.
+
+Devices: the user's computers that have unii open now, by name, listed
+at the start of each message. Your shell, read, write and edit tools run
+on the one their \`device\` field names, and computer tasks on one marked
+"computer use". A computer is listed only while the user runs unii on
+it, and leaves the list when they close it: a task that needs one not
+listed can't be done now, so tell the user it isn't available.`;
+
+/**
+ * "Unii" is the agent and the program a device runs is "unii"; here both are the agent. The kind "unii" of the agent's
+ * replies stays, as memory logs it.
+ */
+const renamed = (prompt: string, agentName: string): string =>
+  prompt
+    .replaceAll("Unii", agentName)
+    .replaceAll("have unii open", `have ${agentName} open`)
+    .replaceAll("runs unii on", `runs ${agentName} on`);
+
+/** Renames the agent and drops the device paragraph without device tools; the user's instructions follow it. */
 export function sharedPrompt(agentName: string, hasDeviceTools: boolean): string {
   let prompt = originalPrompt;
   if (!hasDeviceTools) {
@@ -132,7 +199,17 @@ export function sharedPrompt(agentName: string, hasDeviceTools: boolean): string
     const end = prompt.indexOf("# Compactions", start);
     prompt = prompt.slice(0, start) + prompt.slice(end);
   }
-  return prompt.replaceAll("Unii", agentName);
+  return renamed(prompt, agentName);
+}
+
+/** The subagents' prompt, renamed and without its devices paragraph as `sharedPrompt` is. */
+export function subagentPrompt(agentName: string, hasDeviceTools: boolean): string {
+  const prompt = hasDeviceTools
+    ? originalSubagentPrompt
+    : originalSubagentPrompt
+        .slice(0, originalSubagentPrompt.indexOf("\n\nDevices:"))
+        .replace("then the devices open now, then\nyour task", "then your task");
+  return renamed(prompt, agentName);
 }
 ```
 
@@ -175,6 +252,7 @@ import {
   type HarnessOptions,
   type Conversation,
   type ConversationInit,
+  type Extension,
   ROOT_CONVERSATION_ID,
 } from "@earendil-works/pi-durable";
 import {
@@ -187,20 +265,20 @@ import {
 } from "./memory.mjs";
 import { BuildNode, ConfigDoc, pumpBuilds } from "./summary.mjs";
 import {
+  agentTask,
   agentTool,
-  AgentTask,
+  agentsAtWork,
   AgentDirectoryDoc,
   takeAgentReports,
 } from "./agents.mjs";
-import { sharedPrompt } from "./prompt.mjs";
-import { memoryTools, toolPolicy } from "./tools.mjs";
+import { sharedPrompt, subagentPrompt } from "./prompt.mjs";
+import { memoryTools, toolPolicy, type NativeContracts } from "./tools.mjs";
 
 export type Admission = {
   requestId: string;
   kind: "user" | "work" | "note";
   content: JsonRepresentation<UserInput>;
   date: string;
-  turnState: string;
   epoch: number;
   fresh: boolean;
   phase: "pending" | "prepared" | "submitted" | "cancelled";
@@ -211,11 +289,20 @@ export const InputDoc = defineDocFamily<
   Admission | null
 >({
   kind: "optchat.input",
-  version: 1,
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "current",
   family: true,
+  // Version 1 kept the turn state each input was accepted with; a turn now reads it as it starts.
+  migrate: (value) => {
+    const stored = (
+      value as { value: (Admission & { turnState: string }) | null }
+    ).value;
+    if (stored === null) return { value: null };
+    const { turnState: _accepted, ...admission } = stored;
+    return { value: admission };
+  },
   initial: (value) => ({ value }),
 });
 /** The entry a dispatched input is placed as. Its user message carries the envelope; the input is in `InputDoc`. */
@@ -239,18 +326,29 @@ export type AppState = {
   stop: number;
   stopped: number;
   stopPending: string[];
+  /** The note a stop that cut a running turn leaves in memory, once the turn's last entries are there. */
+  stopNote: string | null;
+  /** Tool calls projected but not logged yet: each is logged right before its result, as UniiChat logs them. */
+  held: Record<string, { text: string; date: string; source: string }>;
 };
 export const AppDoc = defineDoc<AppState>({
   kind: "optchat.app",
-  version: 2,
+  version: 3,
   scope: "conversation",
   history: "latest",
   fork: "current",
-  // Version 1 had every field but the prompt version; its instructions hold the composed prompt.
-  migrate: (value) => ({
-    ...(value as Omit<AppState, "promptVersion">),
-    promptVersion: 1,
-  }),
+  migrate: (value, fromVersion) => {
+    // Version 1 had no prompt version; its instructions hold the composed prompt.
+    const stored =
+      fromVersion < 2
+        ? {
+            ...(value as Omit<AppState, "promptVersion" | "stopNote" | "held">),
+            promptVersion: 1,
+          }
+        : (value as Omit<AppState, "stopNote" | "held">);
+    // Version 2 logged a call with its assistant message, so no call waits for its result, and noted no stop.
+    return { ...stored, stopNote: null, held: {} };
+  },
   initial: () => ({
     promptVersion: PROMPT_VERSION,
     epoch: 0,
@@ -264,6 +362,8 @@ export const AppDoc = defineDoc<AppState>({
     stop: 0,
     stopped: 0,
     stopPending: [],
+    stopNote: null,
+    held: {},
   }),
 });
 
@@ -325,7 +425,6 @@ export async function admitInput(
     kind: "user" | "work" | "note";
     content: UserInput;
     date: string;
-    turnState?: string;
   },
 ): Promise<void> {
   const stored = await tx.doc(InputDoc, root, input.requestId, null);
@@ -343,7 +442,6 @@ export async function admitInput(
   if (input.kind === "note") {
     stored.value = {
       ...input,
-      turnState: input.turnState ?? "",
       content: input.content,
       epoch: app.epoch,
       fresh: false,
@@ -364,7 +462,6 @@ export async function admitInput(
   }
   stored.value = {
     ...input,
-    turnState: input.turnState ?? "",
     content: input.content,
     epoch: app.epoch,
     fresh,
@@ -433,24 +530,29 @@ async function projectEntries(
           if (block.type === "text") text += block.text;
           else if (block.type === "toolCall") {
             await flush();
-            await appendMessage(tx, root, {
-              kind: "tool",
+            // pi-durable gives every call a result, an aborted one too, so a held call is always logged.
+            app.held[block.id] = {
               text: `${block.name} ${JSON.stringify(block.arguments)}`,
               date,
-              images: [],
               source: `${entry.id}:${index++}`,
-            });
+            };
           }
           // Thinking remains in native history/provider context but not semantic memory.
         }
         await flush();
       } else if (message.role === "toolResult") {
+        const call = app.held[message.toolCallId];
+        if (call) {
+          await appendMessage(tx, root, { kind: "tool", ...call, images: [] });
+          delete app.held[message.toolCallId];
+        }
+        const text = message.content
+          .filter((x) => x.type === "text")
+          .map((x) => x.text)
+          .join("");
         await appendMessage(tx, root, {
           kind: "echo",
-          text: message.content
-            .filter((x) => x.type === "text")
-            .map((x) => x.text)
-            .join(""),
+          text: `${message.isError ? "error: " : ""}${text || "(no output)"}`,
           date,
           images: message.content.filter(
             (x): x is ImageContent => x.type === "image",
@@ -482,18 +584,23 @@ async function consumeReports(
   }
 }
 
+/**
+ * A fresh turn's message, as UniiChat's: the view, the host's turn state and the agents at work, which change, so
+ * they follow the cached view and never enter the prompt; then the head that tells a turn from a compaction.
+ */
 function envelope(
   view: string,
   content: UserInput,
-  date: string,
   turnState: string,
+  agents: string[],
 ): UserInput {
-  // Dynamic date belongs after the saved view, never in instructions/tool schemas.
+  const state = turnState ? `${turnState}\n\n` : "";
+  const working = agents.length ? agents.join(", ") : "none";
   return [
-    ...(view ? [{ type: "text" as const, text: view }] : []),
+    { type: "text", text: view },
     {
       type: "text",
-      text: `\n<turn date="${date}"/>\n${turnState}${turnState ? "\n" : ""}`,
+      text: `\n${state}Agents at work now: ${working}.\n\nTurn: the user's new message:\n\n`,
     },
     ...(typeof content === "string"
       ? [{ type: "text" as const, text: content }]
@@ -502,208 +609,247 @@ function envelope(
 }
 
 type CoordinatorState = { phase: "coordinate"; tick: number };
-export const CoordinatorTask = defineTask<{}, CoordinatorState, null>({
-  name: "optchat.coordinator",
-  version: 1,
-  initial: () => ({ phase: "coordinate", tick: 0 }),
-  phases: {
-    async coordinate(task, runtime, context) {
-      const root = runtime.conversationId;
-      const invocation = withAbortSignal(runtime.signal, context);
-      const acquired = await Promise.all([
-        runtime.watchDoc(AppDoc, root, invocation),
-        runtime.watchDoc(MemoryDoc, root, invocation),
-        runtime.watchDoc(LiveDoc, root, invocation),
-        runtime.watchDoc(InboxDoc, root, invocation),
-        runtime.watchDoc(AgentDirectoryDoc, root, invocation),
-      ]);
-      if (acquired.some((watch) => !watch)) {
-        await Promise.all(acquired.map((watch) => watch?.stop()));
-        throw new Error("OptChat documents were not initialized");
-      }
-      const watches = acquired.flatMap((watch) => (watch ? [watch] : []));
-      const changed = new Promise<void>((resolve) => {
-        for (const watch of watches) {
-          const seen = JSON.stringify(watch.value);
-          watch.start(async (value) => {
-            if (JSON.stringify(value) !== seen) resolve();
-          });
+/** `turnState` is the host's; a turn reads it as it starts. */
+const coordinatorTask = (turnState: () => Promise<string>) =>
+  defineTask<Record<string, never>, CoordinatorState, null>({
+    name: "optchat.coordinator",
+    version: 1,
+    initial: () => ({ phase: "coordinate", tick: 0 }),
+    phases: {
+      async coordinate(task, runtime, context) {
+        const root = runtime.conversationId;
+        const invocation = withAbortSignal(runtime.signal, context);
+        // Read only while an input or a report waits, outside the commit; a host that can't tell (a locked
+        // keychain) is reported, and the turn starts without it rather than never.
+        const pending =
+          (await runtime.snapshot(AppDoc, root, invocation))?.pending.length ?? 0;
+        const reports =
+          (await runtime.snapshot(AgentDirectoryDoc, root, invocation))
+            ?.pendingReports.length ?? 0;
+        const read = pending + reports > 0;
+        const state = !read
+          ? ""
+          : await turnState().catch((error: unknown) => {
+              runtime.report(error);
+              return "";
+            });
+        const acquired = await Promise.all([
+          runtime.watchDoc(AppDoc, root, invocation),
+          runtime.watchDoc(MemoryDoc, root, invocation),
+          runtime.watchDoc(LiveDoc, root, invocation),
+          runtime.watchDoc(InboxDoc, root, invocation),
+          runtime.watchDoc(AgentDirectoryDoc, root, invocation),
+        ]);
+        if (acquired.some((watch) => !watch)) {
+          await Promise.all(acquired.map((watch) => watch?.stop()));
+          throw new Error("OptChat documents were not initialized");
         }
-      });
-      let dispatchId: string | undefined;
-      let stop = 0;
-      let progressed = false;
-      try {
-        await runtime.commit(async (tx) => {
-          // All native table reads happen before reset/task creation table writes.
-          const projection = await projectEntries(tx, root);
-          progressed = projection.progressed;
-          await consumeReports(tx, root, new Date(runtime.now()).toISOString());
-          await closeSettledEpoch(tx, root);
-          const app = await tx.doc(AppDoc, root);
-          const next = app.pending[0];
-          if (app.stop > app.stopped) {
-            if (projection.caughtUp) {
-              stop = app.stop;
-              // A withdrawn input was never handed to the model, so it never enters memory.
-              for (const id of app.stopPending) {
-                const input = await storedInput(tx, root, id);
-                input.phase = "cancelled";
-                input.envelope = null;
-              }
-              app.pending = app.pending.filter(
-                (id) => !app.stopPending.includes(id),
-              );
-              app.stopPending = [];
-              app.revision++;
-              progressed = true;
-            }
-          } else if (next !== undefined) {
-            const input = await storedInput(tx, root, next);
-            if (input.kind === "note" && projection.caughtUp) {
-              await appendMessage(
-                tx,
-                root,
-                {
-                  kind: "note",
-                  text: textOf(input.content),
-                  date: input.date,
-                  images: imagesOf(input.content),
-                  source: `input:${input.requestId}`,
-                },
-                false,
-              );
-              input.phase = "submitted";
-              app.pending.shift();
-              app.revision++;
-              progressed = true;
-            } else if (input.phase === "prepared") dispatchId = input.requestId;
-            else if (
-              projection.caughtUp &&
-              (!input.fresh || (await memoryReady(tx, root)))
-            ) {
-              await settleViews(tx, root);
-              const view = input.fresh ? await renderMain(tx, root) : "";
-              // The view is frozen here; the original enters memory once pi-durable places the delivery.
-              input.envelope = envelope(
-                view,
-                input.content,
-                input.date,
-                input.turnState,
-              );
-              input.phase = "prepared";
-              app.started = true;
-              app.revision++;
-              if (input.fresh)
-                await tx.appendEntry(ResetEntry, root, { head: "self" });
-              dispatchId = input.requestId;
-              progressed = true;
-            }
+        const watches = acquired.flatMap((watch) => (watch ? [watch] : []));
+        const changed = new Promise<void>((resolve) => {
+          for (const watch of watches) {
+            const seen = JSON.stringify(watch.value);
+            watch.start(async (value) => {
+              if (JSON.stringify(value) !== seen) resolve();
+            });
           }
-          const launched = await pumpBuilds(tx, root);
-          if (launched.length > 0) progressed = true;
-          // Effect must run outside this native commit; checkpoint the preparation first.
-          if (dispatchId !== undefined || progressed)
-            return {
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 1,
-              },
-            };
-        }, context);
-        if (stop) {
-          const conversation = await runtime.conversation(root, context);
-          if (!conversation)
-            throw new Error("OptChat root conversation is missing");
-          await conversation.abort(context);
+        });
+        let dispatchId: string | undefined;
+        let stop = 0;
+        let progressed = false;
+        try {
           await runtime.commit(async (tx) => {
+            // All native table reads happen before reset/task creation table writes.
+            const projection = await projectEntries(tx, root);
+            progressed = projection.progressed;
+            const now = new Date(runtime.now()).toISOString();
+            await consumeReports(tx, root, now);
+            await closeSettledEpoch(tx, root);
             const app = await tx.doc(AppDoc, root);
-            app.stopped = stop;
-            app.revision++;
-            return {
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 2,
-              },
-            };
+            if (
+              app.stopNote !== null &&
+              app.stopped >= app.stop &&
+              projection.caughtUp &&
+              !(await tx.doc(LiveDoc, root)).run
+            ) {
+              await appendMessage(tx, root, {
+                kind: "note",
+                text: app.stopNote,
+                date: now,
+                images: [],
+                source: `stop:${app.stop}`,
+              });
+              app.stopNote = null;
+              app.revision++;
+              progressed = true;
+            }
+            const next = app.pending[0];
+            if (app.stop > app.stopped) {
+              if (projection.caughtUp) {
+                stop = app.stop;
+                // A withdrawn input was never handed to the model, so it never enters memory.
+                for (const id of app.stopPending) {
+                  const input = await storedInput(tx, root, id);
+                  input.phase = "cancelled";
+                  input.envelope = null;
+                }
+                app.pending = app.pending.filter(
+                  (id) => !app.stopPending.includes(id),
+                );
+                app.stopPending = [];
+                app.revision++;
+                progressed = true;
+              }
+            } else if (next !== undefined) {
+              const input = await storedInput(tx, root, next);
+              if (input.kind === "note" && projection.caughtUp) {
+                await appendMessage(
+                  tx,
+                  root,
+                  {
+                    kind: "note",
+                    text: textOf(input.content),
+                    date: input.date,
+                    images: imagesOf(input.content),
+                    source: `input:${input.requestId}`,
+                  },
+                  false,
+                );
+                input.phase = "submitted";
+                app.pending.shift();
+                app.revision++;
+                progressed = true;
+              } else if (input.phase === "prepared") dispatchId = input.requestId;
+              else if (input.fresh && !read)
+                // Accepted after the turn state was skipped: the next tick reads it.
+                progressed = true;
+              else if (
+                projection.caughtUp &&
+                (!input.fresh || (await memoryReady(tx, root)))
+              ) {
+                await settleViews(tx, root);
+                // The view is frozen here; the original enters memory once pi-durable places the delivery. A message
+                // sent while a turn runs goes to it as it is, between its tool calls.
+                input.envelope = input.fresh
+                  ? envelope(
+                      await renderMain(tx, root),
+                      input.content,
+                      state,
+                      await agentsAtWork(tx, root),
+                    )
+                  : input.content;
+                input.phase = "prepared";
+                app.started = true;
+                app.revision++;
+                if (input.fresh)
+                  await tx.appendEntry(ResetEntry, root, { head: "self" });
+                dispatchId = input.requestId;
+                progressed = true;
+              }
+            }
+            const launched = await pumpBuilds(tx, root);
+            if (launched.length > 0) progressed = true;
+            // Effect must run outside this native commit; checkpoint the preparation first.
+            if (dispatchId !== undefined || progressed)
+              return {
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 1,
+                },
+              };
           }, context);
-        } else if (dispatchId !== undefined) {
-          const requestId = dispatchId;
-          // The prepared admission is read back committed: a draft is not readable after its commit.
-          const prepared = (
-            await runtime.snapshot(InputDoc, root, requestId, context)
-          )?.value;
-          if (!prepared?.envelope)
-            throw new Error(`Prepared input has no envelope: ${requestId}`);
-          const conversation = await runtime.conversation(root, context);
-          if (!conversation)
-            throw new Error("OptChat root conversation is missing");
-          await conversation.submit(
-            {
-              type: "input",
-              requestId: nativeRequest(requestId),
-              content: prepared.envelope,
-              whenBusy: "steer",
-              entry: {
-                kind: DeliveryEntry.kind,
-                data: { requestId, kind: prepared.kind },
+          if (stop) {
+            const conversation = await runtime.conversation(root, context);
+            if (!conversation)
+              throw new Error("OptChat root conversation is missing");
+            await conversation.abort(context);
+            await runtime.commit(async (tx) => {
+              const app = await tx.doc(AppDoc, root);
+              app.stopped = stop;
+              app.revision++;
+              return {
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 2,
+                },
+              };
+            }, context);
+          } else if (dispatchId !== undefined) {
+            const requestId = dispatchId;
+            // The prepared admission is read back committed: a draft is not readable after its commit.
+            const prepared = (
+              await runtime.snapshot(InputDoc, root, requestId, context)
+            )?.value;
+            if (!prepared?.envelope)
+              throw new Error(`Prepared input has no envelope: ${requestId}`);
+            const conversation = await runtime.conversation(root, context);
+            if (!conversation)
+              throw new Error("OptChat root conversation is missing");
+            await conversation.submit(
+              {
+                type: "input",
+                requestId: nativeRequest(requestId),
+                content: prepared.envelope,
+                whenBusy: "steer",
+                entry: {
+                  kind: DeliveryEntry.kind,
+                  data: { requestId, kind: prepared.kind },
+                },
               },
-            },
-            context,
-          );
-          await runtime.commit(async (tx) => {
-            const app = await tx.doc(AppDoc, root);
-            const saved = await storedInput(tx, root, requestId);
-            saved.phase = "submitted";
-            saved.envelope = null;
-            const position = app.pending.indexOf(requestId);
-            if (position >= 0) app.pending.splice(position, 1);
-            app.revision++;
-            return {
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 2,
+              context,
+            );
+            await runtime.commit(async (tx) => {
+              const app = await tx.doc(AppDoc, root);
+              const saved = await storedInput(tx, root, requestId);
+              saved.phase = "submitted";
+              saved.envelope = null;
+              const position = app.pending.indexOf(requestId);
+              if (position >= 0) app.pending.splice(position, 1);
+              app.revision++;
+              return {
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 2,
+                },
+              };
+            }, context);
+          } else if (!progressed) {
+            const ended = Promise.race(watches.map((watch) => watch.closed)).then(
+              (end) => {
+                if (
+                  end.reason === "session_failed" ||
+                  end.reason === "listener_error"
+                )
+                  throw end.error;
+                throw new Error(`OptChat watch ended: ${end.reason}`);
               },
-            };
-          }, context);
-        } else if (!progressed) {
-          const ended = Promise.race(watches.map((watch) => watch.closed)).then(
-            (end) => {
-              if (
-                end.reason === "session_failed" ||
-                end.reason === "listener_error"
-              )
-                throw end.error;
-              throw new Error(`OptChat watch ended: ${end.reason}`);
-            },
-          );
-          await awaitWithContext(Promise.race([changed, ended]), invocation);
-          await runtime.commit(
-            () => ({
-              status: "running",
-              checkpoint: {
-                phase: "coordinate",
-                tick: task.state.checkpoint.tick + 1,
-              },
-            }),
-            context,
-          );
+            );
+            await awaitWithContext(Promise.race([changed, ended]), invocation);
+            await runtime.commit(
+              () => ({
+                status: "running",
+                checkpoint: {
+                  phase: "coordinate",
+                  tick: task.state.checkpoint.tick + 1,
+                },
+              }),
+              context,
+            );
+          }
+        } finally {
+          await Promise.all(watches.map((watch) => watch.stop()));
         }
-      } finally {
-        await Promise.all(watches.map((watch) => watch.stop()));
-      }
+      },
     },
-  },
-  async abort(_task, runtime, context) {
-    await runtime.commit(
-      () => ({ status: "terminal", outcome: { status: "aborted" } }),
-      context,
-    );
-  },
-});
+    async abort(_task, runtime, context) {
+      await runtime.commit(
+        () => ({ status: "terminal", outcome: { status: "aborted" } }),
+        context,
+      );
+    },
+  });
 
 export type OptChatOptions = {
   models: Models;
@@ -717,7 +863,9 @@ export type OptChatOptions = {
     target: EnvTarget,
     context: Context,
   ) => ExecutionEnv | undefined | Promise<ExecutionEnv | undefined>;
-  nativeSpillContracts?: Record<string, "bash" | "codemode">;
+  nativeContracts?: NativeContracts;
+  /** What changes between turns, such as the devices: read as a turn or a subagent starts, it follows the view. */
+  turnState?: () => Promise<string>;
   onReport?: HarnessOptions["onReport"];
   /** Runs in the root conversation's creating commit after OptChat's own documents, for the host's documents. */
   init?: ConversationInit;
@@ -735,7 +883,6 @@ export type OptChat = {
     content: UserInput;
     kind?: "user" | "work" | "note";
     date?: string;
-    turnState?: string;
   }): Promise<string>;
   /**
    * The user's own instructions, pi-durable's `instructions` section rendered after the prompt, in the host's
@@ -755,42 +902,57 @@ export async function openOptChat(
   context: Context,
 ): Promise<OptChat> {
   const registry = createRegistry();
-  const prompt = sharedPrompt(
-    options.name ?? "OptChat",
-    options.hasDeviceTools ?? false,
-  );
+  const name = options.name ?? "OptChat";
+  const hasDeviceTools = options.hasDeviceTools ?? false;
+  const turnState = async () => (await options.turnState?.()) ?? "";
+  const coordinator = coordinatorTask(turnState);
   const tools: ToolRegistration[] = [
     ...memoryTools(ROOT_CONVERSATION_ID),
-    agentTool(ROOT_CONVERSATION_ID),
     ...(options.tools ?? []),
   ];
-  // The prompt is the extension's own section and the offered tools follow the host, so an edited prompt or tool
-  // set reaches an existing conversation as pi-durable's system entry instead of staying as created.
+  const agents = agentTask({
+    master: () => master,
+    prompt: subagentPrompt(name, hasDeviceTools),
+    turnState,
+  });
+  const agent = agentTool(ROOT_CONVERSATION_ID, agents);
+  // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
+  // reaches an existing conversation as pi-durable's system entry instead of staying as created. The master's prompt
+  // and agent tool are an extension of their own, which a subagent's conversation goes without.
+  const master: Extension = defineExtension({
+    name: "optchat.master",
+    sections: [
+      section("optchat", () => sharedPrompt(name, hasDeviceTools), {
+        tag: false,
+      }),
+    ],
+    tools: [agent],
+  });
   registry.install(
     defineExtension({
       name: "optchat",
-      sections: [section("optchat", () => prompt, { tag: false })],
       tools,
-      tasks: [CoordinatorTask, BuildNode, AgentTask],
+      tasks: [coordinator, BuildNode, agents],
     }),
   );
+  registry.install(master);
   let harness: Harness | undefined;
   registry.install(
     toolPolicy(
-      tools,
+      [...tools, agent],
       async (call, conversationId, ctx) => {
         if (!harness) throw new Error("OptChat is still opening");
-        const agent = await harness.snapshot(
+        const stored = await harness.snapshot(
           NativeAgentDoc,
           conversationId,
           ctx,
         );
-        const target: EnvTarget = { conversationId, cwd: agent?.cwd, read: harness };
+        const target: EnvTarget = { conversationId, cwd: stored?.cwd, read: harness };
         return options.callEnv
           ? options.callEnv(call, target, ctx)
           : options.env?.(target, ctx);
       },
-      options.nativeSpillContracts,
+      options.nativeContracts,
     ),
   );
   const opened = await Harness.open(
@@ -817,7 +979,7 @@ export async function openOptChat(
       await tx.doc(ConfigDoc, id);
       const app = await tx.doc(AppDoc, id);
       app.coordinator = await tx.createTask(
-        CoordinatorTask,
+        coordinator,
         {},
         {
           conversationId: id,
@@ -845,7 +1007,6 @@ export async function openOptChat(
       content: UserInput;
       kind?: "user" | "work" | "note";
       date?: string;
-      turnState?: string;
     }) {
       if (!input.requestId)
         throw new Error("Provide a stable request ID for each original input");
@@ -940,6 +1101,9 @@ export async function openOptChat(
     async abort() {
       const requested = await opened.commit(async (tx) => {
         const app = await tx.doc(AppDoc, root.id);
+        // A stop that cuts a running turn tells later turns so, as UniiChat's note does.
+        if ((await tx.doc(LiveDoc, root.id)).run)
+          app.stopNote = `Stopped by the user: ${name}'s turn.`;
         app.stop++;
         app.stopPending.push(...app.pending);
         app.open = false;

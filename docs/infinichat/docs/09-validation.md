@@ -9,17 +9,19 @@ Run the package’s declared typecheck and test commands from its root. The impl
 
 ## Executable checks
 
-- [Memory and summary tests](../test/memory-summary.test.mts): exact short sources, bounded model corrections, queue eligibility, frozen context and saved-view byte budgets.
-- [Independent guide oracles](../test/independent-guide.test.mts): the original rollback push comparison through 20,000 messages, due-order counterexample, admission races, pending batches and storage reopen.
-- [Application tests](../test/app.test.mts): complete native assembly and fresh-turn isolation.
-- [Tools tests](../test/tools.test.mts): native recall/images, scalar pagination, output clipping and sequential steering.
-- [Background-agent tests](../test/agents.test.mts): private context, captured summary cutoff and full named-report publication.
+- [Memory and summary tests](../test/memory-summary.test.mts): exact short sources, bounded corrections with the single too-long note, cut replies, patient provider retries, queue eligibility, frozen context, saved-view byte budgets and the scratch and `BuildNode` migrations.
+- [Independent guide oracles](../test/independent-guide.test.mts): the original rollback push comparison through 20,000 messages, due-order counterexample, admission races, pending batches, independent view batches and storage reopen.
+- [Application tests](../test/app.test.mts): complete native assembly, fresh-turn isolation, the turn message after the view and the `AppDoc` and `InputDoc` migrations.
+- [Tools tests](../test/tools.test.mts): prompt renaming, native recall/images, wrong-line answers, scalar pagination, output clipping, unclipped read pages and steering after the round.
+- [Background-agent tests](../test/agents.test.mts): configuration as the agent starts, without the master’s prompt, private context, captured summary cutoff, full named-report publication and the version 1 task migration.
 - [Native recovery tests](../test/recovery.test.mts): reopening during interrupted summary work, preserved saved views, resumed summary, and next-turn context isolation.
 - [Linux storage tests](../test/node-storage.test.mts): exclusive writer, exact reopen, and acknowledged native data surviving process termination. These are not physical power-failure tests.
 
 ## Behavioral requirements
 
 Satisfy each linked guide behavior and its acceptance check. Treat algorithm examples and reported cache measurements as explanatory evidence, not additional product APIs or guaranteed performance.
+
+Where UniiChat’s release differs from the gist, the requirements below follow the release: its prompt’s closing paragraph, the turn message, the single too-long note, patient summary calls, the clipped source of an unanswerable compaction, independent view batches, wrong-line zoom answers, tool-call logging and the stop note.
 
 ## One endless chat and permanent log
 
@@ -30,7 +32,7 @@ Source: [Guide introduction and section 1 — The log](https://gist.github.com/V
 - All six kinds (`user`, `unii`, `tool`, `echo`, `work`, `note`): [memory and views](02-memory-tree-views.md), [turns and coordinator](04-turns-and-coordinator.md), [tools and recall](05-tools-and-recall.md), [background agents](06-background-agents.md). A tool record contains its name and JSON input; a work record contains the actual named final reply.
 - Append-only semantic history and one writer: [memory and views](02-memory-tree-views.md), [host and lifecycle](08-host-and-lifecycle.md). Verify the single owner; native commits are atomic.
 - No thinking in OptChat memory: [turns and coordinator](04-turns-and-coordinator.md). Native operational reasoning/signatures remain, as explicitly requested by the user; test both memory exclusion and protocol preservation.
-- Tool output clipped to head and tail within 30,000 characters total: [tools and recall](05-tools-and-recall.md). Test complete source head/tail, Unicode unit, diagnostic-inclusive echo/model text, and marker budget.
+- Tool output clipped to head and tail within 30,000 characters total, except a native read page in the model’s context: [tools and recall](05-tools-and-recall.md). Test complete source head/tail, Unicode unit, diagnostic-inclusive echo/model text, marker budget and the unclipped page.
 - Other long text split losslessly into consecutive records: [turns and coordinator](04-turns-and-coordinator.md), [tools and recall](05-tools-and-recall.md). Test concatenation equality and whole original provider delivery.
 - Daily JSONL partitioning and separate view files are replaced by native storage/doc addressing, as requested; permanent behavior is not replaced with disposable exports.
 
@@ -70,12 +72,13 @@ Source: [Guide section 3.3 — Why the cache holds](https://gist.github.com/Vict
 Source: [Guide section 4 — Compactions and exact templates](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449).
 
 - Same system and offered tools, but no tool execution: [summary tasks](03-summary-tasks.md), [turns and coordinator](04-turns-and-coordinator.md). Test request schemas and reject a tool-using candidate without running tools.
-- Independent saved 16,000–32,000-byte compaction sawtooth: [memory and views](02-memory-tree-views.md). Test initial reduction, tail appends, >32,000 trigger and main-batch-triggered reduction.
+- Independent saved 16,000–32,000-byte compaction sawtooth: [memory and views](02-memory-tree-views.md). Test initial reduction, tail appends, the >32,000 trigger, and that a main batch only appends to it.
 - Leaf context ends before its source; merge context through its own last message; stop at first missing leaf: [memory and views](02-memory-tree-views.md), [summary tasks](03-summary-tasks.md). Test no future context and no placeholders.
 - Exact leaf/merge task wording, complete source, 512-dash ruler, source IDs/range and parent-detail recovery: [summary tasks](03-summary-tasks.md), [turns and coordinator](04-turns-and-coordinator.md). Compare fixtures against linked source.
-- Exact overlength correction in the same saved conversation, measured byte size, safe 512-byte prefix and cut marker: [summary tasks](03-summary-tasks.md). Test preserved source/context and provider reasoning metadata.
-- At most five candidate responses under the declared interpretation; keep shortest, allow slight overrun rather than silently truncating: [summary tasks](03-summary-tasks.md). Test worsening later candidates.
-- Failed calls become retry-eligible at the next message, including later assistant/tool/result records: [turns and coordinator](04-turns-and-coordinator.md), [summary tasks](03-summary-tasks.md). Test fresh-input gating, duplicate request replay and no timer loop.
+- Overlength retry with UniiChat’s single note after the same view and task: measured byte size, safe 512-byte prefix and cut marker, never a try’s words or thoughts: [summary tasks](03-summary-tasks.md). Test preserved source/context and the one note of the last line.
+- At most five lines; keep the shortest, allow slight overrun rather than truncating a written line: [summary tasks](03-summary-tasks.md). Test worsening later candidates.
+- While Harness retries are enabled, a retryable provider error waits pi-ai’s backoff and asks again, past pi-durable’s retry bound; a reply without a line publishes the shortest earlier line or the flattened source cut to 512 bytes: [summary tasks](03-summary-tasks.md). Test both without new messages.
+- Other failed calls become retry-eligible at the next message, including later assistant/tool/result records: [turns and coordinator](04-turns-and-coordinator.md), [summary tasks](03-summary-tasks.md). Test fresh-input gating, duplicate request replay and no timer loop.
 - Up to eight concurrent calls; fewer than eight earlier unbuilt leaves before a leaf starts; parent waits for both children: [memory and views](02-memory-tree-views.md). Test every admission transition.
 - Readiness queues, never repeated full-tree work scans: [memory and views](02-memory-tree-views.md). Test historical growth without rediscovery scans.
 - Cheap summary model/effort supplied by host; Haiku/xhigh is the guide’s example rather than a universal provider requirement: [summary tasks](03-summary-tasks.md).
@@ -84,7 +87,7 @@ Source: [Guide section 4 — Compactions and exact templates](https://gist.githu
 
 Source: [Guide section 5 — Verbatim prompt and explanation](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449).
 
-- Adopt the exact source prompt, only rename the agent/remove device paragraph as permitted, then append user instructions: [turns and coordinator](04-turns-and-coordinator.md).
+- Adopt the exact source prompt, UniiChat’s `prompt.txt`, only rename the agent and the program a device runs, keeping the reply kind `unii`, or remove the device paragraph as permitted, then append user instructions: [turns and coordinator](04-turns-and-coordinator.md).
 - Preserve every memory-use, zoom-first, latest-mention, user-priority, source-attribution, device, subagent and no-inflated-progress rule: [turns and coordinator](04-turns-and-coordinator.md).
 - Preserve compaction’s data-not-instructions rule, output-only-line form, contextual source discipline and lasting-value priorities: [summary tasks](03-summary-tasks.md), [turns and coordinator](04-turns-and-coordinator.md).
 - Keep date/device state out of static system/tools: [turns and coordinator](04-turns-and-coordinator.md), [provider cache](07-provider-cache.md).
@@ -94,12 +97,13 @@ Source: [Guide section 5 — Verbatim prompt and explanation](https://gist.githu
 
 Source: [Guide section 6 — A turn, zoom, date and subagents](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449).
 
-- Active work accepts separate incoming messages; idle arrival starts fresh context after the earlier-leaf gate: [turns and coordinator](04-turns-and-coordinator.md). Test arrival after native completion but before coordinator idle handling, and completion before dispatch acknowledgement.
-- Render/freeze view before logging the fresh input; send the input whole afterward: [turns and coordinator](04-turns-and-coordinator.md). Test long/multimodal input and no self-summary in the prefix.
+- Active work accepts separate incoming messages, delivered after the round’s tool calls; idle arrival starts fresh context after the earlier-leaf gate: [turns and coordinator](04-turns-and-coordinator.md). Test arrival after native completion but before coordinator idle handling, and completion before dispatch acknowledgement.
+- Render/freeze view before logging the fresh input; send the turn state, the agents at work, the turn head and the input whole afterward: [turns and coordinator](04-turns-and-coordinator.md). Test long/multimodal input, their order and no self-summary in the prefix.
 - View is the only cross-turn continuity: [architecture](01-architecture.md), [turns and coordinator](04-turns-and-coordinator.md). Test actual provider messages after reset.
-- All visible replies/calls/results are logged as committed records: [turns and coordinator](04-turns-and-coordinator.md). Test content order and parallel result completion order.
-- `zoom(id,n)` returns two immediate children; `zoom(id,1)` returns original/images; long recall is paginated; `date(id)` returns saved time: [tools and recall](05-tools-and-recall.md). Test all pages concatenated losslessly within output cap.
-- Subagents only on user request; fresh private context starts with view then task; private steps excluded from main memory: [background agents](06-background-agents.md), [turns and coordinator](04-turns-and-coordinator.md).
+- All visible replies/calls/results are logged as committed records, each call right before its result, a failed result prefixed `error: ` and an empty one `(no output)`: [turns and coordinator](04-turns-and-coordinator.md). Test content order and parallel result completion order.
+- A stop that cuts a running turn leaves `Stopped by the user: <Name>'s turn.` as a note once its run has ended: [turns and coordinator](04-turns-and-coordinator.md).
+- `zoom(id,n)` returns two immediate children; `zoom(id,1)` returns original/images; a line that isn’t one lists the tree’s roots; long recall is paginated; `date(id)` returns the saved time in local `sv-SE` form, and `No message N.` for an id there isn’t: [tools and recall](05-tools-and-recall.md). Test all pages concatenated losslessly within output cap.
+- Subagents only on user request; a private conversation configured as the agent starts, without the master’s prompt and `agent` tool, with the subagents’ prompt then the user’s instructions; its first message is the view, the turn state, then the task; private steps excluded from main memory: [background agents](06-background-agents.md), [turns and coordinator](04-turns-and-coordinator.md).
 - `zoom(name)` retains complete visible private history permanently, including images, with no thinking in semantic recall: [tools and recall](05-tools-and-recall.md), [background agents](06-background-agents.md).
 - Full final reply becomes one `[Name]` work event, not a paraphrase; background main agent never waits/polls: [background agents](06-background-agents.md). Test one admission across restart and foreground abort isolation.
 
@@ -113,7 +117,7 @@ Source: [Guide section 7 — Mistakes to avoid](https://gist.github.com/VictorTa
 4. Fixed K lines per level → UTF-8 byte budgets in [memory and views](02-memory-tree-views.md).
 5. Raw/partial unsummarized messages in view → preceding-leaf gate and built-only rendering in [turns and coordinator](04-turns-and-coordinator.md), [memory and views](02-memory-tree-views.md).
 6. Contextless summaries or different system → frozen contextual prefix and shared final prompt/schema contract in [summary tasks](03-summary-tasks.md), [turns and coordinator](04-turns-and-coordinator.md).
-7. Trust model byte counting → ruler, measured bytes, cut and corrections in [summary tasks](03-summary-tasks.md).
+7. Trust model byte counting → ruler, measured bytes, cut and the too-long note in [summary tasks](03-summary-tasks.md).
 8. Excessively small summary-line budgets → 512-byte target and value-priority prompt in [memory and views](02-memory-tree-views.md), [summary tasks](03-summary-tasks.md), [turns and coordinator](04-turns-and-coordinator.md); short exact sources are still valid.
 9. Log thoughts → omit from OptChat semantic records in [turns and coordinator](04-turns-and-coordinator.md), preserve native protocol metadata explicitly.
 10. State in system/tools → variable suffix only in [turns and coordinator](04-turns-and-coordinator.md).
@@ -128,8 +132,9 @@ Apply these contracts consistently:
 - Native Docs/Entries replace daily files; immutable semantic content remains permanent.
 - Native reset means fresh request context while retaining provider affinity identity; hidden provider-side continuity must not be assumed.
 - Inputs arriving during pre-call preparation remain distinct inputs in the reserved logical turn; the guide does not spell out that concurrent case. Inputs arriving after native completion with no genuine pending work must instead be fresh.
-- Stock steering modes place inputs at tool-round boundaries. Sequential execution plus a supported beforeTool pending-steer policy can block not-yet-started stale calls and let the next model request reconsider; already-started work and nested-call/replay behavior retain their native semantics. See [turns and coordinator](04-turns-and-coordinator.md).
+- Stock steering modes place inputs at tool-round boundaries: the round’s calls finish and the next model request reconsiders, as the gist and UniiChat deliver a message; nested-call/replay behavior retains its native semantics. See [turns and coordinator](04-turns-and-coordinator.md).
 - Thoughts are omitted from semantic memory, not forcibly stripped from native protocol records, to preserve provider protocol continuity.
-- Unicode scalar units, five total candidate responses, delimiter accounting and non-tool record/page sizing are fixed implementation conventions where the guide is not fully formal.
+- Unicode scalar units, five total lines, delimiter accounting and non-tool record/page sizing are fixed implementation conventions where the guide is not fully formal.
 - Tool output-source conformance remains required behavior, not an optional omission; provider caching is pi-ai’s own.
+- Every changed document or task shape migrates through pi-durable; existing conversations are never cleared. See [host and lifecycle](08-host-and-lifecycle.md).
 - Preserve native interruption/replay semantics. External-byte recovery, exactly-once external actions, fixed cache economics and guaranteed model success are not guarantees of this plan.

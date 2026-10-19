@@ -210,24 +210,19 @@ test(
     );
     const models = createModels();
     models.setProvider(faux.provider);
+    // The host's turn state, read as each turn starts.
+    let devices = "Devices open now:\n- mac";
     const chat = await openOptChat(
       new MemoryStorage(),
-      { models, hasDeviceTools: true },
+      { models, hasDeviceTools: true, turnState: async () => devices },
       context,
     );
     try {
       await selectModels(chat, model);
-      await chat.accept({
-        requestId: "devices-one",
-        content: "first",
-        turnState: "Available device: mac",
-      });
+      await chat.accept({ requestId: "devices-one", content: "first" });
       await chat.waitForAnswer("devices-one");
-      await chat.accept({
-        requestId: "devices-two",
-        content: "second",
-        turnState: "Available device: linux",
-      });
+      devices = "Devices open now:\n- linux";
+      await chat.accept({ requestId: "devices-two", content: "second" });
       await chat.waitForAnswer("devices-two");
       const systems = seen.map((c) =>
         c.messages
@@ -246,9 +241,16 @@ test(
               .filter((x) => x.type === "text")
               .map((x) => x.text)
               .join("");
-      assert.ok(
-        text.indexOf("</chat>") < text.indexOf("Available device: linux"),
-      );
+      // The view, the turn state, the agents at work, then the head that tells a turn from a compaction.
+      const order = [
+        "</chat>",
+        "- linux",
+        "Agents at work now: none.",
+        "Turn: the user's new message:\n\nsecond",
+      ].map((part) => text.indexOf(part));
+      assert.ok(order.every((at, i) => at >= 0 && (i === 0 || order[i - 1] < at)));
+      assert.ok(!text.includes("- mac"));
+      assert.ok(!text.includes("<turn"));
       const first = await chat.harness.snapshot(
         MessageDoc,
         chat.root.id,
@@ -261,3 +263,22 @@ test(
     }
   },
 );
+
+test("earlier application and input documents migrate as pi-durable reads them", () => {
+  const v2 = {
+    promptVersion: 2, epoch: 4, open: false, started: false, requests: [], pending: [], cursor: null,
+    coordinator: null, revision: 9, stop: 1, stopped: 1, stopPending: [],
+  };
+  // Version 2 logged a call with its assistant message, so none waits for its result.
+  assert.deepEqual(AppDoc.definition.migrate?.(v2, 2), { ...v2, stopNote: null, held: {} });
+  const { promptVersion: _current, ...v1 } = v2;
+  assert.equal(AppDoc.definition.migrate?.(v1, 1)?.promptVersion, 1);
+  const admission = {
+    requestId: "a", kind: "user", content: "hi", date: "d", epoch: 1, fresh: true, phase: "submitted", envelope: null,
+  } as const;
+  assert.deepEqual(
+    InputDoc.definition.migrate?.({ value: { ...admission, turnState: "Devices" } }, 1),
+    { value: admission },
+  );
+  assert.deepEqual(InputDoc.definition.migrate?.({ value: null }, 1), { value: null });
+});

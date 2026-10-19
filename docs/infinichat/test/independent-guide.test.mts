@@ -120,9 +120,10 @@ test('independent incomplete sawtooth waits for a message boundary rather than p
 import { BuildNode, ConfigDoc, pumpBuilds } from '../src/summary.mjs';
 import { AppDoc, InputDoc, admitInput } from '../src/app.mjs';
 
-test('independent failed summary retries on next assistant canonical message, not immediate pump',async()=>{
+test('independent non-retryable summary failure retries on next assistant canonical message, not immediate pump',async()=>{
  const faux=fauxProvider();const models=createModels();models.setProvider(faux.provider);
- faux.setResponses([fauxAssistantMessage('',{stopReason:'error',errorMessage:'temporary provider failure'}),fauxAssistantMessage('summary recovered')]);
+ // Neither the model's doing nor passing (a missing credential): released until the next message.
+ faux.setResponses([fauxAssistantMessage('',{stopReason:'error',errorMessage:'No API key for provider: faux'}),fauxAssistantMessage('summary recovered')]);
  const registry=createRegistry();registry.install(defineExtension({name:'independent-summary',tasks:[BuildNode]}));
  const h=await Harness.open(new MemoryStorage(),{models,registry},context);const root=await h.root(context);
  const model={provider:'faux',modelId:faux.getModel().id};
@@ -178,10 +179,13 @@ test('independent strict main and compact high-water byte thresholds',async()=>{
     const s=await tx.doc(MemoryDoc,root.id);
     const render=field==='main'?await renderMain(tx,root.id):await renderCompaction(tx,root.id,count);
     assert.equal(Buffer.byteLength(render),target);assert.equal(s[field].reducing,false);
+    const compactBefore=s.compact.refs.map((ref):NodeRef=>[ref[0],ref[1]]);
     await appendMessage(tx,root.id,input('threshold plus one'));
     await publishNode(tx,root.id,{ref:[0,count],text:'x',bytes:1,builder});
     const after=field==='main'?await renderMain(tx,root.id):await renderCompaction(tx,root.id,count+1);
     assert.ok(Buffer.byteLength(after)<=low);assert.ok(s[field].refs.length<count);
+    // Each view batches on its own size: the chat's batch only appends to the compactions' view.
+    if(field==='main')assert.deepEqual(s.compact.refs,[...compactBefore,[0,count]]);
    },context);
   }finally{await h.close(context);}
  }

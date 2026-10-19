@@ -1,6 +1,6 @@
 # OptChat with pi-durable 1.3.0
 
-A linked implementation guide and source package for one ongoing OptChat conversation, using native pi-durable documents, tasks, conversations and extension APIs. The behavioral source is [Victor Taelin’s OptChat / UniiChat guide](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449).
+A linked implementation guide and source package for one ongoing OptChat conversation, using native pi-durable documents, tasks, conversations and extension APIs. The behavioral source is [Victor Taelin’s OptChat / UniiChat guide](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), together with [UniiChat’s released source](https://github.com/VictorTaelin/UniiChat/tree/0500bf6a8ea4bf0ce047488562022b1b6532cc30) at commit `0500bf6`; where the release differs from the gist, the guide follows the release.
 
 ## Guide
 
@@ -26,7 +26,7 @@ Read the architecture first, then the topic files in order. Complete implementat
 - [Package commands](package.json)
 - [Listing generator](scripts/build-docs.py)
 
-Regenerate code listings after source edits with `python3 scripts/build-docs.py`. Check listings without rewriting them with `python3 scripts/build-docs.py --check`. The complete test suite and included persistent host require Linux, Node.js 22.19 or newer, and the `flock` utility; validation uses Node.js 24.19. The portable core is separate from this host. Run `npm ci`, `npm run typecheck`, and `npm test` from the package root. This package does not modify the Expo application or migrate an existing chat database.
+Regenerate code listings after source edits with `python3 scripts/build-docs.py`. Check listings without rewriting them with `python3 scripts/build-docs.py --check`. The complete test suite and included persistent host require Linux, Node.js 22.19 or newer, and the `flock` utility; validation uses Node.js 24.19. The portable core is separate from this host. Run `npm ci`, `npm run typecheck`, and `npm test` from the package root. This package does not modify the Expo application or import the application’s other chats; its own documents and tasks migrate with pi-durable, so an existing OptChat conversation keeps working across changes.
 
 ## Run the offline demo
 
