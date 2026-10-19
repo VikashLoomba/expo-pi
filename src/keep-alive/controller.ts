@@ -4,7 +4,7 @@ import type { Harness, TaskGraph, TaskGraphNode } from '@earendil-works/pi-durab
 import * as Location from 'expo-location';
 import type { LiveActivity } from 'expo-widgets';
 
-import { AgentTask } from '../pi/infinichat/agents';
+import { AGENT_TASK } from '../pi/infinichat/agents';
 import { BuildNode } from '../pi/infinichat/summary';
 import AgentActivity, { type AgentActivityProps } from './agent-activity';
 import { KEEP_ALIVE_LOCATION_TASK } from './location-task';
@@ -21,7 +21,7 @@ export type ChatOfTask = (task: TaskGraphNode) => string | undefined;
 export const chatTasks: ChatOfTask = (task) => task.background ? undefined : String(task.conversationId);
 
 const INFINICHAT = 'infinichat';
-const infiniChatWork = new Set([BuildNode.definition.name, AgentTask.definition.name]);
+const infiniChatWork = new Set([BuildNode.definition.name, AGENT_TASK]);
 
 /**
  * InfiniChat is one chat. Its turns are foreground tasks, and its summary builds and private agents are work although

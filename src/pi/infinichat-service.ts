@@ -10,7 +10,7 @@ import type { RemoteHostRepository } from './execution/remote/hosts';
 import type { RemoteExecution } from './execution/remote/owner';
 import { InfiniChatView } from './infinichat-view';
 import { openOptChat, type OptChat } from './infinichat/app';
-import { createDevices, deviceTools, type Devices } from './infinichat/devices';
+import { createDevices, deviceTools } from './infinichat/devices';
 import { ConfigDoc } from './infinichat/summary';
 import { requireModelAuth } from './model-auth';
 import { assertModelSettings, buildModelCatalog, type ChatModelSettings } from './model-catalog';
@@ -41,7 +41,6 @@ export class InfiniChatService {
   private constructor(
     private readonly chat: OptChat,
     private readonly models: Models,
-    private readonly devices: Devices,
     private readonly authError?: (providerId: string) => string | undefined,
   ) {}
 
@@ -65,7 +64,8 @@ export class InfiniChatService {
       hasDeviceTools: true,
       tools: deviceTools(devices),
       callEnv: (call, target, callContext) => devices.callEnvironment(call, target.read, callContext),
-      nativeSpillContracts: { bash: 'bash' },
+      nativeContracts: { bash: 'bash', read: 'read' },
+      turnState: () => devices.turnState(),
       onReport: (error) => service?.report(error),
       // The chat view shows a conversation only with its metadata document; the phone device reads the workspace.
       init: async (tx, id) => {
@@ -75,7 +75,7 @@ export class InfiniChatService {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
       },
     }, context);
-    service = new InfiniChatService(chat, options.models, devices, options.authError);
+    service = new InfiniChatService(chat, options.models, options.authError);
     if (options.keepAlive) service.detachKeepAlive = options.keepAlive.observe(chat.harness, infiniChatTasks);
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
@@ -118,9 +118,8 @@ export class InfiniChatService {
     // OptChat has no default model; nothing is sent until the settings choose one.
     if (!agent?.model) throw new Error('Choose InfiniChat’s models in its settings to send a message.');
     await requireModelAuth(this.models, settingsOf(agent), this.authError);
-    const turnState = await this.devices.turnState();
     this.assertOpen();
-    await this.chat.accept({ requestId, content, turnState });
+    await this.chat.accept({ requestId, content });
     // OptChat's acceptance commit is its own, so the view's record of the request follows in the next one.
     await root.commit(async (tx) => {
       (await tx.doc(ChatMetadataDoc, root.id)).lastRequest = requestId;
