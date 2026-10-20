@@ -12,6 +12,9 @@ export const end = (r: NodeRef): number => first(r) + width(r);
 /** Tool output keeps head and tail within this many Unicode scalars; other long text splits into records this long. */
 const TEXT_LIMIT = 30000;
 
+/** Newlines as spaces, as UniiChat's `flat` writes a line and a merge's input. */
+export const flat = (text: string): string => text.replace(/\s*\n\s*/g, ' ');
+
 type Kind = 'user' | 'unii' | 'tool' | 'echo' | 'work' | 'note';
 type CanonicalMessage = {
   i: number;
@@ -54,7 +57,6 @@ type MemoryState = {
   messageProgress: number;
   pendingLeaves: number[];
   readyParents: NodeRef[];
-  nextQueue: 'leaf' | 'parent';
   active: Record<string, TaskId<string>>;
   failed: Record<string, { ref: NodeRef; at: number }>;
   main: View;
@@ -62,10 +64,15 @@ type MemoryState = {
 };
 export const MemoryDoc = defineDoc<MemoryState>({
   kind: 'optchat.memory',
-  version: 1,
+  version: 2,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
+  // Version 1 took leaves and parents in turn; builds now start in the order the messages came.
+  migrate: (value) => {
+    const { nextQueue: _turn, ...memory } = value as MemoryState & { nextQueue: 'leaf' | 'parent' };
+    return memory;
+  },
   initial: () => ({
     nextMessage: 0,
     frontier: 0,
@@ -74,7 +81,6 @@ export const MemoryDoc = defineDoc<MemoryState>({
     messageProgress: 0,
     pendingLeaves: [],
     readyParents: [],
-    nextQueue: 'leaf',
     active: {},
     failed: {},
     main: { refs: [], reducing: false },
@@ -94,13 +100,14 @@ export async function readNode(tx: Tx, root: ConversationId, ref: NodeRef): Prom
   return (await tx.doc(NodeDoc, root, key(ref), null)).value;
 }
 
+/** UniiChat's clip: half the limit from the head, the tail less 64 for the marker, which counts what it cut. */
 export function clipToolText(text: string): string {
   const chars = Array.from(text);
   if (chars.length <= TEXT_LIMIT) return text;
-  const marker = '\n… [output omitted] …\n';
-  const remaining = TEXT_LIMIT - Array.from(marker).length;
-  const head = Math.ceil(remaining / 2);
-  return chars.slice(0, head).join('') + marker + chars.slice(-(remaining - head)).join('');
+  const head = TEXT_LIMIT / 2;
+  const tail = TEXT_LIMIT / 2 - 64;
+  const cut = chars.length - head - tail;
+  return chars.slice(0, head).join('') + `\n[... ${cut} characters cut ...]\n` + chars.slice(-tail).join('');
 }
 
 export async function advanceMessageProgress(tx: Tx, root: ConversationId): Promise<void> {
@@ -138,17 +145,17 @@ export async function memoryReady(tx: Tx, root: ConversationId, cutoff?: number)
 }
 
 const renderLines = (lines: string[]): string => `<chat>\n${lines.length ? lines.join('\n') + '\n' : ''}</chat>`;
-export const nodeLine = (n: BuiltNode): string =>
-  `${first(n.ref)}+${width(n.ref)}|${n.text.replace(/\r\n|\r|\n/g, ' ')}`;
+export const nodeLine = (n: BuiltNode): string => `${first(n.ref)}+${width(n.ref)}|${flat(n.text)}`;
 
-async function rendered(tx: Tx, root: ConversationId, refs: NodeRef[]): Promise<string> {
-  const lines: string[] = [];
+/** A view's size as UniiChat counts it: its lines' text, without their heads, newlines or tags. */
+async function viewBytes(tx: Tx, root: ConversationId, refs: NodeRef[]): Promise<number> {
+  let total = 0;
   for (const ref of refs) {
     const n = await readNode(tx, root, ref);
     if (!n) throw new Error('View contains an unresolved node');
-    lines.push(nodeLine(n));
+    total += n.bytes;
   }
-  return renderLines(lines);
+  return total;
 }
 
 // Compare (T-last)/width exactly, then prefer the oldest first-message address.
@@ -163,7 +170,7 @@ function moreDue(a: NodeRef, b: NodeRef, T: number): boolean {
 
 async function reduceView(tx: Tx, root: ConversationId, view: View, T: number, target: number): Promise<boolean> {
   let changed = false;
-  while (bytes(await rendered(tx, root, view.refs)) > target) {
+  while ((await viewBytes(tx, root, view.refs)) > target) {
     let chosen = -1;
     for (let j = 0; j + 1 < view.refs.length; j++) {
       const a = view.refs[j];
@@ -194,9 +201,9 @@ export async function settleViews(tx: Tx, root: ConversationId): Promise<void> {
     s.compact.refs.push([0, i]);
     const T = i + 1;
     // Each view batches on its own size only, so a chat batch leaves the compactions' cached view alone.
-    if (bytes(await rendered(tx, root, s.main.refs)) > 128000) s.main.reducing = true;
+    if ((await viewBytes(tx, root, s.main.refs)) > 128000) s.main.reducing = true;
     if (s.main.reducing) await reduceView(tx, root, s.main, T, 64000);
-    if (bytes(await rendered(tx, root, s.compact.refs)) > 32000) s.compact.reducing = true;
+    if ((await viewBytes(tx, root, s.compact.refs)) > 32000) s.compact.reducing = true;
     if (s.compact.reducing) await reduceView(tx, root, s.compact, T, 16000);
     s.revision++;
   }

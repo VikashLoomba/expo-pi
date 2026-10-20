@@ -24,7 +24,7 @@ const roleNames: Record<Role, string> = { main: 'the main model', summary: 'the 
 const pageTitles: Record<ModelPicker, string> = { provider: 'Provider', model: 'Model', effort: 'Reasoning effort' };
 /** OptChat has no default model; an unchosen one is shown as such until the user picks it. */
 const unchosen: ChatModelSettings = { model: { provider: '', modelId: '' }, thinkingLevel: 'off' };
-/** The gist's description of the user's own instructions, which follow the prompt. */
+/** How UniiChat's prompt.txt describes the user's own instructions, which follow the prompt. */
 const INSTRUCTIONS_PLACEHOLDER = 'Who you are, how your files are organized and how you want work done.';
 
 const sameSettings = (left: ChatModelSettings, right: ChatModelSettings) => left.model.provider === right.model.provider

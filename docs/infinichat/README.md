@@ -1,6 +1,6 @@
 # OptChat with pi-durable 1.3.0
 
-A linked implementation guide and source package for one ongoing OptChat conversation, using native pi-durable documents, tasks, conversations and extension APIs. The behavioral source is [Victor Taelin’s OptChat / UniiChat guide](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), together with [UniiChat’s released source](https://github.com/VictorTaelin/UniiChat/tree/0500bf6a8ea4bf0ce047488562022b1b6532cc30) at commit `0500bf6`; where the release differs from the gist, the guide follows the release.
+A linked implementation guide and source package for one ongoing OptChat conversation, using native pi-durable documents, tasks, conversations and extension APIs. The behavioral source is [UniiChat’s released source](https://github.com/VictorTaelin/UniiChat/tree/0500bf6a8ea4bf0ce047488562022b1b6532cc30), Victor Taelin’s implementation, at commit `0500bf6`. The guide was first written from [his design gist](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449/3c190e06f34aba0c69f49042c526093269604935), revised 2026-10-08, which the release supersedes; [the references](docs/10-references.md#where-this-port-differs-from-uniichat) list where this port still differs from the release.
 
 ## Guide
 

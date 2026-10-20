@@ -8,7 +8,8 @@ import {
 } from '@earendil-works/pi-durable';
 
 import {
-  MemoryDoc, bytes, end, first, key, publishNode, readMessage, readNode, renderCompaction, shownMessage, type NodeRef,
+  MemoryDoc, bytes, end, first, flat, key, publishNode, readMessage, readNode, renderCompaction, shownMessage,
+  type NodeRef,
 } from './memory';
 
 /** The summary model and effort the host selected. Builds wait while it is `null`. */
@@ -55,8 +56,6 @@ function prefixUtf8(text: string, budget: number): string {
   return out;
 }
 
-const flat = (text: string): string => text.replace(/\s*\n\s*/g, ' ');
-
 function tooLong(line: string): string {
   return `Too long: your last line for this <input> was ${bytes(line)} bytes,\nover the 512-byte limit. Write the `
     + 'whole line again, cutting just\nenough of the least valuable items to fit before this cut:\n'
@@ -94,7 +93,8 @@ async function freeze(tx: Tx, root: ConversationId, ref: NodeRef): Promise<{
     const a = await readNode(tx, root, [ref[0] - 1, ref[1] * 2]);
     const b = await readNode(tx, root, [ref[0] - 1, ref[1] * 2 + 1]);
     if (!a || !b) throw new Error('Parent halves must both exist');
-    source = `${a.text}\n${b.text}`;
+    // Each line flattened, as UniiChat's merge input is: a short leaf is its exact, maybe multi-line, source.
+    source = `${flat(a.text)}\n${flat(b.text)}`;
     task = `Compaction: merge lines ${first(a.ref)}+${2 ** a.ref[0]} and ${first(b.ref)}+${2 ** b.ref[0]}, `
       + 'adjacent, into one line of at most\n512 bytes (about 70 words), the length of this ruler:\n'
       + `${ruler}\n<chat> may hold their messages, ${first(ref)} to ${end(ref) - 1}, in more detail: take details\n`
@@ -104,8 +104,16 @@ async function freeze(tx: Tx, root: ConversationId, ref: NodeRef): Promise<{
   return { source, task, view };
 }
 
-// Queue work only. At most the first eight unresolved leaves are eligible; a failed
-// earlier leaf still occupies its place in that eligibility window until it succeeds.
+/** UniiChat's JOBS: the summaries that build at once, and how many unbuilt leaves deep one may start. */
+const JOBS = 64;
+
+/** Where a node's context ends, UniiChat's `ctx`: before a leaf's message, after a merge's last. */
+const ctx = ([l, i]: NodeRef): number => (l === 0 ? i : (i + 1) * 2 ** l);
+
+/**
+ * Queue work only, as UniiChat starts it: the nodes ready up to the JOBS-th unbuilt leaf, in the order the messages
+ * came and a merge first at a tie, while fewer than JOBS build. A failed node keeps its place until it builds.
+ */
 export async function pumpBuilds(tx: Tx, root: ConversationId): Promise<TaskId<string>[]> {
   const s = await tx.doc(MemoryDoc, root);
   const { summary } = await tx.doc(ConfigDoc, root);
@@ -137,32 +145,21 @@ export async function pumpBuilds(tx: Tx, root: ConversationId): Promise<TaskId<s
     created.push(id);
     return true;
   }
-  async function leaf(): Promise<boolean> {
-    for (const i of s.pendingLeaves.slice(0, 8)) if (await admit([0, i])) return true;
-    return false;
-  }
-  async function parent(): Promise<boolean> {
-    for (let j = 0; j < s.readyParents.length;) {
-      const r = s.readyParents[j];
-      if (await readNode(tx, root, r)) {
-        s.readyParents.splice(j, 1);
-        continue;
-      }
-      if (await admit(r)) {
-        s.readyParents.splice(j, 1);
-        return true;
-      }
-      j++;
+  const deepest = s.pendingLeaves[JOBS - 1] ?? s.nextMessage;
+  const ready: NodeRef[] = [
+    ...s.pendingLeaves.filter((i) => i <= deepest).map((i): NodeRef => [0, i]),
+    ...s.readyParents.filter((ref) => ctx(ref) <= deepest),
+  ].sort((a, b) => ctx(a) - ctx(b) || b[0] - a[0]);
+  for (const ref of ready) {
+    if (Object.keys(s.active).length >= JOBS) break;
+    const parent = s.readyParents.findIndex(([l, i]) => l === ref[0] && i === ref[1]);
+    if (parent >= 0 && (await readNode(tx, root, ref))) {
+      s.readyParents.splice(parent, 1);
+    } else if ((await admit(ref)) && parent >= 0) {
+      // Failed parents leave the ready queue while running and are requeued exactly on failure.
+      s.readyParents.splice(parent, 1);
     }
-    return false;
   }
-  while (Object.keys(s.active).length < 8) {
-    const preferParent = s.nextQueue === 'parent';
-    const made = preferParent ? (await parent()) || (await leaf()) : (await leaf()) || (await parent());
-    if (!made) break;
-    s.nextQueue = preferParent ? 'leaf' : 'parent';
-  }
-  // Failed parents leave the ready queue while running and are requeued exactly on failure.
   return created;
 }
 
@@ -223,7 +220,6 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
       if (!saved?.selection) throw new Error('Missing native task scratch');
       const { selection } = saved;
       const model = r.models.getModel(selection.model.provider, selection.model.modelId);
-      if (!model) throw new Error('Configured summary model is unavailable');
       // The same static system prompt and offered tool schemas as a turn, from the root agent.
       const agent = await r.agent(ctx);
       const request: ModelContext = {
@@ -249,36 +245,39 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
       };
       let failure: string | undefined;
       let reply: AssistantMessage | undefined;
-      try {
-        reply = await r.models.completeSimple(model, request, {
-          ...(selection.thinkingLevel === 'off' ? {} : { reasoning: selection.thinkingLevel }),
-          toolChoice: 'none',
-          signal: r.signal,
-        });
-        r.signal.throwIfAborted();
-      } catch (error) {
-        r.signal.throwIfAborted();
-        failure = error instanceof Error ? error.message : String(error);
+      if (!model) {
+        failure = 'Configured summary model is unavailable';
+      } else {
+        try {
+          reply = await r.models.completeSimple(model, request, {
+            ...(selection.thinkingLevel === 'off' ? {} : { reasoning: selection.thinkingLevel }),
+            toolChoice: 'none',
+            signal: r.signal,
+          });
+          r.signal.throwIfAborted();
+        } catch (error) {
+          r.signal.throwIfAborted();
+          failure = error instanceof Error ? error.message : String(error);
+        }
       }
       const answer = reply;
-      // An outage only delays a summary, as UniiChat's patient calls do: provider failures retry past pi-durable's
-      // bounded policy, at pi-ai's backoff, which caps at a minute.
       const { retry } = r.settings;
       const until = r.now() + retryDelayMs(retry, retries + 1);
       await r.commit(async (tx) => {
-        if (retry.enabled && answer !== undefined && answer.stopReason === 'error'
-          && isRetryableAssistantError(answer)) {
-          return { status: 'running', checkpoint: { phase: 'retry', attempt, retries: retries + 1, until } };
-        }
         const d = await tx.doc(BuildScratchDoc, task.id);
         const text = answer ? replyText(answer) : '';
-        if (answer !== undefined && unanswerable(answer, text)) {
-          // The best line a try wrote, else the source cut to the limit.
+        if (answer !== undefined && !isRetryableAssistantError(answer) && unanswerable(answer, text)) {
+          // The model's own failure, as a refusal: the best line a try wrote, else the source cut to the limit.
           d.shortest ??= prefixUtf8(flat(d.source), 512);
           return { status: 'running', checkpoint: { phase: 'publish' } };
         }
         if (answer === undefined || answer.stopReason === 'error' || answer.stopReason === 'aborted') {
-          // Not the model's doing nor passing, as a missing credential: tried again at the next message.
+          // Any other failure only delays a summary, as UniiChat's patient calls ask again till one is answered: an
+          // outage or a missing credential, past pi-durable's bounded policy, at pi-ai's backoff, which caps at a
+          // minute. With the Harness's retries off, it is tried again at the next message.
+          if (retry.enabled) {
+            return { status: 'running', checkpoint: { phase: 'retry', attempt, retries: retries + 1, until } };
+          }
           await release(tx, r.conversationId, task.input.ref, task.id);
           const message = failure ?? answer?.errorMessage ?? 'Summary model returned no reply';
           return { status: 'terminal', outcome: { status: 'failed', error: { message } } };

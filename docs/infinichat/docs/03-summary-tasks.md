@@ -2,19 +2,19 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: [OptChat §4](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449), [UniiChat’s build and `over`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L726-L816), [pi-durable’s compaction retry phase](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/src/harness/compaction.ts#L185-L227), [native tasks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1657-L1933), [task-local documents](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [terminal transitions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1952-L1987).
+Sources: UniiChat’s [compaction tasks](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L176-L190), [`JOBS`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L143), [`ctx`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L584-L586), [build admission](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L588-L656), [build and `over`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L726-L816) and [patient calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/AskAI.ts#L7-L13), [pi-durable’s compaction retry phase](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/src/harness/compaction.ts#L185-L227), [native tasks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1657-L1933), [task-local documents](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [terminal transitions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1952-L1987).
 
-A summary task freezes its complete source and permitted built-only contextual view when admitted. It uses the same static system prompt and offered tool schemas as a normal turn, resolved from the root conversation’s agent when each request is made, with tool use disabled. It does not invoke the agent’s effectful tools. The summary model and thinking level are the host’s `ConfigDoc` selection; nothing is admitted while it is unset.
+A summary task freezes its complete source and permitted built-only contextual view when admitted. It uses the same static system prompt and offered tool schemas as a normal turn, resolved from the root conversation’s agent when each request is made, with tool use disabled. It does not invoke the agent’s effectful tools. UniiChat’s compactions send the system prompt without tools; this port keeps offering them until the caching work, which is deferred. The summary model and thinking level are the host’s `ConfigDoc` selection; nothing is admitted while it is unset.
 
-At most eight summary calls run simultaneously. A leaf is eligible when fewer than eight earlier leaves are unbuilt; a parent requires both children. Admission, queue removal and native task creation are transactional. Publication stores the immutable result and releases the slot transactionally. Queue readiness is driven by message arrival and child completion, not full-tree scans.
+Up to 64 summary calls run at once, UniiChat’s `JOBS`. The nodes ready up to the 64th unbuilt leaf start in the order the messages came, by where each one’s context ends (UniiChat’s `ctx`: before a leaf’s message, after a merge’s last), a merge first at a tie; a parent requires both children. A failed node keeps its place in that window until it builds. `MemoryDoc` is version 2: it drops version 1’s `nextQueue`, which took leaves and parents in turn. Admission, queue removal and native task creation are transactional. Publication stores the immutable result and releases the slot transactionally. Queue readiness is driven by message arrival and child completion, not full-tree scans.
 
-The exact task wording comes from the guide. Include the 512-dash ruler, the complete leaf or two child lines, and the parent range/detail instruction. For an oversized line, ask again with the same view and task and one note after them, UniiChat’s `over`: the last line’s measured UTF-8 size and its UTF-8-safe first 512 bytes before a `| ← LIMIT` marker. A try’s words and thoughts are never sent back; the task’s scratch document keeps only that last line. Allow **five lines total**. Keep the shortest, even if the bounded process ends slightly over 512 bytes; never truncate a line the model wrote to force success.
+The exact task wording is UniiChat’s `LEAF` and `MERGE`. Include the 512-dash ruler, the complete leaf or the two child lines, each flattened, and the parent range/detail instruction. For an oversized line, ask again with the same view and task and one note after them, UniiChat’s `over`: the last line’s measured UTF-8 size and its UTF-8-safe first 512 bytes before a `| ← LIMIT` marker. A try’s words and thoughts are never sent back; the task’s scratch document keeps only that last line. Allow **five lines total**. Keep the shortest, even if the bounded process ends slightly over 512 bytes; never truncate a line the model wrote to force success.
 
-A retryable provider error, as pi-ai’s `isRetryableAssistantError` classifies one (overload, rate limits, 5xx, network), only delays a summary, as UniiChat’s patient calls do. The task checkpoints a `retry` phase, sleeps on the Harness clock until pi-ai’s `retryDelayMs` backoff for that retry under the Harness `retry` settings (capped at `maxAgentDelayMs`, a minute by default), and asks again, without pi-durable’s `maxRetries` bound; the phase follows pi-durable’s own compaction task. With the Harness `retry` settings disabled, a retryable error is released like any other failure below. A reply without a line fails alike when asked again: one cut at `length`, an error the provider gave a stop reason for (a refusal), a tool call or empty text. Its node is the shortest line an earlier try wrote, else the source with its newlines flattened to spaces and cut to 512 UTF-8 bytes, as UniiChat clips it.
+A reply without a line is the model’s own failure and fails alike when asked again: one cut at `length`, an error the provider gave a stop reason for (a refusal) that pi-ai’s `isRetryableAssistantError` does not class as retryable, a tool call or empty text. Its node is the shortest line an earlier try wrote, else the source with its newlines flattened to spaces and cut to 512 UTF-8 bytes, as UniiChat clips it.
 
-Any other failure, such as a missing credential, releases its slot and becomes eligible at the next new semantic message, not a timer loop. Accepted external input and later assistant/tool/result messages count as new progress; replaying a duplicate request does not. Do not count one accepted input a second time when projecting its native entry.
+Any other failure only delays a summary, as UniiChat’s patient calls ask again till one is answered: a provider error, retryable or not (overload, rate limits, 5xx, network, a missing credential), a thrown error or a summary model that is unavailable. The task checkpoints a `retry` phase, sleeps on the Harness clock until pi-ai’s `retryDelayMs` backoff for that retry under the Harness `retry` settings (capped at `maxAgentDelayMs`, a minute by default), and asks again, without pi-durable’s `maxRetries` bound; the phase follows pi-durable’s own compaction task. Only with the Harness `retry` settings disabled does such a failure release its slot, eligible again at the next new semantic message, not a timer loop. Accepted external input and later assistant/tool/result messages count as new progress; replaying a duplicate request does not. Do not count one accepted input a second time when projecting its native entry.
 
-Changed shapes migrate through pi-durable, as it reads them: the scratch document is version 2, a version 1 scratch keeping its last too-long reply’s line as `last`, and `BuildNode` is version 2, a version 1 `request` checkpoint gaining `retries: 0`.
+Changed shapes migrate through pi-durable, as it reads them: `MemoryDoc` is version 2, as above; the scratch document is version 2, a version 1 scratch keeping its last too-long reply’s line as `last`, and `BuildNode` is version 2, a version 1 `request` checkpoint gaining `retries: 0`.
 
 Permanent message/node records live at conversation scope. Task-local scratch lives only for the task. A phase transition must make native durable progress; changing only task-local document contents is not a substitute for advancing a checkpoint when the runtime requires it.
 
@@ -57,6 +57,7 @@ import {
   key,
   first,
   end,
+  flat,
   shownMessage,
   type NodeRef,
 } from "./memory.mjs";
@@ -114,7 +115,6 @@ export function prefixUtf8(text: string, budget: number): string {
   }
   return out;
 }
-const flat = (text: string): string => text.replace(/\s*\n\s*/g, " ");
 function tooLong(line: string): string {
   return (
     `Too long: your last line for this <input> was ${bytes(line)} bytes,\n` +
@@ -154,7 +154,8 @@ async function freeze(
     const a = await readNode(tx, root, [ref[0] - 1, ref[1] * 2]),
       b = await readNode(tx, root, [ref[0] - 1, ref[1] * 2 + 1]);
     if (!a || !b) throw new Error("Parent halves must both exist");
-    source = `${a.text}\n${b.text}`;
+    // Each line flattened, as UniiChat's merge input is: a short leaf is its exact, maybe multi-line, source.
+    source = `${flat(a.text)}\n${flat(b.text)}`;
     task = `Compaction: merge lines ${first(a.ref)}+${2 ** a.ref[0]} and ${first(b.ref)}+${2 ** b.ref[0]}, adjacent, into one line of at most\n512 bytes (about 70 words), the length of this ruler:\n${ruler}\n<chat> may hold their messages, ${first(ref)} to ${end(ref) - 1}, in more detail: take details\nof them from there too.\n<input>\n${source}\n</input>`;
   }
   const view = await renderCompaction(
@@ -164,8 +165,14 @@ async function freeze(
   );
   return { source, task, view };
 }
-// Queue work only. At most the first eight unresolved leaves are eligible; a failed
-// earlier leaf still occupies its place in that eligibility window until it succeeds.
+/** UniiChat's JOBS: the summaries that build at once, and how many unbuilt leaves deep one may start. */
+const JOBS = 64;
+/** Where a node's context ends, UniiChat's `ctx`: before a leaf's message, after a merge's last. */
+const ctx = ([l, i]: NodeRef): number => (l === 0 ? i : (i + 1) * 2 ** l);
+/**
+ * Queue work only, as UniiChat starts it: the nodes ready up to the JOBS-th unbuilt leaf, in the order the messages
+ * came and a merge first at a tie, while fewer than JOBS build. A failed node keeps its place until it builds.
+ */
 export async function pumpBuilds(
   tx: Tx,
   root: ConversationId,
@@ -204,35 +211,23 @@ export async function pumpBuilds(
     created.push(id);
     return true;
   }
-  async function leaf(): Promise<boolean> {
-    for (const i of s.pendingLeaves.slice(0, 8))
-      if (await admit([0, i])) return true;
-    return false;
-  }
-  async function parent(): Promise<boolean> {
-    for (let j = 0; j < s.readyParents.length; ) {
-      const r = s.readyParents[j];
-      if (await readNode(tx, root, r)) {
-        s.readyParents.splice(j, 1);
-        continue;
-      }
-      if (await admit(r)) {
-        s.readyParents.splice(j, 1);
-        return true;
-      }
-      j++;
+  const deepest = s.pendingLeaves[JOBS - 1] ?? s.nextMessage;
+  const ready: NodeRef[] = [
+    ...s.pendingLeaves.filter((i) => i <= deepest).map((i): NodeRef => [0, i]),
+    ...s.readyParents.filter((ref) => ctx(ref) <= deepest),
+  ].sort((a, b) => ctx(a) - ctx(b) || b[0] - a[0]);
+  for (const ref of ready) {
+    if (Object.keys(s.active).length >= JOBS) break;
+    const parent = s.readyParents.findIndex(
+      ([l, i]) => l === ref[0] && i === ref[1],
+    );
+    if (parent >= 0 && (await readNode(tx, root, ref))) {
+      s.readyParents.splice(parent, 1);
+    } else if ((await admit(ref)) && parent >= 0) {
+      // Failed parents leave the ready queue while running and are requeued exactly on failure.
+      s.readyParents.splice(parent, 1);
     }
-    return false;
   }
-  while (Object.keys(s.active).length < 8) {
-    const preferParent = s.nextQueue === "parent";
-    const made = preferParent
-      ? (await parent()) || (await leaf())
-      : (await leaf()) || (await parent());
-    if (!made) break;
-    s.nextQueue = preferParent ? "leaf" : "parent";
-  }
-  // Failed parents leave the ready queue while running and are requeued exactly on failure.
   return created;
 }
 async function release(
@@ -322,7 +317,6 @@ export const BuildNode = defineTask<
         selection.model.provider,
         selection.model.modelId,
       );
-      if (!model) throw new Error("Configured summary model is unavailable");
       // The same static system prompt and offered tool schemas as a turn, from the root agent.
       const agent = await r.agent(ctx);
       const request: ModelContext = {
@@ -354,39 +348,35 @@ export const BuildNode = defineTask<
       };
       let failure: string | undefined;
       let reply: AssistantMessage | undefined;
-      try {
-        reply = await r.models.completeSimple(model, request, {
-          ...(selection.thinkingLevel === "off"
-            ? {}
-            : { reasoning: selection.thinkingLevel }),
-          toolChoice: "none",
-          signal: r.signal,
-        });
-        r.signal.throwIfAborted();
-      } catch (error) {
-        r.signal.throwIfAborted();
-        failure = error instanceof Error ? error.message : String(error);
+      if (!model) {
+        failure = "Configured summary model is unavailable";
+      } else {
+        try {
+          reply = await r.models.completeSimple(model, request, {
+            ...(selection.thinkingLevel === "off"
+              ? {}
+              : { reasoning: selection.thinkingLevel }),
+            toolChoice: "none",
+            signal: r.signal,
+          });
+          r.signal.throwIfAborted();
+        } catch (error) {
+          r.signal.throwIfAborted();
+          failure = error instanceof Error ? error.message : String(error);
+        }
       }
       const answer = reply;
-      // An outage only delays a summary, as UniiChat's patient calls do: provider failures retry past pi-durable's
-      // bounded policy, at pi-ai's backoff, which caps at a minute.
       const { retry } = r.settings;
       const until = r.now() + retryDelayMs(retry, retries + 1);
       await r.commit(async (tx) => {
-        if (
-          retry.enabled &&
-          answer !== undefined &&
-          answer.stopReason === "error" &&
-          isRetryableAssistantError(answer)
-        )
-          return {
-            status: "running",
-            checkpoint: { phase: "retry", attempt, retries: retries + 1, until },
-          };
         const d = await tx.doc(BuildScratchDoc, task.id);
         const text = answer ? replyText(answer) : "";
-        if (answer !== undefined && unanswerable(answer, text)) {
-          // The best line a try wrote, else the source cut to the limit.
+        if (
+          answer !== undefined &&
+          !isRetryableAssistantError(answer) &&
+          unanswerable(answer, text)
+        ) {
+          // The model's own failure, as a refusal: the best line a try wrote, else the source cut to the limit.
           d.shortest ??= prefixUtf8(flat(d.source), 512);
           return { status: "running", checkpoint: { phase: "publish" } };
         }
@@ -395,7 +385,20 @@ export const BuildNode = defineTask<
           answer.stopReason === "error" ||
           answer.stopReason === "aborted"
         ) {
-          // Not the model's doing nor passing, as a missing credential: tried again at the next message.
+          // Any other failure only delays a summary, as UniiChat's patient calls ask again till one is answered: an
+          // outage or a missing credential, past pi-durable's bounded policy, at pi-ai's backoff, which caps at a
+          // minute. With the Harness's retries off, it is tried again at the next message.
+          if (retry.enabled) {
+            return {
+              status: "running",
+              checkpoint: {
+                phase: "retry",
+                attempt,
+                retries: retries + 1,
+                until,
+              },
+            };
+          }
           await release(tx, r.conversationId, task.input.ref, task.id);
           const message =
             failure ?? answer?.errorMessage ?? "Summary model returned no reply";

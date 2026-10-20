@@ -5,7 +5,7 @@ import { createModels, fauxProvider, fauxAssistantMessage } from '@earendil-work
 import { Harness, MemoryStorage, configure, createRegistry, defineExtension, type TaskId } from '@earendil-works/pi-durable';
 import {
   MemoryDoc, MessageDoc, NodeDoc, appendMessage, publishNode, readNode, reduceView,
-  renderMain, renderCompaction, moreDue, clipToolText, type NodeRef, type View,
+  renderMain, renderCompaction, moreDue, clipToolText, viewBytes, type NodeRef, type View,
 } from '../src/memory.mjs';
 
 async function memoryHarness() {
@@ -17,8 +17,13 @@ const input=(text:string,source='test')=>({kind:'user' as const,text,date:'2026-
 const builder=1 as TaskId<string>;
 
 test('independent scalar clipping and exact lossless canonical splitting',async()=>{
- const text='😀é雪'.repeat(12_000);const clipped=clipToolText(text);
- assert.equal(Array.from(clipped).length,30_000);assert.ok(clipped.startsWith(text.slice(0,200)));assert.ok(clipped.endsWith(text.slice(-200)));
+ const text='😀é雪'.repeat(12_000);const clipped=clipToolText(text);const chars=Array.from(text);
+ // UniiChat's clip: 15,000 from the head, 14,936 from the tail, and a marker that counts what it cut.
+ assert.equal(chars.length-15_000-14_936,18_064);
+ const marker='\n[... 18064 characters cut ...]\n';
+ assert.equal(clipped,chars.slice(0,15_000).join('')+marker+chars.slice(-14_936).join(''));
+ assert.ok(Array.from(clipped).length<=30_000);
+ assert.ok(clipped.startsWith(text.slice(0,200)));assert.ok(clipped.endsWith(text.slice(-200)));
  const {h,root}=await memoryHarness();try{
   const ids=await h.commit(tx=>appendMessage(tx,root.id,{...input(text),images:[{data:'original',mimeType:'image/png'}]},true,777),context);
   const records=await Promise.all(ids.map(i=>h.snapshot(MessageDoc,root.id,String(i),context)));
@@ -110,8 +115,9 @@ test('independent incomplete sawtooth waits for a message boundary rather than p
    assert.equal(JSON.stringify(s.main.refs),saved,'Parent completions cannot create a new message boundary');
    await appendMessage(tx,root.id,input('next boundary'));
    await publishNode(tx,root.id,{ref:[0,260],text:'next',bytes:4,builder});
-   const view=await renderMain(tx,root.id);assert.ok(Buffer.byteLength(view)<=64_000);assert.equal(s.main.reducing,false);
-   assert.ok(s.main.refs.length<260);assert.ok(Buffer.byteLength(await renderCompaction(tx,root.id,261))<=16_000);
+   await renderMain(tx,root.id);
+   assert.ok(await viewBytes(tx,root.id,s.main.refs)<=64_000);assert.equal(s.main.reducing,false);
+   assert.ok(s.main.refs.length<260);assert.ok(await viewBytes(tx,root.id,s.compact.refs)<=16_000);
   },context);
  }finally{await h.close(context);}
 });
@@ -120,12 +126,13 @@ test('independent incomplete sawtooth waits for a message boundary rather than p
 import { BuildNode, ConfigDoc, pumpBuilds } from '../src/summary.mjs';
 import { AppDoc, InputDoc, admitInput } from '../src/app.mjs';
 
-test('independent non-retryable summary failure retries on next assistant canonical message, not immediate pump',async()=>{
+test('independent failed summary, Harness retries off, retries on next assistant canonical message, not pump',async()=>{
  const faux=fauxProvider();const models=createModels();models.setProvider(faux.provider);
- // Neither the model's doing nor passing (a missing credential): released until the next message.
+ // Not the model's own failure (a missing credential), with the Harness's retries off: released until the next message.
  faux.setResponses([fauxAssistantMessage('',{stopReason:'error',errorMessage:'No API key for provider: faux'}),fauxAssistantMessage('summary recovered')]);
  const registry=createRegistry();registry.install(defineExtension({name:'independent-summary',tasks:[BuildNode]}));
- const h=await Harness.open(new MemoryStorage(),{models,registry},context);const root=await h.root(context);
+ const h=await Harness.open(new MemoryStorage(),{models,registry,settings:{retry:{enabled:false}}},context);
+ const root=await h.root(context);
  const model={provider:'faux',modelId:faux.getModel().id};
  try{
   const first=await h.commit(async tx=>{(await tx.doc(ConfigDoc,root.id)).summary={model,thinkingLevel:'off'};await appendMessage(tx,root.id,input('long '.repeat(300)));return await pumpBuilds(tx,root.id);},context);
@@ -165,11 +172,9 @@ test('independent strict main and compact high-water byte thresholds',async()=>{
  for(const [count,target,field,low] of [[256,128_000,'main',64_000],[64,32_000,'compact',16_000]] as const){
   const {h,root}=await memoryHarness();try{
    await h.commit(async tx=>{
-    const lengths=Array<number>(count).fill(490);
-    const overhead=14+Array.from({length:count},(_,i)=>`${i}+1|`.length+1).reduce((a,b)=>a+b,0);
-    let remaining=target-overhead-lengths.reduce((a,b)=>a+b,0);
-    for(let i=0;i<count&&remaining>0;i++){const add=Math.min(22,remaining);lengths[i]!+=add;remaining-=add;}
-    assert.equal(remaining,0,'Fixture must use legal <=512-byte node text');
+    // A view's size is its lines' text, as UniiChat counts it: legal 500-byte lines reach the threshold exactly.
+    const lengths=Array<number>(count).fill(target/count);
+    assert.ok(lengths.every(n=>n<=512),'Fixture must use legal <=512-byte node text');
     for(let i=0;i<count;i++){
      await appendMessage(tx,root.id,input(`source${i}`));
      await publishNode(tx,root.id,{ref:[0,i],text:'x'.repeat(lengths[i]!),bytes:lengths[i]!,builder});
@@ -177,13 +182,11 @@ test('independent strict main and compact high-water byte thresholds',async()=>{
      if(i%2===1)await publishNode(tx,root.id,{ref:[1,(i-1)/2],text:'p',bytes:1,builder});
     }
     const s=await tx.doc(MemoryDoc,root.id);
-    const render=field==='main'?await renderMain(tx,root.id):await renderCompaction(tx,root.id,count);
-    assert.equal(Buffer.byteLength(render),target);assert.equal(s[field].reducing,false);
+    assert.equal(await viewBytes(tx,root.id,s[field].refs),target);assert.equal(s[field].reducing,false);
     const compactBefore=s.compact.refs.map((ref):NodeRef=>[ref[0],ref[1]]);
     await appendMessage(tx,root.id,input('threshold plus one'));
     await publishNode(tx,root.id,{ref:[0,count],text:'x',bytes:1,builder});
-    const after=field==='main'?await renderMain(tx,root.id):await renderCompaction(tx,root.id,count+1);
-    assert.ok(Buffer.byteLength(after)<=low);assert.ok(s[field].refs.length<count);
+    assert.ok(await viewBytes(tx,root.id,s[field].refs)<=low);assert.ok(s[field].refs.length<count);
     // Each view batches on its own size: the chat's batch only appends to the compactions' view.
     if(field==='main')assert.deepEqual(s.compact.refs,[...compactBefore,[0,count]]);
    },context);
@@ -192,53 +195,103 @@ test('independent strict main and compact high-water byte thresholds',async()=>{
 });
 
 import { openOptChat } from '../src/app.mjs';
-import { PrivateAgentDoc } from '../src/agents.mjs';
-import type { Context as ModelContext } from '@earendil-works/pi-ai';
+import { AgentDirectoryDoc } from '../src/agents.mjs';
+import { fauxToolCall, type Context as ModelContext } from '@earendil-works/pi-ai';
 
-test('independent native agent tool lets main finish then delivers one complete report as fresh turn', {timeout:30_000}, async()=>{
- const faux=fauxProvider({models:[{id:'agent-model',contextWindow:100_000}]});const models=createModels();models.setProvider(faux.provider);
- let release!:()=>void;const privateGate=new Promise<void>(r=>{release=r;});let privateStarted=false,privateFinished=false;
- const requests:ModelContext[]=[];
- const respond=async(request:ModelContext)=>{
-  requests.push(structuredClone(request));
-  const users=request.messages.filter(m=>m.role==='user');const last=users.at(-1)!;
-  const blocks=typeof last.content==='string'?[{type:'text' as const,text:last.content}]:last.content;
-  const latestText=blocks.filter(b=>b.type==='text').map(b=>b.text).join('');
-  const lastBlock=blocks.at(-1);
-  if(lastBlock?.type==='text'&&lastBlock.text==='PRIVATE_TASK_SENTINEL'){
-   privateStarted=true;await privateGate;privateFinished=true;return fauxAssistantMessage('PRIVATE_REPLY_COMPLETE');
-  }
-  if(latestText.includes('[Worker] PRIVATE_REPLY_COMPLETE'))return fauxAssistantMessage('RECEIVED_REPORT');
-  if(request.messages.some(m=>m.role==='toolResult'))return fauxAssistantMessage('MAIN_FINISHED_WITHOUT_WAIT');
-  return fauxAssistantMessage([{type:'toolCall',id:'spawn-worker',name:'agent',arguments:{name:'Worker',task:'PRIVATE_TASK_SENTINEL'}}],{stopReason:'toolUse'});
- };
- faux.setResponses(Array.from({length:20},()=>respond));
- const reports:unknown[]=[];const model={provider:'faux',modelId:'agent-model'};
- const chat=await openOptChat(new MemoryStorage(),{models,onReport:e=>reports.push(e)},context);
- try{
-  await chat.root.commit(async tx=>{await configure(tx,chat.root.id,{model});(await tx.doc(ConfigDoc,chat.root.id)).summary={model,thinkingLevel:'off'};},context);
-  await chat.accept({requestId:'spawn-request',content:'Please use a subagent.'});
-  assert.equal((await chat.waitForAnswer('spawn-request')).status,'done');
-  assert.equal(privateFinished,false,'Foreground must not wait for private report');
-  const agent=(await chat.harness.snapshot(PrivateAgentDoc,chat.root.id,'Worker',context))!;assert.ok(agent);
-  const reportId=`optchat:agent:${agent.taskId}:report`;
-  const watch=await chat.harness.watchDoc(AppDoc,chat.root.id,context);assert.ok(watch);
-  let admitted!:()=>void;const admittedPromise=new Promise<void>(r=>{admitted=r;});
-  const inspect=(v:typeof watch.value)=>{if(v?.requests.includes(reportId)||v?.pending.includes(reportId))admitted();};
-  watch.start(async v=>inspect(v));inspect(watch.value);
-  release();await admittedPromise;await watch.stop();
-  assert.equal((await chat.waitForAnswer(reportId)).status,'done');
-  assert.equal(privateStarted,true);assert.equal(privateFinished,true);
-  const reportInput=(await chat.harness.snapshot(InputDoc,chat.root.id,reportId,context))!.value!;
-  assert.equal(reportInput.fresh,true);assert.equal(reportInput.content,'[Worker] PRIVATE_REPLY_COMPLETE');
-  const memory=(await chat.harness.snapshot(MemoryDoc,chat.root.id,context))!;
-  const canonical=await Promise.all(Array.from({length:memory.nextMessage},(_,i)=>chat.harness.snapshot(MessageDoc,chat.root.id,String(i),context)));
-  assert.equal(canonical.filter(m=>m?.kind==='work').length,1);
-  assert.equal(canonical.filter(m=>m?.text==='PRIVATE_REPLY_COMPLETE').length,0,'Private output never enters main as ordinary assistant record');
-  assert.equal(canonical.find(m=>m?.kind==='work')?.text,'[Worker] PRIVATE_REPLY_COMPLETE');
-  assert.deepEqual(reports,[]);
- }finally{release();await chat.close();}
-});
+test(
+  'independent native spawn lets main finish then delivers one complete report as fresh turn',
+  { timeout: 30_000 },
+  async () => {
+    const faux = fauxProvider({ models: [{ id: 'agent-model', contextWindow: 100_000 }] });
+    const models = createModels();
+    models.setProvider(faux.provider);
+    let release = () => {};
+    const privateGate = new Promise<void>((r) => {
+      release = r;
+    });
+    let privateStarted = false,
+      privateFinished = false;
+    const respond = async (request: ModelContext) => {
+      const last = request.messages.findLast((m) => m.role === 'user');
+      const blocks =
+        !last || last.role !== 'user'
+          ? []
+          : typeof last.content === 'string'
+            ? [{ type: 'text' as const, text: last.content }]
+            : last.content;
+      const latestText = blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
+      const lastBlock = blocks.at(-1);
+      // A subagent's message ends with its log, numbered, its task last.
+      if (lastBlock?.type === 'text' && lastBlock.text.endsWith('|user: PRIVATE_TASK_SENTINEL')) {
+        privateStarted = true;
+        await privateGate;
+        privateFinished = true;
+        return fauxAssistantMessage('PRIVATE_REPLY_COMPLETE');
+      }
+      if (latestText.includes(']\nPRIVATE_REPLY_COMPLETE\n\nFull chat: zoom("'))
+        return fauxAssistantMessage('RECEIVED_REPORT');
+      if (request.messages.some((m) => m.role === 'toolResult'))
+        return fauxAssistantMessage('MAIN_FINISHED_WITHOUT_WAIT');
+      return fauxAssistantMessage([fauxToolCall('spawn', { tasks: ['PRIVATE_TASK_SENTINEL'] })], {
+        stopReason: 'toolUse',
+      });
+    };
+    faux.setResponses(Array.from({ length: 20 }, () => respond));
+    const reports: unknown[] = [];
+    const model = { provider: 'faux', modelId: 'agent-model' };
+    const chat = await openOptChat(new MemoryStorage(), { models, onReport: (e) => reports.push(e) }, context);
+    try {
+      await chat.root.commit(async (tx) => {
+        await configure(tx, chat.root.id, { model });
+        (await tx.doc(ConfigDoc, chat.root.id)).summary = { model, thinkingLevel: 'off' };
+      }, context);
+      await chat.accept({ requestId: 'spawn-request', content: 'Please use a subagent.' });
+      assert.equal((await chat.waitForAnswer('spawn-request')).status, 'done');
+      assert.equal(privateFinished, false, 'Foreground must not wait for private report');
+      const [name] = (await chat.harness.snapshot(AgentDirectoryDoc, chat.root.id, context))?.names ?? [];
+      assert.ok(name);
+      const watch = await chat.harness.watchDoc(AppDoc, chat.root.id, context);
+      assert.ok(watch);
+      let admitted = (_id: string) => {};
+      const admittedPromise = new Promise<string>((r) => {
+        admitted = r;
+      });
+      const inspect = (v: typeof watch.value) => {
+        const id = [...(v?.requests ?? []), ...(v?.pending ?? [])].find((x) => /^optchat:agent:\d+:report$/.test(x));
+        if (id) admitted(id);
+      };
+      watch.start(async (v) => inspect(v));
+      inspect(watch.value);
+      release();
+      const reportId = await admittedPromise;
+      await watch.stop();
+      assert.equal((await chat.waitForAnswer(reportId)).status, 'done');
+      assert.equal(privateStarted, true);
+      assert.equal(privateFinished, true);
+      const reportText = `[${name}]\nPRIVATE_REPLY_COMPLETE\n\nFull chat: zoom("${name}")`;
+      const reportInput = (await chat.harness.snapshot(InputDoc, chat.root.id, reportId, context))?.value;
+      assert.equal(reportInput?.fresh, true);
+      assert.equal(reportInput?.content, reportText);
+      const memory = await chat.harness.snapshot(MemoryDoc, chat.root.id, context);
+      const canonical = await Promise.all(
+        Array.from({ length: memory?.nextMessage ?? 0 }, (_, i) =>
+          chat.harness.snapshot(MessageDoc, chat.root.id, String(i), context),
+        ),
+      );
+      assert.equal(canonical.filter((m) => m?.kind === 'work').length, 1);
+      assert.equal(
+        canonical.filter((m) => m?.text === 'PRIVATE_REPLY_COMPLETE').length,
+        0,
+        'Private output never enters main as ordinary assistant record',
+      );
+      assert.equal(canonical.find((m) => m?.kind === 'work')?.text, reportText);
+      assert.deepEqual(reports, []);
+    } finally {
+      release();
+      await chat.close();
+    }
+  },
+);
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

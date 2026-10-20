@@ -11,7 +11,7 @@ MODULES = {
  '03-summary-tasks.md': ['src/summary.mts'],
  '04-turns-and-coordinator.md': ['src/prompt.mts', 'src/app.mts'],
  '05-tools-and-recall.md': ['src/tools.mts'],
- '06-background-agents.md': ['src/agents.mts'],
+ '06-background-agents.md': ['src/agents.mts', 'src/names.mts'],
  '08-host-and-lifecycle.md': ['src/node.mts', 'examples/demo.mts', 'examples/anthropic-node.mts'],
 }
 START = '<!-- implementation:start -->'

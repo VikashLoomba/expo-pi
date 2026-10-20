@@ -16,7 +16,10 @@ test('shared system prompt retains exact guide text unless permitted options sub
   assert.ok(subagentPrompt('OptChat', true).includes("unii\n(OptChat's replies)"));
   assert.ok(subagentPrompt('OptChat', true).includes('runs OptChat on'));
   assert.equal(subagentPrompt('Dot', false).includes('Devices:'), false);
-  assert.ok(subagentPrompt('Dot', false).includes('view below, then your task.'));
+  // UniiChat's SUB_HEAD: its first message is the view, then its chat so far, which it may be sent more of.
+  const head = subagentPrompt('Dot', false);
+  assert.ok(head.includes('view below, then your chat with Dot so far,\nits lines as "i|kind: text"'));
+  assert.ok(head.includes('Dot may\nsend you more messages, even while you work: answer the last.'));
   assert.equal(subagentPrompt('Dot', false).includes('devices open now'), false);
 });
 test('Unicode pages return every scalar without clipping or overlap',()=>{
@@ -33,7 +36,7 @@ test('real native zoom/date tools read permanent docs and preserve original imag
   faux.setResponses([fauxAssistantMessage([fauxToolCall('zoom',{id:0,n:1}),fauxToolCall('date',{id:0}),fauxToolCall('zoom',{id:1,n:2})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
   assert.equal((await(await root.submit({type:'input',content:'read memory'},context)).wait(context)).status,'done');
   const results=seen.messages.filter((m:any)=>m.role==='toolResult');assert.equal(results.length,3);
-  assert.ok(results[0].content.some((x:any)=>x.type==='text'&&x.text.includes('user: Original 😀\n[image]')));assert.ok(results[0].content.some((x:any)=>x.type==='image'&&x.data==='YWJj'));
+  assert.ok(results[0].content.some((x:any)=>x.type==='text'&&x.text==='Page 1/1\n0+0|user: Original 😀\n[image]'));assert.ok(results[0].content.some((x:any)=>x.type==='image'&&x.data==='YWJj'));
   assert.ok(results[1].content.some((x:any)=>x.text===new Date('2026-10-15T00:00:00Z').toLocaleString('sv-SE')));
   // A line that isn't one is an answer listing the tree's roots, not a failed call.
   assert.equal(results[2].isError,false);
@@ -48,7 +51,7 @@ test('native output hook keeps exact Unicode head and tail including diagnostic-
  const faux=fauxProvider({models:[{id:'test',contextWindow:1_000_000}],tokensPerSecond:1e9});const models=createModels();models.setProvider(faux.provider);const registry=createRegistry();registry.install(defineExtension({name:'tools',tools:[tool]}));registry.install(toolPolicy([tool],async()=>undefined));let seen:any;
  faux.setResponses([fauxAssistantMessage([fauxToolCall('large',{})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false}}},context);
- try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.equal(Array.from(text).length,30_000);assert.ok(text.startsWith('HEAD'));const entry=(await root.entries({order:'ascending'},100,undefined,context)).items.find(e=>e.kind==='pi.tool-result')!;const raw=entry.model![0]!;assert.equal(raw.role,'toolResult');if(raw.role==='toolResult')assert.equal(text,clipToolText(raw.content.filter(x=>x.type==='text').map(x=>x.text).join('')));assert.ok(text.includes('d'.repeat(100)));}finally{await harness.close(context);}
+ try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.ok(Array.from(text).length<=30_000);assert.match(text,/\n\[\.\.\. \d+ characters cut \.\.\.\]\n/);assert.ok(text.startsWith('HEAD'));const entry=(await root.entries({order:'ascending'},100,undefined,context)).items.find(e=>e.kind==='pi.tool-result')!;const raw=entry.model![0]!;assert.equal(raw.role,'toolResult');if(raw.role==='toolResult')assert.equal(text,clipToolText(raw.content.filter(x=>x.type==='text').map(x=>x.text).join('')));assert.ok(text.includes('d'.repeat(100)));}finally{await harness.close(context);}
 });
 test('native sequential tools finish the round, then the steer is delivered before the next request',async()=>{
  const { defineTool }=await import('@earendil-works/pi-durable');const {Type}=await import('@earendil-works/pi-ai');
@@ -66,7 +69,7 @@ test('completed native bash spill recovers full Unicode head and tail through pu
  const faux=fauxProvider({models:[{id:'test',contextWindow:1_000_000}],tokensPerSecond:1e9});const models=createModels();models.setProvider(faux.provider);const registry=createRegistry();registry.install(defineExtension({name:'tools',tools:[tool]}));registry.install(toolPolicy([tool],async()=>env,{bash:"bash"}));let seen:any;
  faux.setResponses([fauxAssistantMessage([fauxToolCall('bash',{command:`node -e 'process.stdout.write("HEAD" + "😀\\n".repeat(80000) + "TAIL")'`})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,env:()=>env,settings:{compaction:{enabled:false}}},context);
- try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.equal(result.isError,false);assert.ok(text.startsWith('HEAD'));assert.ok(text.includes('TAIL'));assert.equal(Array.from(text).length,30_000);}finally{await harness.close(context);}
+ try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.equal(result.isError,false);assert.ok(text.startsWith('HEAD'));assert.ok(text.includes('TAIL'));assert.ok(Array.from(text).length<=30_000);assert.match(text,/\n\[\.\.\. \d+ characters cut \.\.\.\]\n/);}finally{await harness.close(context);}
 });
 
 for (const body of ['😀'.repeat(40_000), '\n'.repeat(40_000)]) test('native bounds preserve original head before final diagnostic-inclusive cap: '+(body[0]==='\n'?'newlines':'four-byte Unicode'),async()=>{
@@ -75,7 +78,7 @@ for (const body of ['😀'.repeat(40_000), '\n'.repeat(40_000)]) test('native bo
  const faux=fauxProvider({models:[{id:'test',contextWindow:1_000_000}],tokensPerSecond:1e9});const models=createModels();models.setProvider(faux.provider);const registry=createRegistry();registry.install(defineExtension({name:'tools',tools:[tool]}));registry.install(toolPolicy([tool],async()=>undefined));let seen:any;
  faux.setResponses([fauxAssistantMessage([fauxToolCall('boundary',{})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false}}},context);
- try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const entry=(await root.entries({order:'ascending'},100,undefined,context)).items.find(e=>e.kind==='pi.tool-result')!;const original=entry.model![0]!;assert.equal(original.role,'toolResult');if(original.role!=='toolResult')throw new Error('Missing tool result');const raw=original.content.filter(x=>x.type==='text').map(x=>x.text).join('');assert.ok(raw.startsWith('HEAD'));assert.ok(raw.includes('TAIL'));const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.equal(text,clipToolText(raw));assert.equal(Array.from(text).length,30_000);assert.ok(text.startsWith('HEAD'));assert.ok(text.includes('TAIL'));}finally{await harness.close(context);}
+ try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const entry=(await root.entries({order:'ascending'},100,undefined,context)).items.find(e=>e.kind==='pi.tool-result')!;const original=entry.model![0]!;assert.equal(original.role,'toolResult');if(original.role!=='toolResult')throw new Error('Missing tool result');const raw=original.content.filter(x=>x.type==='text').map(x=>x.text).join('');assert.ok(raw.startsWith('HEAD'));assert.ok(raw.includes('TAIL'));const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.equal(text,clipToolText(raw));assert.ok(Array.from(text).length<=30_000);assert.ok(text.startsWith('HEAD'));assert.ok(text.includes('TAIL'));}finally{await harness.close(context);}
 });
 
 test('a read registered as native pages itself and reaches the model unclipped', async () => {

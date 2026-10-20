@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-This package implements the behavior in [Victor Taelin’s OptChat / UniiChat guide](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) and [UniiChat’s released source](https://github.com/VictorTaelin/UniiChat/tree/0500bf6a8ea4bf0ce047488562022b1b6532cc30) using **pi-durable 1.3.0**; where the release differs from the gist, it follows the release. The guide defines semantic behavior; its JSONL files and view files are represented by native documents, not mirrored application files.
+This package implements the behavior of [UniiChat’s released source](https://github.com/VictorTaelin/UniiChat/tree/0500bf6a8ea4bf0ce047488562022b1b6532cc30) at commit `0500bf6` using **pi-durable 1.3.0**; [the references](10-references.md#where-this-port-differs-from-uniichat) list where it still differs. The guide defines semantic behavior; UniiChat’s JSON-lines logs and `view.json` are represented by native documents, not mirrored application files.
 
 The user has one ongoing chat. Every fresh logical turn sees the saved memory view and its new input, not the previous turn’s provider transcript. Native context resets preserve the stored transcript. Native tasks manage the coordinator, summary builds, and requested background agents. Native documents hold permanent originals, immutable built nodes, exact saved views, and application policy state.
 
@@ -23,9 +23,9 @@ Sources: [native concepts](https://github.com/earendil-works/pi/blob/71023aec154
 
 ## Public API
 
-`openOptChat(storage, options, context)` assembles the native registry, documents, tasks, hooks and root conversation. It returns `accept`, `waitForAnswer`, `abort`, `close`, `root` and `harness`. Use a stable unique `requestId` for an input and reuse it if its acknowledgement is lost. `waitForAnswer` is a host/UI wait for that submission, not a tool for the main agent to poll its subagents.
+`openOptChat(storage, options, context)` assembles the native registry, documents, tasks, hooks and root conversation. It returns `accept`, `waitForAnswer`, `abort`, `close`, `root` and `harness`. Use a stable unique `requestId` for an input and reuse it if its acknowledgement is lost. `waitForAnswer` is a host/UI wait for that input’s answer, across the resubmissions a failed run can cause, not a tool for the main agent to poll its subagents. `abort` is the user’s stop: it ends the turn and every agent at work.
 
-The host passes its own pi-ai `Models`. It selects the root conversation’s main model and thinking level with pi-durable’s `configure`, and the summary model and thinking level as the `summary` of `ConfigDoc`, in one commit; summary builds wait until that selection is set, and the host accepts no input before the main model is. `turnState` supplies what changes between turns, such as the devices open now; a turn and a subagent read it as they start. `init` runs in the root conversation’s creating commit after OptChat’s own documents, for the host’s documents. See the [complete hosts](08-host-and-lifecycle.md).
+The host passes its own pi-ai `Models`. It selects the root conversation’s main model and thinking level with pi-durable’s `configure`, and the summary model and thinking level as the `summary` of `ConfigDoc`, in one commit; summary builds wait until that selection is set, and the host accepts no input before the main model is. `turnState` supplies what changes between turns, such as the devices open now; a turn reads it as it starts, and a message to a subagent as it is sent. `init` runs in the root conversation’s creating commit after OptChat’s own documents, for the host’s documents. See the [complete hosts](08-host-and-lifecycle.md).
 
 <!-- implementation:start -->
 

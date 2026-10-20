@@ -63,7 +63,8 @@ export class InfiniChatService {
       name: TITLE,
       hasDeviceTools: true,
       tools: deviceTools(devices),
-      callEnv: (call, target, callContext) => devices.callEnvironment(call, target.read, callContext),
+      callEnv: (call, target, callContext) =>
+        devices.callEnvironment(call, target.read, target.conversationId, callContext),
       nativeContracts: { bash: 'bash', read: 'read' },
       turnState: () => devices.turnState(),
       onReport: (error) => service?.report(error),

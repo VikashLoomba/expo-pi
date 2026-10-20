@@ -15,7 +15,7 @@ export interface ChatSummary {
 
 export interface ChatMessage {
   id: string;
-  /** `work` is a background agent's report, the gist's work message starting "[Name]". */
+  /** `work` is a background agent's report, UniiChat's work message starting "[Name]". */
   role: 'user' | 'assistant' | 'tool' | 'notice' | 'work';
   text: string;
   createdAt: number;

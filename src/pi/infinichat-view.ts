@@ -3,7 +3,7 @@ import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
 import {
   ResetEntry,
   type Conversation, type ConversationId, type ConversationView, type Cursor, type DocumentState, type EntryId,
-  type EntryRecord, type Harness, type InboxItem, type InboxState, type SettledSubmissionRecord,
+  type EntryRecord, type Harness, type InboxItem, type InboxState, type SettledSubmissionRecord, type TaskGraph,
 } from '@earendil-works/pi-durable';
 
 import type { ChatControls, ChatMessage } from '../chat/types';
@@ -12,6 +12,7 @@ import {
   projectControls, projectMessages, queuedRow, readConversationView, stoppedNotice, type ChatState,
 } from './chat-projection';
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
+import { AGENT_TASK } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, type Admission, type AppState } from './infinichat/app';
 import { ConfigDoc, type SummarySelection } from './infinichat/summary';
 
@@ -89,6 +90,8 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   private metadata?: DocumentState<ChatMetadata>;
   private app?: DocumentState<AppState>;
   private config?: DocumentState<{ summary: SummarySelection | null }>;
+  /** pi-durable's live tasks, for the agents at work, as the keep-alive counts them. */
+  private tasks?: AttachedReplicatedState<TaskGraph>;
   private loaded = false;
   private scheduled = false;
   private readonly entries = new Map<EntryId, EntryRecord>();
@@ -141,22 +144,25 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       }
       this.view = view;
       this.unsubscribeView = view.subscribe(this.schedule);
-      const [metadata, app, config] = await Promise.all([
+      const [metadata, app, config, tasks] = await Promise.all([
         this.harness.documentState(ChatMetadataDoc, this.id, context),
         this.harness.documentState(AppDoc, this.id, context),
         this.harness.documentState(ConfigDoc, this.id, context),
+        this.harness.taskGraph(context),
       ]);
       if (!current()) {
         metadata?.dispose();
         app?.dispose();
         config?.dispose();
+        tasks.dispose();
         return;
       }
       this.metadata = metadata;
       this.app = app;
       this.config = config;
+      this.tasks = tasks;
       this.unsubscribeDocs = [metadata?.subscribe(this.schedule) ?? noop, app?.subscribe(this.schedule) ?? noop,
-        config?.subscribe(this.schedule) ?? noop];
+        config?.subscribe(this.schedule) ?? noop, tasks.subscribe(this.schedule)];
       if (!metadata?.value) {
         this.publish({ status: 'missing' });
         return;
@@ -195,6 +201,8 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
     this.app = undefined;
     this.config?.dispose();
     this.config = undefined;
+    this.tasks?.dispose();
+    this.tasks = undefined;
   }
 
   /**
@@ -308,15 +316,16 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
     const summary = this.config?.value?.summary ?? null;
     this.controls = {
       ...controls,
-      // An accepted input waits for its turn's summaries or the coordinator before pi-durable runs it; a stop
-      // cancels it, so the conversation is working.
-      busy: controls.busy || pending.length > 0,
+      // An accepted input waits for its turn's summaries or the coordinator before pi-durable runs it, and agents
+      // work in the background; a stop cancels both, so the conversation is working.
+      busy: controls.busy || pending.length > 0
+        || Object.values(this.tasks?.value.tasks ?? {}).some((task) => task.kind === AGENT_TASK),
       summary,
       instructions: docs.agent?.instructions ?? '',
       configured: docs.agent?.model !== undefined && summary !== null,
       ...(error ? { error } : {}),
     };
-    // An agent's report is the gist's work message; its delivery row is the agent's, not the user's.
+    // An agent's report is UniiChat's work message; its delivery row is the agent's, not the user's.
     const workRows = new Set(shown.flatMap((entry) =>
       DeliveryEntry.is(entry) && entry.data.kind === 'work' ? [`${entry.id}-0`] : []));
     const messages = projectMessages(state, shown).map((message) =>

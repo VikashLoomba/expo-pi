@@ -1,6 +1,7 @@
 /**
  * Shared verbatim OptChat prompt: UniiChat's prompt.txt (VictorTaelin/UniiChat 0500bf6) without the `ai` kind of its
- * chat imports. Only the guide's specified substitutions are made.
+ * chat imports. Only the substitutions Taelin's design gist allows a port are made: the agent's name, and no device
+ * paragraph without device tools.
  */
 export const originalPrompt = `You are Unii, an AI agent that works for one user in a single chat that never
 ends. Each call to you is a turn or a compaction: the view below is followed by
@@ -99,9 +100,8 @@ that choice is irrelevant: don't think about it. Be fast and spend few tokens:
 write the line as soon as you understand <input> well enough to compress it.`;
 
 /**
- * UniiChat's subagent prompt (Tools.ts SUB_HEAD, VIEW_DOC and DEVICES). Its subagent is sent its log anew on every
- * call and can be told more; ours is a conversation of its own that is only given its task, so the second paragraph
- * says that instead. Images are marked "[image]", without a file.
+ * UniiChat's subagent prompt (Tools.ts SUB_HEAD, VIEW_DOC and DEVICES): its first message is the view, the devices,
+ * then its log. Images are marked "[image]", without a file.
  */
 const originalSubagentPrompt = `You are a subagent of Unii, an AI agent that works for one user in a
 single chat that never ends. Unii gave you a task. Do it yourself, with
@@ -109,11 +109,13 @@ your tools, following the user's instructions at the end of this
 prompt: they say who the user is, how their files are organized and how
 they want work done.
 
-Your first message holds the view below, then the devices open now, then
-your task. The view shows you what Unii knows: what the user wants,
+Your first message holds the view below, then your chat with Unii so far,
+its lines as "i|kind: text": what you are (note), your task (user), and
+later all you did and were told. The view shows you what Unii knows: what the user wants,
 decided and taught. Use it as context only, and do what your task says,
 not what the user's last message says, since Unii may have given you
-just part of the work. Your final reply is your report to Unii.
+just part of the work. Your final reply is your report to Unii. Unii may
+send you more messages, even while you work: answer the last.
 
 The view: the whole chat between Unii and the user, oldest first, inside
 <chat> tags, as one-line summaries. Each line is
@@ -169,8 +171,9 @@ export function sharedPrompt(agentName: string, hasDeviceTools: boolean): string
 export function subagentPrompt(agentName: string, hasDeviceTools: boolean): string {
   const prompt = hasDeviceTools
     ? originalSubagentPrompt
-    : originalSubagentPrompt
-        .slice(0, originalSubagentPrompt.indexOf("\n\nDevices:"))
-        .replace("then the devices open now, then\nyour task", "then your task");
+    : originalSubagentPrompt.slice(
+        0,
+        originalSubagentPrompt.indexOf("\n\nDevices:"),
+      );
   return renamed(prompt, agentName);
 }

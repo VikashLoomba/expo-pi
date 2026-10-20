@@ -61,8 +61,11 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
     </View>
   </View>;
   if (message.role === 'user') return <View style={styles.userRow}>{userBubble}</View>;
-  // An agent's report is the gist's work message, "[Name] …": the name heads the row and the rest is its body.
-  const report = message.role === 'work' ? /^\[([^\]\r\n]+)\]\s?([\s\S]*)$/.exec(message.text) : null;
+  // An agent's report is UniiChat's work message, "[Name]" and its text: the name heads the row and the text is its
+  // body, without the zoom pointer for the model, as UniiChat's `report_read` shows one.
+  const report = message.role === 'work'
+    ? /^\[([^\]\r\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\r\n]*"\))?\s*$/.exec(message.text)
+    : null;
   const author = report?.[1] ?? 'Pi';
   const body = report?.[2] ?? message.text;
   return <View testID={`message-${message.id}`} style={styles.assistant}>

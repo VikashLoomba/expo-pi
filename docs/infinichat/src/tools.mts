@@ -12,7 +12,6 @@ import {
   ToolTask,
   GenerationTask,
   type ConversationId,
-  type Cursor,
   type ToolHookCall,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
@@ -27,7 +26,7 @@ import {
   shownMessage,
   type NodeRef,
 } from "./memory.mjs";
-import { PrivateAgentDoc } from "./agents.mjs";
+import { PrivateAgentDoc, agentLog } from "./agents.mjs";
 
 const PAGE = 29_000;
 /** The tree's roots over `count` messages, largest first, as UniiChat's zoom lists them for a line that isn't one. */
@@ -81,42 +80,16 @@ export function memoryTools(root: ConversationId) {
           : given;
       if (typeof id === "string") {
         const agent = await api.snapshot(PrivateAgentDoc, root, id, context);
+        // An answer, not a failure, for an agent there isn't, as UniiChat's agent log gives.
         if (!agent?.conversationId)
-          throw new Error(`No transcript for agent ${id}`);
+          return { output: [{ type: "text" as const, text: `No agent ${id}.` }] };
         const conversationId = agent.conversationId;
-        const parts: string[] = [];
-        let cursor: Cursor | undefined;
-        do {
-          const batch = await api.commit(
-            (tx) =>
-              tx.scanEntries(
-                { conversationId, order: "ascending" },
-                100,
-                cursor,
-              ),
-            context,
-          );
-          for (const entry of batch.items)
-            for (const message of entry.model ?? []) {
-              if (message.role === "system") continue;
-              if (typeof message.content === "string")
-                parts.push(`${message.role}: ${message.content}`);
-              else {
-                const content: string[] = [];
-                for (const item of message.content) {
-                  if (item.type === "text") content.push(item.text);
-                  else if (item.type === "toolCall")
-                    content.push(
-                      `${item.name} ${JSON.stringify(item.arguments)}`,
-                    );
-                  else if (item.type === "image") images.push(item);
-                }
-                parts.push(`${message.role}: ${content.join("\n")}`);
-              }
-            }
-          cursor = batch.next;
-        } while (cursor);
-        text = parts.join("\n\n");
+        const log = await api.commit(
+          (tx) => agentLog(tx, conversationId, agent.effort),
+          context,
+        );
+        text = log.lines.map((line, i) => `${i}|${line}`).join("\n\n");
+        images.push(...log.images);
       } else {
         const count =
           (await api.snapshot(MemoryDoc, root, context))?.nextMessage ?? 0;
@@ -143,7 +116,8 @@ export function memoryTools(root: ConversationId) {
             ],
           };
         if (message) {
-          text = shownMessage(message);
+          // UniiChat's head for a message whole: its id and +0.
+          text = `${id}+0|${shownMessage(message)}`;
           images.push(
             ...message.images.map((image) => ({
               type: "image" as const,
