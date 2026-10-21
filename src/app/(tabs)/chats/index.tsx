@@ -1,7 +1,6 @@
 import { Link, router, Stack } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp } from '@/chat/chat-provider';
 import { useChatActions } from '@/components/chat/chat-actions';
@@ -20,7 +19,6 @@ function dateLabel(timestamp: number) {
 
 export default function ChatsScreen() {
   const colors = useChatColors();
-  const insets = useSafeAreaInsets();
   const { ready, error, dismissError, chats, hasConnectedProvider, catalog, providerAccess, signOutPending, service } =
     useChatApp();
   const connectionsReady = catalog.every((provider) => providerAccess(provider.id).ready);
@@ -42,13 +40,17 @@ export default function ChatsScreen() {
     finally { setCreating(false); }
   };
   return <View testID="chats-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
-    <Stack.Screen options={{ title: 'Chats',
-      headerLeft: () => <IconButton testID="account-button" icon="person" label="Account" onPress={() => router.push('/account')} />,
-      headerRight: () => <IconButton testID="new-chat" icon="compose" label="New chat" disabled={!ready || creating} onPress={() => { void newChat(); }} />,
-    }} />
+    <Stack.Screen options={{ title: 'Chats' }} />
+    <Stack.Toolbar placement="left">
+      <Stack.Toolbar.Button icon="person" accessibilityLabel="Account" onPress={() => router.push('/account')} />
+    </Stack.Toolbar>
+    <Stack.Toolbar placement="right">
+      <Stack.Toolbar.Button icon="square.and.pencil" accessibilityLabel="New chat" disabled={!ready || creating}
+        onPress={() => { void newChat(); }} />
+    </Stack.Toolbar>
     <FlatList testID="chat-list" data={visibleChats} keyExtractor={(chat) => String(chat.id)}
-      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
-      contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 20) + 24 }]}
+      contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+      contentContainerStyle={styles.listContent}
       ListHeaderComponent={<View style={styles.listHeader}>
         <View style={styles.brandRow}><PiMark size={36} /><View style={styles.brandCopy}>
           <Text style={[styles.brandTitle, { color: colors.text }]}>Room for a good conversation.</Text>
@@ -120,7 +122,7 @@ export default function ChatsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  listContent: { flexGrow: 1, paddingHorizontal: 22, maxWidth: 760, width: '100%', alignSelf: 'center' },
+  listContent: { flexGrow: 1, paddingHorizontal: 22, paddingBottom: 24, maxWidth: 760, width: '100%', alignSelf: 'center' },
   listHeader: { gap: 20, paddingTop: 13 },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
   brandCopy: { flex: 1 },

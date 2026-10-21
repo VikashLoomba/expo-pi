@@ -2,7 +2,9 @@ import { uuidv7, type UserMessage } from '@earendil-works/pi-ai';
 import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance } from 'react-native';
+import {
+  KeyboardAvoidingView, PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
@@ -10,7 +12,7 @@ import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo
 import { useChatActions } from '@/components/chat/chat-actions';
 import { Composer } from '@/components/chat/composer';
 import { ChatIcon } from '@/components/chat/icon';
-import { ChatTranscript, type ChatTranscriptHandle } from '@/components/chat/transcript';
+import { ChatTranscript } from '@/components/chat/transcript';
 import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -52,7 +54,6 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const [localError, setLocalError] = useState<string>();
   const actions = useChatActions(setLocalError);
   const [headerOffset, setHeaderOffset] = useState(0);
-  const transcript = useRef<ChatTranscriptHandle>(null);
   const input = useRef<TextInputInstance>(null);
   const keyboardContainer = useRef<ViewInstance>(null);
   const busy = !!conversation?.busy;
@@ -102,7 +103,6 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
     try {
       await service.send(id, userInput(text, draft.images), draft.requestId);
       setDraft(emptyDraft());
-      transcript.current?.scrollToLatest();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : 'Your message could not be sent. Try again.');
     } finally {
@@ -140,12 +140,17 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
       headerTitle: () => <Pressable testID="open-chat-settings" accessibilityRole="button" accessibilityLabel={`Chat settings. ${settingsLabel}`}
         accessibilityHint="Change the provider, model, and reasoning effort for this chat." accessibilityState={{ disabled: settingsDisabled }}
         disabled={settingsDisabled} onPress={openSettings} style={styles.headerTitle}>
-        <Text numberOfLines={1} style={[styles.headerName, { color: colors.text }]}>{conversation?.title || 'New chat'}</Text>
-        <View style={styles.headerSettings}><Text numberOfLines={1} style={[styles.headerSubtitle, { color: colors.muted }]}>{busy ? `Working… · ${settingsLabel}` : settingsLabel}</Text><ChatIcon name="down" color={colors.muted} size={9} /></View>
+        <Text numberOfLines={1} style={[styles.headerName, { color: PlatformColor('label') }]}>{conversation?.title || 'New chat'}</Text>
+        <View style={styles.headerSettings}>
+          <Text numberOfLines={1} style={[styles.headerSubtitle, { color: PlatformColor('secondaryLabel') }]}>
+            {busy ? `Working… · ${settingsLabel}` : settingsLabel}
+          </Text>
+          <ChatIcon name="down" color={PlatformColor('secondaryLabel')} size={9} />
+        </View>
       </Pressable>,
     }} />
     <Stack.Toolbar placement="right">
-      <Stack.Toolbar.Menu icon="ellipsis.circle" accessibilityLabel="Chat options" hidden={!chat}>
+      <Stack.Toolbar.Menu icon="ellipsis" accessibilityLabel="Chat options" hidden={!chat}>
         <Stack.Toolbar.MenuAction icon="slider.horizontal.3" onPress={openSettings}>
           Model settings
         </Stack.Toolbar.MenuAction>
@@ -157,9 +162,11 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
         </Stack.Toolbar.MenuAction>
       </Stack.Toolbar.Menu>
     </Stack.Toolbar>
-    <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
-      <SafeAreaView style={styles.screen} edges={['bottom']}>
-        <ChatTranscript ref={transcript} view={view} ready={ready} stopping={stopping} onChoose={choosePrompt}
+    {/* The keyboard view pads only for the keyboard's overlap with its own frame, so it sits inside the bottom
+        inset (tab bar, home indicator); outside it, the keyboard's padding and the inset would stack. */}
+    <SafeAreaView style={styles.screen} edges={['bottom']}>
+      <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
+        <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt}
           onSteerQueued={steerQueued} />
         {settingsError && <View style={styles.banner}><InlineNotice testID="conversation-settings-error" message={settingsError}
           action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} /></View>}
@@ -176,8 +183,8 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
           accountStatus={accountStatus} inputRef={input}
           attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
           attaching={attaching} imagesSupported={!!model?.images} />
-      </SafeAreaView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   </View>;
 }
 

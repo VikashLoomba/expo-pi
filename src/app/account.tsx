@@ -2,12 +2,11 @@ import * as Location from 'expo-location';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp } from '@/chat/chat-provider';
 import { AuthPromptForm } from '@/components/chat/auth-prompt';
 import { ChatIcon } from '@/components/chat/icon';
-import { ActionButton, IconButton, InlineNotice, PiMark } from '@/components/chat/primitives';
+import { ActionButton, InlineNotice, PiMark } from '@/components/chat/primitives';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { ProviderOption } from '@/pi/model-catalog';
 import { OPENAI_PROVIDER_ID } from '@/pi/openai-auth/core';
@@ -135,14 +134,18 @@ function BackgroundWorkCard() {
 
 export default function AccountScreen() {
   const colors = useChatColors();
-  const insets = useSafeAreaInsets();
   const { provider: requestedProvider } = useLocalSearchParams<{ provider?: string }>();
   const { catalog, hasConnectedProvider, cancelSignIn } = useChatApp();
   const focusedProvider = catalog.find((provider) => provider.id === (requestedProvider ?? OPENAI_PROVIDER_ID));
   useEffect(() => () => cancelSignIn(), [cancelSignIn]);
   return <View testID="account-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
-    <Stack.Screen options={{ title: 'Providers', headerRight: () => <IconButton testID="close-account" icon="close" label="Close providers" onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/'); }} /> }} />
-    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}>
+    <Stack.Screen options={{ title: 'Providers' }} />
+    <Stack.Toolbar placement="right">
+      <Stack.Toolbar.Button icon="xmark" accessibilityLabel="Close providers"
+        onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/'); }} />
+    </Stack.Toolbar>
+    <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive" contentContainerStyle={styles.content}>
       <View style={styles.hero}>
         <PiMark size={64} />
         <Text style={[styles.title, { color: colors.text }]}>Your providers.</Text>
@@ -176,7 +179,7 @@ export default function AccountScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { paddingHorizontal: 24, paddingTop: 24, maxWidth: 620, width: '100%', alignSelf: 'center', gap: 27 },
+  content: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 28, maxWidth: 620, width: '100%', alignSelf: 'center', gap: 27 },
   hero: { alignItems: 'center', gap: 19, paddingVertical: 18 },
   title: { fontSize: 29, lineHeight: 36, textAlign: 'center', letterSpacing: -0.8, fontWeight: '500' },
   subtitle: { fontSize: 14, lineHeight: 22, textAlign: 'center' },

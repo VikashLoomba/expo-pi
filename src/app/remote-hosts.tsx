@@ -1,10 +1,9 @@
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef } from 'react';
 import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatApp } from '@/chat/chat-provider';
-import { ActionButton, IconButton, InlineNotice } from '@/components/chat/primitives';
+import { ActionButton, InlineNotice } from '@/components/chat/primitives';
 import { RemoteHostForm } from '@/components/chat/remote-host-form';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteHost } from '@/pi/execution/remote/hosts';
@@ -12,7 +11,6 @@ import { testRemoteHost, type HostKeyChallenge } from '@/pi/execution/remote/tes
 
 export default function RemoteHostsScreen() {
   const colors = useChatColors();
-  const insets = useSafeAreaInsets();
   const { remoteHosts } = useChatApp();
   const snapshot = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   const [editing, setEditing] = useState<RemoteHost | 'new'>();
@@ -78,11 +76,15 @@ export default function RemoteHostsScreen() {
     finally { setBusy(undefined); }
   };
   return <View testID="remote-hosts-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
-    <Stack.Screen options={{ title: 'Remote machines', headerRight: () => <IconButton icon="close" label="Close remote machines" testID="close-remote-hosts"
-      onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/'); }} /> }} />
-    <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive"
+    <Stack.Screen options={{ title: 'Remote machines' }} />
+    <Stack.Toolbar placement="right">
+      <Stack.Toolbar.Button icon="xmark" accessibilityLabel="Close remote machines"
+        onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/'); }} />
+    </Stack.Toolbar>
+    <ScrollView ref={scroll} contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
       onContentSizeChange={() => { if (challenge) scroll.current?.scrollToEnd({ animated: true }); }}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}>
+      contentContainerStyle={styles.content}>
       <Text style={[styles.intro, { color: colors.secondary }]}>SSH over Tailscale connects to the machine’s existing SSH server. Keep Tailscale connected on your phone and the machine. Each chat chooses where its tools run.</Text>
       <Text style={[styles.detail, { color: colors.secondary }]}>Pi prepares remote execution automatically when you test or connect. Your chat and model connection stay on this phone.</Text>
       {snapshot.error && <InlineNotice message={snapshot.error} action="Retry" onAction={() => { void remoteHosts.restore().catch(() => {}); }} />}
@@ -130,7 +132,7 @@ export default function RemoteHostsScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 }, content: { padding: 22, gap: 20, width: '100%', maxWidth: 620, alignSelf: 'center' },
+  screen: { flex: 1 }, content: { padding: 22, paddingBottom: 28, gap: 20, width: '100%', maxWidth: 620, alignSelf: 'center' },
   intro: { fontSize: 15, lineHeight: 23 }, detail: { fontSize: 13, lineHeight: 20 },
   card: { padding: 18, gap: 14, borderWidth: StyleSheet.hairlineWidth, borderRadius: 18 },
   name: { fontSize: 19, fontWeight: '600' }, fingerprint: { fontSize: 14, lineHeight: 22, fontFamily: 'Menlo' },

@@ -2,7 +2,7 @@ import { uuidv7 } from '@earendil-works/pi-ai';
 import { router, Stack } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance,
+  KeyboardAvoidingView, PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -12,7 +12,7 @@ import { Composer } from '@/components/chat/composer';
 import { ChatIcon } from '@/components/chat/icon';
 import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
-import { ChatTranscript, type ChatTranscriptHandle } from '@/components/chat/transcript';
+import { ChatTranscript } from '@/components/chat/transcript';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { findCatalogModel, getModelSettingsError } from '@/pi/model-catalog';
 import { userInput } from '@/pi/user-input';
@@ -45,7 +45,6 @@ export default function InfiniChatScreen() {
   const [stopping, setStopping] = useState(false);
   const [localError, setLocalError] = useState<string>();
   const [headerOffset, setHeaderOffset] = useState(0);
-  const transcript = useRef<ChatTranscriptHandle>(null);
   const input = useRef<TextInputInstance>(null);
   const keyboardContainer = useRef<ViewInstance>(null);
   const busy = !!conversation?.busy;
@@ -95,7 +94,6 @@ export default function InfiniChatScreen() {
     try {
       await service.accept(userInput(text, draft.images), draft.requestId);
       setDraft(emptyDraft());
-      transcript.current?.scrollToLatest();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : 'Your message could not be sent. Try again.');
     } finally {
@@ -134,18 +132,20 @@ export default function InfiniChatScreen() {
         accessibilityHint="Choose the main and summary models and their reasoning effort."
         accessibilityState={{ disabled: settingsDisabled }} disabled={settingsDisabled} onPress={openSettings}
         style={styles.headerTitle}>
-        <Text numberOfLines={1} style={[styles.headerName, { color: colors.text }]}>{TITLE}</Text>
+        <Text numberOfLines={1} style={[styles.headerName, { color: PlatformColor('label') }]}>{TITLE}</Text>
         <View style={styles.headerSettings}>
-          <Text numberOfLines={1} style={[styles.headerSubtitle, { color: colors.muted }]}>
+          <Text numberOfLines={1} style={[styles.headerSubtitle, { color: PlatformColor('secondaryLabel') }]}>
             {busy ? `Working… · ${settingsLabel}` : settingsLabel}
           </Text>
-          <ChatIcon name="down" color={colors.muted} size={9} />
+          <ChatIcon name="down" color={PlatformColor('secondaryLabel')} size={9} />
         </View>
       </Pressable>,
     }} />
-    <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
-      <SafeAreaView style={styles.screen} edges={['bottom']}>
-        <ChatTranscript ref={transcript} view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} />
+    {/* The keyboard view pads only for the keyboard's overlap with its own frame, so it sits inside the bottom
+        inset (tab bar, home indicator); outside it, the keyboard's padding and the inset would stack. */}
+    <SafeAreaView style={styles.screen} edges={['bottom']}>
+      <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
+        <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} />
         {conversation && !configured && <View style={styles.banner}>
           <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
             action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
@@ -167,8 +167,8 @@ export default function InfiniChatScreen() {
           accountStatus={accountStatus} inputRef={input}
           attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
           attaching={attaching} imagesSupported={!!model?.images} />
-      </SafeAreaView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   </View>;
 }
 

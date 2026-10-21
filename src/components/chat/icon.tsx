@@ -1,4 +1,5 @@
 import { SymbolView } from 'expo-symbols';
+import type { ColorValue } from 'react-native';
 
 const symbols = {
   compose: 'square.and.pencil',
@@ -27,6 +28,6 @@ const symbols = {
 
 export type ChatIconName = keyof typeof symbols;
 
-export function ChatIcon({ name, color, size = 21 }: { name: ChatIconName; color: string; size?: number }) {
+export function ChatIcon({ name, color, size = 21 }: { name: ChatIconName; color: ColorValue; size?: number }) {
   return <SymbolView name={symbols[name]} tintColor={color} size={size} style={{ width: size, height: size }} />;
 }

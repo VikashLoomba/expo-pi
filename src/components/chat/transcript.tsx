@@ -1,9 +1,9 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
 import type { SubmissionId } from '@earendil-works/pi-durable';
+import { GlassView } from 'expo-glass-effect';
 import { router } from 'expo-router';
-import { memo, useImperativeHandle, type Ref } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import { memo } from 'react';
+import { ActivityIndicator, FlatList, PlatformColor, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@/chat/chat-provider';
 import type { ChatMessage } from '@/chat/types';
@@ -38,16 +38,13 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
 
 const keyExtractor = (message: ChatMessage) => message.id;
 
-export interface ChatTranscriptHandle { scrollToLatest: () => void }
-
 /**
  * Only this subtree subscribes to text deltas. `memo` stays because the chat screen that renders it is not compiled
  * by React Compiler (it contains `try … finally`).
  */
-export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, onSteerQueued, ref }: {
+export const ChatTranscript = memo(function ChatTranscript({ view, ready, stopping, onChoose, onSteerQueued }: {
   view: ChatViewSource | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
   onSteerQueued?: (submissionId: SubmissionId, content: UserMessage['content']) => void;
-  ref: Ref<ChatTranscriptHandle>;
 }) {
   const colors = useChatColors();
   const messages = useChatMessages(view);
@@ -60,7 +57,6 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
   const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
     : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
   const { list, onScroll, onContentSizeChange, onLayout, scrollToLatest, showScrollDown } = useTranscriptScroll();
-  useImperativeHandle(ref, () => ({ scrollToLatest }), [scrollToLatest]);
   const showWorking = controls?.compacting
     || (busy && !messages.some((message) => message.streaming || message.tool?.status === 'running'));
   const unavailable = status === 'missing' || status === 'failed' || (ready && !view);
@@ -73,11 +69,12 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
     </View>
       : !ready || status === 'loading' ? <View style={styles.loading}><ActivityIndicator color={colors.accent} />
         <Text style={[styles.loadingText, { color: colors.muted }]}>Opening this conversation…</Text></View>
-      : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.emptyMessages}><EmptyConversation onChoose={onChoose} /></ScrollView>}
+      : <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.emptyMessages}><EmptyConversation onChoose={onChoose} /></ScrollView>}
   </View>;
   return <View style={styles.transcript}>
-    <Animated.FlatList ref={list} testID="message-list" data={messages} keyExtractor={keyExtractor}
-      renderItem={renderMessage} extraData={stopping}
+    <FlatList ref={list} testID="message-list" data={messages} keyExtractor={keyExtractor}
+      renderItem={renderMessage} extraData={stopping} contentInsetAdjustmentBehavior="automatic"
       keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
       scrollEventThrottle={16} initialNumToRender={20} contentContainerStyle={styles.messages}
       onScroll={onScroll} onContentSizeChange={onContentSizeChange} onLayout={onLayout}
@@ -86,8 +83,12 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
           <Text testID="conversation-working" style={[styles.workingText, { color: colors.secondary }]}>{working}</Text></>}
       </View>}
     />
-    {showScrollDown && <Pressable testID="scroll-to-latest" accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={scrollToLatest}
-      style={[styles.scrollDown, { backgroundColor: colors.surface, borderColor: colors.border }]}><ChatIcon name="arrowDown" color={colors.accent} size={19} /></Pressable>}
+    {showScrollDown && <GlassView isInteractive style={styles.scrollDown}>
+      <Pressable testID="scroll-to-latest" accessibilityRole="button" accessibilityLabel="Scroll to latest message"
+        onPress={scrollToLatest} style={styles.scrollDownButton}>
+        <ChatIcon name="arrowDown" color={PlatformColor('label')} size={19} />
+      </Pressable>
+    </GlassView>}
   </View>;
 });
 
@@ -109,5 +110,6 @@ const styles = StyleSheet.create({
   missingTitle: { fontSize: 22, fontWeight: '600' },
   working: { height: 44, flexDirection: 'row', gap: 10, alignItems: 'center' },
   workingText: { fontSize: 13 },
-  scrollDown: { position: 'absolute', bottom: 10, alignSelf: 'center', width: 42, height: 42, borderWidth: 1, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  scrollDown: { position: 'absolute', bottom: 10, alignSelf: 'center', width: 42, height: 42, borderRadius: 21 },
+  scrollDownButton: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
