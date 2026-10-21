@@ -5,7 +5,8 @@ import { chatPalettes } from '@/hooks/use-chat-colors';
 
 // Liquid Glass picks light or dark from what lies beneath the tab bar, not from the color scheme, so the native
 // side resolves the tint (Expo Router native tabs, "Customizing the icon color").
-const tint = DynamicColorIOS({ light: chatPalettes.light.accent, dark: chatPalettes.dark.accent });
+const tint = DynamicColorIOS({ light: chatPalettes.light.accent, dark: chatPalettes.dark.accent,
+  highContrastLight: chatPalettes.lightContrast.accent, highContrastDark: chatPalettes.darkContrast.accent });
 
 /**
  * The app's tabs: InfiniChat and the chats, each with its own Stack for its header and pushed screens. Neither tab

@@ -1,4 +1,5 @@
-import { useColorScheme } from 'react-native';
+import { AccessibilityInfo, useColorScheme } from 'react-native';
+import { useSyncExternalStore } from 'react';
 
 const light = {
   dark: false,
@@ -36,11 +37,62 @@ const dark: typeof light = {
   scrim: 'rgba(0, 0, 0, 0.6)',
 };
 
-/** Both palettes, for colors the native side resolves itself. */
-export const chatPalettes = { light, dark };
+/** Light with Increase Contrast: darker text, borders and accent, and fills that separate more. */
+const lightContrast: typeof light = {
+  ...light,
+  subtle: '#E8EAE2',
+  user: '#DAE5D6',
+  text: '#121813',
+  secondary: '#3E4840',
+  muted: '#566057',
+  border: '#AAB2A5',
+  accent: '#2D5235',
+  accentSoft: '#DBE7D7',
+  danger: '#8C3326',
+  dangerSoft: '#F5E1DC',
+};
+
+/** Dark with Increase Contrast: brighter text, borders and accent on a deeper background. */
+const darkContrast: typeof light = {
+  ...dark,
+  background: '#0F1310',
+  surface: '#1B211C',
+  subtle: '#252D26',
+  user: '#2E402F',
+  text: '#FFFFFF',
+  secondary: '#D4DCD2',
+  muted: '#ABB7A8',
+  border: '#5A695A',
+  accent: '#CBE9BE',
+  accentSoft: '#2F432E',
+  onAccent: '#0F1F0F',
+  danger: '#FFC3B7',
+  dangerSoft: '#48302B',
+};
+
+/** Every palette, for colors the native side resolves itself. */
+export const chatPalettes = { light, dark, lightContrast, darkContrast };
+
+// iOS's Increase Contrast setting, read once and then followed through its change event.
+let increasedContrast = false;
+const listeners = new Set<() => void>();
+const setIncreasedContrast = (enabled: boolean) => {
+  increasedContrast = enabled;
+  listeners.forEach((listener) => listener());
+};
+void AccessibilityInfo.isDarkerSystemColorsEnabled().then(setIncreasedContrast);
+AccessibilityInfo.addEventListener('darkerSystemColorsChanged', setIncreasedContrast);
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+};
+const getIncreasedContrast = () => increasedContrast;
 
 export function useChatColors() {
-  return useColorScheme() === 'dark' ? dark : light;
+  const scheme = useColorScheme();
+  const contrast = useSyncExternalStore(subscribe, getIncreasedContrast, getIncreasedContrast);
+  if (scheme === 'dark') return contrast ? darkContrast : dark;
+  return contrast ? lightContrast : light;
 }
 
 export type ChatColors = typeof light;

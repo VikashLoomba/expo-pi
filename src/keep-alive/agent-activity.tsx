@@ -15,7 +15,9 @@ const AgentActivity = (props: AgentActivityProps, environment: LiveActivityEnvir
   'widget';
   // The bundler serializes only this function's body for the widget runtime: every constant must be declared
   // inside it; module-scope values are undefined there and the layout would fail to render.
-  const accent = environment.isLuminanceReduced ? '#FFFFFF' : '#208AEF';
+  // InfiniChat's accent for the activity's color scheme (src/hooks/use-chat-colors.ts), white when dimmed.
+  const accent = environment.isLuminanceReduced ? '#FFFFFF'
+    : environment.colorScheme === 'dark' ? '#B6D6A9' : '#426A4B';
   const chats = props.activeChats === 1 ? '1 chat' : `${props.activeChats} chats`;
   return {
     banner: (
