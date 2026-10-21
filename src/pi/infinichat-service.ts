@@ -8,6 +8,7 @@ import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
 import type { RemoteHostRepository } from './execution/remote/hosts';
 import type { RemoteExecution } from './execution/remote/owner';
+import { ScheduledTaskNotifier } from './infinichat-notifications';
 import { InfiniChatView } from './infinichat-view';
 import { openOptChat, type OptChat } from './infinichat/app';
 import { createDevices, deviceTools } from './infinichat/devices';
@@ -36,6 +37,7 @@ export class InfiniChatService {
   private closed = false;
   private closePromise?: Promise<void>;
   private detachKeepAlive = () => {};
+  private notifier?: ScheduledTaskNotifier;
   private shownView?: InfiniChatView;
 
   private constructor(
@@ -78,6 +80,9 @@ export class InfiniChatService {
     }, context);
     service = new InfiniChatService(chat, options.models, options.authError);
     if (options.keepAlive) service.detachKeepAlive = options.keepAlive.observe(chat.harness, infiniChatTasks);
+    // Scheduled tasks remind the user through local notifications while the app is closed.
+    service.notifier = new ScheduledTaskNotifier(chat.harness, (error) => service?.report(error));
+    void service.notifier.start().catch((error: unknown) => service?.report(error));
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
       if (end.reason === 'failed') service.report(end.error);
@@ -178,6 +183,7 @@ export class InfiniChatService {
       } finally {
         // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
         this.detachKeepAlive();
+        this.notifier?.close();
       }
     })();
     return this.closePromise;

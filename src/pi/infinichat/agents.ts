@@ -395,7 +395,7 @@ export const agentTask = (setup: SubagentSetup) => defineTask<AgentInput, Checkp
     }, context);
   },
 });
-type AgentTask = ReturnType<typeof agentTask>;
+export type AgentTask = ReturnType<typeof agentTask>;
 
 /** The messages to agents still being answered, read from pi-durable's own task records so they can't drift. */
 export async function agentWork(tx: Tx, root: ConversationId): Promise<{ id: TaskId; name: string }[]> {
@@ -436,7 +436,7 @@ export async function takeAgentReports(tx: Tx, rootId: ConversationId): Promise<
 }
 
 /** A tool call's answer, kept so a native replay of the call answers alike without acting twice. */
-const AgentCallDoc = defineDocFamily<{ result: string | null }, null>({
+export const AgentCallDoc = defineDocFamily<{ result: string | null }, null>({
   kind: 'optchat.agent-launch',
   version: 2,
   scope: 'conversation',
@@ -451,18 +451,32 @@ const AgentCallDoc = defineDocFamily<{ result: string | null }, null>({
   initial: () => ({ result: null }),
 });
 
+/** Starts a call of an agent on a message, in the same commit that records what started it. */
+async function startCall(tx: Tx, rootId: ConversationId, task: AgentTask, name: string, message: string) {
+  const memory = await tx.doc(MemoryDoc, rootId);
+  const agent = await tx.doc(PrivateAgentDoc, rootId, name, null);
+  agent.calling = await tx.createTask(task, { name, message, cutoff: memory.nextMessage }, {
+    conversationId: rootId,
+    ownership: { kind: 'conversation' },
+    background: true,
+  });
+}
+
+/** Starts a new agent on a task, as `spawn` starts each of its tasks: a fresh name, its document, then its call. */
+export async function spawnAgent(
+  tx: Tx, rootId: ConversationId, task: AgentTask, text: string, effort: ThinkingLevel | null,
+): Promise<string> {
+  const directory = await tx.doc(AgentDirectoryDoc, rootId);
+  const name = agentName(directory.names);
+  directory.names.push(name);
+  await tx.doc(PrivateAgentDoc, rootId, name, effort);
+  await startCall(tx, rootId, task, name, text);
+  return name;
+}
+
 /** UniiChat's master tools: `spawn` starts subagents, `tell` messages one. */
 export function agentTools(rootId: ConversationId, task: AgentTask) {
-  /** Starts a call of an agent on a message, in the same commit that records the tool call's answer. */
-  async function call(tx: Tx, name: string, message: string): Promise<void> {
-    const memory = await tx.doc(MemoryDoc, rootId);
-    const agent = await tx.doc(PrivateAgentDoc, rootId, name, null);
-    agent.calling = await tx.createTask(task, { name, message, cutoff: memory.nextMessage }, {
-      conversationId: rootId,
-      ownership: { kind: 'conversation' },
-      background: true,
-    });
-  }
+  const call = (tx: Tx, name: string, message: string) => startCall(tx, rootId, task, name, message);
   const spawn = defineTool({
     name: 'spawn',
     description: 'Start one subagent per task, in parallel, and return their names at once. Each one\'s report '
@@ -482,15 +496,8 @@ export function agentTools(rootId: ConversationId, task: AgentTask) {
         const done = await tx.doc(AgentCallDoc, rootId, String(api.taskId), null);
         if (done.result !== null) return done.result;
         if (tasks.length === 0) return 'No tasks.';
-        const directory = await tx.doc(AgentDirectoryDoc, rootId);
         const names: string[] = [];
-        for (const each of tasks) {
-          const name = agentName(directory.names);
-          directory.names.push(name);
-          await tx.doc(PrivateAgentDoc, rootId, name, effort ?? null);
-          await call(tx, name, each);
-          names.push(name);
-        }
+        for (const each of tasks) names.push(await spawnAgent(tx, rootId, task, each, effort ?? null));
         done.result = `Started ${names.join(', ')}. Each one's report will reach you as a message when it finishes.`;
         return done.result;
       }, context);

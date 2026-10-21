@@ -47,6 +47,12 @@
           "locationAlwaysAndWhenInUsePermission": "Allow Pi Agent to keep agent work running in the background. Location updates are only used to keep the app alive while work runs.",
           "locationWhenInUsePermission": "Allow Pi Agent to keep agent work running in the background. Location updates are only used to keep the app alive while work runs."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "enableRemoteNotifications": false
+        }
       ]
     ],
     "experiments": {

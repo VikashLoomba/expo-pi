@@ -15,6 +15,7 @@ import {
 } from './agents';
 import { MemoryDoc, advanceMessageProgress, appendMessage, memoryReady, renderMain, settleViews } from './memory';
 import { sharedPrompt, subagentPrompt } from './prompt';
+import { scheduleTool, scheduledTask } from './schedule';
 import { BuildNode, ConfigDoc, pumpBuilds } from './summary';
 import { memoryTools, toolPolicy, type NativeContracts } from './tools';
 
@@ -632,7 +633,8 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
   const coordinator = coordinatorTask(turnState);
   const tools: ToolRegistration[] = [...memoryTools(ROOT_CONVERSATION_ID), ...(options.tools ?? [])];
   const agents = agentTask({ master: () => master, prompt: subagentPrompt(name, hasDeviceTools), turnState });
-  const agentCalls = agentTools(ROOT_CONVERSATION_ID, agents);
+  const scheduled = scheduledTask(agents);
+  const agentCalls = [...agentTools(ROOT_CONVERSATION_ID, agents), scheduleTool(ROOT_CONVERSATION_ID, scheduled)];
   // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
   // reaches an existing conversation as pi-durable's system entry instead of staying as created. The master's prompt
   // and agent tools are an extension of their own, which a subagent's conversation goes without.
@@ -641,7 +643,9 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     sections: [section('optchat', () => sharedPrompt(name, hasDeviceTools), { tag: false })],
     tools: agentCalls,
   });
-  registry.install(defineExtension({ name: 'optchat', tools, tasks: [coordinator, BuildNode, agents, AgentAnchor] }));
+  registry.install(defineExtension({
+    name: 'optchat', tools, tasks: [coordinator, BuildNode, agents, AgentAnchor, scheduled],
+  }));
   registry.install(master);
   let harness: Harness | undefined;
   registry.install(toolPolicy([...tools, ...agentCalls], async (call, conversationId, ctx) => {
