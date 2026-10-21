@@ -3,6 +3,7 @@ import '@/pi/random-values';
 
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { ChatProvider } from '@/chat/chat-provider';
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -19,19 +20,21 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={{ ...baseTheme, colors: { ...baseTheme.colors, primary: colors.accent,
       background: colors.background, card: colors.background, text: colors.text, border: colors.border } }}>
-      <ChatProvider>
-        <StatusBar style={colors.dark ? 'light' : 'dark'} />
-        <Stack screenOptions={screenOptions}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          {/* Their picker pages keep fixed content above the list, which a transparent header would cover. */}
-          <Stack.Screen name="chat-settings/[id]"
-            options={{ title: 'Chat settings', presentation: 'modal', headerTransparent: false }} />
-          <Stack.Screen name="infinichat-settings"
-            options={{ title: 'InfiniChat settings', presentation: 'modal', headerTransparent: false }} />
-          <Stack.Screen name="remote-hosts" options={{ title: 'Remote machines', presentation: 'modal' }} />
-          <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
-        </Stack>
-      </ChatProvider>
+      <KeyboardProvider>
+        <ChatProvider>
+          <StatusBar style={colors.dark ? 'light' : 'dark'} />
+          <Stack screenOptions={screenOptions}>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            {/* Their picker pages keep fixed content above the list, which a transparent header would cover. */}
+            <Stack.Screen name="chat-settings/[id]"
+              options={{ title: 'Chat settings', presentation: 'modal', headerTransparent: false }} />
+            <Stack.Screen name="infinichat-settings"
+              options={{ title: 'InfiniChat settings', presentation: 'modal', headerTransparent: false }} />
+            <Stack.Screen name="remote-hosts" options={{ title: 'Remote machines', presentation: 'modal' }} />
+            <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
+          </Stack>
+        </ChatProvider>
+      </KeyboardProvider>
     </ThemeProvider>
   );
 }

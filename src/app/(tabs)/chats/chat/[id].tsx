@@ -2,10 +2,7 @@ import { uuidv7, type UserMessage } from '@earendil-works/pi-ai';
 import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView, PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
 
 import { useChatApp, useChatControls, useChatId, useChatStatus, useChatView } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
@@ -53,9 +50,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const [steering, setSteering] = useState(false);
   const [localError, setLocalError] = useState<string>();
   const actions = useChatActions(setLocalError);
-  const [headerOffset, setHeaderOffset] = useState(0);
   const input = useRef<TextInputInstance>(null);
-  const keyboardContainer = useRef<ViewInstance>(null);
   const busy = !!conversation?.busy;
   const providerId = conversation?.settings.model.provider;
   const provider = catalog.find((entry) => entry.id === providerId);
@@ -134,8 +129,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
   const accountStatus = !access.ready ? 'Restoring your connection…'
     : access.error ? `Reconnect ${provider?.name || providerId} in Account`
       : `Connect ${provider?.name || providerId || 'your provider'} to send a message`;
-  return <View ref={keyboardContainer} testID="conversation-screen" onLayout={() => keyboardContainer.current?.measureInWindow((_x, y) => setHeaderOffset(y))}
-    style={[styles.screen, { backgroundColor: colors.background }]}>
+  return <View testID="conversation-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
     <Stack.Screen options={{ title: conversation?.title || 'New chat',
       headerTitle: () => <Pressable testID="open-chat-settings" accessibilityRole="button" accessibilityLabel={`Chat settings. ${settingsLabel}`}
         accessibilityHint="Change the provider, model, and reasoning effort for this chat." accessibilityState={{ disabled: settingsDisabled }}
@@ -162,14 +156,12 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
         </Stack.Toolbar.MenuAction>
       </Stack.Toolbar.Menu>
     </Stack.Toolbar>
-    {/* The keyboard view pads only for the keyboard's overlap with its own frame, so it sits inside the bottom
-        inset (tab bar, home indicator); outside it, the keyboard's padding and the inset would stack. */}
-    <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
-        <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt}
-          onSteerQueued={steerQueued} />
-        {settingsError && <View style={styles.banner}><InlineNotice testID="conversation-settings-error" message={settingsError}
-          action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} /></View>}
+    <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt}
+      onSteerQueued={steerQueued} composer={<>
+        {settingsError && <View style={styles.banner}>
+          <InlineNotice testID="conversation-settings-error" message={settingsError}
+            action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} />
+        </View>}
         {messageError && messageError !== settingsError && <View style={styles.banner}>
           <InlineNotice testID="conversation-error" message={messageError}
             action={localError || showsAppError ? 'Dismiss' : access.error ? 'Account' : undefined}
@@ -183,8 +175,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
           accountStatus={accountStatus} inputRef={input}
           attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
           attaching={attaching} imagesSupported={!!model?.images} />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </>} />
   </View>;
 }
 

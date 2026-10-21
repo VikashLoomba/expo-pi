@@ -1,34 +1,21 @@
 import { useRef, useState } from 'react';
-import type { FlatList, LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import type { KeyboardChatScrollViewRef } from 'react-native-keyboard-controller';
 
-import type { ChatMessage } from '@/chat/types';
-
-/** Offers a jump to the newest message once the reader is well above it. */
+/** Offers a jump to the newest message once the reader leaves it. */
 export function useTranscriptScroll() {
-  const list = useRef<FlatList<ChatMessage>>(null);
-  const metrics = useRef({ height: 0, viewport: 0, offset: 0 });
+  const scrollRef = useRef<KeyboardChatScrollViewRef | null>(null);
+  const pinned = useRef(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
-  const update = () => {
-    const { height, viewport, offset } = metrics.current;
-    setShowScrollDown(height - viewport - offset > 120);
+  const onEndVisible = (visible: boolean) => { setShowScrollDown(!visible); };
+  const onScrollBeginDrag = () => { pinned.current = false; };
+  // Rows that never rendered are estimated, so the end moves once they render; stay on it until the reader drags.
+  const onContentSizeChange = () => {
+    if (pinned.current) scrollRef.current?.scrollToEnd({ animated: false });
   };
-  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    metrics.current.offset = event.nativeEvent.contentOffset.y;
-    update();
-  };
-  const onContentSizeChange = (_width: number, height: number) => {
-    metrics.current.height = height;
-    update();
-  };
-  const onLayout = (event: LayoutChangeEvent) => {
-    metrics.current.viewport = event.nativeEvent.layout.height;
-    update();
-  };
-  // FlatList.scrollToEnd estimates unmeasured rows; the measured content size lands on the real end.
   const scrollToLatest = () => {
-    const { height, viewport } = metrics.current;
-    list.current?.scrollToOffset({ offset: Math.max(0, height - viewport), animated: true });
+    pinned.current = true;
+    scrollRef.current?.scrollToEnd({ animated: true });
   };
 
-  return { list, onScroll, onContentSizeChange, onLayout, scrollToLatest, showScrollDown };
+  return { scrollRef, onEndVisible, onScrollBeginDrag, onContentSizeChange, scrollToLatest, showScrollDown };
 }

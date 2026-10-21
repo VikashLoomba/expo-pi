@@ -1,10 +1,7 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
 import { router, Stack } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView, PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance, type ViewInstance,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
 
 import { useChatApp, useChatControls, useInfiniChatError, useInfiniChatView } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
@@ -44,9 +41,7 @@ export default function InfiniChatScreen() {
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [localError, setLocalError] = useState<string>();
-  const [headerOffset, setHeaderOffset] = useState(0);
   const input = useRef<TextInputInstance>(null);
-  const keyboardContainer = useRef<ViewInstance>(null);
   const busy = !!conversation?.busy;
   const configured = !!conversation?.configured;
   const providerId = conversation?.settings.model.provider;
@@ -123,9 +118,7 @@ export default function InfiniChatScreen() {
       : `Connect ${provider?.name || providerId || 'your provider'} to send a message`;
   // With no model chosen there is no provider to connect; the models notice says what to do instead.
   const connected = !configured || access.connected;
-  return <View ref={keyboardContainer} testID="infinichat-screen"
-    onLayout={() => keyboardContainer.current?.measureInWindow((_x, y) => setHeaderOffset(y))}
-    style={[styles.screen, { backgroundColor: colors.background }]}>
+  return <View testID="infinichat-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
     <Stack.Screen options={{ title: TITLE,
       headerTitle: () => <Pressable testID="open-infinichat-settings" accessibilityRole="button"
         accessibilityLabel={`InfiniChat settings. ${settingsLabel}`}
@@ -141,34 +134,29 @@ export default function InfiniChatScreen() {
         </View>
       </Pressable>,
     }} />
-    {/* The keyboard view pads only for the keyboard's overlap with its own frame, so it sits inside the bottom
-        inset (tab bar, home indicator); outside it, the keyboard's padding and the inset would stack. */}
-    <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerOffset}>
-        <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} />
-        {conversation && !configured && <View style={styles.banner}>
-          <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
-            action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
-        </View>}
-        {settingsError && <View style={styles.banner}>
-          <InlineNotice testID="infinichat-settings-error" message={settingsError}
-            action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
-        </View>}
-        {messageError && messageError !== settingsError && <View style={styles.banner}>
-          <InlineNotice testID="infinichat-error" message={messageError}
-            action={dismiss ? 'Dismiss' : access.error ? 'Account' : undefined}
-            onAction={dismiss ?? (access.error ? openAccount : undefined)} />
-        </View>}
-        <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
-          onStop={() => { void stop(); }}
-          onConnect={openAccount} busy={busy} admitting={admitting} connected={connected}
-          disabled={!ready || !conversation || stopping
-            || (!busy && (!configured || !access.ready || !!settingsError))}
-          accountStatus={accountStatus} inputRef={input}
-          attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
-          attaching={attaching} imagesSupported={!!model?.images} />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+    <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} composer={<>
+      {conversation && !configured && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
+          action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
+      </View>}
+      {settingsError && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-settings-error" message={settingsError}
+          action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
+      </View>}
+      {messageError && messageError !== settingsError && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-error" message={messageError}
+          action={dismiss ? 'Dismiss' : access.error ? 'Account' : undefined}
+          onAction={dismiss ?? (access.error ? openAccount : undefined)} />
+      </View>}
+      <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
+        onStop={() => { void stop(); }}
+        onConnect={openAccount} busy={busy} admitting={admitting} connected={connected}
+        disabled={!ready || !conversation || stopping
+          || (!busy && (!configured || !access.ready || !!settingsError))}
+        accountStatus={accountStatus} inputRef={input}
+        attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
+        attaching={attaching} imagesSupported={!!model?.images} />
+    </>} />
   </View>;
 }
 
