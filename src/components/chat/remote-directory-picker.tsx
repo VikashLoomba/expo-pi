@@ -1,10 +1,10 @@
 import { ExecutionError, FileError } from '@earendil-works/pi-durable/env';
 import {
-  Button, Host, HStack, Image, List, ProgressView, Section, Spacer, Text, TextField, VStack, useNativeState,
+  Button, Host, HStack, Image, Label, List, ProgressView, Section, Spacer, Text, TextField, VStack, useNativeState,
 } from '@expo/ui/swift-ui';
 import {
-  autocorrectionDisabled, buttonStyle, font, foregroundStyle, headerProminence, listStyle, scrollContentBackground,
-  scrollDismissesKeyboard, submitLabel, textInputAutocapitalization,
+  autocorrectionDisabled, buttonStyle, font, foregroundStyle, headerProminence, listStyle, scrollDismissesKeyboard,
+  submitLabel, textInputAutocapitalization,
 } from '@expo/ui/swift-ui/modifiers';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet } from 'react-native';
@@ -144,11 +144,12 @@ function Unavailable({ error, onRetry }: { error: string; onRetry: () => void })
 
 /**
  * A native folder browser for a remote machine: tap a folder to open it, search to find one a few levels below the
- * shown folder. The screen's header owns going up and choosing the shown folder, as the Files app does.
+ * shown folder. Each folder is its own screen, so the back button goes up; `parent` offers the folder above the one
+ * the browser opened at, which no earlier screen shows.
  */
-export function RemoteDirectoryPicker({ remote, machineId, hostName, path, folder, onOpen, onRetry }: {
+export function RemoteDirectoryPicker({ remote, machineId, hostName, path, folder, parent, onOpen, onRetry }: {
   remote: RemoteExecution; machineId: string; hostName: string; path: string | null; folder: RemoteFolderState;
-  onOpen: (path: string) => void; onRetry: () => void;
+  parent?: string; onOpen: (path: string) => void; onRetry: () => void;
 }) {
   const colors = useChatColors();
   const search = useNativeState('');
@@ -193,13 +194,15 @@ export function RemoteDirectoryPicker({ remote, machineId, hostName, path, folde
     : found.status === 'failed' ? found.error
     : searching ? 'No folders match.' : 'No folders inside.';
   return <Host style={styles.host} seedColor={colors.accent} testID="directory-picker">
-    <List modifiers={[listStyle('insetGrouped'), scrollContentBackground('hidden'),
-      scrollDismissesKeyboard('interactively')]}>
+    <List modifiers={[listStyle('insetGrouped'), scrollDismissesKeyboard('interactively')]}>
       <Section>
         <TextField placeholder="Search folders" text={search} onTextChange={setQuery}
           modifiers={[autocorrectionDisabled(), textInputAutocapitalization('never'), submitLabel('search')]} />
       </Section>
       <Section header={<Text>{header}</Text>} footer={<Text>{footer}</Text>} modifiers={[headerProminence('increased')]}>
+        {!searching && parent !== undefined && <Button onPress={() => open(parent)}>
+          <Label title="Enclosing folder" systemImage="arrow.turn.left.up" />
+        </Button>}
         {rows.length
           ? <List.ForEach data={rows} keyExtractor={(row) => row.path} estimatedItemSize={44}>{renderRow}</List.ForEach>
           : <Text modifiers={secondaryText}>{empty}</Text>}

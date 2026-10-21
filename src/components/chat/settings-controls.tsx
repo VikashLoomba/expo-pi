@@ -1,10 +1,16 @@
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Button, Host, HStack, Image, Label, List, Picker, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
+import {
+  disabled as disable, font, foregroundStyle, listStyle, pickerStyle, tag,
+} from '@expo/ui/swift-ui/modifiers';
+import { useCallback } from 'react';
+import { ActivityIndicator, PlatformColor, StyleSheet, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import {
-  findCatalogModel, type ChatModelSettings, type ModelCatalog, type ModelThinkingLevel,
+  findCatalogModel, type ChatModelSettings, type ModelCatalog, type ModelOption, type ModelThinkingLevel,
+  type ProviderOption,
 } from '@/pi/model-catalog';
-import { ChatIcon } from './icon';
+import { ActionButton, InlineNotice } from './primitives';
 
 const thinkingLabels: Record<ModelThinkingLevel, string> = {
   off: 'Off', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Maximum',
@@ -14,141 +20,137 @@ export function thinkingLevelLabel(level: ModelThinkingLevel) {
   return thinkingLabels[level] ?? level;
 }
 
-export function SettingRow({ label, value, detail, onPress, disabled, testID }: {
-  label: string; value: string; detail?: string; onPress: () => void; disabled?: boolean; testID: string;
-}) {
+const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
+// Inside a button, hierarchical styles derive from the tint, so its text takes the label colors explicitly.
+const buttonLabel = foregroundStyle(PlatformColor('label'));
+const buttonDetail = foregroundStyle(PlatformColor('secondaryLabel'));
+
+/** A form section's footer: an error in the danger color, otherwise the caption. */
+export function SectionFooter({ error, caption }: { error?: string; caption?: string }) {
   const colors = useChatColors();
-  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={`${label}, ${value}${detail ? `. ${detail}` : ''}`}
-    accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress}
-    style={({ pressed }) => [styles.setting, { borderColor: colors.border, opacity: pressed || disabled ? 0.55 : 1 }]}>
-    <View style={styles.copy}>
-      <Text style={[styles.label, { color: colors.secondary }]}>{label}</Text>
-      <Text style={[styles.value, { color: colors.text }]}>{value}</Text>
-      {detail && <Text style={[styles.detail, { color: colors.muted }]}>{detail}</Text>}
-    </View>
-    <ChatIcon name="chevron" color={colors.muted} size={14} />
-  </Pressable>;
+  if (error) return <Text modifiers={[foregroundStyle(colors.danger)]}>{error}</Text>;
+  return caption ? <Text>{caption}</Text> : null;
 }
 
-/** The pickers of one model choice. */
-export type ModelPicker = 'provider' | 'model' | 'effort';
+/** A form row that pushes another screen, labelled with its current value. */
+export function PushRow({ label, value, disabled, onPress }: {
+  label: string; value: string; disabled?: boolean; onPress: () => void;
+}) {
+  return <Button onPress={onPress} modifiers={[disable(disabled)]}>
+    <HStack spacing={8}>
+      <Text modifiers={[buttonLabel]}>{label}</Text>
+      <Spacer />
+      <Text modifiers={[buttonDetail]}>{value}</Text>
+      <Image systemName="chevron.right" size={13} color={PlatformColor('tertiaryLabel')} />
+    </HStack>
+  </Button>;
+}
 
-/** The provider, model and reasoning effort rows of one model choice; `testID` prefixes each row's. */
-export function ModelSettingRows({ catalog, settings, disabled, onOpen, testID }: {
-  catalog: ModelCatalog; settings: ChatModelSettings; disabled: boolean; onOpen: (picker: ModelPicker) => void;
-  testID: string;
+/**
+ * One model choice as a form section: the provider and reasoning effort are menus, and the model, which can be one
+ * of hundreds, opens a searchable list. Choosing another provider opens that list at once.
+ */
+export function ModelSection({ title, error, caption, catalog, settings, disabled, onChange, onChooseModel }: {
+  title: string; error?: string; caption?: string; catalog: ModelCatalog; settings: ChatModelSettings;
+  disabled: boolean; onChange: (settings: ChatModelSettings) => void; onChooseModel: () => void;
 }) {
   const provider = catalog.find((entry) => entry.id === settings.model.provider);
   const model = findCatalogModel(catalog, settings.model);
-  const canChooseEffort = !!model?.thinkingLevels.length
-    && (model.thinkingLevels.length > 1 || !model.thinkingLevels.includes(settings.thinkingLevel));
-  return <>
-    <SettingRow testID={`${testID}-provider`} label="Provider"
-      value={provider?.name || settings.model.provider || 'Choose a provider'} disabled={disabled}
-      onPress={() => onOpen('provider')} />
-    <SettingRow testID={`${testID}-model`} label="Model"
-      value={model?.name || settings.model.modelId || 'Choose a model'}
-      detail={model && model.id !== model.name ? model.id : undefined} disabled={disabled || !provider?.models.length}
-      onPress={() => onOpen('model')} />
-    <SettingRow testID={`${testID}-effort`} label="Reasoning effort" value={thinkingLevelLabel(settings.thinkingLevel)}
-      detail={!model ? 'Choose an available model first.' : !model.reasoning ? 'This model does not support reasoning.'
-        : model.thinkingLevels.length === 1 ? 'This model uses a fixed reasoning level.' : undefined}
-      disabled={disabled || !canChooseEffort} onPress={() => onOpen('effort')} />
-  </>;
+  const levels = model?.thinkingLevels ?? [];
+  const canChooseEffort = levels.length > 1 || (levels.length === 1 && !levels.includes(settings.thinkingLevel));
+  const effortNote = !model ? undefined : !model.reasoning ? 'This model does not support reasoning.'
+    : levels.length === 1 ? 'This model uses a fixed reasoning level.' : undefined;
+  const chooseProvider = (providerId: string) => {
+    if (providerId === settings.model.provider) return;
+    onChange({ model: { provider: providerId, modelId: '' }, thinkingLevel: settings.thinkingLevel });
+    onChooseModel();
+  };
+  const chooseEffort = (value: string) => {
+    const thinkingLevel = levels.find((level) => level === value);
+    if (thinkingLevel) onChange({ ...settings, thinkingLevel });
+  };
+  return <Section title={title} footer={<SectionFooter error={error}
+    caption={[effortNote, caption].filter(Boolean).join(' ') || undefined} />}>
+    <Picker<string> label="Provider" selection={settings.model.provider} onSelectionChange={chooseProvider}
+      modifiers={[pickerStyle('menu'), disable(disabled)]}>
+      {!provider && <Text modifiers={[tag(settings.model.provider)]}>
+        {settings.model.provider || 'Choose a provider'}
+      </Text>}
+      {catalog.map((entry) => <Text key={entry.id} modifiers={[tag(entry.id), disable(!entry.models.length)]}>
+        {entry.name}
+      </Text>)}
+    </Picker>
+    <PushRow label="Model" value={model?.name || settings.model.modelId || 'Choose a model'}
+      disabled={disabled || !provider?.models.length} onPress={onChooseModel} />
+    <Picker<string> label="Reasoning effort" selection={settings.thinkingLevel} onSelectionChange={chooseEffort}
+      modifiers={[pickerStyle('menu'), disable(disabled || !canChooseEffort)]}>
+      {!levels.includes(settings.thinkingLevel) && <Text modifiers={[tag(settings.thinkingLevel)]}>
+        {thinkingLevelLabel(settings.thinkingLevel)}
+      </Text>}
+      {levels.map((level) => <Text key={level} modifiers={[tag(level)]}>{thinkingLevelLabel(level)}</Text>)}
+    </Picker>
+  </Section>;
 }
 
-/** A model picker's choices: the catalog's providers, the chosen provider's models, or the model's efforts. */
-export function modelChoices(
-  catalog: ModelCatalog, settings: ChatModelSettings, picker: ModelPicker,
-): SettingsChoice[] {
-  if (picker === 'provider') {
-    return catalog.map((entry) => ({ id: entry.id, title: entry.name,
-      description: entry.models.length ? `${entry.models.length} ${entry.models.length === 1 ? 'model' : 'models'}`
-        : 'No models available',
-      disabled: entry.models.length === 0 }));
-  }
-  if (picker === 'model') {
-    const provider = catalog.find((entry) => entry.id === settings.model.provider);
-    return (provider?.models ?? []).map((entry) => ({ id: entry.id, title: entry.name,
-      description: `${entry.id} · ${entry.reasoning ? 'Reasoning available' : 'No reasoning control'}` }));
-  }
-  return (findCatalogModel(catalog, settings.model)?.thinkingLevels ?? [])
-    .map((level) => ({ id: level, title: thinkingLevelLabel(level) }));
-}
-
-export function HeaderAction({ title, onPress, disabled, loading, testID }: {
-  title: string; onPress: () => void; disabled?: boolean; loading?: boolean; testID?: string;
+/** A provider's models as a checkmark list, filtered by the screen's search field. */
+export function ModelChoices({ provider, selectedId, query, onSelect }: {
+  provider: ProviderOption | undefined; selectedId: string; query: string; onSelect: (model: ModelOption) => void;
 }) {
   const colors = useChatColors();
-  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={title}
-    accessibilityState={{ disabled: !!disabled, busy: !!loading }} disabled={disabled || loading} onPress={onPress}
-    style={({ pressed }) => [styles.headerAction, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}>
-    {loading ? <ActivityIndicator size="small" color={colors.accent} />
-      : <Text style={[styles.headerLabel, { color: colors.accent }]}>{title}</Text>}
-  </Pressable>;
+  const needle = query.trim().toLocaleLowerCase();
+  const models = (provider?.models ?? [])
+    .filter((model) => `${model.name} ${model.id}`.toLocaleLowerCase().includes(needle));
+  const renderModel = useCallback(({ item }: { item: ModelOption }) => <Button onPress={() => onSelect(item)}>
+    <HStack spacing={12}>
+      <VStack alignment="leading" spacing={2}>
+        <Text modifiers={[buttonLabel]}>{item.name}</Text>
+        <Text modifiers={[font({ textStyle: 'footnote' }), buttonDetail]}>
+          {`${item.id} · ${item.reasoning ? 'Reasoning available' : 'No reasoning control'}`}
+        </Text>
+      </VStack>
+      <Spacer />
+      {item.id === selectedId && <Image systemName="checkmark" size={15} color={colors.accent} />}
+    </HStack>
+  </Button>, [colors.accent, onSelect, selectedId]);
+  return <Host style={styles.fill} seedColor={colors.accent} testID="model-choices">
+    <List modifiers={[listStyle('insetGrouped')]}>
+      <Section footer={provider ? <Text>{`Models from ${provider.name}.`}</Text> : undefined}>
+        {models.length
+          ? <List.ForEach data={models} keyExtractor={(model) => model.id} estimatedItemSize={56}>
+            {renderModel}
+          </List.ForEach>
+          : <Text modifiers={[secondary]}>{needle ? 'No matches. Try another search.' : 'No models available.'}</Text>}
+      </Section>
+    </List>
+  </Host>;
 }
 
-export interface SettingsChoice {
-  id: string;
-  title: string;
-  description?: string;
-  disabled?: boolean;
-}
-
-export function SettingsChoices({ choices, selectedId, onSelect, disabled, search, onSearch, searchPlaceholder, description, bottomInset = 0 }: {
-  choices: readonly SettingsChoice[]; selectedId: string; onSelect: (id: string) => void; disabled?: boolean;
-  search?: string; onSearch?: (value: string) => void; searchPlaceholder?: string; description: string; bottomInset?: number;
+/** A notice as its own form section, with an optional action below it. */
+export function SettingsNotice({ message, tone = 'error', action, onAction, testID }: {
+  message: string; tone?: 'error' | 'neutral'; action?: string; onAction?: () => void; testID?: string;
 }) {
   const colors = useChatColors();
-  return <View style={styles.choices}>
-    <View style={styles.choiceIntro}>
-      <Text style={[styles.description, { color: colors.secondary }]}>{description}</Text>
-      {onSearch && <View style={[styles.search, { backgroundColor: colors.subtle }]}>
-        <ChatIcon name="search" color={colors.muted} size={18} />
-        <TextInput testID="settings-search" accessibilityRole="search" accessibilityLabel={searchPlaceholder}
-          value={search} onChangeText={onSearch} placeholder={searchPlaceholder} placeholderTextColor={colors.muted}
-          editable={!disabled} autoCorrect={false} autoCapitalize="none" clearButtonMode="while-editing" returnKeyType="search"
-          style={[styles.searchInput, { color: colors.text }]} />
-      </View>}
-    </View>
-    <FlatList testID="settings-choices" data={choices} keyExtractor={(item) => item.id} extraData={`${selectedId}:${disabled}`}
-      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
-      contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: bottomInset + 24 }}
-      ListEmptyComponent={<Text style={[styles.empty, { color: colors.secondary }]}>No matches. Try another search.</Text>}
-      renderItem={({ item }) => {
-        const selected = item.id === selectedId;
-        const unavailable = !!disabled || !!item.disabled;
-        return <Pressable testID={`settings-choice-${item.id}`} accessibilityRole="radio"
-          accessibilityLabel={`${item.title}${item.description ? `. ${item.description}` : ''}`}
-          accessibilityState={{ checked: selected, disabled: unavailable }} disabled={unavailable} onPress={() => onSelect(item.id)}
-          style={({ pressed }) => [styles.choice, { borderColor: colors.border, backgroundColor: selected ? colors.accentSoft : colors.surface, opacity: unavailable ? 0.5 : pressed ? 0.7 : 1 }]}>
-          <View style={styles.copy}>
-            <Text style={[styles.choiceTitle, { color: colors.text }]}>{item.title}</Text>
-            {item.description && <Text style={[styles.detail, { color: colors.secondary }]}>{item.description}</Text>}
-          </View>
-          <View style={[styles.radio, { borderColor: selected ? colors.accent : colors.muted, backgroundColor: selected ? colors.accent : 'transparent' }]}>
-            {selected && <ChatIcon name="check" color={colors.onAccent} size={12} />}
-          </View>
-        </Pressable>;
-      }} />
+  return <Section>
+    <Label title={message} systemImage={tone === 'error' ? 'exclamationmark.circle' : 'info.circle'}
+      modifiers={tone === 'error' ? [foregroundStyle(colors.danger)] : [secondary]} testID={testID} />
+    {action && onAction ? <Button label={action} onPress={onAction} /> : null}
+  </Section>;
+}
+
+/** A settings sheet that cannot open its form yet: still loading, or its conversation is gone. */
+export function SettingsUnavailable({ loading, message, onClose }: {
+  loading: boolean; message: string; onClose: () => void;
+}) {
+  const colors = useChatColors();
+  return <View style={[styles.unavailable, { backgroundColor: colors.background }]}>
+    {loading ? <ActivityIndicator color={colors.accent} /> : <>
+      <InlineNotice message={message} />
+      <ActionButton title="Close" secondary onPress={onClose} />
+    </>}
   </View>;
 }
 
 const styles = StyleSheet.create({
-  setting: { flexDirection: 'row', alignItems: 'center', padding: 18, gap: 16, minHeight: 88, borderBottomWidth: StyleSheet.hairlineWidth },
-  copy: { flex: 1, gap: 5 },
-  label: { fontSize: 13, fontWeight: '500' },
-  value: { fontSize: 17, fontWeight: '500' },
-  detail: { fontSize: 12, lineHeight: 18 },
-  choices: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' },
-  choiceIntro: { padding: 20, gap: 16 },
-  description: { fontSize: 14, lineHeight: 21 },
-  search: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 13, borderRadius: 13, gap: 9 },
-  searchInput: { flex: 1, fontSize: 16, minHeight: 48, paddingVertical: 12 },
-  choice: { flexDirection: 'row', alignItems: 'center', padding: 17, gap: 16, minHeight: 70, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, marginBottom: 8 },
-  choiceTitle: { fontSize: 16, fontWeight: '500' },
-  radio: { width: 23, height: 23, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  empty: { fontSize: 15, lineHeight: 22, textAlign: 'center', padding: 30 },
-  headerAction: { minHeight: 44, minWidth: 48, justifyContent: 'center', alignItems: 'center' },
-  headerLabel: { fontSize: 16, fontWeight: '500' },
+  fill: { flex: 1 },
+  unavailable: { flex: 1, justifyContent: 'center', padding: 24, gap: 16 },
 });
