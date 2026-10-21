@@ -1,11 +1,11 @@
 import { Link, router, Stack } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useChatApp } from '@/chat/chat-provider';
 import { useChatActions } from '@/components/chat/chat-actions';
 import { ChatIcon } from '@/components/chat/icon';
-import { ActionButton, IconButton, InlineNotice, PiMark } from '@/components/chat/primitives';
+import { ActionButton, InlineNotice, PiMark } from '@/components/chat/primitives';
 import { useChatColors } from '@/hooks/use-chat-colors';
 
 function dateLabel(timestamp: number) {
@@ -39,8 +39,12 @@ export default function ChatsScreen() {
     catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'Could not create a chat.'); }
     finally { setCreating(false); }
   };
-  return <View testID="chats-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
-    <Stack.Screen options={{ title: 'Chats' }} />
+  // The list is the screen's first view, so the large title collapses into the bar as it scrolls.
+  return <>
+    <Stack.Screen options={{ title: 'Chats', headerLargeTitleEnabled: true,
+      headerSearchBarOptions: chats.length ? { placeholder: 'Search chats', autoCapitalize: 'none',
+        onChangeText: (event) => setSearch(event.nativeEvent.text), onCancelButtonPress: () => setSearch('') }
+        : undefined }} />
     <Stack.Toolbar placement="left">
       <Stack.Toolbar.Button icon="person" accessibilityLabel="Account" onPress={() => router.push('/account')} />
     </Stack.Toolbar>
@@ -56,16 +60,12 @@ export default function ChatsScreen() {
           <Text style={[styles.brandTitle, { color: colors.text }]}>Room for a good conversation.</Text>
           <Text style={[styles.brandCaption, { color: colors.muted }]}>Pick up where you left off.</Text>
         </View></View>
-        {chats.length > 0 && <View style={[styles.search, { backgroundColor: colors.subtle }]}>
-          <ChatIcon name="search" color={colors.muted} size={18} />
-          <TextInput testID="search-chats" accessibilityLabel="Search chats" value={search} onChangeText={setSearch} placeholder="Search chats" placeholderTextColor={colors.muted}
-            autoCorrect={false} returnKeyType="search" style={[styles.searchInput, { color: colors.text }]} />
-          {!!search && <IconButton icon="close" label="Clear search" onPress={() => setSearch('')} />}
-        </View>}
         {(localError || error) && <InlineNotice testID="chat-list-error" message={localError || error || ''}
           action="Dismiss" onAction={localError ? () => setLocalError(undefined) : dismissError} />}
         {chats.length > 0 && <View style={styles.sectionRow}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>{query ? `${visibleChats.length} results` : 'YOUR CONVERSATIONS'}</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            {query ? `${visibleChats.length} results` : 'Your conversations'}
+          </Text>
           <Text style={[styles.savedLabel, { color: colors.muted }]}>Saved on this device</Text>
         </View>}
       </View>}
@@ -117,22 +117,20 @@ export default function ChatsScreen() {
         </View><ChatIcon name="chevron" color={colors.accent} size={12} />
       </Pressable> : undefined}
     />
-  </View>;
+  </>;
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
   listContent: { flexGrow: 1, paddingHorizontal: 22, paddingBottom: 24, maxWidth: 760, width: '100%', alignSelf: 'center' },
   listHeader: { gap: 20, paddingTop: 13 },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
   brandCopy: { flex: 1 },
   brandTitle: { fontSize: 15, fontWeight: '500' },
   brandCaption: { fontSize: 12, marginTop: 5 },
-  search: { minHeight: 46, borderRadius: 14, flexDirection: 'row', alignItems: 'center', paddingLeft: 14, gap: 9 },
-  searchInput: { flex: 1, fontSize: 16, paddingVertical: 11, paddingRight: 12 },
-  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 9, paddingBottom: 4 },
-  sectionTitle: { fontSize: 10, fontWeight: '600', letterSpacing: 1.1 },
-  savedLabel: { fontSize: 11 },
+  sectionRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingTop: 9,
+    paddingBottom: 4 },
+  sectionTitle: { fontSize: 17, fontWeight: '600' },
+  savedLabel: { fontSize: 12 },
   chatRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 19, borderBottomWidth: StyleSheet.hairlineWidth },
   chatGlyph: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   chatInfo: { flex: 1, gap: 6 },

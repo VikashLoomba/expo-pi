@@ -12,18 +12,6 @@ export function PiMark({ size = 52 }: { size?: number }) {
   );
 }
 
-export function IconButton({ icon, label, onPress, testID, disabled, color }: {
-  icon: ChatIconName; label: string; onPress: () => void; testID?: string; disabled?: boolean; color?: string;
-}) {
-  const colors = useChatColors();
-  return (
-    <Pressable testID={testID} accessibilityLabel={label} accessibilityRole="button" disabled={disabled}
-      onPress={onPress} style={({ pressed }) => [styles.iconButton, { opacity: disabled ? 0.4 : pressed ? 0.55 : 1 }]}>
-      <ChatIcon name={icon} color={color ?? colors.accent} />
-    </Pressable>
-  );
-}
-
 export function ActionButton({ title, onPress, testID, disabled, loading, secondary, icon }: {
   title: string; onPress: () => void; testID?: string; disabled?: boolean; loading?: boolean; secondary?: boolean; icon?: ChatIconName;
 }) {
@@ -58,7 +46,6 @@ export function InlineNotice({ message, action, onAction, testID, tone = 'error'
 }
 
 const styles = StyleSheet.create({
-  iconButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   action: { minHeight: 52, borderRadius: 16, paddingHorizontal: 20, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   actionLabel: { fontSize: 16, fontWeight: '600' },
   notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, borderRadius: 14, padding: 14 },
