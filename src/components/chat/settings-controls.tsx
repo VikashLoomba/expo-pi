@@ -34,13 +34,13 @@ export function SectionFooter({ error, caption }: { error?: string; caption?: st
 
 /** A form row that pushes another screen, labelled with its current value. */
 export function PushRow({ label, value, disabled, onPress }: {
-  label: string; value: string; disabled?: boolean; onPress: () => void;
+  label: string; value?: string; disabled?: boolean; onPress: () => void;
 }) {
   return <Button onPress={onPress} modifiers={[disable(disabled)]}>
     <HStack spacing={8}>
       <Text modifiers={[buttonLabel]}>{label}</Text>
       <Spacer />
-      <Text modifiers={[buttonDetail]}>{value}</Text>
+      {value ? <Text modifiers={[buttonDetail]}>{value}</Text> : null}
       <Image systemName="chevron.right" size={13} color={PlatformColor('tertiaryLabel')} />
     </HStack>
   </Button>;

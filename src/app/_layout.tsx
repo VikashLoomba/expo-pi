@@ -25,10 +25,10 @@ export default function RootLayout() {
           <StatusBar style={colors.dark ? 'light' : 'dark'} />
           <Stack screenOptions={screenOptions}>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            {/* Each settings sheet has its own Stack, whose screens show the headers. */}
+            {/* These sheets have their own Stacks, whose screens show the headers. */}
             <Stack.Screen name="chat-settings/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="infinichat-settings" options={{ presentation: 'modal', headerShown: false }} />
-            <Stack.Screen name="remote-hosts" options={{ title: 'Remote machines', presentation: 'modal' }} />
+            <Stack.Screen name="remote-hosts" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
           </Stack>
         </ChatProvider>
