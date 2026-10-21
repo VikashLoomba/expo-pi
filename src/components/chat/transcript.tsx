@@ -1,11 +1,12 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
 import type { SubmissionId } from '@earendil-works/pi-durable';
+import { FlashList } from '@shopify/flash-list';
 import { GlassView } from 'expo-glass-effect';
 import { router } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { memo, useState, type ReactNode, type Ref, type RefObject } from 'react';
+import { memo, useCallback, useState, type ReactNode, type Ref } from 'react';
 import {
-  ActivityIndicator, FlatList, PlatformColor, Pressable, StyleSheet, Text, View, type ScrollViewProps,
+  ActivityIndicator, PlatformColor, Pressable, StyleSheet, Text, View, type ScrollViewProps,
 } from 'react-native';
 import {
   KeyboardChatScrollView, KeyboardStickyView, type KeyboardChatScrollViewRef,
@@ -48,13 +49,18 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
 const keyExtractor = (message: ChatMessage) => message.id;
 
 /**
+ * FlashList's chat setting, as its docs give it: the list opens on the newest message; near it, new and streaming
+ * output scrolls into view; further up, the reader's position holds.
+ */
+const chatPosition = { autoscrollToBottomThreshold: 0.2, startRenderingFromBottom: true };
+
+/**
  * The transcript's scroll view, following keyboard-controller's virtualized-list example: the library sets the insets
  * that lift content with the keyboard and the floating composer, so the system's automatic insets stay off and the
- * glass header and the tab bar become explicit insets.
+ * glass header and the tab bar become explicit insets. FlashList's ref reaches the scroll view through `props`.
  */
-function ChatScrollView({ ref, scrollRef, composerHeight, onEndVisible, ...props }: ScrollViewProps & {
+function ChatScrollView({ composerHeight, onEndVisible, ...props }: ScrollViewProps & {
   ref?: Ref<KeyboardChatScrollViewRef>;
-  scrollRef: RefObject<KeyboardChatScrollViewRef | null>;
   composerHeight: SharedValue<number>;
   onEndVisible: (visible: boolean) => void;
 }) {
@@ -62,13 +68,7 @@ function ChatScrollView({ ref, scrollRef, composerHeight, onEndVisible, ...props
   const { bottom } = useSafeAreaInsets();
   // The header reports new heights after mount and while it shrinks on scroll; only the first one places the list.
   const [contentOffset] = useState(() => ({ x: 0, y: -headerHeight }));
-  // FlatList's own ref and the transcript's both need the scroll view; FlatList's reaches it through `ref`.
-  const attach = (instance: KeyboardChatScrollViewRef | null) => {
-    scrollRef.current = instance;
-    if (typeof ref === 'function') ref(instance);
-    else if (ref) ref.current = instance;
-  };
-  return <KeyboardChatScrollView {...props} ref={attach} automaticallyAdjustContentInsets={false}
+  return <KeyboardChatScrollView {...props} automaticallyAdjustContentInsets={false}
     contentInsetAdjustmentBehavior="never" contentInset={{ top: headerHeight, bottom }}
     scrollIndicatorInsets={{ top: headerHeight, bottom }} contentOffset={contentOffset}
     offset={bottom} extraContentPadding={composerHeight} onEndVisible={onEndVisible} />;
@@ -96,14 +96,18 @@ export const ChatTranscript = memo(function ChatTranscript({
     <MessageRow message={item} stopping={stopping && !!item.streaming} onSteerQueued={onSteerQueued} />;
   const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
     : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
-  const { scrollRef, onEndVisible, onScrollBeginDrag, onContentSizeChange, scrollToLatest, showScrollDown } =
-    useTranscriptScroll();
+  const { listRef, onEndVisible, scrollToLatest, showScrollDown } = useTranscriptScroll();
   const composerHeight = useSharedValue(0);
   const { bottom } = useSafeAreaInsets();
+  // FlashList renders this as a component, so it needs one identity for the life of the list.
+  const renderScrollComponent = useCallback((props: ScrollViewProps) =>
+    <ChatScrollView {...props} composerHeight={composerHeight} onEndVisible={onEndVisible} />,
+  [composerHeight, onEndVisible]);
   const showWorking = controls?.compacting
     || (busy && !messages.some((message) => message.streaming || message.tool?.status === 'running'));
   const unavailable = status === 'missing' || status === 'failed' || (ready && !view);
-  const empty = unavailable ? <View style={styles.loading}>
+  // FlashList starts from the newest message when it mounts with its data, so the list waits for the conversation.
+  const placeholder = unavailable ? <View style={styles.loading}>
     <Text style={[styles.missingTitle, { color: colors.text }]}>Chat unavailable</Text>
     <Text style={[styles.loadingText, { color: colors.secondary }]}>{status === 'failed' && error
       ? error : 'This conversation may have been deleted.'}</Text>
@@ -111,22 +115,19 @@ export const ChatTranscript = memo(function ChatTranscript({
   </View>
     : !ready || status === 'loading' ? <View style={styles.loading}><ActivityIndicator color={colors.accent} />
       <Text style={[styles.loadingText, { color: colors.muted }]}>Opening this conversation…</Text></View>
-    : <EmptyConversation onChoose={onChoose} />;
+    : undefined;
   return <View style={styles.transcript}>
-    <FlatList testID="message-list" data={messages} keyExtractor={keyExtractor}
-      renderItem={renderMessage} extraData={stopping}
-      renderScrollComponent={(props) => <ChatScrollView {...props} scrollRef={scrollRef} composerHeight={composerHeight}
-        onEndVisible={onEndVisible} />}
-      keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
-      scrollEventThrottle={16} initialNumToRender={20}
+    {placeholder ?? <FlashList ref={listRef} testID="message-list" data={messages} keyExtractor={keyExtractor}
+      renderItem={renderMessage} extraData={stopping} renderScrollComponent={renderScrollComponent}
+      maintainVisibleContentPosition={chatPosition}
+      keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" scrollEventThrottle={16}
       contentContainerStyle={[styles.messages, !messages.length && styles.grow]}
-      onScrollBeginDrag={onScrollBeginDrag} onContentSizeChange={onContentSizeChange}
-      ListEmptyComponent={empty}
+      ListEmptyComponent={<EmptyConversation onChoose={onChoose} />}
       ListFooterComponent={messages.length ? <View style={styles.working}>
         {showWorking && <><ActivityIndicator color={colors.accent} size="small" />
           <Text testID="conversation-working" style={[styles.workingText, { color: colors.secondary }]}>{working}</Text></>}
       </View> : undefined}
-    />
+    />}
     <KeyboardStickyView offset={{ opened: bottom }} style={[styles.composer, { bottom }]}
       onLayout={(event) => composerHeight.set(event.nativeEvent.layout.height)}>
       {showScrollDown && <GlassView isInteractive style={styles.scrollDown}>
