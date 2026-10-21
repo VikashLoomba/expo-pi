@@ -69,7 +69,7 @@ export const ChatTranscript = memo(function ChatTranscript({ view, ready, stoppi
       <Text style={[styles.missingTitle, { color: colors.text }]}>Chat unavailable</Text>
       <Text style={[styles.loadingText, { color: colors.secondary }]}>{status === 'failed' && error
         ? error : 'This conversation may have been deleted.'}</Text>
-      <ActionButton title="Back to chats" secondary onPress={() => router.replace('/')} />
+      <ActionButton title="Back to chats" secondary onPress={() => router.replace('/chats')} />
     </View>
       : !ready || status === 'loading' ? <View style={styles.loading}><ActivityIndicator color={colors.accent} />
         <Text style={[styles.loadingText, { color: colors.muted }]}>Opening this conversation…</Text></View>

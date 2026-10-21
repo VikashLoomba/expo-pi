@@ -36,7 +36,7 @@ export default function ChatsScreen() {
     setCreating(true); setLocalError(undefined);
     try {
       const id = await service.createChat();
-      router.push({ pathname: '/chat/[id]', params: { id } });
+      router.push({ pathname: '/chats/chat/[id]', params: { id } });
     }
     catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'Could not create a chat.'); }
     finally { setCreating(false); }
@@ -67,7 +67,7 @@ export default function ChatsScreen() {
           <Text style={[styles.savedLabel, { color: colors.muted }]}>Saved on this device</Text>
         </View>}
       </View>}
-      renderItem={({ item }) => <Link href={{ pathname: '/chat/[id]', params: { id: item.id } }} asChild>
+      renderItem={({ item }) => <Link href={{ pathname: '/chats/chat/[id]', params: { id: item.id } }} asChild>
         <Link.Trigger>
           <Pressable testID={`chat-row-${item.id}`}
             accessibilityLabel={`${item.title || 'New chat'}. ${item.preview || 'No messages yet'}`}>

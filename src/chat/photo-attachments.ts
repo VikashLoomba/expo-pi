@@ -33,7 +33,7 @@ export async function pickPhotos(source: PhotoSource, limits: ImageInput): Promi
 
 async function takePhoto(): Promise<ImagePickerResult> {
   const permission = await requestCameraPermissionsAsync();
-  if (!permission.granted) throw new Error('Allow camera access for Pi Agent in Settings to take a photo.');
+  if (!permission.granted) throw new Error('Allow camera access for InfiniChat in Settings to take a photo.');
   return launchCameraAsync({ mediaTypes: 'images' });
 }
 

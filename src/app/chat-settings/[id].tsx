@@ -24,7 +24,7 @@ type Picker = 'provider' | 'model' | 'effort' | 'environment' | 'directory';
 
 function dismissSettings(id: string | ConversationId) {
   if (router.canGoBack()) router.back();
-  else router.replace({ pathname: '/chat/[id]', params: { id } });
+  else router.replace({ pathname: '/chats/chat/[id]', params: { id } });
 }
 
 export default function ChatSettingsRoute() {

@@ -36,7 +36,7 @@ export function createNativeOpenAIOAuth(): OAuthAuth {
       const request = new AuthRequest({ clientId: OPENAI_DYNAMIC_CLIENT_ID, redirectUri: OPENAI_REDIRECT_URI,
         responseType: ResponseType.Code, usePKCE: true, scopes: [...OPENAI_SCOPES],
         state: Crypto.randomUUID(), extraParams: { nonce: Crypto.randomUUID(), resource: OPENAI_RESOURCE,
-          ext_agent_host_id: `urn:uuid:${deviceId.toLowerCase()}`, agent_name_hint: 'Pi Agent' } });
+          ext_agent_host_id: `urn:uuid:${deviceId.toLowerCase()}`, agent_name_hint: 'InfiniChat' } });
       const url = await request.makeAuthUrlAsync(OPENAI_DISCOVERY);
       signal.throwIfAborted();
       notify({ type: 'auth_url', url, instructions: 'Complete sign-in in the browser. If it cannot return here, paste the full return URL.' });

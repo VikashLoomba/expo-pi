@@ -32,7 +32,7 @@ const sameSettings = (left: ChatModelSettings, right: ChatModelSettings) => left
 
 function dismissSettings() {
   if (router.canGoBack()) router.back();
-  else router.replace('/infinichat');
+  else router.replace('/');
 }
 
 export default function InfiniChatSettingsRoute() {

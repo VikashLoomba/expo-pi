@@ -72,7 +72,7 @@ enum OAuthCallbackHTTP {
   static func response(status: Int) -> Data {
     let success = status == 200
     let title = success ? "Sign-in received" : "Request not accepted"
-    let body = "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>\(title)</title><body><h1>\(title)</h1><p>\(success ? "Return to Pi Agent to continue." : "Return to the sign-in page to continue.")</p></body></html>"
+    let body = "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>\(title)</title><body><h1>\(title)</h1><p>\(success ? "Return to InfiniChat to continue." : "Return to the sign-in page to continue.")</p></body></html>"
     let reason = success ? "OK" : status == 404 ? "Not Found" : status == 431 ? "Request Header Fields Too Large" : "Bad Request"
     let headers = [
       "HTTP/1.1 \(status) \(reason)", "Content-Type: text/html; charset=utf-8",

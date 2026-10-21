@@ -107,7 +107,7 @@ function BackgroundWorkCard() {
       const permission = await Location.requestBackgroundPermissionsAsync();
       if (permission.status !== 'granted') {
         Alert.alert('Allow location access to keep work running',
-          'Pi Agent holds a background location stream to keep agent work running while your phone is locked. '
+          'InfiniChat holds a background location stream to keep agent work running while your phone is locked. '
           + 'Your location is never read, stored, or sent anywhere. Allow “Always” location access to use this.',
           [{ text: 'Not now', style: 'cancel' },
             { text: 'Open Settings', onPress: () => { void Linking.openSettings(); } }]);
@@ -123,7 +123,7 @@ function BackgroundWorkCard() {
       <View style={styles.connectionCopy}>
         <Text style={[styles.providerName, { color: colors.text }]}>Background work</Text>
         <Text style={[styles.privacyText, { color: colors.secondary }]}>
-          Keep agent work running while your phone is locked. Pi Agent holds a background location stream to stay
+          Keep agent work running while your phone is locked. InfiniChat holds a background location stream to stay
           alive — your location is never read, stored, or sent anywhere — and shows progress in a Live Activity.
           Off by default.
         </Text>
@@ -169,7 +169,7 @@ export default function AccountScreen() {
           <Text style={[styles.privacyText, { color: colors.muted }]}>Your messages are processed by the provider selected for that chat. API keys use the same secure storage as your saved sign-in.</Text>
         </View>
       </View>
-      {hasConnectedProvider && <ActionButton testID="back-to-chats" title="Back to your chats" onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/'); }} />}
+      {hasConnectedProvider && <ActionButton testID="back-to-chats" title="Back to your chats" onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/chats'); }} />}
     </ScrollView>
   </View>;
 }
