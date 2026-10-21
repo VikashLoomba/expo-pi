@@ -463,7 +463,7 @@ async function startCall(tx: Tx, rootId: ConversationId, task: AgentTask, name: 
 }
 
 /** Starts a new agent on a task, as `spawn` starts each of its tasks: a fresh name, its document, then its call. */
-export async function spawnAgent(
+async function spawnAgent(
   tx: Tx, rootId: ConversationId, task: AgentTask, text: string, effort: ThinkingLevel | null,
 ): Promise<string> {
   const directory = await tx.doc(AgentDirectoryDoc, rootId);

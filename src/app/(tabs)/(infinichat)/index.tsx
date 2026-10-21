@@ -134,6 +134,10 @@ export default function InfiniChatScreen() {
         </View>
       </Pressable>,
     }} />
+    <Stack.Toolbar placement="right">
+      <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks" disabled={!ready}
+        onPress={() => router.push('/infinichat-schedule')} />
+    </Stack.Toolbar>
     <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} composer={<>
       {conversation && !configured && <View style={styles.banner}>
         <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}

@@ -1,7 +1,7 @@
 import type { Context } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
-import { AgentDoc, configure, type SessionEnd, type Storage } from '@earendil-works/pi-durable';
+import { AgentDoc, configure, type SessionEnd, type Storage, type TaskId } from '@earendil-works/pi-durable';
 
 import { infiniChatTasks, type KeepAliveController } from '../keep-alive/controller';
 import { ChatMetadataDoc } from './chat-metadata';
@@ -11,6 +11,7 @@ import type { RemoteExecution } from './execution/remote/owner';
 import { ScheduledTaskNotifier } from './infinichat-notifications';
 import { InfiniChatView } from './infinichat-view';
 import { openOptChat, type OptChat } from './infinichat/app';
+import type { ScheduledInput } from './infinichat/schedule';
 import { createDevices, deviceTools } from './infinichat/devices';
 import { ConfigDoc } from './infinichat/summary';
 import { requireModelAuth } from './model-auth';
@@ -37,11 +38,12 @@ export class InfiniChatService {
   private closed = false;
   private closePromise?: Promise<void>;
   private detachKeepAlive = () => {};
-  private notifier?: ScheduledTaskNotifier;
   private shownView?: InfiniChatView;
 
   private constructor(
     private readonly chat: OptChat,
+    /** The scheduled tasks still waiting, which it also mirrors as local notifications. */
+    readonly scheduled: ScheduledTaskNotifier,
     private readonly models: Models,
     private readonly authError?: (providerId: string) => string | undefined,
   ) {}
@@ -78,11 +80,11 @@ export class InfiniChatService {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
       },
     }, context);
-    service = new InfiniChatService(chat, options.models, options.authError);
-    if (options.keepAlive) service.detachKeepAlive = options.keepAlive.observe(chat.harness, infiniChatTasks);
     // Scheduled tasks remind the user through local notifications while the app is closed.
-    service.notifier = new ScheduledTaskNotifier(chat.harness, (error) => service?.report(error));
-    void service.notifier.start().catch((error: unknown) => service?.report(error));
+    const scheduled = new ScheduledTaskNotifier(chat.harness, (error) => service?.report(error));
+    service = new InfiniChatService(chat, scheduled, options.models, options.authError);
+    if (options.keepAlive) service.detachKeepAlive = options.keepAlive.observe(chat.harness, infiniChatTasks);
+    void scheduled.start().catch((error: unknown) => service?.report(error));
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
       if (end.reason === 'failed') service.report(end.error);
@@ -157,6 +159,12 @@ export class InfiniChatService {
     }, context);
   }
 
+  /** Deletes a scheduled task still waiting, or edits it; false when it was sent first. */
+  cancelScheduled(id: TaskId, replacement?: ScheduledInput): Promise<boolean> {
+    this.assertOpen();
+    return this.chat.cancelScheduled(id, replacement);
+  }
+
   /**
    * InfiniChat's one conversation, shared by the screens that show it, so the settings opened over the conversation
    * do not read its history again; it attaches while something subscribes.
@@ -183,7 +191,7 @@ export class InfiniChatService {
       } finally {
         // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
         this.detachKeepAlive();
-        this.notifier?.close();
+        this.scheduled.close();
       }
     })();
     return this.closePromise;

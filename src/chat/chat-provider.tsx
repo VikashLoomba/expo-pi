@@ -12,6 +12,7 @@ import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
+import type { ScheduledTask } from '../pi/infinichat-notifications';
 import { InfiniChatService } from '../pi/infinichat-service';
 import type { InfiniChatView } from '../pi/infinichat-view';
 import { buildModelCatalog } from '../pi/model-catalog';
@@ -384,6 +385,13 @@ export function useChatError(view: ChatViewSource | undefined): string | undefin
 export function useInfiniChatView(): InfiniChatView | undefined {
   const { infiniChat } = useChatApp();
   return useMemo(() => infiniChat?.view(), [infiniChat]);
+}
+
+/** InfiniChat's scheduled tasks still waiting, soonest first; undefined until they are read. */
+export function useScheduledTasks(): readonly ScheduledTask[] | undefined {
+  const { infiniChat } = useChatApp();
+  const getTasks = () => infiniChat?.scheduled.getSnapshot();
+  return useSyncExternalStore(infiniChat?.scheduled.subscribe ?? subscribeNothing, getTasks, getTasks);
 }
 
 /** InfiniChat's Harness's latest report, until it is dismissed. */

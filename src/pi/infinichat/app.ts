@@ -15,7 +15,7 @@ import {
 } from './agents';
 import { MemoryDoc, advanceMessageProgress, appendMessage, memoryReady, renderMain, settleViews } from './memory';
 import { sharedPrompt, subagentPrompt } from './prompt';
-import { scheduleTool, scheduledTask } from './schedule';
+import { scheduleTool, scheduledTask, type ScheduledInput } from './schedule';
 import { BuildNode, ConfigDoc, pumpBuilds } from './summary';
 import { memoryTools, toolPolicy, type NativeContracts } from './tools';
 
@@ -215,7 +215,7 @@ async function requeueWithdrawn(tx: Tx, root: ConversationId): Promise<void> {
   else await closeSettledEpoch(tx, root);
 }
 
-/** Called in the acceptance transaction, including when a private report arrives. */
+/** Called in the acceptance transaction, including when a private report arrives or a scheduled task ends. */
 async function admitInput(tx: Tx, root: ConversationId, input: {
   requestId: string;
   kind: 'user' | 'work' | 'note';
@@ -622,6 +622,11 @@ export type OptChat = {
   setInstructions(tx: Tx, text: string): Promise<void>;
   waitForAnswer(requestId: string, context?: Context): ReturnType<Submission['wait']>;
   abort(): Promise<void>;
+  /**
+   * Aborts a scheduled task still waiting, as pi-durable's example 24 cancels a task, and schedules `replacement`
+   * in its place, since a task's input never changes. False when the task was sent first.
+   */
+  cancelScheduled(id: TaskId, replacement?: ScheduledInput): Promise<boolean>;
   close(): Promise<void>;
 };
 
@@ -633,7 +638,7 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
   const coordinator = coordinatorTask(turnState);
   const tools: ToolRegistration[] = [...memoryTools(ROOT_CONVERSATION_ID), ...(options.tools ?? [])];
   const agents = agentTask({ master: () => master, prompt: subagentPrompt(name, hasDeviceTools), turnState });
-  const scheduled = scheduledTask(agents);
+  const scheduled = scheduledTask((tx, id, input) => admitInput(tx, id, { ...input, kind: 'work' }));
   const agentCalls = [...agentTools(ROOT_CONVERSATION_ID, agents), scheduleTool(ROOT_CONVERSATION_ID, scheduled)];
   // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
   // reaches an existing conversation as pi-durable's system entry instead of staying as created. The master's prompt
@@ -808,6 +813,17 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
         cancellation.abort();
         await watch.stop();
       }
+    },
+    async cancelScheduled(id, replacement) {
+      await opened.abortTask(id, context);
+      if ((await opened.waitForTask(id, context)).state.outcome.status !== 'aborted') return false;
+      if (replacement) {
+        await root.commit((tx) => tx.createTask(scheduled, replacement, {
+          ownership: { kind: 'conversation' },
+          background: true,
+        }), context);
+      }
+      return true;
     },
     async close() {
       await opened.close(context);

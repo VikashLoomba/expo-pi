@@ -28,6 +28,7 @@ export default function RootLayout() {
             {/* These sheets have their own Stacks, whose screens show the headers. */}
             <Stack.Screen name="chat-settings/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="infinichat-settings" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="infinichat-schedule" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="remote-hosts" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
           </Stack>
