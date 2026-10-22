@@ -6,6 +6,7 @@ import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
 
+import { STORED_CREDENTIALS_ONLY } from './model-auth';
 import type { NewChatDefaults } from './model-catalog';
 import { createNativeOpenAIOAuth } from './openai-auth';
 import { isPermanentOpenAIAuthError, OPENAI_PROVIDER_ID, validateOpenAICredential } from './openai-auth/core';
@@ -32,9 +33,7 @@ export const NEW_CHAT_DEFAULTS: NewChatDefaults = {
 /** Registration is the only integration point needed to expose another mobile provider. */
 export function createChatModels(credentials: CredentialStore) {
   // Mobile apps have no process environment or desktop auth files; only stored credentials apply.
-  const models = createModels({
-    credentials, authContext: { env: async () => undefined, fileExists: async () => false },
-  });
+  const models = createModels({ credentials, authContext: STORED_CREDENTIALS_ONLY });
   const openai = withNativeWebSearch(openaiProvider());
   models.setProvider({ ...openai, auth: { ...openai.auth, oauth: createNativeOpenAIOAuth() } });
   // Individual imports preserve Metro's lazy, mobile-safe SDK boundaries.

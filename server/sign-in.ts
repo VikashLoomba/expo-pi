@@ -1,11 +1,9 @@
-import type { AuthPrompt, Models } from '@earendil-works/pi-ai';
+import type { AuthPrompt, LoginOptions, Models } from '@earendil-works/pi-ai';
 
 import { AuthPromptController } from '../src/chat/auth-prompt-controller';
 import type { SignInAttempt } from '../src/pi/infinichat-remote/contract';
 import { OPENAI_PROVIDER_ID } from '../src/pi/openai-auth/core';
 import type { ProviderCredentialStore } from '../src/pi/provider-credentials';
-import type { CredentialBackend } from '../src/pi/secure-storage';
-import { openAILoginOptions } from './credentials';
 
 type Attempt = Exclude<SignInAttempt, null>;
 
@@ -34,8 +32,9 @@ export class ServerSignIn {
   private latest?: Omit<Attempt, 'prompt'>;
   private snapshot: SignInAttempt = null;
 
+  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`server/credentials.ts`). */
   constructor(private readonly models: Models, private readonly credentials: ProviderCredentialStore,
-    private readonly backend: CredentialBackend) {
+    private readonly openAILogin: () => Promise<LoginOptions>) {
     this.prompts.subscribe(() => this.publish());
   }
 
@@ -99,7 +98,7 @@ export class ServerSignIn {
       this.publish();
     };
     try {
-      const options = providerId === OPENAI_PROVIDER_ID ? await openAILoginOptions(this.backend) : undefined;
+      const options = providerId === OPENAI_PROVIDER_ID ? await this.openAILogin() : undefined;
       signal.throwIfAborted();
       await this.models.login(providerId, 'oauth', {
         signal,
@@ -117,10 +116,15 @@ export class ServerSignIn {
       }, options);
       // No status after a sign-in, as the account screen clears its notice; the access state says it.
       if (current()) this.latest = { attempt, providerId, running: false };
-    } catch {
+    } catch (error) {
       if (current()) {
-        this.latest = { attempt, providerId, running: false, status: signal.aborted
-          ? 'Sign-in cancelled.' : 'Sign-in could not be completed. Please try again.' };
+        // Before its URL, ChatGPT's flow has talked to no server (openai-chatgpt.ts:237-269), so its message is pi-ai's
+        // own setup copy, such as "Port 1455 is in use…" (:243-248), and says what to do. Later ones, and other
+        // providers' device-code requests, can carry a server's reply.
+        const setup = providerId === OPENAI_PROVIDER_ID && this.latest?.url === undefined && error instanceof Error
+          ? error.message : undefined;
+        this.latest = { attempt, providerId, running: false, status: signal.aborted ? 'Sign-in cancelled.'
+          : setup ?? 'Sign-in could not be completed. Please try again.' };
       }
     } finally {
       if (current()) {

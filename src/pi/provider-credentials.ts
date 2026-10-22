@@ -78,8 +78,10 @@ export class ProviderCredentialStore implements CredentialStore {
   private readonly listeners = new Set<() => void>();
   private snapshot: ProviderCredentialSnapshot = { providers: {} };
 
+  /** `storageAdvice` follows a storage error: the phone's Keychain fails while the device is locked. */
   constructor(private readonly backend: CredentialBackend,
-    private readonly policies: Readonly<Record<string, ProviderCredentialPolicy>> = {}) {}
+    private readonly policies: Readonly<Record<string, ProviderCredentialPolicy>> = {},
+    private readonly storageAdvice = 'Unlock this device and try again.') {}
 
   private record(id: string): ProviderRecord {
     let record = this.records.get(id);
@@ -118,7 +120,7 @@ export class ProviderCredentialStore implements CredentialStore {
     this.publish();
   }
   private storageError(id: string, operation: string): Error {
-    const error = new Error(`Could not ${operation} your saved provider credentials. Unlock this device and try again.`);
+    const error = new Error(`Could not ${operation} your saved provider credentials. ${this.storageAdvice}`);
     this.setAccess(id, error.message, true);
     return error;
   }

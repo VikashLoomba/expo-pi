@@ -63,12 +63,15 @@ export class InfiniChatService implements InfiniChatHost {
     readonly scheduled: ScheduledTasks,
     private readonly models: Models,
     private readonly authError?: (providerId: string) => string | undefined,
+    private readonly machine?: string,
   ) {}
 
   static async open(options: {
     storage: Storage; models: Models; devices: InfiniChatDevices;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */
     authError?: (providerId: string) => string | undefined;
+    /** The machine this runs on, named where a message sends the user to sign in; none on the phone. */
+    machine?: string;
     /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
     onClosed?: (end: SessionEnd) => void;
   }): Promise<InfiniChatService> {
@@ -89,7 +92,7 @@ export class InfiniChatService implements InfiniChatHost {
       },
     }, BACKGROUND_CONTEXT);
     const scheduled = new ScheduledTasks(chat.harness, (error) => service?.report(error));
-    service = new InfiniChatService(chat, scheduled, options.models, options.authError);
+    service = new InfiniChatService(chat, scheduled, options.models, options.authError, options.machine);
     void scheduled.start().catch((error: unknown) => service?.report(error));
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
@@ -137,7 +140,7 @@ export class InfiniChatService implements InfiniChatHost {
     const agent = await this.chat.harness.snapshot(AgentDoc, root.id, context);
     // OptChat has no default model; nothing is sent until the settings choose one.
     if (!agent?.model) throw new Error('Choose InfiniChat’s models in its settings to send a message.');
-    await requireModelAuth(this.models, settingsOf(agent), this.authError);
+    await requireModelAuth(this.models, settingsOf(agent), this.authError, this.machine);
     this.assertOpen();
     await this.chat.accept({ requestId, content });
     // OptChat's acceptance commit is its own, so the view's record of the request follows in the next one. Once the

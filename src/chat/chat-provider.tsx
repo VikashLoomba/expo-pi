@@ -18,7 +18,6 @@ import { createInfiniChatMachineChoice } from '../pi/infinichat-remote/machine-c
 import type { ScheduledTask } from '../pi/infinichat-scheduled';
 import type { InfiniChatHost } from '../pi/infinichat-service';
 import type { InfiniChatControls } from '../pi/infinichat-view';
-import type { ProviderAccount } from '../components/chat/provider-section';
 import { buildModelCatalog, type ModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } from '../pi/openai-auth';
@@ -27,6 +26,7 @@ import type { ProviderAccess, ProviderCredentialStore } from '../pi/provider-cre
 import { openExpoSqliteStorage } from '../pi/storage';
 import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
 import { AuthPromptController } from './auth-prompt-controller';
+import type { ProviderAccount } from './provider-account';
 import type { ChatControls, ChatMessage } from './types';
 
 const subscribeNothing = () => () => {};
@@ -493,7 +493,15 @@ export function useInfiniChatAccount(): ProviderAccount & { catalog: ModelCatalo
       const url = await remote.signInStep(attempt, (step) => step.url, controller.signal);
       // The browser never outlives the machine's attempt, however that ends.
       void remote.signInStep(attempt, () => undefined, controller.signal).catch(() => controller.abort());
-      const callback = await openOpenAIBrowserFor(url, controller.signal);
+      const callback = await openOpenAIBrowserFor(url, controller.signal).catch((error: unknown) => {
+        // A callback that declined or failed the check, or a browser that could not open, ends the attempt, as it
+        // ends the phone's own; leaving the machine's prompt open would wait for a paste nobody was asked for.
+        if (!controller.signal.aborted) {
+          setNotice({ providerId, message: 'Sign-in could not be completed. Please try again.' });
+          void remote.cancelSignIn().catch(() => {});
+        }
+        throw error;
+      });
       // Without a callback the machine's prompt stays for the return URL, pasted or opened again in a browser.
       if (callback === undefined) return;
       const prompt = await remote.signInStep(attempt,

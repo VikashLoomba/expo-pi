@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { createHost } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { processLock } from '@earendil-works/chord/node';
+import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 import type { SessionEnd } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 
@@ -15,7 +16,7 @@ import { InfiniChatService } from '../src/pi/infinichat-service';
 import { buildModelCatalog } from '../src/pi/model-catalog';
 import { validateOpenAICredential } from '../src/pi/openai-auth/core';
 import { ProviderCredentialStore } from '../src/pi/provider-credentials';
-import { fileCredentialBackend } from './credentials';
+import { fileCredentialBackend, openAILoginOptions } from './credentials';
 import { serverDevices } from './devices';
 import { listen } from './listen';
 import { createServerModels } from './models';
@@ -24,6 +25,11 @@ import { ServerSignIn } from './sign-in';
 import { restoreTimeZone, setTimeZone } from './time-zone';
 
 const USAGE = 'Usage: node server.js serve --device <name>';
+
+// pi-ai loads its sign-in flows through an import bundlers cannot follow, which this single-file bundle cannot resolve
+// at run time, so it registers them statically at startup, as pi's own standalone binary does (coding-agent
+// `src/bun/runtime-setup.ts:10` at v1.4.0). The flows use only `node:http` and `node:crypto`.
+registerBunOAuthFlows();
 
 /**
  * Runs InfiniChat on this machine until SIGTERM or SIGINT, or until a storage error ends its Harness, which fails the
@@ -44,12 +50,13 @@ async function serve(device: string): Promise<number> {
     restoreTimeZone(home);
     // pi-ai's own persistence seam: this machine's store, for as long as the process; its file outlives it.
     const backend = fileCredentialBackend(join(home, 'credentials.json'));
-    const credentials = new ProviderCredentialStore(backend, { openai: { validate: validateOpenAICredential } });
+    const credentials = new ProviderCredentialStore(backend, { openai: { validate: validateOpenAICredential } },
+      `Check that ~/.infinichat/credentials.json on ${device} can be read and written, then try again.`);
     const models = createServerModels(credentials);
     credentials.registerProviders(models.getProviders().map((provider) => provider.id));
     // A provider whose credential cannot be read reports it in its own access state.
     await credentials.restore().catch(() => {});
-    const signIn = new ServerSignIn(models, credentials, backend);
+    const signIn = new ServerSignIn(models, credentials, openAILoginOptions(backend));
     // Ends an attempt still under way, after the host has closed the links that could start another.
     closes.push(() => signIn.cancel());
     await mkdir(join(home, 'data'), { recursive: true });
@@ -57,7 +64,7 @@ async function serve(device: string): Promise<number> {
     // The Harness closes its storage; this closes it when the Harness never opened, and is a no-op otherwise.
     closes.push(() => storage.close(BACKGROUND_CONTEXT));
     const core = await InfiniChatService.open({
-      storage, models, devices: serverDevices(device),
+      storage, models, devices: serverDevices(device), machine: device,
       onClosed: (end) => {
         if (end.reason === 'failed') stopping.resolve(end);
       },

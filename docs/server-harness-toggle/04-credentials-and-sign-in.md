@@ -43,9 +43,10 @@ side out.
 
 - **`server/credentials.ts`:** a file `CredentialBackend` for `ProviderCredentialStore`, in
   `~/.infinichat/credentials.json`, mode `0600`, written to a temporary file and renamed. `server/models.ts`
-  (piece 1) passes the store to `createModels({ credentials })`. Auth resolution keeps pi-ai's Node defaults, so a
-  provider key in the service's environment counts too. launchd and systemd user services start with a minimal
-  environment, so usually there is none.
+  (piece 1) passes the store to `createModels({ credentials })`. The stored credentials are the only source on the
+  machine, as on the phone (owner decision at review, 2026-10-22). It passes the phone's auth context, with no
+  environment and no auth files, so `access`, the composer's gate and the send path agree. A provider key in the
+  service's environment does not count.
 - **Contract additions:**
   - **State:**
     - `catalog`: `buildModelCatalog(models)` from the server's `Models`.
@@ -69,32 +70,46 @@ As built (pi 1.4.0, tag `4a080252f`; Chord 1.4.0; Expo 58.0.17, expo-auth-sessio
   - Each write reads the file, changes one item, writes `credentials.json.<pid>` with mode `0600` and renames it into
     place. Writes run one at a time, so two providers' writes never drop each other's. The store orders each
     provider's own operations.
-  - `main.ts` builds `new ProviderCredentialStore(backend, { openai: { validate: validateOpenAICredential } })`,
-    registers the providers and restores them before it serves, as the phone does.
+  - A file that does not parse, or is not one object of strings, reads as empty, so the next sign-in or key from the
+    phone rewrites it. pi-ai's own CLI treats an `auth.json` it cannot parse the same way (`src/cli.ts:19-26`). A file
+    that cannot be read still throws.
+  - `main.ts` builds `new ProviderCredentialStore(backend, { openai: { validate: validateOpenAICredential } },
+    advice)`, registers the providers and restores them before it serves, as the phone does.
+  - `advice` is the store's new third argument. It defaults to the phone's "Unlock this device and try again.", which
+    follows a storage error. On the machine it reads "Check that ~/.infinichat/credentials.json on <machine> can be
+    read and written, then try again."
+- **Stored credentials only.** `STORED_CREDENTIALS_ONLY` (`src/pi/model-auth.ts`) is the phone's auth context, now
+  shared, and both `createChatModels` and `createServerModels` pass it.
 - **The OpenAI installation ID.** pi-ai's Node ChatGPT sign-in requires `LoginOptions.getDeviceId`, a UUID that must
   be the same on every login, and fails without one (`src/auth/oauth/openai-chatgpt.ts:225-231`). pi-ai's own CLI
   makes a new one each time and says "apps should reuse one across logins" (`src/cli.ts:51`, `:73`).
   - `openAILoginOptions(backend)` keeps the machine's own ID in the same file, under the phone's key
-    `pi.openai.host.v1`, made at the first ChatGPT sign-in, as `src/pi/openai-auth/installation.ts` does on the phone.
+    `pi.openai.host.v1`, made at the first ChatGPT sign-in. As `src/pi/openai-auth/installation.ts` does on the phone,
+    it is read once per process and refused when it isn't a UUID: "The saved OpenAI installation ID could not be
+    restored."
   - It also passes `agentName: 'InfiniChat'`, the name the phone's own sign-in gives OpenAI (`agent_name_hint`).
 - **The sign-in flows are registered statically.** pi-ai loads each OAuth flow with an `import()` of a variable
   specifier "so bundlers cannot follow the import" (`src/auth/oauth/load.ts:4-13`). The single-file server bundle then
   has no `openai-chatgpt.js` to load: measured, `models.login` rejected with `ERR_MODULE_NOT_FOUND`.
-  - `createServerModels` calls `registerBunOAuthFlows()` from pi-ai's public `./bun-oauth` export
-    (`src/bun-oauth.ts:13`), as pi's own standalone binary does at startup (coding-agent `src/bun/runtime-setup.ts:10`).
-    The name says Bun, but the module only imports the flows statically, and they use only `node:http` and
-    `node:crypto`.
-  - The asset grew from 8,109,307 to 8,246,243 bytes.
+  - `server/main.ts` calls `registerBunOAuthFlows()` from pi-ai's public `./bun-oauth` export (`src/bun-oauth.ts:13`)
+    at its top level, as pi's own standalone binary does at startup (coding-agent `src/bun/runtime-setup.ts:10`). The
+    name says Bun, but the module only imports the flows statically, and they use only `node:http` and `node:crypto`.
+  - The asset grew from 8,109,307 to 8,247,840 bytes.
 - **The contract** (`src/pi/infinichat-remote/contract.ts`):
   - **The state member is `signInAttempt`, not `signIn`.** `signIn` is the method that starts one, and Chord refuses a
     member that is both state and method (`src/contract.ts:237`).
   - **`access` is the store's own `ProviderAccess` per provider**: `{ ready, connected, type?, error?, retryable? }`.
-    An expired session is its `error`, `SESSION_EXPIRED`, as on the account screen. `ProviderAccess` and the
+    On the phone an expired session is its `error`, `SESSION_EXPIRED`; the machine has no such mark (below).
+    `ProviderAccess` and the
     catalog's `ModelOption`, `ProviderOption` and `ImageInput` became `Static<…>` of TypeBox schemas beside the types
     they replace, as piece 1 did.
   - **`signIn` returns the attempt's number**, so the phone knows which attempt is its own.
   - **An attempt that ended stays in `signInAttempt`** with `running: false`, until the next one starts:
     - with the account screen's "Sign-in cancelled." or "Sign-in could not be completed. Please try again.";
+    - with pi-ai's own message when ChatGPT's flow fails before its URL. Until then it has talked to no server
+      (`openai-chatgpt.ts:237-269`), so the message is pi-ai's setup copy, such as "Port 1455 is in use…". Later
+      failures, and other providers' device-code requests, can carry a server's reply, so they keep the account
+      screen's copy;
     - with no `status` after a sign-in that succeeded, as the account screen clears its notice then.
 
     A call's result can reach the phone before the state that shows its attempt, so a value that went back to `null`
@@ -112,10 +127,19 @@ As built (pi 1.4.0, tag `4a080252f`; Chord 1.4.0; Expo 58.0.17, expo-auth-sessio
   - `main.ts` owns it, and cancels an attempt under way at shutdown, after the host has closed the links.
 - **The catalog cell is set once.** None of the six registered providers has `refreshModels`, so pi-ai's
   `models.refresh()` changes nothing for them.
-- **No `isPermanentAuthError` policy on the server.** The phone's `isPermanentOpenAIAuthError` matches its own native
-  adapter's `OpenAITokenRequestError`. pi-ai's Node refresh throws a plain `Error` ("OpenAI OAuth token request failed
-  (400): …", `openai-chatgpt.ts:146`), so that policy would never match there. A refused refresh on the machine
-  surfaces as pi-ai's `ModelsError` `oauth`, and signing in again replaces the credential.
+  - Today it equals the phone's own catalog (measured): the phone only connects to a server of its own bundle, built
+    from the same lockfile.
+  - It stays as the spec asks, so that what the screens offer is what the machine runs, also once the server
+    registers other providers than the phone.
+- **Session expired (owner decision at review).** There is no `isPermanentAuthError` policy on the server. The phone's
+  `isPermanentOpenAIAuthError` matches its own native adapter's `OpenAITokenRequestError`, and pi-ai's Node refresh
+  throws a plain `Error` ("OpenAI OAuth token request failed (400): …", `openai-chatgpt.ts:146`), so it would never
+  match there, and matching its message is not done.
+  - Instead, `requireModelAuth` gets the machine's name (`InfiniChatService.open({ machine })`, from `--device`). A
+    `ModelsError` `oauth` there becomes "Could not renew the <provider> sign-in on <machine>. Sign in again." pi-ai
+    documents `oauth` as "token refresh failed, credential preserved for re-login" (`README.md:401`).
+  - Its fallback copy reads "Sign in or connect <provider> on <machine> to send a message." instead of "in Account".
+  - The phone keeps its behaviour.
 
 ### Phone
 
@@ -145,8 +169,10 @@ As built:
   - the new providers screen.
 - **The providers screen.** `src/app/infinichat-providers.tsx` is a modal titled "Providers on <machine>". The account
   screen's `ProviderSection` moved, unchanged, to `src/components/chat/provider-section.tsx`, and takes the account it
-  shows as a `ProviderAccount`. The account screen passes `useChatApp()`, and the machine's screen passes
-  `useInfiniChatAccount()`.
+  shows as a `ProviderAccount` (`src/chat/provider-account.ts`, beside `auth-prompt-controller.ts`). The account
+  screen passes `useChatApp()`, and the machine's screen passes `useInfiniChatAccount()`.
+  - While the machine's reference isn't live, the screen says "Connecting to <machine>…" above the last values the
+    machine sent. After a failed attempt it shows that failure with "Try Again" (`useInfiniChatConnection`).
   - The settings notice reads "Sign in to <provider> on <machine> before InfiniChat can use it", with "Sign in on
     <machine>". The tab's composer reads "Connect <provider> on <machine> to send a message". Both open the machine's
     screen.
@@ -161,6 +187,9 @@ As built:
   non-empty state of up to 1,024 bytes without control characters (`OAuthCallbackServer.swift:54-55`), pi-ai's
   base64url included.
   - The callback is checked with `validateOpenAICallback`, as the phone's own sign-in checks it, before it answers.
+    A callback that fails the check (OpenAI declined, another attempt's state), or a browser that cannot open, ends
+    the machine's attempt with `cancelSignIn` and the phone's own "Sign-in could not be completed. Please try again.",
+    as the phone's own flow ends. Leaving the machine's prompt open would wait for a paste nobody was asked for.
   - The hook waits for the attempt's URL, opens the browser, then answers the attempt's `manual_code` prompt with the
     callback (`RemoteInfiniChat.signInStep`).
   - The browser is dismissed when the machine's attempt ends, however it ends.
@@ -193,7 +222,8 @@ As built:
   (`src/cli.ts`) isn't exported.
 - **pi-ai's default environment lookup on the server.** The phone disables it because "Mobile apps have no process
   environment" (`src/pi/models.ts`). Keeping pi-ai's default on Node follows upstream; say so if a key from the
-  machine's environment should not count.
+  machine's environment should not count. *Decided at review, 2026-10-22: it does not count.* The machine passes the
+  phone's auth context, so the stored credentials are the only source (Builds).
 
 Found while implementing, against the installed 1.4.0 sources:
 
@@ -204,16 +234,16 @@ Found while implementing, against the installed 1.4.0 sources:
 - **`signInAttempt`** as the state member's name, an attempt's number from `signIn`, and an ended attempt kept until
   the next (above).
 - **A busy port 1455 on the machine fails ChatGPT sign-in.** pi-ai 1.4.0 starts its callback server first and throws
-  "Port 1455 is in use, probably by an unfinished login in another pi session or by the Codex CLI" before any URL or
-  prompt (`openai-chatgpt.ts:243-248`). It has no manual-only path, though the browser's redirect never reaches that
-  port here. Measured: the attempt ends with the account screen's "Sign-in could not be completed. Please try again."
-  The machine's real message is not shown, because the account screen's rule is to never render pi-ai's error text.
-- **The machine's `access` counts stored credentials only.** That is what `ProviderCredentialStore` reports, and
-  sending is gated on it, as on the phone. So a key in the service's environment, which pi-ai would use, still shows
-  "Not connected" and blocks the composer. launchd and systemd user services usually have none (above).
-- **The store's messages are the phone's.** A credential file the store cannot read says "Could not restore your
-  saved provider credentials. Unlock this device and try again.", because `ProviderCredentialStore` is reused
-  unchanged.
+  "Port 1455 is in use, probably by an unfinished login in another pi session or by the Codex CLI. Cancel that login
+  and try again." before any URL or prompt (`openai-chatgpt.ts:243-248`). It has no manual-only path, though the
+  browser's redirect never reaches that port here. That message reaches the phone as the attempt's status (Builds).
+  The other way round, while an attempt waits, pi-ai's listener on the machine's 1455 blocks pi and Codex logins on
+  that machine until the attempt ends or is cancelled.
+- **The store's storage advice is an argument.** `ProviderCredentialStore`'s storage errors said "Unlock this device",
+  which would send the user to the phone for a file on the machine. It takes the advice as an optional third argument,
+  and the phone's stays the default.
+- **A corrupt `credentials.json` reads as empty**, as pi-ai's CLI reads `auth.json`, so it can be repaired from the
+  phone.
 - **`openai-auth/core.ts` reads an error body as `unknown`.** The server's typecheck now covers the file. Node's types
   give `response.json()` `unknown`, where the DOM lib gives it `any`, so the `invalid_grant` check reads it through
   `isRecord`, with the same behaviour.
@@ -230,6 +260,9 @@ As built, +816 −205 lines outside the asset and its manifest, about 480 new:
 - The account hook +134, the providers screen 41, and the tab and settings +40.
 - `provider-section.tsx`, 168 lines, is about 130 lines moved out of `account.tsx`, which lost 135.
 
+The review's fixes added +138 −74 outside the docs, the asset and its manifest, so the piece is +908 −222 against
+`chore/pi-1.4.0`.
+
 A third or more of the new lines are comments. The growth over the estimate comes from:
 - the schemas the catalog needed to cross as Chord state;
 - the phone's half of the relay: waiting for its own attempt's URL and prompt across a reconnect, and ending its
@@ -243,8 +276,9 @@ Done in this piece on the implementer's Mac, with no device available and no rea
   ran on Node against the real server asset, started by hand.
 - Throwaway stand-ins (not committed) replaced react-native-ssh, the Keychain, the native receiver, expo-web-browser
   and React Native's `Platform`.
-- The server had no provider variables, and its outbound HTTPS went to a closed port, so a token exchange failed
-  locally instead of reaching OpenAI.
+- The server had no real credentials and no provider variables but one made-up `XAI_API_KEY`, to show it is ignored.
+  Its outbound HTTPS went to a closed port, so a token exchange or a refresh failed locally instead of reaching
+  OpenAI.
 
 The results are in [references](references.md#piece-4-on-macos). Everything below is still unverified.
 
