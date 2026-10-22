@@ -49,6 +49,9 @@ becomes an `InfiniChatHost`. The screens don't change.
      Keychain.
    - Read `~/.infinichat/server.json` for the port when install didn't run, then
      `connection.forwardLocal({ remoteHost: "127.0.0.1", remotePort: port })`.
+   - Tolerate a stale `server.json`. On Linux without lingering, the user manager stops the unit when the last
+     session closes and starts it again with the phone's SSH session, so the file can name a dead process or an old
+     port until the new server rewrites it. Wait for a live `pid` as install's readiness step does, or retry.
 2. **Socket and link.** Open `new WebSocket(`ws://127.0.0.1:${forward.localPort}`, undefined, { headers: {
    authorization: `Bearer ${secret}` } })` and wrap it with `webSocketLink(socket)`. The link's own options keep
    their defaults: `compress: false` is already the client side's default.

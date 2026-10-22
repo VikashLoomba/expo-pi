@@ -139,6 +139,10 @@ As built: about +480 net lines outside the lockfile, much of it moved. `device-t
 - **A Mac and a Linux machine:**
   - Build the bundle, copy it to `~/.infinichat/server/dev/`, write a secret, and run `node server.js serve
     --device <name>` with Node 22.19+.
+  - On macOS, a server started by hand runs with `TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)`, or through `launchctl`.
+    Chord's `processLock` locks a socket file under `os.tmpdir()` there (`src/manager.ts:82-91`, `:133-134`), and
+    the piece 2 LaunchAgent gets that per-user `TMPDIR` from launchd; a shell without it locks under `/tmp`, and the
+    two servers would not exclude each other.
   - A throwaway Node client on the machine (not committed) connects with the secret and hydrates `snapshot`,
     `controls` and `messages`.
   - A wrong secret is refused.
