@@ -12,8 +12,9 @@ import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
-import type { ScheduledTask } from '../pi/infinichat-notifications';
-import { InfiniChatService } from '../pi/infinichat-service';
+import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
+import type { ScheduledTask } from '../pi/infinichat-scheduled';
+import type { InfiniChatService } from '../pi/infinichat-service';
 import type { InfiniChatView } from '../pi/infinichat-view';
 import { buildModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
@@ -51,7 +52,7 @@ function useChatRuntime() {
   const [infiniChat, setInfiniChat] = useState<InfiniChatService>();
   const [openError, setOpenError] = useState<string>();
   // Opening and closing storage apply in order, also across a remount, so two connections never coexist.
-  const lifecycle = useRef<{ queue: Promise<void>; service?: DurableChatService; infiniChat?: InfiniChatService }>(
+  const lifecycle = useRef<{ queue: Promise<void>; service?: DurableChatService; infiniChat?: PhoneInfiniChat }>(
     { queue: Promise.resolve() });
   useEffect(() => {
     const state = lifecycle.current;
@@ -110,7 +111,7 @@ function useChatRuntime() {
       }
       if (!state.infiniChat) {
         try {
-          const opened = await withStorage(INFINICHAT_DATABASE, (storage) => InfiniChatService.open({
+          const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
             storage, models, workspaces, remote, remoteHosts, keepAlive, authError,
             onClosed: (end) => {
               if (end.reason !== 'failed') return;
@@ -124,7 +125,7 @@ function useChatRuntime() {
             },
           }));
           state.infiniChat = opened;
-          setInfiniChat(opened);
+          setInfiniChat(opened.service);
         } catch (error) {
           failures.push(`InfiniChat: ${errorText(error)}`);
         }

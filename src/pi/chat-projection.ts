@@ -110,8 +110,10 @@ function toolResultRow(message: ToolResultMessage, key: string, call: ChatMessag
     return { id: key, role: 'tool', text: output, createdAt: message.timestamp, ...(images.length ? { images } : {}),
       tool: { name: message.toolName, args: '', output, status } };
   }
+  // Rows are JSON, which has no `undefined`: Chord diffs them when they cross a link.
+  const file = withFileToolDetails(call.tool.file, message.details);
   return { ...call, text: output, ...(images.length ? { images } : {}),
-    tool: { ...call.tool, output, status, file: withFileToolDetails(call.tool.file, message.details) } };
+    tool: { ...call.tool, output, status, ...(file ? { file } : {}) } };
 }
 
 /** An assistant row (when it has anything to show) followed by one row per tool call. */
@@ -241,8 +243,9 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
     const index = calls.get(slot.callId);
     const message = index === undefined ? undefined : messages[index];
     if (message?.tool && index !== undefined && slot.status !== 'done') {
+      const file = withFileToolDetails(message.tool.file, slot.details);
       messages[index] = { ...message, tool: { ...message.tool, output: slot.output ?? '', status: 'running',
-        file: withFileToolDetails(message.tool.file, slot.details) } };
+        ...(file ? { file } : {}) } };
     }
   }
   // A stopped run saves its partial answer as an interrupted entry, which already shows the stop.

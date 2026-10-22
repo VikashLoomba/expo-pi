@@ -1,67 +1,35 @@
-import type { AttachedReplicatedState, JsonValue } from '@earendil-works/chord';
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import type { Harness, TaskGraph, TaskId } from '@earendil-works/pi-durable';
 import * as Notifications from 'expo-notifications';
 
-import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
+import type { ScheduledTasks } from './infinichat-scheduled';
 
-const context = BACKGROUND_CONTEXT;
 /** Category identifiers may not contain ':' or '-' (expo-notifications). */
 const CATEGORY = 'infinichatScheduledTask';
 const IDENTIFIER_PREFIX = 'infinichat-task-';
 
-/** A scheduled task still waiting, by pi-durable's own task ID. */
-export type ScheduledTask = ScheduledInput & { id: TaskId };
-const identifierOf = (id: TaskId) => `${IDENTIFIER_PREFIX}${id}`;
-
-/** The input of a scheduled task, read from pi-durable's own record. */
-function scheduledInput(value: JsonValue): ScheduledInput | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const { task, until } = value;
-  return typeof task === 'string' && typeof until === 'number' ? { task, until } : undefined;
-}
+const identifierOf = (id: number) => `${IDENTIFIER_PREFIX}${id}`;
 
 /**
  * Keeps one scheduled local notification per scheduled task still waiting, as the keep-alive keeps one location
  * stream per Harness with work: added when the task appears, cancelled when it ends, reconciled against what iOS
- * holds whenever the task graph changes. Nothing handles the tap: opening the app reopens the Harness, whose wait
- * task then sends its task at once, and the "Run now" action launches the app in the background for the same. The
- * tasks it reads are the Scheduled tasks sheet's too.
+ * holds whenever the list changes. Nothing handles the tap: opening the app reopens the Harness, whose wait task then
+ * sends its task at once, and the "Run now" action launches the app in the background for the same.
  */
-export class ScheduledTaskNotifier {
-  private graph?: AttachedReplicatedState<TaskGraph>;
-  private tasks?: readonly ScheduledTask[];
-  private readonly listeners = new Set<() => void>();
-  private unsubscribe = () => {};
+export class ScheduledTaskNotifications {
   private queue: Promise<void> = Promise.resolve();
   private category?: Promise<unknown>;
   private closed = false;
+  private readonly unsubscribe: () => void;
 
-  constructor(private readonly harness: Harness, private readonly report: (error: unknown) => void) {}
-
-  async start(): Promise<void> {
-    const graph = await this.harness.taskGraph(context);
-    if (this.closed) {
-      graph.dispose();
-      return;
-    }
-    this.graph = graph;
-    this.unsubscribe = graph.subscribe(this.schedule);
+  constructor(private readonly tasks: ScheduledTasks, private readonly report: (error: unknown) => void) {
+    this.unsubscribe = tasks.subscribe(this.schedule);
+    // The list may have been read before this followed it.
     this.schedule();
   }
 
-  readonly subscribe = (listener: () => void) => {
-    this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
-  };
-  /** The scheduled tasks still waiting, soonest first; undefined until they are first read. */
-  readonly getSnapshot = () => this.tasks;
-
-  /** Stops following the Harness; a sync under way finishes on its own, and iOS keeps what was scheduled. */
+  /** Stops following the list; a sync under way finishes on its own, and iOS keeps what was scheduled. */
   close(): void {
     this.closed = true;
     this.unsubscribe();
-    this.graph?.dispose();
   }
 
   private readonly schedule = () => {
@@ -70,10 +38,8 @@ export class ScheduledTaskNotifier {
   };
 
   private async sync(): Promise<void> {
-    const pending = await this.pending();
-    if (this.closed) return;
-    this.tasks = pending;
-    for (const listener of [...this.listeners]) listener();
+    const pending = this.tasks.getSnapshot();
+    if (this.closed || pending === undefined) return;
     const held = (await Notifications.getAllScheduledNotificationsAsync())
       .filter((request) => request.identifier.startsWith(IDENTIFIER_PREFIX));
     const wanted = new Set(pending.map((item) => identifierOf(item.id)));
@@ -94,20 +60,6 @@ export class ScheduledTaskNotifier {
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: item.until },
       });
     }
-  }
-
-  /** The scheduled tasks still waiting for a time ahead, from pi-durable's records; a due one is about to run. */
-  private async pending(): Promise<ScheduledTask[]> {
-    const tasks = Object.values(this.graph?.value.tasks ?? {});
-    if (!tasks.some((task) => task.kind === SCHEDULED_TASK)) return [];
-    const inspection = await this.harness.inspect(context);
-    const pending: ScheduledTask[] = [];
-    for (const { record } of inspection.tasks) {
-      if (record.kind !== SCHEDULED_TASK || record.abortRequested) continue;
-      const input = scheduledInput(record.input);
-      if (input && input.until > Date.now()) pending.push({ ...input, id: record.id });
-    }
-    return pending.sort((left, right) => left.until - right.until);
   }
 
   /** Asks for notification permission at the first scheduled task; a refusal leaves the tasks to run on open. */

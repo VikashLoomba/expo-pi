@@ -1,5 +1,4 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
-import type { SubmissionId } from '@earendil-works/pi-durable';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -17,7 +16,7 @@ import { collectSearchSources } from './web-search-presentation';
 
 export function MessageRow({ message, stopping = false, onSteerQueued }: {
   message: ChatMessage; stopping?: boolean;
-  onSteerQueued?: (submissionId: SubmissionId, content: UserMessage['content']) => void;
+  onSteerQueued?: (submissionId: number, content: UserMessage['content']) => void;
 }) {
   const colors = useChatColors();
   const [thinkingExpanded, setThinkingExpanded] = useState(false);

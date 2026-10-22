@@ -1,7 +1,17 @@
-import type { ImageContent, Message, UserMessage } from '@earendil-works/pi-ai';
+import { Type, type Message, type Static, type UserMessage } from '@earendil-works/pi-ai';
 
 /** pi-ai's image part without its tag: what a saved message carries and what the composer sends. */
-export type ChatImage = Pick<ImageContent, 'data' | 'mimeType'>;
+export const ChatImageSchema = Type.Object({ data: Type.String(), mimeType: Type.String() });
+export type ChatImage = Static<typeof ChatImageSchema>;
+
+/** pi-ai's `UserMessage` content, as a caller on another host sends it: text, or text and image parts. */
+export const UserInputSchema = Type.Union([
+  Type.String(),
+  Type.Array(Type.Union([
+    Type.Object({ type: Type.Literal('text'), text: Type.String() }),
+    Type.Object({ type: Type.Literal('image'), ...ChatImageSchema.properties }),
+  ])),
+]);
 
 /** The text parts of a message's content, joined. */
 export const textOf = (content: Message['content']) => typeof content === 'string' ? content

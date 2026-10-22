@@ -3,7 +3,6 @@ import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
   type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
-  type TaskId,
 } from '@earendil-works/pi-durable';
 import { createCodingTools } from '@earendil-works/pi-durable/tools';
 
@@ -350,10 +349,13 @@ export class DurableChatService {
   /**
    * Turns one queued follow-up into a steer, as pi-durable's busy queueing allows: withdraw the submission, then
    * submit the same text again with `whenBusy: 'steer'`. A follow-up a boundary placed meanwhile is left alone.
+   * The row carries the submission's number; its record comes from the Harness's queued and placed submissions.
    */
-  async steerQueued(id: ConversationId, submissionId: SubmissionId, content: UserMessage['content']): Promise<void> {
+  async steerQueued(id: ConversationId, submissionId: number, content: UserMessage['content']): Promise<void> {
     const conversation = await this.conversation(id);
-    const result = await this.harness.abortSubmission(submissionId, context, id);
+    const record = (await this.harness.inspect(context)).submissions.find((each) => each.id === submissionId);
+    if (!record) throw new Error('That message already left the queue.');
+    const result = await this.harness.abortSubmission(record.id, context, id);
     if (result === 'already_placed') return;
     if (result === 'settled' || result === 'not_found') throw new Error('That message already left the queue.');
     // A new request ID: the withdrawn submission is settled, and its ID would return that aborted submission.
@@ -366,10 +368,12 @@ export class DurableChatService {
     }, context);
   }
 
-  /** Runs a chat's parked tasks again, the ones its view's controls list. */
-  async retryParked(tasks: readonly TaskId[]): Promise<void> {
+  /** Runs a chat's parked tasks again, the ones its view's controls list by number, from the Harness's records. */
+  async retryParked(tasks: readonly number[]): Promise<void> {
     this.assertOpen();
-    for (const task of tasks) await this.harness.retryTask(task, context);
+    for (const { record } of (await this.harness.inspect(context)).tasks) {
+      if (tasks.includes(record.id)) await this.harness.retryTask(record.id, context);
+    }
   }
 
   /** Withdraws queued input and aborts the running work; resolves once the chat is idle. */

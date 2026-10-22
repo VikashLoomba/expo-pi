@@ -1,18 +1,21 @@
 import {
-  getSupportedThinkingLevels, type Api, type Model, type Models, type ModelThinkingLevel,
+  Type, getSupportedThinkingLevels, type Api, type Model, type Models, type ModelThinkingLevel, type Static,
 } from '@earendil-works/pi-ai';
+import { ModelThinkingLevelSchema } from '@earendil-works/pi-ai/providers/model-schema';
 import type { ModelRef } from '@earendil-works/pi-durable';
 import { DEFAULT_IMAGE_LIMITS } from '@earendil-works/pi-durable/tools';
 
-import { DEFAULT_JPEG_QUALITY } from './images';
-
 export type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 
-/** The same serializable references persisted by pi-durable's AgentDoc. */
-export type ChatModelSettings = {
-  model: ModelRef;
-  thinkingLevel: ModelThinkingLevel;
-};
+/** The JPEG quality in percent when the model declares none; pi-durable's Photon processor starts at the same. */
+export const DEFAULT_JPEG_QUALITY = 80;
+
+/** The same serializable references persisted by pi-durable's AgentDoc: its `ModelRef` and pi-ai's effort. */
+export const ChatModelSettingsSchema = Type.Object({
+  model: Type.Object({ provider: Type.String(), modelId: Type.String() }),
+  thinkingLevel: ModelThinkingLevelSchema,
+});
+export type ChatModelSettings = Static<typeof ChatModelSettingsSchema>;
 
 /** What an attached photo is fitted to before it is sent, from the model's `inputLimits.images`. */
 export interface ImageInput {

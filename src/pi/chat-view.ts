@@ -1,5 +1,6 @@
 import type { AttachedReplicatedState } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
+import { Type, type Static } from '@earendil-works/pi-ai';
 import type {
   Conversation, ConversationId, ConversationView, Cursor, DocumentState, EntryId, EntryRecord, Harness,
   SubmissionId, SubmissionRecord, TaskGraph,
@@ -14,10 +15,11 @@ import { SearchPresentationsDoc, type SearchPresentationsState } from './native-
 const context = BACKGROUND_CONTEXT;
 const noop = () => {};
 
-export type ChatViewSnapshot = {
-  status: 'loading' | 'ready' | 'missing' | 'failed';
-  error?: string;
-};
+export const ChatViewSnapshotSchema = Type.Object({
+  status: Type.Enum(['loading', 'ready', 'missing', 'failed']),
+  error: Type.Optional(Type.String()),
+});
+export type ChatViewSnapshot = Static<typeof ChatViewSnapshotSchema>;
 
 /** What screens read from a conversation's view; InfiniChat's view extends the controls. */
 export interface ChatViewSource<C extends ChatControls = ChatControls> {

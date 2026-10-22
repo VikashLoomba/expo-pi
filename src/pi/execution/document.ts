@@ -1,9 +1,18 @@
+import { Type, type Static } from '@earendil-works/pi-ai';
 import { defineDoc, type AgentState } from '@earendil-works/pi-durable';
 
-export type ExecutionTarget = { kind: 'local' } | { kind: 'ssh'; machineId: string };
+const ExecutionTargetSchema = Type.Union([
+  Type.Object({ kind: Type.Literal('local') }),
+  Type.Object({ kind: Type.Literal('ssh'), machineId: Type.String() }),
+]);
+export type ExecutionTarget = Static<typeof ExecutionTargetSchema>;
 export type ExecutionTargetState = { target: ExecutionTarget };
 /** `cwd: null` leaves the agent's directory unset, so a remote machine uses its account's home directory. */
-export type ChatExecutionSettings = { target: ExecutionTarget; cwd: string | null };
+export const ChatExecutionSettingsSchema = Type.Object({
+  target: ExecutionTargetSchema,
+  cwd: Type.Union([Type.String(), Type.Null()]),
+});
+export type ChatExecutionSettings = Static<typeof ChatExecutionSettingsSchema>;
 
 /**
  * The target sits under `target` so a commit can replace it whole: a draft cannot turn one variant of a root union

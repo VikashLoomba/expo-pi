@@ -1,5 +1,4 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
-import type { SubmissionId } from '@earendil-works/pi-durable';
 import { FlashList } from '@shopify/flash-list';
 import { GlassView } from 'expo-glass-effect';
 import { router } from 'expo-router';
@@ -83,7 +82,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   view, ready, stopping, onChoose, onSteerQueued, composer,
 }: {
   view: ChatViewSource | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
-  onSteerQueued?: (submissionId: SubmissionId, content: UserMessage['content']) => void;
+  onSteerQueued?: (submissionId: number, content: UserMessage['content']) => void;
   composer: ReactNode;
 }) {
   const colors = useChatColors();

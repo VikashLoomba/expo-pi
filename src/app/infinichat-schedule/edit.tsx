@@ -7,7 +7,7 @@ import { ActivityIndicator, StyleSheet } from 'react-native';
 import { useChatApp, useScheduledTasks } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { ScheduledTask } from '@/pi/infinichat-notifications';
+import type { ScheduledTask } from '@/pi/infinichat-scheduled';
 import type { ScheduledInput } from '@/pi/infinichat/schedule';
 
 /** Edits the scheduled task `id` names, as the list showed it; saving or deleting returns to the list. */

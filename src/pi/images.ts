@@ -3,10 +3,10 @@ import type { ImageLimits, ImageProcessor, PreparedImage } from '@earendil-works
 import { File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
+import { DEFAULT_JPEG_QUALITY } from './model-catalog';
+
 /** Each shrink step while an image is still over the model's byte limit, as pi-durable's Photon processor shrinks. */
 const SHRINK = 0.75;
-/** The JPEG quality in percent when the model declares none; pi-durable's Photon processor starts at the same. */
-export const DEFAULT_JPEG_QUALITY = 80;
 
 /** A fitted image, with the file it was saved to and its dimensions. */
 export interface FittedImage extends PreparedImage {

@@ -1,11 +1,14 @@
+import { Type, type Static } from '@earendil-works/pi-ai';
+
 /** Small, validated UI state derived from tool arguments and durable result details. */
-export type FileToolPresentation = {
-  kind: 'read' | 'write' | 'edit';
-  path: string;
-  summary: string;
-  diff?: string;
-  firstChangedLine?: number;
-};
+export const FileToolPresentationSchema = Type.Object({
+  kind: Type.Enum(['read', 'write', 'edit']),
+  path: Type.String(),
+  summary: Type.String(),
+  diff: Type.Optional(Type.String()),
+  firstChangedLine: Type.Optional(Type.Number()),
+});
+export type FileToolPresentation = Static<typeof FileToolPresentationSchema>;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;

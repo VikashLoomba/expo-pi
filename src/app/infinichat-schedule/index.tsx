@@ -2,7 +2,6 @@ import {
   Button, ContentUnavailableView, Host, HStack, Image, List, ProgressView, Section, Spacer, Text, VStack,
 } from '@expo/ui/swift-ui';
 import { font, foregroundStyle, lineLimit, listStyle } from '@expo/ui/swift-ui/modifiers';
-import type { TaskId } from '@earendil-works/pi-durable';
 import { router, Stack } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { PlatformColor, StyleSheet } from 'react-native';
@@ -10,7 +9,7 @@ import { PlatformColor, StyleSheet } from 'react-native';
 import { useChatApp, useScheduledTasks } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { ScheduledTask } from '@/pi/infinichat-notifications';
+import type { ScheduledTask } from '@/pi/infinichat-scheduled';
 
 // Inside a button, hierarchical styles derive from the tint, so its text takes the label colors explicitly.
 const buttonLabel = foregroundStyle(PlatformColor('label'));
@@ -29,7 +28,7 @@ export default function ScheduledTasksScreen() {
   const { infiniChat } = useChatApp();
   const tasks = useScheduledTasks();
   // A deleted row leaves at once, as onDelete expects of its data; one whose delete failed comes back.
-  const [deleted, setDeleted] = useState<readonly TaskId[]>([]);
+  const [deleted, setDeleted] = useState<readonly number[]>([]);
   const [error, setError] = useState<string>();
   const shown = tasks?.filter((task) => !deleted.includes(task.id));
   const remove = async (task: ScheduledTask) => {

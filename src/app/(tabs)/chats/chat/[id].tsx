@@ -1,5 +1,5 @@
 import { uuidv7, type UserMessage } from '@earendil-works/pi-ai';
-import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
+import type { ConversationId } from '@earendil-works/pi-durable';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
@@ -104,7 +104,7 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
       setAdmitting(false);
     }
   };
-  const steerQueued = async (submissionId: SubmissionId, content: UserMessage['content']) => {
+  const steerQueued = async (submissionId: number, content: UserMessage['content']) => {
     if (id === undefined || !service || steering) return;
     setSteering(true);
     setLocalError(undefined);

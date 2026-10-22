@@ -1,12 +1,13 @@
 import type { AttachedReplicatedState, Context, JsonValue } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
+import { Type, type Static } from '@earendil-works/pi-ai';
 import {
   ResetEntry,
   type Conversation, type ConversationId, type ConversationView, type Cursor, type DocumentState, type EntryId,
   type EntryRecord, type Harness, type InboxItem, type InboxState, type SettledSubmissionRecord, type TaskGraph,
 } from '@earendil-works/pi-durable';
 
-import type { ChatControls, ChatMessage } from '../chat/types';
+import { ChatControlsSchema, type ChatMessage } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import {
   projectControls, projectMessages, queuedRow, readConversationView, stoppedNotice, type ChatState,
@@ -15,19 +16,22 @@ import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
 import { AGENT_TASK } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, type Admission, type AppState } from './infinichat/app';
 import { ConfigDoc, type SummarySelection } from './infinichat/summary';
+import { ChatModelSettingsSchema } from './model-catalog';
 
 const context = BACKGROUND_CONTEXT;
 const noop = () => {};
 const workRow = (message: ChatMessage): ChatMessage => ({ ...message, role: 'work' });
 
-export type InfiniChatControls = ChatControls & {
+export const InfiniChatControlsSchema = Type.Object({
+  ...ChatControlsSchema.properties,
   /** The summary model and effort, or `null` until they are chosen. */
-  summary: SummarySelection | null;
+  summary: Type.Union([ChatModelSettingsSchema, Type.Null()]),
   /** The user's own instructions that follow the prompt; empty until written. */
-  instructions: string;
+  instructions: Type.String(),
   /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
-  configured: boolean;
-};
+  configured: Type.Boolean(),
+});
+export type InfiniChatControls = Static<typeof InfiniChatControlsSchema>;
 
 /** The request a queued delivery is for: its inbox item carries the entry it will be placed as. */
 function queuedRequest(entry: { readonly kind: string; readonly data?: JsonValue } | undefined): string | undefined {
