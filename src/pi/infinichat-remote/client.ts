@@ -68,6 +68,7 @@ function plain(error: unknown): Error {
 export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
   private readonly listeners = new Set<() => void>();
+  private readonly scheduledListeners = new Set<() => void>();
   private ref?: InfiniChatRef;
   private session?: Session;
   /** The attempt under way, which `close` cancels. */
@@ -94,7 +95,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
     this.stopHosts = hosts.subscribe(() => this.sendMachines());
   }
 
-  /** One store for the view, the report, the scheduled tasks and the connection. */
+  /** One store for the view, the report, the scheduled tasks and the connection; `scheduled` also has its own. */
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
@@ -102,8 +103,17 @@ export class RemoteInfiniChat implements InfiniChatHost {
   /** The server's latest report, until it is dismissed there. */
   readonly getSnapshot = () => this.report;
   readonly getConnection = () => this.connection;
-  /** The machine's waiting tasks; undefined until connected, and while the machine hasn't opened and read them. */
-  readonly scheduled = { subscribe: this.subscribe, getSnapshot: () => this.values?.scheduled };
+  /**
+   * The machine's waiting tasks; undefined until connected, and while the machine hasn't opened and read them. A store
+   * of its own, which notifies only when the list changes, not at every streamed change of the view.
+   */
+  readonly scheduled = {
+    subscribe: (listener: () => void) => {
+      this.scheduledListeners.add(listener);
+      return () => { this.scheduledListeners.delete(listener); };
+    },
+    getSnapshot: () => this.values?.scheduled,
+  };
   private readonly shown: ChatViewSource<InfiniChatControls> = {
     subscribe: this.subscribe,
     getSnapshot: () => this.values?.view ?? LOADING,
@@ -303,6 +313,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
       this.attempt?.abort();
       this.calls.abort(new Error(`InfiniChat no longer runs on ${this.name}.`));
       this.listeners.clear();
+      this.scheduledListeners.clear();
       await this.running;
       const session = this.session;
       this.session = undefined;
@@ -456,12 +467,16 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const ref = this.ref;
     if (ref === undefined || !this.session?.live) return;
     const { view, report } = ref.snapshot.value;
-    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value,
-      scheduled: ref.scheduled.value ?? undefined, catalog: ref.catalog.value, access: ref.access.value,
-      signIn: ref.signInAttempt.value, conversation: ref.conversation.value, reach: ref.reach.value,
-      pendingHostKeys: ref.pendingHostKeys.value };
+    const scheduled = ref.scheduled.value ?? undefined;
+    // The values are copied here only, once the server is checked, so the list's own store compares; Chord replaces a
+    // member's value only when that member changes.
+    const rescheduled = scheduled !== this.values?.scheduled;
+    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled,
+      catalog: ref.catalog.value, access: ref.access.value, signIn: ref.signInAttempt.value,
+      conversation: ref.conversation.value, reach: ref.reach.value, pendingHostKeys: ref.pendingHostKeys.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };
     this.notify();
+    if (rescheduled) for (const listener of [...this.scheduledListeners]) listener();
   };
 
   /**

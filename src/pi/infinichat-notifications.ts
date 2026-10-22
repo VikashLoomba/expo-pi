@@ -1,6 +1,5 @@
 import * as Notifications from 'expo-notifications';
 
-import type { ScheduledTask } from './infinichat-scheduled';
 import type { InfiniChatHost } from './infinichat-service';
 
 const IDENTIFIER_PREFIX = 'infinichat-task-';
@@ -17,6 +16,11 @@ const CATEGORIES = {
     { identifier: 'run', buttonTitle: 'Run now', options: { opensAppToForeground: false } }, OPEN] },
   machine: { identifier: 'infinichatMachineTask', actions: [OPEN] },
 };
+
+/** A tap on a scheduled task's notification, or its "Open": both open InfiniChat; "Run now" runs in the background. */
+export const opensInfiniChat = (response: Notifications.NotificationResponse) =>
+  response.notification.request.identifier.startsWith(IDENTIFIER_PREFIX)
+  && [Notifications.DEFAULT_ACTION_IDENTIFIER, OPEN.identifier].includes(response.actionIdentifier);
 
 /** The side that holds the conversation open: its waiting tasks, where they run, and where a failure shows. */
 export interface ScheduledTaskSource {
@@ -36,8 +40,6 @@ export interface ScheduledTaskSource {
 export class ScheduledTaskNotifications {
   private source?: ScheduledTaskSource;
   private unsubscribe = () => {};
-  /** The list last queued: a machine's one store also notifies at each streamed change of its view, list unchanged. */
-  private queued?: readonly ScheduledTask[];
   private queue: Promise<void> = Promise.resolve();
   private readonly categories: Partial<Record<ScheduledTaskSource['runsOn'], Promise<unknown>>> = {};
   private closed = false;
@@ -50,7 +52,6 @@ export class ScheduledTaskNotifications {
     if (this.closed || source.tasks === this.source?.tasks) return;
     this.unsubscribe();
     this.source = source;
-    this.queued = undefined;
     this.unsubscribe = source.tasks.subscribe(this.schedule);
     // The list may have been read before this followed it.
     this.schedule();
@@ -63,36 +64,45 @@ export class ScheduledTaskNotifications {
   }
 
   private readonly schedule = () => {
-    const source = this.source;
-    const pending = source?.tasks.getSnapshot();
-    if (this.closed || source === undefined || pending === undefined || pending === this.queued) return;
-    this.queued = pending;
-    this.queue = this.queue.then(() => this.sync(source, pending)).catch(source.report);
+    if (!this.closed) this.queue = this.queue.then(() => this.sync());
   };
 
-  private async sync(source: ScheduledTaskSource, pending: readonly ScheduledTask[]): Promise<void> {
-    // A later list, or another side's, is queued after this one.
-    if (this.closed || source !== this.source || pending !== this.queued) return;
+  /** Reconciles with the list of the side followed when it runs; a failure shows on that side. */
+  private async sync(): Promise<void> {
+    const source = this.source;
+    const pending = source?.tasks.getSnapshot();
+    if (this.closed || source === undefined || pending === undefined) return;
     const category = CATEGORIES[source.runsOn];
-    const held = (await Notifications.getAllScheduledNotificationsAsync())
-      .filter((request) => request.identifier.startsWith(IDENTIFIER_PREFIX));
-    const wanted = new Set(pending.map((item) => identifierOf(item.id)));
-    for (const request of held) {
-      if (!wanted.has(request.identifier)) await Notifications.cancelScheduledNotificationAsync(request.identifier);
-    }
-    const missing = pending.filter((item) => !held.some((request) => request.identifier === identifierOf(item.id)
-      && request.content.categoryIdentifier === category.identifier));
-    if (missing.length === 0 || !(await this.permitted())) return;
-    await (this.categories[source.runsOn] ??= Notifications.setNotificationCategoryAsync(category.identifier,
-      category.actions));
-    for (const item of missing) {
-      // A request under an identifier iOS already holds replaces it (UNNotificationRequest), so a task notified from
-      // the other side is never notified twice.
-      await Notifications.scheduleNotificationAsync({
-        identifier: identifierOf(item.id),
-        content: { title: 'InfiniChat', body: item.task, categoryIdentifier: category.identifier },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: item.until },
-      });
+    try {
+      const held = (await Notifications.getAllScheduledNotificationsAsync())
+        .filter((request) => request.identifier.startsWith(IDENTIFIER_PREFIX));
+      const wanted = new Set(pending.map((item) => identifierOf(item.id)));
+      for (const request of held) {
+        if (!wanted.has(request.identifier)) await Notifications.cancelScheduledNotificationAsync(request.identifier);
+      }
+      const missing = pending.filter((item) => !held.some((request) => request.identifier === identifierOf(item.id)
+        && request.content.categoryIdentifier === category.identifier));
+      if (missing.length === 0 || !(await this.permitted())) return;
+      await (this.categories[source.runsOn] ??= Notifications.setNotificationCategoryAsync(category.identifier,
+        category.actions));
+      // Each on its own: iOS refuses a task due within the second (the DATE trigger floors to whole seconds), and that
+      // must not hold back the tasks after it. A request under an identifier iOS already holds replaces it
+      // (UNNotificationRequest), so a task notified from the other side is never notified twice.
+      let failure: unknown;
+      for (const item of missing) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            identifier: identifierOf(item.id),
+            content: { title: 'InfiniChat', body: item.task, categoryIdentifier: category.identifier },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: item.until },
+          });
+        } catch (error) {
+          failure ??= error;
+        }
+      }
+      if (failure !== undefined) throw failure;
+    } catch (error) {
+      source.report(error);
     }
   }
 

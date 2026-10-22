@@ -100,6 +100,9 @@ Checked on 2026-10-21. Versions:
 | A request whose identifier matches a pending request replaces it | Apple, `UNNotificationRequest.init(identifier:content:trigger:)`, read 2026-10-22 |
 | A DATE trigger floors its time to whole seconds and becomes a time-interval trigger, which refuses a time not ahead | expo-notifications 58.1.6 `ios/ExpoNotifications/Notifications/TriggerRecords.swift:102-110` |
 | Category identifiers may not contain `:` or `-`; `opensAppToForeground: false` keeps an action in the background | expo-notifications 58.1.6 `build/setNotificationCategoryAsync.d.ts:6`, `build/Notifications.types.d.ts:714-720` |
+| A tap routes with Expo Router in the root layout: `getLastNotificationResponse()` on mount, a response listener, `clearLastNotificationResponse()` once handled; a tap's action is `DEFAULT_ACTION_IDENTIFIER` | Expo SDK 58 notifications reference, "Handle push notifications with navigation"; expo-notifications 58.1.6 `build/NotificationsEmitter.d.ts:3`, `:64`, `:83`, `:105` |
+| `navigate` pushes onto a stack unless the route is the current one or the action asks to pop; deep links ask to pop, `router.navigate` doesn't | expo-router 58.0.25 `build/react-navigation/routers/StackRouter.js:268-276`, `build/fork/useLinking.native.js:118-127` |
+| `dismissTo` is `POP_TO`; the tab router has no `POP_TO`, and an action addressed to a navigator that doesn't handle it stops there | expo-router 58.0.25 `build/global-state/router.js:198-203`, `build/react-navigation/routers/TabRouter.js`, `build/global-state/reduceNavigationTree.js:78-82` |
 
 ## Chord over WebSocket in Hermes
 
@@ -371,8 +374,10 @@ ran over loopback, so the times are the Mac's, not Tailscale's.
 ## Piece 6 on macOS
 
 **Checks, 2026-10-22**, on the implementer's Mac (arm64; the server on Node 24.5.0 from Homebrew, the phone's code on
-Node 25.6.1), with pi 1.4.0 (tag `4a080252f`), Expo 58.0.17 and expo-notifications 58.1.6 installed. No device or
-simulator was used. 23 of 23 checks passed, in four runs.
+Node 25.6.1), with pi 1.4.0 (tag `4a080252f`), Expo 58.0.17, expo-notifications 58.1.6 and expo-router 58.0.25
+installed. No device was used. Before the review, 23 of 23 checks passed in four runs; after it, 24 of 24 in five
+runs (one run first failed two checks on the harness's own timing: a transcript read before its frame arrived, and a
+call stamped in the same millisecond as the next check's start).
 - **What ran on the phone's side:** one Node process with the app's real `ScheduledTaskNotifications`,
   `KeepAliveController`, `ShownInfiniChat`, `InfiniChatMoves`, home record, `RemoteInfiniChat`,
   `openPhoneInfiniChat`, `openExpoSqliteStorage`, contract and Chord, wired as `chat-provider.tsx` wires them
@@ -392,17 +397,33 @@ simulator was used. 23 of 23 checks passed, in four runs.
 | Check | Result |
 | --- | --- |
 | Two tasks scheduled on the phone | Two notifications, category `infinichatScheduledTask` with `run` (background) and `open` (foreground) |
+| A task iOS refuses (the stand-in refuses one) scheduled before another | The other still scheduled; the refusal shown once as InfiniChat's error |
 | Keep-alive for work on the phone | The location stream and the Live Activity started, and ended with the work |
 | Move there | The two requests replaced under their identifiers with `infinichatMachineTask` (Open only) as the screens switched; no cancel, never fewer than two pending |
 | A task the machine's agent schedules; one deleted from the sheet | Its notification added; the deleted one's cancelled |
-| A streamed answer from the machine | 24 store notifications, no read of iOS's pending set (26 with the notifier's list check removed) |
+| A streamed answer from the machine | 24–26 notifications of the client's store, none of its list's, no read of iOS's pending set. Before the review, with one store, the notifier read the pending set 26 times for one answer unless it skipped a list it had queued |
 | Keep-alive for work on the machine | No location stream, no Live Activity start or update |
 | The phone cut off (connections dropped, new ones refused) before a task 12 s out | The notification delivered at its time (floored, 0.44 s early) with the machine's category; the machine ran the task 26 ms after its time and its turn scheduled another; the phone touched nothing meanwhile |
 | Reconnected (as the app becoming active) | The task scheduled meanwhile got its notification; `ran T5` was in the transcript |
 | The server restarted while the phone was cut off | Reconnected to the same set: one read of iOS's set, nothing scheduled or cancelled |
 | Relaunch while the machine is unreachable, then reachable | Nothing touched while it failed; after connecting one read and no change |
 | Move back | The three requests replaced with the phone's category as the screens switched; no cancel, no add; the client's list went `undefined` after `relinquish` |
-| The same run against a server that sends `[]` for a conversation it doesn't hold (piece 5's behaviour) | 3 failures: the move there cancelled both requests right after `adopt` (the list `[]` before the machine had read its tasks) and added them again; the move back cancelled all three after `relinquish` and added them again 32 ms later, once the phone had opened |
+| The same run against a server that sends `[]` for a conversation it doesn't hold (piece 5's behaviour) | 3 failures: the move there cancelled both requests right after `adopt` (the list `[]` before the machine had read its tasks) and added them again; the move back cancelled all three after `relinquish` and added them again 32–35 ms later, once the phone had opened |
+
+**The tap, in the iOS simulator** (iOS 27.0, a development build of this commit made with `npx @expo/agent-cli dev
+--ios`, on the worktree's own simulator). Each response went through expo-notifications' own native emitter
+(`ExpoNotificationsEmitter.emit('onDidReceiveNotificationResponse', …)`, the event a tap sends), and the root
+navigation state was read from the app's navigation container.
+
+| Where the app was | Response | Result |
+| --- | --- | --- |
+| The Scheduled tasks sheet over InfiniChat | A tap on `infinichat-task-1` | The sheet dismissed; InfiniChat shown |
+| The Account sheet over the Chats tab | A tap | The sheet dismissed; the InfiniChat tab selected |
+| The settings sheet with its model page pushed, over Chats | A tap | Both dismissed; the InfiniChat tab selected |
+| The Chats tab, no sheet | "Run now"; a tap on another identifier | Nothing changed |
+| The Chats tab, no sheet | "Open" | The InfiniChat tab selected |
+| The Scheduled tasks sheet, with `router.navigate('/')` alone | A tap | A second `(tabs)` pushed above the sheet |
+| The Chats tab, with `router.dismissTo('/')` alone | A tap | The Chats tab still selected |
 
 ## Piece 7 on macOS
 
@@ -486,8 +507,9 @@ The final run passed 27 of 27 checks; after the review's fixes, 30 of 30.
   `digest` on a 40 MB file, expo-sqlite's close leaving no WAL, the header's progress and the menu's Cancel Move, the
   screens keeping their scroll and draft through a move, and a killed app relaunching into a move.
 - Piece 5 against Linux, and against a machine whose `released/` holds earlier conversations.
-- Piece 6 on the phone: delivered notifications and their actions on iOS, "Open" and a tap opening the app, a request
-  replaced under its identifier by iOS itself, and the checks of `06` over Tailscale with the phone locked.
+- Piece 6 on the phone: delivered notifications and their actions on iOS, a real tap on a banner and a launch from
+  one (the simulator checks sent the response through the module's emitter), a request replaced under its identifier
+  by iOS itself, and the checks of `06` over Tailscale with the phone locked.
 - Piece 7 on the phone: the Remote machines rows and the accept button, the list sent from the real Keychain, and
   the phone's own tools after a move back (their code is unchanged).
 - Piece 7 on Linux, as A or as one of the others, and over Tailscale.

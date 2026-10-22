@@ -73,14 +73,25 @@ expo-notifications 58.1.6.
   cancelled for a move, so there is never a moment without one.
 - **Categories.** The phone's is unchanged: `infinichatScheduledTask` with "Run now" (`opensAppToForeground: false`)
   and "Open". A machine's is `infinichatMachineTask` with "Open" only. Each is registered the first time it is used.
-  The tap is still unhandled on both sides: the app opens where it was, which is InfiniChat on a cold launch (its
-  first tab).
-- **Only a changed list reconciles.** `RemoteInfiniChat` has one store for its view, report, list and connection, so
-  it notifies at every streamed change of the transcript. The notifier skips a notification whose list is the same
-  object it last queued, and a queued sync that a later list or another side superseded. Measured: one streamed
-  answer from the machine gave 24 store notifications; without the check the notifier read iOS's pending set 26 times
-  for them, with it none. The phone's `ScheduledTasks` makes a new list at each task graph change, so the phone
-  reconciles as often as before.
+- **The tap opens InfiniChat** (`src/hooks/use-scheduled-task-taps.ts`, called by `src/app/_layout.tsx`), as the SDK 58
+  notifications reference routes a tap with Expo Router ("Handle push notifications with navigation", Expo Router):
+  on mount it reads `getLastNotificationResponse()`, then adds `addNotificationResponseReceivedListener`, and clears
+  the response once handled. A response opens InfiniChat when its request identifier is a scheduled task's and its
+  action is the default (a tap on the notification) or "Open" (`opensInfiniChat` in the notifier's module); "Run now"
+  stays in the background as before. The route is `router.dismissTo('/')` then `router.navigate('/')`. In expo-router
+  58.0.25 neither alone does it, as checked in the simulator: `navigate` from a sheet pushes the tabs again above the
+  sheet (the stack router pushes unless asked to pop, `build/react-navigation/routers/StackRouter.js:268-276`), and
+  `dismissTo` with no sheet open leaves the Chats tab selected (the tab router has no `POP_TO`, and an action
+  addressed to a navigator stops there, `build/global-state/reduceNavigationTree.js:78-82`).
+- **Each task is scheduled on its own.** iOS refuses a task due within about a second (the DATE trigger floors to whole
+  seconds and refuses a time not ahead, `ios/.../TriggerRecords.swift:102-110`), so one refusal no longer holds back
+  the tasks after it: the first error is kept and reported after the loop, as the provider's teardown does.
+- **The machine's list notifies only when it changes.** `RemoteInfiniChat` has one store for its view, report and
+  connection, which notifies at every streamed change of the transcript. Its `scheduled` now has a store of its own,
+  notified when the list it shows changes. The notifier enqueues a sync at each notification of the list it follows,
+  and the sync reads that list when it runs. Measured in the harness: one streamed answer from the machine gave 24–26
+  notifications of the client's store, none of its list's, and no read of iOS's pending set. The phone's
+  `ScheduledTasks` makes a new list at each task graph change, so the phone reconciles as often as before.
 - **Keep-alive: no change was needed.** Piece 3's structure already holds: the only `keepAlive.observe` for
   InfiniChat is in `openPhoneInfiniChat` (`src/pi/infinichat-phone.ts:41`), so while InfiniChat is on a machine its
   work is never counted, and a move there detaches the phone's Harness when it closes it. Ordinary chats still pass
@@ -88,11 +99,10 @@ expo-notifications 58.1.6.
 
 ## Ownership and lifetime
 
-The notifier is created by the phone host and closed with it. In remote mode it borrows the `RemoteInfiniChat`
-reference's state and closes nothing of it. The keep-alive controller is unchanged and simply not given the remote
-conversation.
+The notifier is created by the provider, beside the keep-alive controller, and closed with it at unmount. It borrows
+whichever side holds the conversation open, the phone's `ScheduledTasks` or the `RemoteInfiniChat` reference's state,
+and closes nothing of either. The keep-alive controller is unchanged and simply not given the remote conversation.
 
-As built:
 
 | Resource | Created by | Borrowed by | Closed by |
 | --- | --- | --- | --- |
@@ -100,17 +110,23 @@ As built:
 | Its subscription to a side's list | `follow` | — | the next `follow`, or `close` |
 | The phone's `ScheduledTasks` | `InfiniChatService.open` | the notifier, while it follows the phone | the service's close |
 | `RemoteInfiniChat`'s `scheduled` store | the client | the notifier, while it follows the machine | the client's close |
+| The tap listener | the root layout's effect | — | the effect's cleanup |
 | iOS's pending notifications | the notifier | — | the notifier when a task leaves the list; iOS when one is delivered |
 
 ## Size
 
 About 80 lines: the notifier's list source ~40, the remote category ~20, the keep-alive condition ~20.
 
-As built, +101 −45 outside the asset and its manifest:
-- the notifier +63 −26 (`follow`, the source type, the second category, the list check, the comments);
+As built after the review and the rebase onto piece 7, +173 −62 outside the asset and its manifest:
+- the notifier +84 −37 (`follow`, the source type, the second category, each task scheduled on its own, the tap
+  predicate, the comments);
+- the tap: a new 27-line hook and +2 in the root layout;
 - the provider +15 −4, the phone host +7 −4;
-- the contract +5 −1, the client +4 −3, `serve.ts` +6 −6, a comment in `infinichat-scheduled.ts`;
+- the client +24 −8 (the list's own store), the contract +5 −1, `serve.ts` +8 −7, a comment in
+  `infinichat-scheduled.ts`;
 - the keep-alive 0, as above.
+
+The estimate did not include the tap (about 30 lines) or the client's list store (about 15).
 
 The server asset was rebuilt for the `null`, on top of piece 7's: 8,332,583 bytes (bundle `722983cc…`).
 
@@ -121,6 +137,12 @@ The server asset was rebuilt for the `null`, on top of piece 7's: 8,332,583 byte
   bundle changes, as for every piece.
 - **The machine's failures go to the provider's InfiniChat error.** The phone has no local report on a machine's
   InfiniChat, whose report is the server's.
+- **The client's list store compares the list it shows.** Chord does let a holder follow one member
+  (`ref.scheduled.subscribe`), but the client copies the reference's values in one place, `refresh`, only once it has
+  checked which server answers, and a connect changes the list shown without that member changing. So `refresh`
+  notifies the list's own listeners when the list differs from the one it showed: an identity check, since Chord keeps
+  a member's value until that member changes (one streamed answer: 24–26 notifications of the client's store, none of
+  the list's).
 
 ## Checks
 
@@ -133,23 +155,21 @@ On the owner's iPhone Release install, conversation on a machine:
 - Move back to the phone: the waiting tasks' notifications are the phone's again, with "Run now".
 - No location indicator or InfiniChat Live Activity appears for work on the machine.
 
-Done in this piece on the implementer's Mac with no device or simulator: 23 of 23 checks, with stand-ins for iOS's
-notifications, SSH and the other native modules, against the server built from this commit with scripted models.
-The results are in [references](references.md#piece-6-on-macos). Still unverified, on the phone:
+Done in this piece on the implementer's Mac: 24 of 24 checks in Node, with stand-ins for iOS's notifications, SSH and
+the other native modules, against the server built from this commit with scripted models; and the tap in the iOS
+simulator, on a development build of this commit. The results are in
+[references](references.md#piece-6-on-macos). Still unverified, on the phone:
 
-- iOS itself: a delivered notification on the lock screen, the two categories' actions, "Open" and a tap opening the
-  app, "Run now" from a machine's leftover phone notification, and a request replaced under its identifier.
+- iOS itself: a delivered notification on the lock screen, the two categories' actions, a real tap on a banner (the
+  simulator checks sent the response through expo-notifications' own emitter), a launch from a tap (the
+  `getLastNotificationResponse()` path), "Run now" from a machine's leftover phone notification, and a request
+  replaced under its identifier.
 - Delivery when a task is due within about a second of its list reaching the phone: the DATE trigger floors to
   whole seconds and refuses a time not ahead (`ios/.../TriggerRecords.swift:103-107`), which then shows as an error.
 - The checks above over Tailscale, with the phone locked and the app suspended.
 
 ## For the owner
 
-- **Opening InfiniChat from a tap.** Nothing handles a tap on either side, as before this piece, so a notification
-  opens the app where it was left: InfiniChat after a cold launch (its first tab), but the Chats tab if the app was
-  left there. Expo's documented way to open a screen from a tap is in the root layout: read
-  `getLastNotificationResponse()` at launch, add a response listener, and route with Expo Router (the SDK 58
-  notifications reference's Expo Router example). It would apply to both sides' notifications.
 - **`schedule_task`'s description.** It tells the agent "If the app is closed at that time, the user gets a
   notification and the task reaches you when the app is next opened" (`src/pi/infinichat/schedule.ts:51-53`). While
   InfiniChat runs on a machine, the task reaches the agent at its time instead. Changing the text changes the agent's

@@ -7,6 +7,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { ChatProvider } from '@/chat/chat-provider';
 import { useChatColors } from '@/hooks/use-chat-colors';
+import { useScheduledTaskTaps } from '@/hooks/use-scheduled-task-taps';
 import { useStackScreenOptions } from '@/hooks/use-stack-screen-options';
 
 // A modal opened from a link has the tabs beneath it to return to.
@@ -16,6 +17,7 @@ export const unstable_settings = { anchor: '(tabs)' };
 export default function RootLayout() {
   const colors = useChatColors();
   const screenOptions = useStackScreenOptions();
+  useScheduledTaskTaps();
   const baseTheme = colors.dark ? DarkTheme : DefaultTheme;
   return (
     <ThemeProvider value={{ ...baseTheme, colors: { ...baseTheme.colors, primary: colors.accent,
