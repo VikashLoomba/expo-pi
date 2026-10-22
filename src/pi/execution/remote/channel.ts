@@ -38,7 +38,7 @@ function aborted(): Error {
 }
 
 /** Native diagnostics may contain credential input. Only stable codes and fixed text leave this boundary. */
-function connectionFailure(error: unknown): Error {
+export function connectionFailure(error: unknown): Error {
   if (error instanceof BootstrapError) return error;
   const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'INTERNAL';
   const messages: Record<string, string> = {

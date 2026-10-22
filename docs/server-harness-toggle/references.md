@@ -39,6 +39,11 @@ Checked on 2026-10-21. Versions:
 | Local port forwarding for WebSocket clients | react-native-ssh `README.md:16-20`, `:87-93`; `src/index.ts:146-156` |
 | `exec` output is capped at 16 MiB; `exec` has no stdin | react-native-ssh `src/errors.ts:20`, README "Planned" |
 | `WebSocket(url, protocols, { headers })` | react-native `Libraries/WebSocket/WebSocket.js:100` |
+| `deployDaemon`: check by SHA-256, upload to a temporary file, verify, rename, at v1.4.0 | pi-env `src/ssh.ts:389-398`, `:400-461` |
+| `loginShell`: start the daemon through `exec "$SHELL" -lc 'exec "$0" "$@"'`, at v1.4.0 | pi-env `src/ssh.ts:466-470`, `:475-484` |
+| A child host's `readyTimeout` defaults to 30 s, at v1.4.0 | chord `src/manager.ts:238-239`, `:325-327` |
+| `processLock` is a socket file under `os.tmpdir()` on macOS, an abstract socket on Linux, at v1.4.0 | chord `src/manager.ts:82-91`, `:133-134` |
+| Node ≥ 22.19 | pi-durable `package.json` `engines` (installed 1.4.0, line 150) |
 
 ## Chord over WebSocket in Hermes
 
@@ -104,11 +109,50 @@ A subagent's assessment of branch `replication` at `2cf6cd898`, 2026-10-21. It i
 | Same, as a Bun-compiled executable (darwin-arm64) | 62 MB (not used: Node is required instead) |
 | Official Node 22 tarballs (darwin-arm64, linux-x64) | 26 MB, 31 MB (not used) |
 | The phone's InfiniChat database, 2026-10-21 backup | 32 MB, plus a 4.1 MB WAL |
+| Piece 2's asset (`assets/infinichat-server/server.bin`, esbuild 0.28.2, pi 1.4.0) | 8,109,307 bytes, 1,880,796 gzipped |
+
+## Piece 2 on macOS
+
+**Checks, 2026-10-21**, on the implementer's Mac: arm64, macOS, zsh, Node 24.5.0 from Homebrew. `brew shellenv` sits in
+`~/.zprofile`, so Node is on the login shell's `PATH` only. The real `install.ts` ran on Node with react-native-ssh and
+the Expo modules replaced by throwaway stand-ins (not committed): each script ran as sshd runs a command, through
+`$SHELL -c` with sshd's environment (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`). The Keychain was a file. `ssh localhost`
+itself was not available non-interactively.
+
+| Check | Result |
+| --- | --- |
+| Node through the login shell | `/opt/homebrew/bin/node`, 24.5.0. The non-login command `ssh` runs finds no `node` |
+| Node hidden from the login `PATH`; a `node` printing 20.11.0 first on it | Both stop with "InfiniChat needs Node 22.19 or newer on …" before anything is written |
+| First install | Upload, secret, LaunchAgent, ready in 1.5 s. `~/.infinichat` and the bundle directory `0700`; `secret`, `server.js` and the plist `0600`; `plutil -lint` OK; a device name with `'` and `&` arrives intact |
+| Install again, nothing changed | No upload, no restart (same pid), 0.25–0.35 s |
+| `server` handshake from a throwaway Chord client with the secret | `{ bundle: "c8b959ca…", pi: { durable, ai, chord: "1.4.0" }, device }` |
+| Wrong secret | Socket closed with 1008 |
+| `setTimeZone("Asia/Tokyo")`, read through the server's inspector (`SIGUSR1`) | Same process: `new Date(0).toLocaleString("sv-SE")` from `1969-12-31 16:00:00` to `1970-01-01 09:00:00`, offset 420 → −540; `state.json` `{"timeZone":"Asia/Tokyo"}` |
+| `setTimeZone("Not/AZone")` | Rejected (`unavailable: Invalid time zone specified`); `state.json` unchanged |
+| `launchctl kickstart -k` by hand | Back with a new pid and port; `TZ` restored from `state.json` |
+| `kill -9` | launchd starts it again (KeepAlive on failure) |
+| `SIGTERM` | Exits 0 and stays stopped; the next install's `kickstart` starts it (1.4 s) |
+| `kickstart -k` after changing the plist (a probe agent) | Restarts the old `ProgramArguments` |
+| `bootstrap` right after `bootout` | "Bootstrap failed: 5: Input/output error"; the service stays listed ~0.1 s after `bootout` returns. Waiting until `launchctl print` fails: 5 of 5 rounds OK |
+| Changed bundle (the asset plus a trailing comment) | Upload, `bootout`, `bootstrap`, ready, the old directory removed, the handshake names the new bundle: 2.4–2.5 s |
+| Upload script fed a truncated bundle | Exit 1, temporary file removed, the published file unchanged |
+| Install cancelled during the upload; during readiness | "SSH connection cancelled."; no temporary file. Left an empty or a complete bundle directory, removed by the next install |
+| Phone without its secret (Keychain emptied) | New secret, `kickstart -k`, new pid; the old secret refused (1008), the new one accepted |
+| Readiness script for a server that never starts | Marker only after 31 s; nothing removed |
+| LaunchAgent environment (inspector) | `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `TMPDIR=/var/folders/…/T/` |
+| `processLock`'s socket | The LaunchAgent's server: under `/var/folders/…/T/`. A server started with sshd's environment, which has no `TMPDIR`: `/tmp/chord2-ef594aa4….sock` |
+| Linux script without a user bus, on macOS with `uname` → `Linux` and `setsid` → `exec "$@"` stand-ins | Detached start with a notice; unchanged run keeps the pid; a new secret or bundle stops the old server and starts the new one |
+| Linux script with logging `systemctl`/`loginctl` stand-ins | First install: `daemon-reload`, `enable`, `restart`. Unchanged: `enable --now`. New secret: `enable`, `restart`. Linger `no` read |
+| systemd unit for the name `Lab "A" \ 100% $HOME` | `ExecStart=… "--device" "Lab \"A\" \\ 100%% $$HOME"` (text only) |
 
 ## Unverified until a piece checks it
 
 - App Transport Security for `ws://127.0.0.1` through `forwardLocal` on a Release build (piece 3).
-- Linux user services without lingering (piece 2).
+- Linux user services, with and without lingering, and the detached start (piece 2: checked on macOS with stand-ins
+  only).
+- `launchctl bootstrap gui/<uid>` from a real SSH session, and an SSH session's `TMPDIR` on macOS (piece 2: run from a
+  local login session).
+- A reboot bringing the LaunchAgent back at login (piece 2).
 - The ChatGPT receiver answering a server's `manual_code` prompt (piece 4).
 - Move timings on the real database (piece 5).
 

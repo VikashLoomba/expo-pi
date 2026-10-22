@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { createHost } from '@earendil-works/chord';
@@ -15,6 +16,7 @@ import { serverDevices } from './devices';
 import { listen } from './listen';
 import { createServerModels } from './models';
 import { serveInfiniChat } from './serve';
+import { restoreTimeZone, setTimeZone } from './time-zone';
 
 const USAGE = 'Usage: node server.js serve --device <name>';
 
@@ -34,6 +36,7 @@ async function serve(device: string): Promise<number> {
     closes.push(await processLock('infinichat-server'));
     // It holds the conversation and the secret that keeps other local accounts out, so only this account enters it.
     await mkdir(home, { recursive: true, mode: 0o700 });
+    restoreTimeZone(home);
     await mkdir(join(home, 'data'), { recursive: true });
     const storage = await openNodeSqliteStorage(join(home, 'data', 'infinichat.db'));
     // The Harness closes its storage; this closes it when the Harness never opened, and is a no-op otherwise.
@@ -51,8 +54,12 @@ async function serve(device: string): Promise<number> {
     });
     // It disposes its objects, then closes its links.
     closes.push(() => host.close());
-    serveInfiniChat(host, core);
-    const server = await listen(host, home);
+    // The phone installs each bundle in a directory named after its hash.
+    const bundle = basename(dirname(fileURLToPath(import.meta.url)));
+    serveInfiniChat(host, core, {
+      server: { bundle, pi: INFINICHAT_PI, device }, setTimeZone: (zone) => setTimeZone(home, zone),
+    });
+    const server = await listen(host, home, bundle);
     // Stops accepting first; the host closes the connections already accepted.
     closes.push(() => server.close());
     const end = await stopping.promise;

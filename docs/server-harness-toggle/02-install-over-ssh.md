@@ -14,22 +14,30 @@ bundle. The machine must already have Node ≥ 22.19 (owner decision); nothing i
   - `daemon-assets.ts`: a Metro `.bin` asset, read and verified against a pinned hash.
   - `scripts/sync-pi-daemon-assets.mjs`: a generated manifest with a `--check` mode.
 - Upstream's version of the same steps: pi-env `deployDaemon` and its `loginShell` option (`packages/env/src/ssh.ts`
-  at v1.4.0, `:396` onward and `:464-472`). The login shell is there because "`ssh` runs commands without a login
-  shell", and Node installed through Homebrew, nvm or fnm is often only on the login shell's `PATH`.
-- react-native-ssh 0.3.0: `connect`, `exec` and `openShell`, as `channel.ts` and `command-channel.ts` use them.
+  at v1.4.0: `checkDaemon` `:389-398`, `deployDaemon` `:400-461`, `loginShell` `:466-470`, `launchCommand`
+  `:475-484`). The login shell is there because "`ssh` runs commands without a login shell", and Node installed
+  through Homebrew, nvm or fnm is often only on the login shell's `PATH`.
+- react-native-ssh 0.3.0: `connect` and `openShell`, as `channel.ts` and `command-channel.ts` use them. `exec` has no
+  stdin, so every script goes through `runSshCommand` (`openShell` with input).
 
 ## Builds
 
 ### The bundle as an app asset
 
-- `scripts/build-infinichat-server.mjs` (from piece 1) also writes `assets/infinichat-server/server.bin` and
-  `src/pi/infinichat-remote/server-manifest.ts`:
+- `scripts/build-infinichat-server.mjs` (from piece 1) now writes `assets/infinichat-server/server.bin` and
+  `src/pi/infinichat-remote/server-manifest.ts`, instead of `dist/infinichat-server/server.js`:
   - `{ sha256, size }`;
-  - the pi package versions the bundle was built with.
+  - the pi package versions the bundle was built with, `pi: { durable, ai, chord }`. The same versions reach the
+    server through esbuild's `define` as `INFINICHAT_PI` (declared in `server/build.d.ts`). pi-ai's `exports` has no
+    `./package.json`, so the script reads each version from the app's own `node_modules`.
 
-  Like the daemon script, it gets a `--check` mode, so a stale asset fails the build checks.
-- `server-assets.ts` loads and verifies the asset exactly as `daemon-assets.ts` loads the daemon. The bundle is one
-  file of about 7.7 MB (1.8 MB gzipped), measured with piece 1. Most of it is:
+  Like the daemon script, it gets a `--check` mode, so a stale asset fails the build checks. `--check` builds the
+  bundle in memory and compares it byte for byte with the asset, and the manifest text with the file. esbuild's
+  `absWorkingDir` is the repo root: the bundle's path comments are relative to the working directory, and a build
+  started from another directory gave different bytes.
+- `server-assets.ts` loads and verifies the asset exactly as `daemon-assets.ts` loads the daemon. `install.ts` checks
+  the machine against the manifest's hash and loads the asset only when it uploads. The bundle is one file of
+  8,109,307 bytes (1.9 MB gzipped). Most of it is:
   - Photon's WebAssembly, embedded as base64: ~2.5 MB;
   - the provider SDKs `createChatModels` pulls in: `@google/genai` ~0.9 MB, `openai` ~0.8 MB,
     `@anthropic-ai/sdk` ~0.65 MB, and `google-auth-library` with its helpers ~0.4 MB;
@@ -39,44 +47,73 @@ bundle. The machine must already have Node ≥ 22.19 (owner decision); nothing i
 
 ### Provisioning: `src/pi/infinichat-remote/install.ts`
 
-Over one short-lived SSH connection opened with the machine's admission. Credentials and the pinned host key come
-from `hosts.admit(machineId)`, as `owner.ts` builds `admittedSshChannel`. Steps, each reporting progress to the UI:
+`installServer(hosts, machineId, { signal, onProgress })` resolves to `{ port, secret, notice? }`: the loopback port
+for the tunnel, the secret the WebSocket carries, and a notice when the machine won't keep the server running by
+itself. The progress stages are `connecting`, `checking` (Node and the bundle), `uploading` (only when the bundle is
+missing) and `starting` (secret, service, readiness).
 
-1. **Node.** Find it with `$SHELL -lc 'command -v node; node -p process.versions.node'` and require ≥ 22.19.
-   Otherwise stop with: "InfiniChat needs Node 22.19 or newer on <machine>. Install it there and try again." Record
-   the absolute path of the `node` that was found.
+It runs over one short-lived SSH connection opened with the machine's admission. Credentials and the pinned host key
+come from `hosts.admit(machineId)`, as `owner.ts` builds `admittedSshChannel`. Every step is a POSIX script sent
+through `runSshCommand`. Its answer is what it prints after a marker, so output from the account's shell startup files
+is skipped, and remote output never reaches an error message. The steps:
+
+1. **Node.** Find it with `"$SHELL" -lc 'printf "%s\n" "$0"; command -v node && node -p process.versions.node'
+   "$M-NODE"` and require ≥ 22.19. `$0` is a marker printed after the login profile's own output; upstream's
+   `launchCommand` passes arguments the same way. Otherwise stop with: "InfiniChat needs Node 22.19 or newer on
+   <machine>. Install it there and try again." Record the absolute path of the `node` that was found. The same script
+   reads `uname -s` and `$HOME`.
 2. **Bundle.** Upload to `~/.infinichat/server/<sha256[0:32]>/server.js` when it isn't already there, with
-   provisioning.ts's check, upload, verify and rename script. Server directories of other hashes are removed only
-   after the new service has started.
+   provisioning.ts's check, upload, verify and rename script (`HASH` and `script` are now exported from it). The
+   readiness script removes server directories of other hashes, only after the new service has started.
 3. **Secret.** The phone generates 32 random bytes with `expo-crypto` and keeps them in the Keychain per machine,
-   through the existing `CredentialBackend` (`src/pi/secure-storage.ts`). It writes them to `~/.infinichat/secret`
-   with `umask 077`. If the phone has no secret for a machine whose file exists (a reinstalled phone), it writes a
-   new one and restarts the service.
+   through the existing `CredentialBackend` (`src/pi/secure-storage.ts`), under `pi.infinichat.secret.v1.<machine
+   id>`. It writes them to `~/.infinichat/secret` with `umask 077`. If the phone has no secret for a machine whose
+   file exists (a reinstalled phone), it writes a new one and restarts the service. The secret goes over stdin, never
+   on a command line. The script compares it with the file and reports `changed` only when it differs, and that
+   restarts the service.
 4. **Service.** Started by the machine's own service manager, so the server outlives the SSH session:
    - **macOS:** a LaunchAgent, `~/Library/LaunchAgents/com.vikashloomba.piagent.infinichat.plist`, with
      `ProgramArguments` of the recorded `node`, `server.js`, `serve` and `--device <name>`. It sets `RunAtLoad`, and
      `KeepAlive` with `SuccessfulExit: false`, so a clean stop stays stopped and a failure restarts. Load it with
-     `launchctl bootstrap gui/$(id -u) …`, or `launchctl kickstart -k` after an update.
+     `launchctl bootstrap gui/$(id -u) …`. Then:
+     - **The plist changed** (a new bundle, a renamed machine, another `node`): `launchctl bootout`, wait until
+       `launchctl print` no longer lists the service, then `bootstrap`. `kickstart -k` restarts the definition
+       launchd loaded before and ignores the new file, and a `bootstrap` right after `bootout` fails with
+       "Bootstrap failed: 5: Input/output error" (both measured, [references](references.md#piece-2-on-macos)).
+     - **Only the secret changed:** `launchctl kickstart -k`.
+     - **Nothing changed:** `launchctl kickstart` without `-k`, which starts a cleanly stopped service and leaves a
+       running one alone.
+     - **Nobody is logged in** (no `gui/<uid>` domain): setup stops with "InfiniChat starts at login on <machine>,
+       and no one is logged in there. Log in, then try again." The deviations say why macOS has no detached fallback.
    - **Linux:** a systemd user unit, `~/.config/systemd/user/infinichat.service`, with `Restart=on-failure`, then
-     `systemctl --user daemon-reload` and `enable --now`. Without lingering (`loginctl enable-linger`, which needs an
-     administrator) a user service stops at the last logout. The setup result says so instead of failing.
-   - **No user service manager** (no user bus, a container): start it detached with `nohup` and `setsid`. The phone
-     starts it again whenever it connects and finds it not running.
-5. **Ready.** Read `~/.infinichat/server.json` until it names a live `pid`, the `port` and this bundle's hash.
+     `systemctl --user daemon-reload` and `enable --now`, or `enable` and `restart` when the unit or the secret
+     changed. `ExecStart` quotes each argument and escapes `\`, `"`, `%` and `$`. Without lingering (`loginctl
+     enable-linger`, which needs an administrator) a user service stops at the last logout. The setup result says so
+     in its `notice` instead of failing, from `loginctl show-user <user> --property=Linger --value`.
+   - **No user service manager** (Linux without a user bus, a container): start it detached with `nohup` and
+     `setsid`. The phone starts it again whenever it connects and finds it not running. A running server of another
+     bundle, or one that must read a new secret, gets `SIGTERM` first. The result carries a notice.
+5. **Ready.** Read `~/.infinichat/server.json` until it names a live `pid`, the `port` and this bundle's hash: once a
+   second for up to 30 seconds, the default `readyTimeout` of Chord's host manager (`src/manager.ts:238-239`,
+   `:325-327` at v1.4.0). Every (re)start removes `server.json` first, so a stale file never answers. The script
+   matches the exact `JSON.stringify` form `server/listen.ts` writes.
 
 ### Version handshake
 
-The contract gains a `server` state member: `{ bundle, pi: { durable, ai, chord, env }, device }`. The phone
-compares `bundle` with its manifest:
+The contract gains a `server` state member: `{ bundle, pi: { durable, ai, chord }, device }`. `bundle` is the name of
+the server's directory, the first 32 hex digits of its SHA-256. There is no `env`: the bundle contains no pi-env until
+piece 7 adds it. The phone compares `bundle` with its manifest:
 
 - On a mismatch it reinstalls (steps 2 and 4) before it shows anything.
 - It never moves a conversation to a server of another bundle (piece 5), because pi-durable's SQLite migrations are
   one-way.
 
-**Time zone.** On every connect the phone also calls `setTimeZone(zone)` with its IANA zone
+**Time zone.** On every connect the phone also calls `setTimeZone({ zone })` with its IANA zone
 (`Intl.DateTimeFormat().resolvedOptions().timeZone`). The server keeps it in `~/.infinichat/state.json`, sets
 `process.env.TZ` from it at start and on each change (Node applies `TZ` changes at run time), so the times the agent
-reads match the phone's clock wherever the machine is.
+reads match the phone's clock wherever the machine is. In `server/time-zone.ts`, a name that isn't an IANA zone is
+refused before anything changes, and `state.json` is written aside and renamed, synchronously, so two calls never
+interleave. In this piece `state.json` holds only `{ timeZone }`; piece 5 adds its own fields.
 
 ## Ownership and lifetime
 
@@ -86,8 +123,8 @@ reads match the phone's clock wherever the machine is.
 | Server process | the machine's service manager | — | the service manager (`launchctl bootout`, `systemctl --user stop`) |
 | Secret | the phone, at first install | — | replaced on reinstall; never sent anywhere else |
 
-The phone's SSH session never owns the server. A dropped install leaves at most a temporary file, which the next
-run's upload script removes, as provisioning.ts does.
+The phone's SSH session never owns the server. A dropped install removes its own temporary file, and leaves at most a
+bundle directory, which the next run's readiness script removes once its server is ready.
 
 ## Deviations (need approval)
 
@@ -95,12 +132,44 @@ run's upload script removes, as provisioning.ts does.
   a per-user daemon running on each OS. Nothing is installed system-wide, and nothing needs `sudo`.
 - **Finding Node through the login shell**, as pi-env's `loginShell` option does.
 
+Found while implementing, against the installed sources and this Mac:
+
+- **`bootout` and `bootstrap` for a changed plist**, not `kickstart -k` (step 4). `kickstart -k` keeps the loaded
+  definition, so after an update it would start the old bundle again.
+- **No detached fallback on macOS.** launchd is always there; the `gui/<uid>` domain is missing only while nobody is
+  logged in. Chord's `processLock` uses a socket file under `os.tmpdir()` on macOS (`src/manager.ts:82-91`,
+  `:133-134` at v1.4.0). launchd gives its agents a per-user `TMPDIR` (measured: `/var/folders/…/T/`). A server
+  started with sshd's environment, which sets no `TMPDIR`, locked `/tmp/chord2-….sock` instead (measured with the
+  stand-in; a real SSH session's `TMPDIR` is unverified), so it would not exclude the LaunchAgent's. On Linux the lock is an abstract socket, independent of `TMPDIR`, so the
+  fallback stays there.
+- **`pi` without `env`** in the handshake (above).
+- **No `dist/` output** from the build script: the asset is the bundle.
+
+## Open question for the owner
+
+The service runs with its manager's environment, not the login shell's. Measured on this Mac, the LaunchAgent's
+`PATH` is `/usr/bin:/bin:/usr/sbin:/sbin`, so the agent's bash tool on the machine doesn't find Homebrew's, nvm's or
+fnm's programs, `node` included. Today's phone tools reach machines through the pi-env daemon, which also starts
+without a login shell, so this matches them. Upstream's way to give a remote daemon the login environment is
+`loginShell` (`exec "$SHELL" -lc 'exec "$0" "$@"' …`, `src/ssh.ts:482`), and the service's command line could start
+the server the same way. It is not done: it changes what the tools see, which is the owner's call.
+
 ## Size
 
-About 300 lines: the build script and manifest ~80 (after `sync-pi-daemon-assets.mjs`), `install.ts` ~150 (after
-`provisioning.ts`, 95 lines, plus Node detection and services), service templates ~40, handshake ~30.
+Estimated at about 300 lines: the build script and manifest ~80 (after `sync-pi-daemon-assets.mjs`), `install.ts`
+~150 (after `provisioning.ts`, 95 lines, plus Node detection and services), service templates ~40, handshake ~30.
+
+As built, about 400 lines: `install.ts` 288, of which the plist, the unit and their service scripts are about 100;
+`server-assets.ts` 25; the build script +34 net; the handshake and the time zone about 70 across the contract,
+`server/` and `server/time-zone.ts`. The manifest and the asset are generated.
 
 ## Checks
+
+Done in this piece on the implementer's Mac (arm64, Node 24.5 from Homebrew, on the login shell's `PATH` only): the
+real `install.ts` ran on Node with react-native-ssh and the Expo modules replaced by throwaway stand-ins, each script
+run as sshd runs it (`$SHELL -c`, sshd's minimal environment). The results are in
+[references](references.md#piece-2-on-macos). Linux is unverified: the systemd unit was checked as text, and the
+systemd and detached branches ran on macOS only, with stand-ins for `systemctl`, `loginctl`, `uname` and `setsid`.
 
 Back up the phone's InfiniChat database first, then check on the owner's iPhone Release install:
 
@@ -112,5 +181,6 @@ Back up the phone's InfiniChat database first, then check on the owner's iPhone 
 
 ## Not in this piece
 
-The phone UI that triggers it (piece 3 calls `install` from the header's machine menu), moves (piece 5), and uninstalling from a
-machine. Uninstalling has no requirement yet; add it if the owner asks.
+The phone UI that triggers it (piece 3 calls `installServer` from the header's machine menu), moves (piece 5), and
+uninstalling from a machine. Uninstalling has no requirement yet; add it if the owner asks. Until then, removing a
+machine from Remote machines leaves its InfiniChat secret in the phone's Keychain.

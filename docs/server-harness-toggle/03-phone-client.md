@@ -44,9 +44,11 @@ becomes an `InfiniChatHost`. The screens don't change.
 1. **SSH.**
    - `connect` with `hosts.admit(machineId)`: the credentials, `verifyHostKey` against the pinned key, and
      `hostKeyAlgorithms`, as `admittedSshChannel` does.
-   - Install or update first when needed (piece 2).
-   - Read `~/.infinichat/server.json` for the port, then `connection.forwardLocal({ remoteHost: "127.0.0.1",
-     remotePort: port })`.
+   - Install or update first when needed (piece 2). `installServer` opens its own connection and resolves to
+     `{ port, secret, notice? }`: the port it read from `~/.infinichat/server.json`, and the secret from the
+     Keychain.
+   - Read `~/.infinichat/server.json` for the port when install didn't run, then
+     `connection.forwardLocal({ remoteHost: "127.0.0.1", remotePort: port })`.
 2. **Socket and link.** Open `new WebSocket(`ws://127.0.0.1:${forward.localPort}`, undefined, { headers: {
    authorization: `Bearer ${secret}` } })` and wrap it with `webSocketLink(socket)`. The link's own options keep
    their defaults: `compress: false` is already the client side's default.

@@ -1,8 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
-import { basename, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 import { webSocketLink, type Host } from '@earendil-works/chord';
 import { WebSocketServer } from 'ws';
@@ -20,9 +19,9 @@ function authorized(request: IncomingMessage, secret: Buffer): boolean {
  * Listens on the machine's loopback, where the phone's SSH tunnel arrives, and records where in `server.json`. The
  * loopback is open to every account on the machine, so each connection must also carry the secret the phone wrote;
  * then it is a client link acting as the owner. Links send plain frames: Chord's `acceptWebSockets` deflates large
- * ones, which the phone's Hermes cannot inflate.
+ * ones, which the phone's Hermes cannot inflate. `bundle` tells the phone which bundle answers.
  */
-export async function listen(host: Host<InfiniChatPrincipal>, home: string): Promise<WebSocketServer> {
+export async function listen(host: Host<InfiniChatPrincipal>, home: string, bundle: string): Promise<WebSocketServer> {
   const secret = Buffer.from((await readFile(join(home, 'secret'), 'utf8')).trim());
   if (secret.length === 0) throw new Error(`${join(home, 'secret')} is empty.`);
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -40,9 +39,8 @@ export async function listen(host: Host<InfiniChatPrincipal>, home: string): Pro
   });
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error(`Unexpected listening address ${address}.`);
-  // The bundle's directory is named after its hash, so the phone can tell which bundle answers.
-  const bundle = basename(dirname(fileURLToPath(import.meta.url)));
-  // Written aside and renamed into place, so the phone polling it never reads half a file.
+  // Written aside and renamed into place, so the phone polling it never reads half a file. The phone's readiness
+  // check (src/pi/infinichat-remote/install.ts) matches this exact JSON.stringify form.
   const temporary = join(home, `server.json.${process.pid}`);
   await writeFile(temporary, JSON.stringify({ pid: process.pid, port: address.port, bundle }));
   await rename(temporary, join(home, 'server.json'));

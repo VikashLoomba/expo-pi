@@ -1,0 +1,2 @@
+# The bundled InfiniChat server is generated JavaScript; diff its manifest, not its text.
+assets/infinichat-server/server.bin binary
