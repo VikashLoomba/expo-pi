@@ -1,7 +1,7 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 
-import { useChatApp } from '@/chat/chat-provider';
+import { useInfiniChatAccount } from '@/chat/chat-provider';
 import { ModelChoices } from '@/components/chat/settings-controls';
 import { useInfiniChatSettingsDraft, type InfiniChatRole } from '@/components/chat/settings-drafts';
 import { createModelSettings } from '@/pi/model-catalog';
@@ -11,7 +11,7 @@ export default function InfiniChatModelScreen() {
   const params = useLocalSearchParams<{ role?: string }>();
   const role: InfiniChatRole = params.role === 'summary' ? 'summary' : 'main';
   const { draft, setDraft } = useInfiniChatSettingsDraft();
-  const { catalog } = useChatApp();
+  const { catalog } = useInfiniChatAccount();
   const [query, setQuery] = useState('');
   const settings = draft[role];
   const provider = catalog.find((entry) => entry.id === settings.model.provider);

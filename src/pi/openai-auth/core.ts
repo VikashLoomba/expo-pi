@@ -112,8 +112,10 @@ export async function requestOpenAIToken(
   if (!response.ok) {
     let code: 'invalid_grant' | undefined;
     try {
-      const error = (await response.json())?.error;
-      if ([400, 401].includes(response.status) && (error === 'invalid_grant' || error?.code === 'invalid_grant')) code = 'invalid_grant';
+      const body: unknown = await response.json();
+      const error = isRecord(body) ? body.error : undefined;
+      if ([400, 401].includes(response.status)
+        && (error === 'invalid_grant' || (isRecord(error) && error.code === 'invalid_grant'))) code = 'invalid_grant';
     } catch { /* Remote error bodies can contain secrets; never surface them. */ }
     signal.throwIfAborted();
     throw new OpenAITokenRequestError(response.status, code);

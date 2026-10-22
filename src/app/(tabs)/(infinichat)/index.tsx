@@ -4,7 +4,7 @@ import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
 
 import {
-  useChatApp, useChatControls, useInfiniChatConnection, useInfiniChatError, useInfiniChatView,
+  useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatConnection, useInfiniChatError, useInfiniChatView,
 } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { Composer } from '@/components/chat/composer';
@@ -33,9 +33,10 @@ const emptyDraft = (): Draft => ({ text: '', images: [], requestId: uuidv7() });
 export default function InfiniChatScreen() {
   const colors = useChatColors();
   const {
-    infiniChat: service, catalog, providerAccess, error: appError, dismissError, remoteHosts, infiniChatMachine,
-    chooseInfiniChatMachine,
+    infiniChat: service, error: appError, dismissError, remoteHosts, infiniChatMachine, chooseInfiniChatMachine,
   } = useChatApp();
+  // While InfiniChat runs on a machine, its models and sign-ins are that machine's.
+  const { catalog, providerAccess } = useInfiniChatAccount();
   const ready = service !== undefined;
   const view = useInfiniChatView();
   const conversation = useChatControls(view);
@@ -70,7 +71,8 @@ export default function InfiniChatScreen() {
     : !configured ? 'Models not chosen'
       : `${provider?.name || providerId} · ${model?.name || conversation.settings.model.modelId} · `
         + thinkingLevelLabel(conversation.settings.thinkingLevel);
-  const openAccount = () => router.push({ pathname: '/account', params: { provider: providerId } });
+  const openAccount = () => router.push({ pathname: remote ? '/infinichat-providers' : '/account',
+    params: { provider: providerId } });
   const settingsDisabled = !ready || !conversation;
   const openSettings = () => router.push('/infinichat-settings');
   const choosePrompt = useCallback((text: string) => {
@@ -145,9 +147,11 @@ export default function InfiniChatScreen() {
         : connection?.status === 'connecting' ? connecting(machine, connection.stage)
           : `${machine} · ${working}`;
   const runsOn = !remote ? PHONE : removed ? 'a removed machine' : machine ?? 'a remote machine';
+  const onMachine = remote ? ` on ${machine ?? 'the machine'}` : '';
+  const accountAction = remote ? 'Providers' : 'Account';
   const accountStatus = !access.ready ? 'Restoring your connection…'
-    : access.error ? `Reconnect ${provider?.name || providerId} in Account`
-      : `Connect ${provider?.name || providerId || 'your provider'} to send a message`;
+    : access.error ? `Reconnect ${provider?.name || providerId}${remote ? onMachine : ' in Account'}`
+      : `Connect ${provider?.name || providerId || 'your provider'}${onMachine} to send a message`;
   // With no model chosen there is no provider to connect; the models notice says what to do instead.
   const connected = !configured || access.connected;
   return <View testID="infinichat-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -191,7 +195,7 @@ export default function InfiniChatScreen() {
       </View>}
       {messageError && messageError !== settingsError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-error" message={messageError}
-          action={retry ? 'Try Again' : dismiss ? 'Dismiss' : access.error ? 'Account' : undefined}
+          action={retry ? 'Try Again' : dismiss ? 'Dismiss' : access.error ? accountAction : undefined}
           onAction={retry ?? dismiss ?? (access.error ? openAccount : undefined)} />
       </View>}
       {connection?.notice && !messageError && <View style={styles.banner}>

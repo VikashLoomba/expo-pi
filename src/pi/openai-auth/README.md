@@ -22,11 +22,11 @@ provider extension interface rather than importing or patching those internals.
 [SDK provider](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/providers/openai.ts),
 [public `OAuthAuth` contract](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/auth/types.ts).
 
-The account screen's sign-in hook in [`src/chat/chat-provider.tsx`](../../chat/chat-provider.tsx) calls `models.login('openai', 'oauth', interaction, options)` with options from `getOpenAILoginOptions()`, and is the only place that keeps sign-in to one attempt at a time. The installation UUID is durably saved before login and remains separate from the account credential. `interaction.notify()` drives status; `interaction.prompt()` bridges Pi's awaited prompts to the React UI.
+The account screen's sign-in hook in [`src/chat/chat-provider.tsx`](../../chat/chat-provider.tsx) calls `models.login('openai', 'oauth', interaction, options)` with options from `getOpenAILoginOptions()`, and is the only place on the phone that keeps sign-in to one attempt at a time. A machine running InfiniChat keeps its own to one attempt (`server/sign-in.ts`). The installation UUID is durably saved before login and remains separate from the account credential. `interaction.notify()` drives status; `interaction.prompt()` bridges Pi's awaited prompts to the React UI.
 
 | File | Responsibility |
 | --- | --- |
-| `index.ts` | Expo PKCE login, manual fallback, refresh and `toAuth`; external-browser action. |
+| `index.ts` | Expo PKCE login, manual fallback, refresh and `toAuth`; external-browser action; `openOpenAIBrowserFor`, the receiver and browser for a machine's sign-in. |
 | `browser.ts` | Starts the native receiver before browser presentation; arbitrates callback, browser dismissal, cancellation, and cleanup. |
 | `core.ts` | Modern protocol constants, strict callback/token validation and safe errors. |
 | `installation.ts` | Persistent installation UUID supplied through `LoginOptions.getDeviceId`. |
@@ -41,6 +41,17 @@ The adapter retains Pi's `http://127.0.0.1:1455/auth/callback` redirect. It wait
 Both callback paths require the exact origin/path, matching state, one nonempty authorization code, and one issued client ID. Duplicate parameters, OAuth errors, unexpected fragments, and credentials embedded in the URL are rejected before exchanging tokens. **Cancel sign-in** aborts the attempt and pending prompt. The external browser remains under the user's control; the app cannot dismiss it.
 
 The native receiver uses an Apple-only local Expo module with `@ExpoModule` and `@JS` Swift macros. It validates method, Host, path, and OAuth state before accepting a callback. The existing TypeScript validator still checks the complete returned authorization. Requests have bounded size, connection count, and lifetime. The browser response is static and never reflects authorization data. Session IDs protect subsequent logins from stale cleanup; Expo module destruction also stops outstanding work. Expo's documented custom-scheme or universal-link capture is not required for this HTTP callback. Native presentation, full-URL manual entry, live authenticated consent, and authenticated inference are separate verification gates. [Expo 58 AuthSession](https://docs.expo.dev/versions/v58.0.0/sdk/auth-session/), [Expo 58 WebBrowser](https://docs.expo.dev/versions/v58.0.0/sdk/webbrowser/), [Expo 58 Linking](https://docs.expo.dev/versions/v58.0.0/sdk/linking/).
+
+## A machine's sign-in
+
+While InfiniChat runs on a connected machine, that machine signs in with pi-ai's own Node ChatGPT flow and keeps the
+grant (`server/sign-in.ts`, `docs/server-harness-toggle/04-credentials-and-sign-in.md`). Its authorization URL uses
+the same `http://127.0.0.1:1455/auth/callback` redirect, so the browser returns to this phone.
+
+- `openOpenAIBrowserFor(url, signal)` gives `openOpenAIBrowser` an Expo `AuthRequest` with that URL's `state`.
+  `promptAsync({ url })` uses only the request's redirect and state, and the PKCE verifier stays on the machine.
+- The callback passes the same validation as this phone's own, and then answers the machine's `manual_code` prompt.
+- This phone's credentials and installation ID are never used for it.
 
 ## Credential separation and validation
 

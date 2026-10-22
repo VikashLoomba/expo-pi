@@ -9,17 +9,42 @@ import { openOpenAIBrowser } from './browser';
 
 export { OPENAI_PROVIDER_ID } from './core';
 
-/** Retry the same authorization in a browser with an address bar for manual return. */
-export async function openOpenAIManualBrowser(value: string, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
+/** An authorization URL for ChatGPT that returns to the redirect the native receiver serves. */
+function authorizationUrl(value: string): URL {
   const url = new URL(value);
   const expected = new URL(OPENAI_DISCOVERY.authorizationEndpoint);
   if (url.origin !== expected.origin || url.pathname !== expected.pathname || url.username || url.password || url.hash
-    || url.searchParams.get('redirect_uri') !== OPENAI_REDIRECT_URI) throw new Error('The sign-in link is invalid. Start sign-in again.');
+    || url.searchParams.get('redirect_uri') !== OPENAI_REDIRECT_URI) {
+    throw new Error('The sign-in link is invalid. Start sign-in again.');
+  }
+  return url;
+}
+
+/** Retry the same authorization in a browser with an address bar for manual return. */
+export async function openOpenAIManualBrowser(value: string, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  const url = authorizationUrl(value);
   // An external browser exposes the full callback in its address bar, including
   // when a loopback page cannot load. It is owned by the user, not dismissible.
   await Linking.openURL(url.toString());
   signal.throwIfAborted();
+}
+
+/**
+ * A machine's ChatGPT sign-in, which pi-ai built there with the same redirect: the phone's receiver and browser catch
+ * its callback, for the machine's `manual_code` prompt. Expo's `AuthRequest` stands for that request with its state;
+ * `promptAsync({ url })` uses only the redirect and the state (`AuthRequest.ts:137-201`), and the PKCE verifier stays
+ * on the machine. Resolves with the whole callback URL, checked as the phone's own, or undefined without one.
+ */
+export async function openOpenAIBrowserFor(value: string, signal: AbortSignal): Promise<string | undefined> {
+  signal.throwIfAborted();
+  const url = authorizationUrl(value);
+  const state = url.searchParams.get('state') ?? '';
+  const request = new AuthRequest({ clientId: OPENAI_DYNAMIC_CLIENT_ID, redirectUri: OPENAI_REDIRECT_URI, state,
+    usePKCE: false });
+  const callback = await openOpenAIBrowser(request, url.toString(), signal);
+  if (callback !== undefined) validateOpenAICallback(callback, state);
+  return callback;
 }
 
 /** Native implementation of Pi's public OAuthAuth boundary. */

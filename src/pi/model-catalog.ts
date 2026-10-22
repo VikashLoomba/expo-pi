@@ -18,25 +18,27 @@ export const ChatModelSettingsSchema = Type.Object({
 export type ChatModelSettings = Static<typeof ChatModelSettingsSchema>;
 
 /** What an attached photo is fitted to before it is sent, from the model's `inputLimits.images`. */
-export interface ImageInput {
-  readonly maxWidth: number;
-  readonly maxHeight: number;
+export const ImageInputSchema = Type.Object({
+  maxWidth: Type.Number(),
+  maxHeight: Type.Number(),
   /** Most bytes of base64 per image. */
-  readonly maxBytes: number;
-  readonly jpegQuality: number;
-  readonly maxPerMessage?: number;
-}
+  maxBytes: Type.Number(),
+  jpegQuality: Type.Number(),
+  maxPerMessage: Type.Optional(Type.Number()),
+});
+export type ImageInput = Static<typeof ImageInputSchema>;
 
-export interface ModelOption {
-  readonly id: string;
-  readonly provider: string;
-  readonly name: string;
-  readonly reasoning: boolean;
-  readonly thinkingLevels: readonly ModelThinkingLevel[];
-  readonly contextWindow: number;
-  /** Undefined when the model takes no images. */
-  readonly images?: ImageInput;
-}
+export const ModelOptionSchema = Type.Object({
+  id: Type.String(),
+  provider: Type.String(),
+  name: Type.String(),
+  reasoning: Type.Boolean(),
+  thinkingLevels: Type.ReadonlyObject(Type.Array(ModelThinkingLevelSchema)),
+  contextWindow: Type.Number(),
+  /** Absent when the model takes no images. */
+  images: Type.Optional(ImageInputSchema),
+});
+export type ModelOption = Static<typeof ModelOptionSchema>;
 
 /** The limits pi-durable's `read` tool fits an image to for this model: its own, else pi-durable's defaults. */
 function imageInput(model: Model<Api>): ImageInput | undefined {
@@ -51,13 +53,16 @@ function imageInput(model: Model<Api>): ImageInput | undefined {
   };
 }
 
-export interface ProviderOption {
-  readonly id: string;
-  readonly name: string;
-  readonly models: readonly ModelOption[];
-}
+export const ProviderOptionSchema = Type.Object({
+  id: Type.String(),
+  name: Type.String(),
+  models: Type.ReadonlyObject(Type.Array(ModelOptionSchema)),
+});
+export type ProviderOption = Static<typeof ProviderOptionSchema>;
 
-export type ModelCatalog = readonly ProviderOption[];
+/** The providers and models a `Models` offers. A machine that runs InfiniChat sends its own as Chord state. */
+export const ModelCatalogSchema = Type.ReadonlyObject(Type.Array(ProviderOptionSchema));
+export type ModelCatalog = Static<typeof ModelCatalogSchema>;
 
 /** Registration-time choices for a new chat when no recently used chat applies. */
 export interface NewChatDefaults {

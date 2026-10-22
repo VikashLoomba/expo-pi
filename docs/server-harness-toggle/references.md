@@ -59,6 +59,18 @@ Checked on 2026-10-21. Versions:
 | `Stack.Toolbar.MenuAction isOn` is the menu item's `on` state; a root menu's `title` is also the button's label | expo-router 58.0.25 `build/layouts/stack-utils/toolbar/StackToolbarMenu/index.js:186-193`, `:57-64` |
 | A server whose object is forced away (its host closing) sends `gone` for each hold before closing the link; the binding's waiting calls reject with it, at v1.4.0 | chord `src/connection.ts:921-927`, `src/remote.ts:291-297` |
 | iOS app states: a return from the background is `background` → `active`; `inactive` comes from WillResignActive | react-native 0.88 `React/CoreModules/RCTAppState.mm:115-124` |
+| `CredentialStore`: `modify` is the only write path; the app persists a login's credential through it, at v1.4.0 | pi-ai `src/auth/types.ts:50-94`; installed `README.md:456-468` |
+| `AuthPrompt` (`text`, `secret`, `select`, `manual_code`, each with an optional `signal`), `AuthEvent`, `AuthInteraction`, at v1.4.0 | pi-ai `src/auth/types.ts:119-161` |
+| `LoginOptions.getDeviceId`: the same installation ID on every call; `agentName`, at v1.4.0 | pi-ai `src/auth/types.ts:201-214` |
+| `models.login` runs the provider's flow and persists through `credentials.modify`; `logout` deletes, at v1.4.0 | pi-ai `src/models.ts:775-830`, `:832-841` |
+| ChatGPT on Node: a UUID device ID is required; a busy port 1455 throws before any URL; `auth_url`, then a `manual_code` prompt that races its callback server; the server closes when the attempt ends, at v1.4.0 | pi-ai `src/auth/oauth/openai-chatgpt.ts:225-231`, `:243-248`, `:264-282`, `:288-297` |
+| A pasted callback must match the attempt's redirect and state, at v1.4.0 | pi-ai `src/auth/oauth/openai-chatgpt.ts:53-78` |
+| pi-ai's CLI makes a new installation ID per login; "apps should reuse one across logins", at v1.4.0 | pi-ai `src/cli.ts:51`, `:73` |
+| OAuth flows load through a variable `import()` bundlers cannot follow; a single-file binary registers them statically, at v1.4.0 | pi-ai `src/auth/oauth/load.ts:4-13`, `:29-31`; `src/bun-oauth.ts:13`; coding-agent `src/bun/runtime-setup.ts:10` |
+| Long waits are state and their answer a separate call, not a call held open, at v1.4.0 | chord `docs/guide.md:503-518` |
+| A member may not be both state and method, at v1.4.0 | chord `src/contract.ts:237` |
+| `AuthRequest.promptAsync({ url })` uses only `redirectUri` (the session's return URL) and `state` (`parseReturnUrl`) | expo-auth-session 58.0.14 `src/AuthRequest.ts:137-201` |
+| The native receiver accepts any non-empty state of at most 1,024 bytes without control characters | `modules/pi-oauth-callback/ios/OAuthCallbackServer.swift:54-55`, `OAuthCallbackHTTP.swift:57-58` |
 
 ## Chord over WebSocket in Hermes
 
@@ -125,6 +137,8 @@ A subagent's assessment of branch `replication` at `2cf6cd898`, 2026-10-21. It i
 | Official Node 22 tarballs (darwin-arm64, linux-x64) | 26 MB, 31 MB (not used) |
 | The phone's InfiniChat database, 2026-10-21 backup | 32 MB, plus a 4.1 MB WAL |
 | Piece 2's asset (`assets/infinichat-server/server.bin`, esbuild 0.28.2, pi 1.4.0) | 8,109,307 bytes, 1,880,796 gzipped |
+| Piece 4's asset, with pi-ai's OAuth flows registered statically | 8,246,243 bytes, 1,907,540 gzipped (bundle `9711b916…`) |
+| The server's `catalog` state (six providers, 490 models) | 115,466 bytes of JSON; identical to the phone's own `buildModelCatalog` |
 
 ## Piece 2 on macOS
 
@@ -214,6 +228,52 @@ device or simulator was used.
 | The server stopped by `SIGTERM` while connected | The reference went `gone` and the client reconnected by itself, keeping the last values. A call in that window rejected with "The connection to test-mac was lost. Try again.", not Chord's text. Install started the stopped LaunchAgent again, and the client connected in 1.34 s |
 | `npx expo export --platform ios` | Bundled (Hermes bytecode, 13 MB) |
 
+## Piece 4 on macOS
+
+**Checks, 2026-10-22**, on the implementer's Mac (arm64, Node 24.5.0 from Homebrew), with pi 1.4.0 (tag
+`4a080252f`), Expo 58.0.17, expo-auth-session 58.0.14 and expo-router 58.0.25 installed. No device or simulator was
+used, and nothing signed in to a real account.
+- **What ran:** the app's real `RemoteInfiniChat`, contract, Chord, `RemoteHostRepository`, `openOpenAIBrowserFor`
+  with expo-auth-session's `AuthRequest`, and the phone's own `createChatModels` and `createChatCredentialStore`,
+  bundled for Node with esbuild, against the real server asset (bundle `9711b916…`).
+- **Stand-ins, not committed:**
+  - react-native-ssh, the Keychain and React Native's three-argument `WebSocket`, as in piece 3;
+  - the native receiver, expo-web-browser's authentication session, expo-linking, expo-constants and React Native's
+    `Platform`. The fake browser followed the authorization URL's redirect to the phone's `127.0.0.1:1455` with that
+    URL's `state`, a made-up code and a made-up client ID, or closed without one.
+- **The server** was started by hand with `TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)`, sshd's `PATH` and no provider
+  variables. Outbound HTTPS was sent to a closed port (`NODE_USE_ENV_PROXY=1`, `HTTPS_PROXY=http://127.0.0.1:9`), so
+  the token exchange failed locally and nothing reached OpenAI.
+- **Port 1455** was free on the Mac before the run.
+- **Afterwards:** `~/.infinichat` was removed, and no server process, LaunchAgent, Chord lock socket or listener on
+  1455 was left.
+
+| Check | Result |
+| --- | --- |
+| Before connecting | No catalog, access or attempt |
+| Hydrate | `catalog`: six providers, 490 models, 115,466 bytes, identical to the phone's own catalog. `access`: every provider `ready`, none connected. `signInAttempt`: `null`. No install ran |
+| `setApiKey` with a fake Anthropic key (spaces around it) | Access `connected`, `api_key`, 9 ms. `credentials.json` holds the store's item with the trimmed key, mode `0600` in a `0700` directory |
+| Atomic write | A second key: `rename:credentials.json.<pid>` then `rename:credentials.json`, a new inode, no temporary file left, both items kept |
+| `setApiKey` with spaces only | "Enter an API key." from the server |
+| `signOut` | Access not connected in 2–10 ms; the item removed, the other kept |
+| `signIn('openai')` | In 6–14 ms the phone had attempt 1's URL: `auth.openai.com`, the redirect `http://127.0.0.1:1455/auth/callback`, `agent_name_hint=InfiniChat`, `ext_agent_host_id=urn:uuid:…`, S256 PKCE. A `manual_code` prompt waited, with "Finish sign-in with the browser return URL." |
+| Installation ID | Saved as `pi.openai.host.v1` in `credentials.json`; the same `ext_agent_host_id` on every later attempt |
+| pi-ai's callback server | Listening on the machine's 1455 during the attempt, gone 150 ms after it ended |
+| `cancelSignIn` | Ended in 2 ms with "Sign-in cancelled.", no prompt, nothing stored. A stale answer afterwards changed nothing |
+| A second `signIn` during an attempt | The first ended; the new attempt had its own prompt; one listener on 1455 (no `EADDRINUSE`) |
+| `setApiKey` while signing in | "Finish or cancel sign-in before changing provider credentials." |
+| The tunnelled sockets dropped mid-attempt | The client kept the attempt and its prompt while connecting, reconnected over one new SSH connection, and showed the same prompt ID |
+| A new client (an app relaunch) mid-attempt | Found the pending prompt and the URL. Closing it left the attempt running |
+| The phone's ChatGPT path (receiver and browser stand-ins) | The receiver started with the server URL's 43-character state. The callback answered the machine's `manual_code` prompt, pi-ai accepted it and reported its token exchange ("Sign-in in progress…"), which failed at the closed proxy port: "Sign-in could not be completed. Please try again." in 64–74 ms. The browser was dismissed and the receiver stopped; nothing was stored |
+| The browser closed without a callback | The machine's `manual_code` prompt stayed for a pasted URL |
+| A pasted URL of another attempt | pi-ai refused it on the machine before any request; the attempt failed |
+| `signIn('deepseek')` | "DeepSeek has no sign-in." |
+| Port 1455 held by another listener on the machine | The attempt failed before any URL or prompt (pi-ai's "Port 1455 is in use"), shown as the account screen's failure copy |
+| Server restart (`SIGTERM`, started again) | A new client: the API key still connected; no attempt (`null`) |
+| The phone's own account | Its Keychain held only InfiniChat's secret before and after; its store listed no credentials |
+| Before the fix: pi-ai's flows without `registerBunOAuthFlows()` | `models.login` rejected with `ERR_MODULE_NOT_FOUND` for `openai-chatgpt.js` next to the bundle |
+| `npx expo export --platform ios` | Bundled (Hermes bytecode, 13 MB) |
+
 ## Unverified until a piece checks it
 
 - App Transport Security for `ws://127.0.0.1` through `forwardLocal` on a Release build (piece 3).
@@ -229,7 +289,11 @@ device or simulator was used.
 - `launchctl bootstrap gui/<uid>` from a real SSH session, and an SSH session's `TMPDIR` on macOS (piece 2: run from a
   local login session).
 - A reboot bringing the LaunchAgent back at login (piece 2).
-- The ChatGPT receiver answering a server's `manual_code` prompt (piece 4).
+- Piece 4 on the phone: the real receiver and authentication session with a server's URL and state, a real ChatGPT
+  grant stored on the machine and then used and refreshed there, the providers screen and its notices, and pasting
+  into the machine's prompt. On the Mac the receiver and browser were stand-ins and no token exchange reached OpenAI.
+- Piece 4 on Linux, and pi-ai's other sign-in flows on a machine (Anthropic, OpenRouter, xAI), which the phone does
+  not offer.
 - Move timings on the real database (piece 5).
 
 Checked in piece 1: the native web-search wrapper in `createChatModels` never reaches InfiniChat requests. It acts

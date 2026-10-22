@@ -1,15 +1,19 @@
-import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai';
+import {
+  Type, type AuthOperationOptions, type Credential, type CredentialInfo, type CredentialStore, type Static,
+} from '@earendil-works/pi-ai';
 
 import type { CredentialBackend } from './secure-storage';
 
-export interface ProviderAccess {
-  ready: boolean;
-  connected: boolean;
-  type?: Credential['type'];
-  error?: string;
+/** A provider's sign-in as the account screen shows it. A machine that runs InfiniChat sends its own as Chord state. */
+export const ProviderAccessSchema = Type.Object({
+  ready: Type.Boolean(),
+  connected: Type.Boolean(),
+  type: Type.Optional(Type.Enum(['api_key', 'oauth'])),
+  error: Type.Optional(Type.String()),
   /** The error came from device storage, so retrying can succeed once the device is unlocked. */
-  retryable?: boolean;
-}
+  retryable: Type.Optional(Type.Boolean()),
+});
+export type ProviderAccess = Static<typeof ProviderAccessSchema>;
 /** Protocol adapters validate stored grants and identify terminal authentication failures. */
 export interface ProviderCredentialPolicy {
   validate?(credential: Credential): void;

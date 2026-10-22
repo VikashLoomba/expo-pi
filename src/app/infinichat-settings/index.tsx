@@ -4,7 +4,7 @@ import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
 
-import { useChatApp, useChatControls } from '@/chat/chat-provider';
+import { useChatApp, useChatControls, useInfiniChatAccount } from '@/chat/chat-provider';
 import { ModelSection, SettingsNotice } from '@/components/chat/settings-controls';
 import {
   useInfiniChatSettingsDraft, type InfiniChatRole,
@@ -33,7 +33,8 @@ function dismissSettings() {
 export default function InfiniChatSettingsScreen() {
   const colors = useChatColors();
   const { view, initial, draft, setDraft } = useInfiniChatSettingsDraft();
-  const { infiniChat: service, catalog, providerAccess, refreshCatalog } = useChatApp();
+  const { infiniChat: service, refreshCatalog } = useChatApp();
+  const { catalog, providerAccess, machine } = useInfiniChatAccount();
   const conversation = useChatControls(view);
   const instructions = useNativeState(draft.instructions);
   const [saving, setSaving] = useState(false);
@@ -116,11 +117,15 @@ export default function InfiniChatSettingsScreen() {
           onChooseModel={() => router.push({ pathname: '/infinichat-settings/model', params: { role } })} />)}
         {unconnected.map((providerId) => <SettingsNotice key={providerId} tone="neutral"
           testID={`infinichat-settings-connection-${providerId}`}
-          message={providerAccess(providerId).error
-            || `Connect ${providerName(providerId)} in Account before InfiniChat can use it. `
+          message={providerAccess(providerId).error || (machine === undefined
+            ? `Connect ${providerName(providerId)} in Account before InfiniChat can use it. `
+            : `Sign in to ${providerName(providerId)} on ${machine} before InfiniChat can use it. `)
               + 'You can save your choice now.'}
-          action={saving ? undefined : 'Open account'} onAction={() => {
-            if (!savingRef.current) router.push({ pathname: '/account', params: { provider: providerId } });
+          action={saving ? undefined : machine === undefined ? 'Open account' : `Sign in on ${machine}`}
+          onAction={() => {
+            if (savingRef.current) return;
+            router.push({ pathname: machine === undefined ? '/account' : '/infinichat-providers',
+              params: { provider: providerId } });
           }} />)}
         <Section title="Instructions" footer={<Text>
           InfiniChat runs each command on this phone or on one of your remote machines, choosing for each command.

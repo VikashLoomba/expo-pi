@@ -10,8 +10,9 @@ import type { ScheduledTask } from '../infinichat-scheduled';
 import type { InfiniChatHost, InfiniChatSnapshot } from '../infinichat-service';
 import type { InfiniChatControls } from '../infinichat-view';
 import type { ScheduledInput } from '../infinichat/schedule';
-import type { ChatModelSettings } from '../model-catalog';
-import { InfiniChatRemote, type InfiniChatPrincipal } from './contract';
+import type { ChatModelSettings, ModelCatalog } from '../model-catalog';
+import type { ProviderAccess } from '../provider-credentials';
+import { InfiniChatRemote, type InfiniChatPrincipal, type SignInAttempt } from './contract';
 import {
   connectAdmitted, installServer, runningServer, savedSecret, SERVER_BUNDLE, type InstallStage,
 } from './install';
@@ -24,6 +25,8 @@ type ConnectionStatus =
 export type RemoteConnection = ConnectionStatus & { notice?: string };
 
 type InfiniChatRef = Ref<typeof InfiniChatRemote>;
+/** The sign-ins of the machine's own credential store, by provider. */
+export type MachineAccess = Readonly<Record<string, ProviderAccess>>;
 /** One connection attempt's SSH connection, tunnel and link; `live` once its server's reference is. */
 interface Session { connection?: SshConnection; forward?: SshLocalForward; link?: Link; live: boolean }
 type Target = { port: number; secret: string };
@@ -70,7 +73,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private notice?: string;
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
-    scheduled: readonly ScheduledTask[];
+    scheduled: readonly ScheduledTask[]; catalog: ModelCatalog; access: MachineAccess; signIn: SignInAttempt;
   };
   private report = NO_REPORT;
   private status: ConnectionStatus = { status: 'connecting' };
@@ -98,6 +101,64 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   view(): ChatViewSource<InfiniChatControls> {
     return this.shown;
+  }
+
+  /** The machine's providers and models, its own sign-ins and its latest sign-in attempt; undefined until shown. */
+  readonly getCatalog = () => this.values?.catalog;
+  readonly getAccess = () => this.values?.access;
+  readonly getSignIn = () => this.values?.signIn;
+
+  /** Starts a sign-in on the machine, ending one under way there, and resolves with its attempt number. */
+  signIn(providerId: string): Promise<number> {
+    return this.call((ref, ctx) => ref.signIn({ providerId }, ctx));
+  }
+
+  answer(promptId: number, value: string): Promise<void> {
+    return this.call((ref, ctx) => ref.answer({ promptId, value }, ctx));
+  }
+
+  cancelSignIn(): Promise<void> {
+    return this.call((ref, ctx) => ref.cancelSignIn(ctx));
+  }
+
+  setApiKey(providerId: string, key: string): Promise<void> {
+    return this.call((ref, ctx) => ref.setApiKey({ providerId, key }, ctx));
+  }
+
+  signOut(providerId: string): Promise<void> {
+    return this.call((ref, ctx) => ref.signOut({ providerId }, ctx));
+  }
+
+  /**
+   * Resolves with what `read` finds in sign-in attempt `attempt` while it runs. Its number can arrive before the state
+   * that shows it, so an earlier attempt or none means not yet; it rejects once the attempt has ended, once a later one
+   * shows, once it is gone after it showed (a restarted server), or with `signal`'s reason.
+   */
+  signInStep<T>(attempt: number, read: (shown: Exclude<SignInAttempt, null>) => T | undefined,
+    signal: AbortSignal): Promise<T> {
+    return new Promise((resolve, reject) => {
+      let seen = false;
+      const settle = (finish: () => void) => {
+        stop();
+        signal.removeEventListener('abort', abort);
+        finish();
+      };
+      const check = () => {
+        const shown = this.values?.signIn ?? null;
+        if (shown?.attempt === attempt && shown.running) {
+          seen = true;
+          const value = read(shown);
+          if (value !== undefined) settle(() => resolve(value));
+        } else if (seen || (shown !== null && shown.attempt >= attempt)) {
+          settle(() => reject(new Error('Sign-in ended.')));
+        }
+      };
+      const abort = () => settle(() => reject(signal.reason));
+      const stop = this.subscribe(check);
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+      else check();
+    });
   }
 
   accept(input: UserMessage['content'], requestId: string): Promise<void> {
@@ -307,6 +368,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     ref.controls.subscribe(this.refresh);
     ref.messages.subscribe(this.refresh);
     ref.scheduled.subscribe(this.refresh);
+    ref.access.subscribe(this.refresh);
+    ref.signInAttempt.subscribe(this.refresh);
     // Forced away while connected, as when the server shuts down: connecting again holds a new one.
     ref.onStatus((status) => {
       if (status === 'gone') this.dropped(this.session);
@@ -320,7 +383,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     if (ref === undefined || !this.session?.live) return;
     const { view, report } = ref.snapshot.value;
     this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value,
-      scheduled: ref.scheduled.value };
+      scheduled: ref.scheduled.value, catalog: ref.catalog.value, access: ref.access.value,
+      signIn: ref.signInAttempt.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };
     this.notify();
   };
