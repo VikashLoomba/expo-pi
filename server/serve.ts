@@ -58,10 +58,13 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
     self.on('access', credentials, (_change, ctx) => access.replace(ctx, credentials.getSnapshot().providers));
     self.on('signInAttempt', signIn, (_change, ctx) => signInAttempt.replace(ctx, signIn.getSnapshot()));
     // The open core's view attaches once this object follows it and publishes when it has read the conversation, so
-    // every cell also catches up on what changed while the object went live, or while the core came or went. The
-    // snapshot goes last: past Chord's flow-control window, each member's state waits in a slot of its own and the
-    // slots flush in the order they were made (chord `docs/spec.md:242`, `:287`), so a `ready` written first could
-    // reach the phone before the messages it describes, and the phone switches its screens on the first `ready`.
+    // every cell also catches up on what changed while the object went live, or while the core came or went.
+    // The snapshot goes last. Past Chord's flow-control window each member's state waits in a slot of its own, flushed
+    // in the order the slots were made (chord `docs/spec.md:242`); with the snapshot first, the realistic
+    // conversation's `ready` reached the phone before its 1,433 messages, and the phone switches its screens on the
+    // first `ready`. Writing it last orders that first `ready` only because no snapshot slot is waiting then (the
+    // server was inactive and the link idle): a later snapshot joins a slot already waiting, wherever it sits
+    // (`src/connection.ts:466-495`). Chord guarantees order within one member's stream only (`docs/spec.md:287`).
     self.on('conversation', conversation, (_change, ctx) => {
       messages.replace(ctx, currentMessages(), { diff: true });
       controls.replace(ctx, currentControls(), { diff: true });

@@ -298,9 +298,9 @@ No device or simulator was used, and nothing signed in to a real account.
 
 ## Piece 5 on macOS
 
-**Checks, 2026-10-22**, on the implementer's Mac (arm64; the server on Node 24.5.0 from Homebrew, the phone's code on
+**Checks, 2026-10-22, rerun after the review**, on the implementer's Mac (arm64; the server on Node 24.5.0 from Homebrew, the phone's code on
 Node 25.6.1), with pi 1.4.0 (tag `4a080252f`), Expo 58.0.17, expo-sqlite 58.0.13, expo-file-system 58.0.10 and
-react-native-ssh 0.3.0 installed. No device or simulator was used. The final run passed 74 of 74 checks. The copies
+react-native-ssh 0.3.0 installed. No device or simulator was used. The final run passed 81 of 81 checks. The copies
 ran over loopback, so the times are the Mac's, not Tailscale's.
 - **What ran on the phone's side:** one Node process per launch of the app, with the app's real `ShownInfiniChat`,
   `InfiniChatMoves`, home record, `RemoteInfiniChat`, `openPhoneInfiniChat`, `openExpoSqliteStorage`,
@@ -344,6 +344,9 @@ ran over loopback, so the times are the Mac's, not Tailscale's.
 | The machine restarted while released (the phone killed mid-download) | It opened nothing (`lsof`); the relaunched phone finished the move back |
 | Unreachable machine (new connections refused, live sessions dropped) | A move there stopped at "Connecting to test-mac failed. …" with the phone still open and the record `phone`; a move back stopped at "Closing InfiniChat on test-mac failed. …" with the record `there`. Cancel cleared each. A launch with the conversation there showed the machine at once with its failed connection; Try Again showed the conversation |
 | Never both open, in every section | No overlap between the phone's opens and the machine's `active` spans, and `lsof` never saw both databases open (about 930 samples) |
+| Shell startup output before every command (rerun after the review: a `ZDOTDIR/.zshenv` printing two lines, for every SSH command the phone ran) | Every copy passed its hash check: the download starts after its marker line, as install's answers do. Before the review's fix the download had no marker, so those lines would have been part of the file |
+| A Cancel after the machine adopted the phone's files (as if `adopt`'s answer was lost: the record and the phone's files at `moving-there`, the machine holding them open) | The Cancel finished the move instead: record `there`, the phone never opened its copy, the machine's 1,433 messages shown, the phone's files renamed, and the notice "InfiniChat had already opened on test-mac, so the move finished and it runs there now. …" |
+| The same with the machine unreachable | The move stopped; its Cancel failed ("The move could not be cancelled. …", still `moving-there`). Becoming active then ran the move forward, not the Cancel, and Try Again with the machine back finished it there |
 | Found by these checks and fixed | The first `ready` overtaking 1,433 messages (`snapshot` now last); a Cancel's queued `closeMachine` handing the next move a closing client whose `connected()` never settled |
 | The stand-in itself | Its channel close first left `cat` waiting on an open stdin, which a real channel close ends; fixed in the stand-in before the repeats |
 

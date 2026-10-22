@@ -27,15 +27,18 @@ const connecting = (machine: string, stage: InstallStage | undefined) => stage =
   : stage === 'starting' ? `Starting InfiniChat on ${machine}…` : `Connecting to ${machine}…`;
 const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
 
-/** The step of a move, as the header's subtitle says it; then the machine's name, once it's done. */
-function moving(move: MoveStatus, machine: string): string {
+/**
+ * The step of a move, as the header's subtitle says it; then the machine's name, once it's done. `stage` is what the
+ * machine's install is doing while the move connects.
+ */
+function moving(move: MoveStatus, machine: string, stage: InstallStage | undefined): string {
+  if (move.undoing) return move.error === undefined ? 'Cancelling the move…' : 'Couldn’t cancel the move';
   if (move.error !== undefined) {
     return move.to === 'machine' ? `Can’t move to ${machine}` : `Can’t move from ${machine}`;
   }
-  if (move.undoing) return 'Cancelling the move…';
   const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
   if (move.to === 'machine') {
-    return move.step === 'connecting' ? connecting(machine, move.stage)
+    return move.step === 'connecting' ? connecting(machine, stage)
       : move.step === 'closing' ? 'Closing InfiniChat…'
         : move.step === 'copying' ? `Copying to ${machine}${copied}` : `Opening on ${machine}…`;
   }
@@ -52,6 +55,7 @@ export default function InfiniChatScreen() {
   const colors = useChatColors();
   const {
     infiniChat: service, error: appError, dismissError, remoteHosts, infiniChatHome: home, infiniChatMove: move, moves,
+    infiniChatMoveNotice: moveNotice,
   } = useChatApp();
   // While the screens show a machine's InfiniChat, its models and sign-ins are that machine's.
   const { catalog, providerAccess, machine: shown } = useInfiniChatAccount();
@@ -66,8 +70,9 @@ export default function InfiniChatScreen() {
   const machineId = move?.machineId ?? (home.home === 'machine' ? home.machineId : null);
   const machine = machines.hosts.find((host) => host.id === machineId)?.name;
   const removed = machineId !== null && machines.ready && machine === undefined;
-  // The checkmark is on where the conversation is going during a move, and where it lives otherwise.
-  const chosen = move ? (move.to === 'machine' ? move.machineId : null)
+  // The checkmark is on where the conversation is going during a move, back where it was during a Cancel, and where
+  // it lives otherwise.
+  const chosen = move ? ((move.to === 'machine') !== !!move.undoing ? move.machineId : null)
     : home.home === 'machine' && home.phase !== 'moving-back' ? home.machineId : null;
   const movingNow = move !== undefined || (home.home === 'machine' && home.phase !== 'there');
   const there = home.home === 'machine' && home.phase === 'there';
@@ -168,7 +173,8 @@ export default function InfiniChatScreen() {
         : appError ? dismissError : undefined;
   const working = busy ? `Working… · ${settingsLabel}` : settingsLabel;
   const subtitle = removed ? 'Machine removed'
-    : move && machine !== undefined ? moving(move, machine)
+    : move && machine !== undefined
+      ? moving(move, machine, connection?.status === 'connecting' ? connection.stage : undefined)
       : !there || machine === undefined ? working
         : connection?.status === 'failed' ? `Can’t connect to ${machine}`
           : connection?.status === 'connecting' ? connecting(machine, connection.stage)
@@ -233,7 +239,11 @@ export default function InfiniChatScreen() {
           action={retry ? 'Try Again' : dismiss ? 'Dismiss' : access.error ? accountAction : undefined}
           onAction={retry ?? dismiss ?? (access.error ? openAccount : undefined)} />
       </View>}
-      {connection?.notice && !messageError && <View style={styles.banner}>
+      {moveNotice && !messageError && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-move-notice" tone="neutral" message={moveNotice}
+          action="Dismiss" onAction={() => moves?.dismissNotice()} />
+      </View>}
+      {connection?.notice && !moveNotice && !messageError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-machine-notice" tone="neutral" message={connection.notice}
           action="Dismiss" onAction={connection.dismissNotice} />
       </View>}

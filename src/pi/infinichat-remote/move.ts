@@ -1,4 +1,5 @@
 import type { SshConnection, SshShell } from '@osuki-dev/react-native-ssh';
+import { Buffer } from 'buffer';
 import { File } from 'expo-file-system';
 import { defaultDatabaseDirectory } from 'expo-sqlite';
 
@@ -6,9 +7,9 @@ import { connectionFailure } from '../execution/remote/channel';
 import type { RemoteHostRepository } from '../execution/remote/hosts';
 import { HASH, script } from '../execution/remote/provisioning';
 import type { RemoteInfiniChat } from './client';
-import type { ConversationFiles } from './contract';
+import type { ConversationFiles, ConversationState } from './contract';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
-import { connectAdmitted, PRINT_MARKER, runScript, type InstallStage } from './install';
+import { connectAdmitted, PRINT_MARKER, runScript } from './install';
 
 /** The phone's InfiniChat database, which expo-sqlite opens by name. */
 export const INFINICHAT_DATABASE = 'infinichat.db';
@@ -28,15 +29,13 @@ export interface MoveStatus {
   machineId: string;
   to: 'machine' | 'phone';
   step: MoveStep;
-  /** While connecting: what the install is doing. */
-  stage?: InstallStage;
   copied?: { bytes: number; total: number };
   running: boolean;
   /** Why it stopped; the home record keeps its phase until it is tried again or cancelled. */
   error?: string;
   /** Cancel can still put the conversation back where it was. */
   cancellable: boolean;
-  /** Cancel is putting it back. */
+  /** A Cancel is putting it back, or a failure stopped one. */
   undoing?: boolean;
 }
 
@@ -70,6 +69,9 @@ const same = (left: ConversationFile | undefined, right: ConversationFile | unde
 const parts = (files: ConversationFiles): [string, ConversationFile][] =>
   files.wal === undefined ? [['', files.db]] : [['', files.db], [WAL, files.wal]];
 const total = (files: ConversationFiles) => files.db.size + (files.wal?.size ?? 0);
+/** The machine holds these files open: it adopted them, and the move there happened. */
+const adopted = (held: ConversationState | undefined, files: ConversationFiles) => held?.active === true
+  && same(held.adopted?.db, files.db) && same(held.adopted?.wal, files.wal);
 
 /**
  * The closed database and the WAL its close left, if any. The `-shm` index never moves: SQLite rebuilds it, and a
@@ -134,9 +136,15 @@ async function upload(connection: SshConnection, signal: AbortSignal, name: stri
   if (placed !== 'placed') throw new Error(failure);
 }
 
+/** Printed on its own line before the file's bytes; whatever the account's shell startup files print comes first. */
+const COPY_MARKER = 'INFINICHAT-COPY';
+const COPY_LINE = Buffer.from(`${COPY_MARKER}\n`);
+
 /**
  * Streams one of the machine's files into `file` with `cat` over `openShell`: `exec` caps its output at 16 MiB
- * (react-native-ssh `src/errors.ts:20`). Like the upload, it has no timeout of its own.
+ * (react-native-ssh `src/errors.ts:20`). The bytes start after a marker line, as install.ts's answers do, since sshd
+ * runs the command through the account's shell, whose startup files may print (zsh's `~/.zshenv`, or `~/.bashrc` where
+ * bash sources it for SSH). Like the upload, it has no timeout of its own.
  */
 async function downloadFile(connection: SshConnection, signal: AbortSignal, path: string, file: File,
   onRead: (bytes: number) => void) {
@@ -144,6 +152,8 @@ async function downloadFile(connection: SshConnection, signal: AbortSignal, path
   const writer = file.writableStream().getWriter();
   let writing = Promise.resolve();
   let read = 0;
+  // What arrived before the marker, until it has.
+  let before: Buffer | undefined = Buffer.alloc(0);
   let ended = false;
   let finish: (status: number | undefined) => void = () => {};
   const closed = new Promise<number | undefined>((resolve) => { finish = resolve; });
@@ -152,15 +162,31 @@ async function downloadFile(connection: SshConnection, signal: AbortSignal, path
     finish(status);
   };
   let shell: SshShell | undefined;
-  const abort = () => end(undefined);
+  // A channel close can wait behind a dead link until the keepalive gives up; disconnecting the move's own connection
+  // ends it at once, as runSshCommand's `fail` does.
+  const abort = () => {
+    end(undefined);
+    void connection.disconnect().catch(() => {});
+  };
   signal.addEventListener('abort', abort, { once: true });
   try {
-    shell = await connection.openShell({ term: '', command: script(`exec cat "$HOME/${path}"`) }, {
+    shell = await connection.openShell({ term: '', command: script(
+      `printf '%s\\n' ${COPY_MARKER}; exec cat "$HOME/${path}"`) }, {
       onData: (bytes) => {
         // Data still on its way after an abort goes nowhere.
         if (ended) return;
         // Native owns the buffer; copy it before the callback returns.
-        const chunk = new Uint8Array(bytes).slice();
+        let chunk = new Uint8Array(bytes).slice();
+        if (before !== undefined) {
+          const seen = Buffer.concat([before, chunk]);
+          const at = seen.indexOf(COPY_LINE);
+          if (at < 0) {
+            before = seen;
+            return;
+          }
+          before = undefined;
+          chunk = new Uint8Array(seen.subarray(at + COPY_LINE.length));
+        }
         read += chunk.byteLength;
         onRead(read);
         writing = writing.then(() => writer.write(chunk));
@@ -175,7 +201,9 @@ async function downloadFile(connection: SshConnection, signal: AbortSignal, path
     signal.throwIfAborted();
     await writing;
     await writer.close();
-    if (status !== 0) throw new Error('The SSH connection closed before the copy was complete.');
+    if (status !== 0 || before !== undefined) {
+      throw new Error('The SSH connection closed before the copy was complete.');
+    }
   } catch (error) {
     writing.catch(() => {});
     await writer.abort().catch(() => {});
@@ -214,6 +242,8 @@ async function download(connection: SshConnection, signal: AbortSignal, name: st
 export class InfiniChatMoves {
   private readonly listeners = new Set<() => void>();
   private status?: MoveStatus;
+  /** What the last move wants the user to know once it is done, until dismissed. */
+  private notice?: string;
   private attempt?: { controller: AbortController; cancelled: boolean };
   private running: Promise<void> = Promise.resolve();
   /** This attempt saw the machine without the conversation open, and has not asked it to adopt since. */
@@ -228,6 +258,12 @@ export class InfiniChatMoves {
     return () => { this.listeners.delete(listener); };
   };
   readonly getSnapshot = () => this.status;
+  readonly getNotice = () => this.notice;
+
+  dismissNotice() {
+    this.notice = undefined;
+    this.notify();
+  }
 
   /** Moves the conversation to the machine, or to this phone for `null`, from where it lives. */
   choose(machineId: string | null) {
@@ -237,26 +273,21 @@ export class InfiniChatMoves {
     else if (machineId === null && home.home === 'machine' && home.phase === 'there') this.run(home.machineId, 'phone');
   }
 
-  /**
-   * Carries a move on from the phase the home record keeps, at launch and when the app becomes active; a Cancel a
-   * failure stopped goes on as a Cancel.
-   */
+  /** Carries a move on from the phase the home record keeps, at launch and when the app becomes active. */
   resume() {
     const home = this.home.getSnapshot();
     if (this.attempt || home.home !== 'machine' || home.phase === 'there') return;
-    if (this.status?.undoing) this.run(this.status.machineId, this.status.to, true);
-    else this.run(home.machineId, home.phase === 'moving-there' ? 'machine' : 'phone');
+    this.run(home.machineId, home.phase === 'moving-there' ? 'machine' : 'phone');
   }
 
-  /** Runs a move a failure stopped again. */
+  /** Runs a move a failure stopped again, forward, also when the failure was a Cancel's. */
   retry() {
     const status = this.status;
     if (this.attempt || status?.error === undefined) return;
-    if (status.undoing) this.run(status.machineId, status.to, true);
-    else this.run(status.machineId, status.to);
+    this.run(status.machineId, status.to);
   }
 
-  /** Puts the conversation back where it was, before the opening step only. */
+  /** Puts the conversation back where it was, before the opening step only; the only way into the undo. */
   cancel() {
     const status = this.status;
     if (!status?.cancellable) return;
@@ -287,6 +318,7 @@ export class InfiniChatMoves {
     const attempt = { controller: new AbortController(), cancelled: cancelling };
     this.attempt = attempt;
     this.machineClosed = false;
+    this.notice = undefined;
     this.status = { machineId, to, step: to === 'machine' ? 'connecting' : 'closing', running: true,
       cancellable: !cancelling };
     this.notify();
@@ -335,17 +367,7 @@ export class InfiniChatMoves {
   private async there(machineId: string, signal: AbortSignal) {
     const remote = this.sides.machine(machineId);
     const name = this.name(machineId);
-    const stop = remote.subscribe(() => {
-      const connection = remote.getConnection();
-      if (this.status?.step === 'connecting' && connection.status === 'connecting') {
-        this.step({ step: 'connecting', stage: connection.stage });
-      }
-    });
-    try {
-      await remote.connected(signal);
-    } finally {
-      stop();
-    }
+    await remote.connected(signal);
     if (this.home.getSnapshot().home === 'phone') {
       this.step({ step: 'closing' });
       this.home.set({ version: 1, home: 'machine', machineId, phase: 'moving-there' });
@@ -355,7 +377,7 @@ export class InfiniChatMoves {
     signal.throwIfAborted();
     const files = await phoneFiles();
     const held = remote.getConversation();
-    if (!held?.active || !same(held.adopted?.db, files.db) || !same(held.adopted?.wal, files.wal)) {
+    if (!adopted(held, files)) {
       if (held?.active) throw new Error(`InfiniChat on ${name} already has another conversation open.`);
       this.machineClosed = true;
       this.step({ step: 'copying', copied: { bytes: 0, total: total(files) } });
@@ -371,6 +393,11 @@ export class InfiniChatMoves {
       this.step({ step: 'opening' }, false);
       await remote.adopt(files);
     }
+    this.arrived(machineId, remote);
+  }
+
+  /** The machine holds the conversation: the record says so, and the screens show it there. */
+  private arrived(machineId: string, remote: RemoteInfiniChat) {
     this.home.set({ version: 1, home: 'machine', machineId, phase: 'there' });
     try {
       rename(INFINICHAT_DATABASE, MOVED);
@@ -424,11 +451,16 @@ export class InfiniChatMoves {
     const home = this.home.getSnapshot();
     if (to === 'machine') {
       if (home.home === 'machine' && home.phase === 'moving-there') {
-        // The phone's files are the conversation only while the machine never opened them.
+        // The phone's files are the conversation only while the machine never opened them. A machine that did (its
+        // answer to `adopt` lost with the link) holds them now and may already be working, so finishing the move is
+        // the only outcome that never opens the conversation twice.
         if (!this.machineClosed) {
           await remote.connected(signal);
-          if (remote.getConversation()?.active) {
-            throw new Error(`InfiniChat is already open on ${this.name(machineId)}. Try again to finish the move.`);
+          if (adopted(remote.getConversation(), await phoneFiles())) {
+            this.arrived(machineId, remote);
+            this.notice = `InfiniChat had already opened on ${this.name(machineId)}, so the move finished and it `
+              + 'runs there now. Choose This iPhone to move it back.';
+            return;
           }
         }
         this.home.set(PHONE_HOME);
@@ -464,7 +496,7 @@ export class InfiniChatMoves {
     return `${step} ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  private step(update: Pick<MoveStatus, 'step' | 'stage' | 'copied'>, cancellable = true) {
+  private step(update: Pick<MoveStatus, 'step' | 'copied'>, cancellable = true) {
     const status = this.status;
     if (!status || this.closed) return;
     this.status = { machineId: status.machineId, to: status.to, running: true, cancellable, ...update };

@@ -111,9 +111,13 @@ As built (`moveThere` is `InfiniChatMoves.there` in `src/pi/infinichat-remote/mo
   gains `timeoutMs: null` for that and `onWritten` for the progress; every other step keeps its 60 s.
 - **Step 5's rename can't fail the move.** Under either name the phone's copy is never opened while the machine holds
   the conversation, and the next move back replaces it.
-- **Cancel** stays possible until `adopt` is called. A Cancel during a running attempt that has seen the server
-  inactive reopens the phone at once, also with the machine unreachable. A Cancel after a failure first connects
-  and checks that the machine never opened the files, since the failed attempt may have reached `adopt`.
+- **Cancel** stays possible until `adopt` is called, and is the only way into the undo; Try Again, and the app
+  becoming active, always carry the move forward, also after a Cancel that failed. A Cancel during a running attempt
+  that has seen the server inactive reopens the phone at once, also with the machine unreachable. A Cancel after a
+  failure first connects, since the failed attempt may have reached `adopt` with its answer lost. A machine that holds
+  the phone's files open then has the conversation and may be working on it, so the Cancel finishes the move instead,
+  the only outcome that never opens the conversation twice, and a notice says so: "InfiniChat had already opened on
+  <machine>, so the move finished and it runs there now. Choose This iPhone to move it back."
 
 ### Move back (machine A → phone)
 
@@ -130,10 +134,15 @@ As built (`moveBack` is `InfiniChatMoves.back`):
 - **It connects before step 1,** so a machine that can't be reached fails the move with nothing changed: the record
   stays `there` and the screens keep showing the machine. This is how "the header says so" is built.
 - **Step 2 resumed at launch calls `relinquish()` again** for the files' names, and downloads them to
-  `infinichat-incoming.db` (and `-wal`) through `openShell({ term: '', command: 'exec cat …' })` into
-  `File.writableStream()`. The file is created first, because the stream's handle opens with
-  `FileHandle(forWritingTo:)`, which needs an existing file (expo-file-system `ios/FileSystemFileHandle.swift:67`).
-  Each file is verified with `File.digest('SHA-256')` (`ios/FileSystemFile.swift:59`) and its size.
+  `infinichat-incoming.db` (and `-wal`) through `openShell({ term: '', command })` into `File.writableStream()`.
+  - The command prints a marker line, then `exec cat`s the file, and the bytes count from after the marker, as
+    install.ts's answers do: sshd runs the command through the account's shell, whose startup files may print (zsh's
+    `~/.zshenv`, or `~/.bashrc` where bash sources it for SSH), and those bytes would fail the hash every time.
+  - The file is created first, because the stream's handle opens with `FileHandle(forWritingTo:)`, which needs an
+    existing file (expo-file-system `ios/FileSystemFileHandle.swift:67`).
+  - Each file is verified with `File.digest('SHA-256')` (`ios/FileSystemFile.swift:59`) and its size.
+  - A Cancel also disconnects the move's own SSH connection, as `runSshCommand`'s `fail` does, so a dead link doesn't
+    hold the Cancel until the keepalive gives up.
 - **Steps 3 and 4 swap the record and the open:** the files are placed (the WAL first, after removing every
   `infinichat.db*` and `infinichat-moved.db*`), then the record says `phone`, then the local core opens. The placed
   files are the conversation from then on and nothing has opened them yet, so a relaunch never downloads over work
@@ -154,16 +163,20 @@ As built (`moveBack` is `InfiniChatMoves.back`):
     other side, so every InfiniChat screen drops to loading in between. This piece has to keep the old host's last
     values on screen until the new one has its first snapshot, instead of clearing it.
   - As built, `useChatApp().infiniChat` is one `ShownInfiniChat` for the app's lifetime
-    (`src/chat/shown-infinichat.ts`), an `InfiniChatHost` with one view and one set of stores. A move calls `hold()`, which stops following the old side
-    and keeps its last values; `show(side)` follows the new side's view and switches once its status isn't `loading`.
-    With nothing shown yet (a launch), or no screen subscribed, it switches at once.
+    (`src/chat/shown-infinichat.ts`), an `InfiniChatHost` with one view and one set of stores. A move calls `hold()`,
+    which stops following the old side and keeps its last values; `show(side)` follows the new side's view and
+    switches once its status isn't `loading`. With nothing shown yet (a launch), or no screen subscribed, it switches
+    at once.
   - A send while held rejects with "InfiniChat is moving. Send again once the move is done." The draft is unchanged,
     so sending it again on the new side keeps its `requestId`, and OptChat admits it once. Queuing calls through a move
     would need a mechanism of its own; nothing asks for one.
   - The machine's server writes the `snapshot` cell last when it mirrors the core. Past Chord's flow-control window,
     each member's state waits in a slot of its own and the slots flush in the order they were made (chord
-    `docs/spec.md:242`, `:287`; `src/connection.ts:331`). With `snapshot` first, the realistic conversation's first
-    `ready` reached the phone before its 1,433 messages, and the screens switched to an empty transcript.
+    `docs/spec.md:242`; `src/connection.ts:331`). With `snapshot` first, the realistic conversation's first `ready`
+    reached the phone before its 1,433 messages, and the screens switched to an empty transcript. Writing it last
+    orders that first `ready` only because no snapshot slot is waiting then (the server was inactive, the link idle):
+    a later snapshot joins a slot already waiting, wherever that sits (`src/connection.ts:466-495`). Chord guarantees
+    order only within one member's stream (`docs/spec.md:287`).
 - **A reply being streamed starts over.** pi-durable's recovery resets the generation to pending, so the partial
   answer is generated again on the new side.
   - As built, and as after any restart: pi-durable commits a streamed partial every 100 ms (README `:502`), and the
@@ -176,14 +189,16 @@ As built (`moveBack` is `InfiniChatMoves.back`):
 - **The menu:** disabled while a move runs, and offering a machine only when its server is reachable and its bundle
   matches. Failures name the step that failed. A machine that is unreachable while InfiniChat lives there can't be
   moved back from, and the header says so.
-  - As built, the subtitle reads "Connecting to <machine>…" (or install's stages), "Closing InfiniChat…",
-    "Copying to <machine> · 12.3 of 43.5 MB", "Opening on <machine>…"; back, "Closing on <machine>…", "Copying from
-    <machine> · …", "Opening on This iPhone…"; then the machine's name as before. A stopped move reads "Can’t move to
-    <machine>" or "Can’t move from <machine>", and "Cancelling the move…" while a Cancel runs.
-  - The error notice names the step ("Copying InfiniChat to Studio failed. …") with "Try Again". A stopped move is also
-    tried again when the app becomes active, as piece 3 reconnects; a stopped Cancel goes on as a Cancel.
+  - As built, the subtitle reads "Connecting to <machine>…" (or install's stages, from the machine client's own
+    connection, as piece 3 shows them), "Closing InfiniChat…", "Copying to <machine> · 12.3 of 43.5 MB", "Opening on
+    <machine>…"; back, "Closing on <machine>…", "Copying from <machine> · …", "Opening on This iPhone…"; then the
+    machine's name as before. A stopped move reads "Can’t move to <machine>" or "Can’t move from <machine>";
+    "Cancelling the move…" while a Cancel runs, and "Couldn’t cancel the move" when it failed.
+  - The error notice names the step ("Copying InfiniChat to Studio failed. …") with "Try Again", which carries the move
+    forward. A stopped move is also carried forward when the app becomes active, as piece 3 reconnects.
   - The menu's items are disabled while a move runs or a failure stopped one, and it gains a destructive "Cancel Move"
-    while Cancel can still put the conversation back. The checkmark is on where the conversation is going.
+    while Cancel can still put the conversation back. The checkmark is on where the conversation is going, and back
+    where it was while a Cancel runs or after one failed.
   - Offering a machine "only when reachable and of this bundle" is step 1: the menu doesn't probe every machine. A
     machine that can't be reached or updated stops the move at "Connecting to <machine>…" with nothing closed.
   - **No move from machine to machine.** While InfiniChat lives on a machine, the other machines are disabled; it moves
@@ -261,11 +276,11 @@ Nothing is built for either.
 
 About 340 lines: home record and recovery ~80, transfer over SSH ~120, server lifecycle methods ~60, UI ~80.
 
-As built, +1,341 −251 lines outside the docs and the asset, 1,090 net, so about three times the estimate. The
+As built, +1,389 −252 lines outside the docs and the asset, 1,137 net, so over three times the estimate. The
 README says a piece that grows to several times its estimate needs revisiting; this one is for the owner's review.
-- **New:** `move.ts` 477 (a fifth of it comments), `shown-infinichat.ts` 156, `server/conversation.ts` 197,
+- **New:** `move.ts` 509 (a fifth of it comments), `shown-infinichat.ts` 156, `server/conversation.ts` 197,
   `server/state.ts` 68 (replacing `time-zone.ts`, 35), `home.ts` 52 (replacing `machine-choice.ts`, 26).
-- **Changed:** the provider +134 −74, the InfiniChat screen +68 −33, `client.ts` +60 −9, `serve.ts` +49 −30, the
+- **Changed:** the provider +136 −74, the InfiniChat screen +79 −34, `client.ts` +60 −9, `serve.ts` +52 −30, the
   contract +23, `main.ts` +18 −18, `command-channel.ts` +10 −3, `install.ts` +10 −6, and a few lines elsewhere.
 
 Where it went beyond the estimate:

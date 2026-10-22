@@ -350,6 +350,8 @@ function useChatController() {
     infiniChatHome.getSnapshot);
   const getMove = () => moves?.getSnapshot();
   const infiniChatMoveStatus = useSyncExternalStore(moves?.subscribe ?? subscribeNothing, getMove, getMove);
+  const getMoveNotice = () => moves?.getNotice();
+  const infiniChatMoveNotice = useSyncExternalStore(moves?.subscribe ?? subscribeNothing, getMoveNotice, getMoveNotice);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
   const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
@@ -413,7 +415,7 @@ function useChatController() {
   // Only a failed open and the Harness's own reports reach every screen; operations return their errors to the
   // screen that started them.
   return { service, infiniChat, infiniChatHome: infiniChatHomeRecord, infiniChatMove: infiniChatMoveStatus, moves,
-    infiniChatClient,
+    infiniChatMoveNotice, infiniChatClient,
     ready: service !== undefined, chats: serviceState.chats,
     error: openError ?? serviceState.error,
     dismissError, signOutPending, disconnectingProvider,
