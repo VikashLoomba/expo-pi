@@ -46,7 +46,7 @@ export default function InfiniChatSettingsScreen() {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  const blocked = !service || !conversation;
+  const blocked = !conversation;
   const disabled = blocked || saving || refreshing;
   const changed = !sameSettings(draft.main, initial.main) || !sameSettings(draft.summary, initial.summary)
     || draft.instructions !== initial.instructions;
@@ -77,7 +77,7 @@ export default function InfiniChatSettingsScreen() {
     }
   };
   const save = async () => {
-    if (!service || !canSave || savingRef.current) return;
+    if (!canSave || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     setError(undefined);

@@ -5,26 +5,25 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { createHost } from '@earendil-works/chord';
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { processLock } from '@earendil-works/chord/node';
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 import type { SessionEnd } from '@earendil-works/pi-durable';
-import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 
 import type { InfiniChatPrincipal } from '../src/pi/infinichat-remote/contract';
 import { InfiniChatService } from '../src/pi/infinichat-service';
 import { buildModelCatalog } from '../src/pi/model-catalog';
 import { validateOpenAICredential } from '../src/pi/openai-auth/core';
 import { ProviderCredentialStore } from '../src/pi/provider-credentials';
+import { ServerConversation } from './conversation';
 import { fileCredentialBackend, openAILoginOptions } from './credentials';
 import { serverDevices } from './devices';
 import { listen } from './listen';
 import { createServerModels } from './models';
 import { serveInfiniChat } from './serve';
 import { ServerSignIn } from './sign-in';
-import { restoreTimeZone, setTimeZone } from './time-zone';
+import { restoreTimeZone, setTimeZone } from './state';
 
-const USAGE = 'Usage: node server.js serve --device <name>';
+const USAGE = 'Usage: node server.js serve --device <name> --description <text>';
 
 // pi-ai loads its sign-in flows through an import bundlers cannot follow, which this single-file bundle cannot resolve
 // at run time, so it registers them statically at startup, as pi's own standalone binary does (coding-agent
@@ -35,7 +34,7 @@ registerBunOAuthFlows();
  * Runs InfiniChat on this machine until SIGTERM or SIGINT, or until a storage error ends its Harness, which fails the
  * process so its service manager starts it again: reopening is how pi-durable recovers (README "Errors").
  */
-async function serve(device: string): Promise<number> {
+async function serve(device: string, description: string): Promise<number> {
   const home = join(homedir(), '.infinichat');
   const stopping = Promise.withResolvers<SessionEnd | undefined>();
   process.once('SIGTERM', () => stopping.resolve(undefined));
@@ -59,18 +58,16 @@ async function serve(device: string): Promise<number> {
     const signIn = new ServerSignIn(models, credentials, openAILoginOptions(backend));
     // Ends an attempt still under way, after the host has closed the links that could start another.
     closes.push(() => signIn.cancel());
-    await mkdir(join(home, 'data'), { recursive: true });
-    const storage = await openNodeSqliteStorage(join(home, 'data', 'infinichat.db'));
-    // The Harness closes its storage; this closes it when the Harness never opened, and is a no-op otherwise.
-    closes.push(() => storage.close(BACKGROUND_CONTEXT));
-    const core = await InfiniChatService.open({
-      storage, models, devices: serverDevices(device), machine: device,
+    // Open only while this machine holds the conversation; the phone moves it here and back.
+    const conversation = new ServerConversation(home, (storage) => InfiniChatService.open({
+      storage, models, devices: serverDevices(device, description), machine: device,
       onClosed: (end) => {
         if (end.reason === 'failed') stopping.resolve(end);
       },
-    });
+    }));
+    await conversation.start();
     // Closing waits for running task code; work it cuts off stays pending for the next start.
-    closes.push(() => core.close());
+    closes.push(() => conversation.close());
     const host = createHost<InfiniChatPrincipal>({
       name: 'infinichat-server', self: { kind: 'host' }, principalKey: (principal) => principal.kind,
     });
@@ -78,8 +75,8 @@ async function serve(device: string): Promise<number> {
     closes.push(() => host.close());
     // The phone installs each bundle in a directory named after its hash.
     const bundle = basename(dirname(fileURLToPath(import.meta.url)));
-    serveInfiniChat(host, core, {
-      server: { bundle, pi: INFINICHAT_PI, device }, setTimeZone: (zone) => setTimeZone(home, zone),
+    serveInfiniChat(host, conversation, {
+      server: { bundle, pi: INFINICHAT_PI, device, description }, setTimeZone: (zone) => setTimeZone(home, zone),
       catalog: buildModelCatalog(models), credentials, signIn,
     });
     const server = await listen(host, home, bundle);
@@ -102,9 +99,12 @@ async function serve(device: string): Promise<number> {
 }
 
 function main(args: string[]): Promise<number> {
-  const { positionals, values } = parseArgs({ args, allowPositionals: true, options: { device: { type: 'string' } } });
-  if (positionals.length !== 1 || positionals[0] !== 'serve' || !values.device) throw new Error(USAGE);
-  return serve(values.device);
+  const { positionals, values } = parseArgs({ args, allowPositionals: true,
+    options: { device: { type: 'string' }, description: { type: 'string' } } });
+  if (positionals.length !== 1 || positionals[0] !== 'serve' || !values.device || !values.description) {
+    throw new Error(USAGE);
+  }
+  return serve(values.device, values.description);
 }
 
 try {

@@ -5,7 +5,7 @@ import type { RemoteExecution } from '../execution/remote/owner';
 import { WorkspaceDoc } from '../workspace/document';
 import { WorkspaceExecutionEnv } from '../workspace/execution-env';
 import type { Workspaces } from '../workspace/storage';
-import { MACHINE_WORK, type Device } from './device-tools';
+import { MACHINE_WORK, machineDescription, type Device } from './device-tools';
 
 /** The phone's work dir is its workspace. */
 const PHONE_WORK = '/workspace';
@@ -31,7 +31,7 @@ export function createDevices(workspaces: Workspaces, remote: RemoteExecution, h
       // The repository keeps machine names unique and never the phone's.
       ...hosts.getSnapshot().hosts.map((host): Device => ({
         name: host.name,
-        description: `${host.username}@${host.hostname} over SSH, work dir ~/${MACHINE_WORK}`,
+        description: machineDescription(host),
         async environment(who) {
           const home = (await remote.environment(host.id, undefined)).cwd;
           return remote.environment(host.id, `${home}/${MACHINE_WORK}/${who}`);

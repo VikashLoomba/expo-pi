@@ -14,6 +14,7 @@ import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { ChatTranscript } from '@/components/chat/transcript';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { InstallStage } from '@/pi/infinichat-remote/install';
+import type { MoveStatus } from '@/pi/infinichat-remote/move';
 import { findCatalogModel, getModelSettingsError } from '@/pi/model-catalog';
 import { userInput } from '@/pi/user-input';
 
@@ -24,6 +25,23 @@ const PHONE = 'This iPhone';
 const connecting = (machine: string, stage: InstallStage | undefined) => stage === 'uploading'
   ? `Installing InfiniChat on ${machine}…`
   : stage === 'starting' ? `Starting InfiniChat on ${machine}…` : `Connecting to ${machine}…`;
+const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
+
+/** The step of a move, as the header's subtitle says it; then the machine's name, once it's done. */
+function moving(move: MoveStatus, machine: string): string {
+  if (move.error !== undefined) {
+    return move.to === 'machine' ? `Can’t move to ${machine}` : `Can’t move from ${machine}`;
+  }
+  if (move.undoing) return 'Cancelling the move…';
+  const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
+  if (move.to === 'machine') {
+    return move.step === 'connecting' ? connecting(machine, move.stage)
+      : move.step === 'closing' ? 'Closing InfiniChat…'
+        : move.step === 'copying' ? `Copying to ${machine}${copied}` : `Opening on ${machine}…`;
+  }
+  return move.step === 'closing' ? `Closing on ${machine}…`
+    : move.step === 'copying' ? `Copying from ${machine}${copied}` : `Opening on ${PHONE}…`;
+}
 
 /** A draft keeps one request ID for every attempt to send it, so a resend after a failure is admitted once. */
 type Draft = { text: string; images: readonly PhotoAttachment[]; requestId: string };
@@ -33,20 +51,26 @@ const emptyDraft = (): Draft => ({ text: '', images: [], requestId: uuidv7() });
 export default function InfiniChatScreen() {
   const colors = useChatColors();
   const {
-    infiniChat: service, error: appError, dismissError, remoteHosts, infiniChatMachine, chooseInfiniChatMachine,
+    infiniChat: service, error: appError, dismissError, remoteHosts, infiniChatHome: home, infiniChatMove: move, moves,
   } = useChatApp();
-  // While InfiniChat runs on a machine, its models and sign-ins are that machine's.
-  const { catalog, providerAccess } = useInfiniChatAccount();
-  const ready = service !== undefined;
+  // While the screens show a machine's InfiniChat, its models and sign-ins are that machine's.
+  const { catalog, providerAccess, machine: shown } = useInfiniChatAccount();
   const view = useInfiniChatView();
   const conversation = useChatControls(view);
   const serviceError = useInfiniChatError();
   const connection = useInfiniChatConnection();
   const machines = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
-  const remote = infiniChatMachine !== null;
-  // Named once the machines are restored, so a launch never shows a placeholder name first.
-  const machine = machines.hosts.find((host) => host.id === infiniChatMachine)?.name;
-  const removed = remote && machines.ready && machine === undefined;
+  const remote = shown !== undefined;
+  // The machine the conversation is on or moving to or from, named once the machines are restored, so a launch never
+  // shows a placeholder name first.
+  const machineId = move?.machineId ?? (home.home === 'machine' ? home.machineId : null);
+  const machine = machines.hosts.find((host) => host.id === machineId)?.name;
+  const removed = machineId !== null && machines.ready && machine === undefined;
+  // The checkmark is on where the conversation is going during a move, and where it lives otherwise.
+  const chosen = move ? (move.to === 'machine' ? move.machineId : null)
+    : home.home === 'machine' && home.phase !== 'moving-back' ? home.machineId : null;
+  const movingNow = move !== undefined || (home.home === 'machine' && home.phase !== 'there');
+  const there = home.home === 'machine' && home.phase === 'there';
   const [draft, setDraft] = useState(emptyDraft);
   const changeDraft = useCallback((text: string) => {
     setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
@@ -73,7 +97,7 @@ export default function InfiniChatScreen() {
         + thinkingLevelLabel(conversation.settings.thinkingLevel);
   const openAccount = () => router.push({ pathname: remote ? '/infinichat-providers' : '/account',
     params: { provider: providerId } });
-  const settingsDisabled = !ready || !conversation;
+  const settingsDisabled = !conversation;
   const openSettings = () => router.push('/infinichat-settings');
   const choosePrompt = useCallback((text: string) => {
     changeDraft(text);
@@ -96,7 +120,7 @@ export default function InfiniChatScreen() {
   };
   const sendMessage = async () => {
     const text = draft.text.trim();
-    if (!service || (!text && !draft.images.length) || admitting) return;
+    if ((!text && !draft.images.length) || admitting) return;
     if (!configured || settingsError || !access.ready || !access.connected) return;
     if (draft.images.length && !model?.images) {
       setLocalError(`${model?.name || 'This model'} does not accept images. `
@@ -115,7 +139,7 @@ export default function InfiniChatScreen() {
     }
   };
   const stop = async () => {
-    if (!service || stopping) return;
+    if (stopping) return;
     // Shown until the stop settles: OptChat cancels the inputs it has not sent and aborts the running turn.
     setStopping(true);
     setLocalError(undefined);
@@ -127,27 +151,31 @@ export default function InfiniChatScreen() {
       setStopping(false);
     }
   };
-  // A machine that can't be reached is tried again when the user asks, and when the app becomes active; a send that
-  // failed with the same error offers the same. A removed machine has nothing to try again.
-  const connectionError = connection?.status === 'failed' ? connection.error : undefined;
-  const messageError = localError || connectionError || conversation?.error || serviceError || appError
+  // A move that failed, and a machine that can't be reached, are tried again when the user asks and when the app
+  // becomes active; a send that failed with the same error offers the same. A removed machine has nothing to try again.
+  const moveError = move?.running === false ? move.error : undefined;
+  const connectionError = there && connection?.status === 'failed' ? connection.error : undefined;
+  const messageError = localError || moveError || connectionError || conversation?.error || serviceError || appError
     || access.error;
-  const retry = !removed && connectionError && (!localError || localError === connectionError) ? () => {
-    setLocalError(undefined);
-    connection?.retry();
-  } : undefined;
+  const retry = moveError && !localError ? () => moves?.retry()
+    : !removed && connectionError && (!localError || localError === connectionError) ? () => {
+      setLocalError(undefined);
+      connection?.retry();
+    } : undefined;
   const dismiss = localError ? () => setLocalError(undefined)
     : connectionError || conversation?.error ? undefined
-      : serviceError ? () => service?.dismissError()
+      : serviceError ? () => service.dismissError()
         : appError ? dismissError : undefined;
   const working = busy ? `Working… · ${settingsLabel}` : settingsLabel;
   const subtitle = removed ? 'Machine removed'
-    : machine === undefined ? working
-      : connection?.status === 'failed' ? `Can’t connect to ${machine}`
-        : connection?.status === 'connecting' ? connecting(machine, connection.stage)
-          : `${machine} · ${working}`;
-  const runsOn = !remote ? PHONE : removed ? 'a removed machine' : machine ?? 'a remote machine';
-  const onMachine = remote ? ` on ${machine ?? 'the machine'}` : '';
+    : move && machine !== undefined ? moving(move, machine)
+      : !there || machine === undefined ? working
+        : connection?.status === 'failed' ? `Can’t connect to ${machine}`
+          : connection?.status === 'connecting' ? connecting(machine, connection.stage)
+            : `${machine} · ${working}`;
+  const runsOn = machineId === null || home.home === 'phone' ? PHONE
+    : removed ? 'a removed machine' : machine ?? 'a remote machine';
+  const onMachine = remote ? ` on ${shown}` : '';
   const accountAction = remote ? 'Providers' : 'Account';
   const accountStatus = !access.ready ? 'Restoring your connection…'
     : access.error ? `Reconnect ${provider?.name || providerId}${remote ? onMachine : ' in Account'}`
@@ -171,20 +199,27 @@ export default function InfiniChatScreen() {
       </Pressable>,
     }} />
     <Stack.Toolbar placement="right">
-      <Stack.Toolbar.Menu icon={remote ? 'server.rack' : 'iphone'} accessibilityLabel={`InfiniChat runs on ${runsOn}`}
-        accessibilityHint="Choose this iPhone or one of your remote machines.">
-        <Stack.Toolbar.MenuAction icon="iphone" isOn={!remote} onPress={() => chooseInfiniChatMachine(null)}>
+      <Stack.Toolbar.Menu icon={chosen === null ? 'iphone' : 'server.rack'}
+        accessibilityLabel={`InfiniChat runs on ${runsOn}`}
+        accessibilityHint="Move InfiniChat to this iPhone or one of your remote machines.">
+        {/* A move goes first; from a machine, the conversation moves back to this iPhone before it moves on. */}
+        <Stack.Toolbar.MenuAction icon="iphone" isOn={chosen === null} disabled={movingNow}
+          onPress={() => moves?.choose(null)}>
           {PHONE}
         </Stack.Toolbar.MenuAction>
         {machines.hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
-          isOn={host.id === infiniChatMachine} onPress={() => chooseInfiniChatMachine(host.id)}>
+          isOn={host.id === chosen} disabled={movingNow || home.home === 'machine'}
+          onPress={() => moves?.choose(host.id)}>
           {host.name}
         </Stack.Toolbar.MenuAction>)}
+        {move?.cancellable && <Stack.Toolbar.MenuAction icon="xmark" destructive onPress={() => moves?.cancel()}>
+          Cancel Move
+        </Stack.Toolbar.MenuAction>}
       </Stack.Toolbar.Menu>
-      <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks" disabled={!ready}
+      <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks"
         onPress={() => router.push('/infinichat-schedule')} />
     </Stack.Toolbar>
-    <ChatTranscript view={view} ready={ready} stopping={stopping} onChoose={choosePrompt} composer={<>
+    <ChatTranscript view={view} ready stopping={stopping} onChoose={choosePrompt} composer={<>
       {conversation && !configured && <View style={styles.banner}>
         <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
           action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
@@ -205,7 +240,7 @@ export default function InfiniChatScreen() {
       <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
         onStop={() => { void stop(); }}
         onConnect={openAccount} busy={busy} admitting={admitting} connected={connected}
-        disabled={!ready || !conversation || stopping
+        disabled={!conversation || stopping
           || (!busy && (!configured || !access.ready || !!settingsError))}
         accountStatus={accountStatus} inputRef={input}
         attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}

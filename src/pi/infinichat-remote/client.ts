@@ -9,10 +9,13 @@ import type { RemoteHostRepository } from '../execution/remote/hosts';
 import type { ScheduledTask } from '../infinichat-scheduled';
 import type { InfiniChatHost, InfiniChatSnapshot } from '../infinichat-service';
 import type { InfiniChatControls } from '../infinichat-view';
+import { machineDescription } from '../infinichat/device-tools';
 import type { ScheduledInput } from '../infinichat/schedule';
 import type { ChatModelSettings, ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
-import { InfiniChatRemote, type InfiniChatPrincipal, type SignInAttempt } from './contract';
+import {
+  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type SignInAttempt,
+} from './contract';
 import {
   connectAdmitted, installServer, runningServer, savedSecret, SERVER_BUNDLE, type InstallStage,
 } from './install';
@@ -74,6 +77,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
     scheduled: readonly ScheduledTask[]; catalog: ModelCatalog; access: MachineAccess; signIn: SignInAttempt;
+    conversation: ConversationState;
   };
   private report = NO_REPORT;
   private status: ConnectionStatus = { status: 'connecting' };
@@ -81,7 +85,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private closed = false;
   private closing?: Promise<void>;
 
-  constructor(private readonly hosts: RemoteHostRepository, private readonly machineId: string) {}
+  constructor(private readonly hosts: RemoteHostRepository, readonly machineId: string) {}
 
   /** One store for the view, the report, the scheduled tasks and the connection. */
   readonly subscribe = (listener: () => void) => {
@@ -107,6 +111,52 @@ export class RemoteInfiniChat implements InfiniChatHost {
   readonly getCatalog = () => this.values?.catalog;
   readonly getAccess = () => this.values?.access;
   readonly getSignIn = () => this.values?.signIn;
+  /** Whether the machine holds the conversation open, and the files it adopted; undefined until connected. */
+  readonly getConversation = () => this.values?.conversation;
+
+  /**
+   * Resolves once connected to this app's server for the machine, installing it as needed. Rejects as a call waiting
+   * for the connection does: with a failed attempt's error, or when this client closes.
+   */
+  connected(signal: AbortSignal): Promise<void> {
+    this.reconnect();
+    const calls = this.calls.signal;
+    return new Promise((resolve, reject) => {
+      const settle = (finish: () => void) => {
+        stop();
+        signal.removeEventListener('abort', abort);
+        calls.removeEventListener('abort', ended);
+        finish();
+      };
+      const check = () => {
+        const { status } = this;
+        if (status.status === 'connected') settle(resolve);
+        else if (status.status === 'failed') settle(() => reject(new Error(status.error)));
+      };
+      const abort = () => settle(() => reject(signal.reason));
+      const ended = () => settle(() => reject(calls.reason));
+      const stop = this.subscribe(check);
+      signal.addEventListener('abort', abort, { once: true });
+      calls.addEventListener('abort', ended, { once: true });
+      if (signal.aborted) abort();
+      else if (calls.aborted) ended();
+      else check();
+    });
+  }
+
+  /** Opens the files this phone copied to the machine, once they match these. */
+  adopt(files: ConversationFiles): Promise<void> {
+    return this.call((ref, ctx) => ref.adopt(files, ctx));
+  }
+
+  /** Closes the conversation on the machine and names the files it left there. */
+  relinquish(): Promise<ConversationFiles> {
+    return this.call((ref, ctx) => ref.relinquish(ctx));
+  }
+
+  archive(): Promise<void> {
+    return this.call((ref, ctx) => ref.archive(ctx));
+  }
 
   /** Starts a sign-in on the machine, ending one under way there, and resolves with its attempt number. */
   signIn(providerId: string): Promise<number> {
@@ -293,8 +343,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
       // As owner.ts checks a chat's machine, with InfiniChat's own way out.
       await this.hosts.restore();
       if (!this.hosts.get(this.machineId)) {
-        throw new Error('This machine was removed from Remote machines. Choose This iPhone or another machine in the '
-          + 'InfiniChat header.');
+        throw new Error('This machine was removed from Remote machines while InfiniChat’s conversation is on it.');
       }
       const secret = await savedSecret(this.machineId);
       const admission = await this.hosts.admit(this.machineId);
@@ -303,7 +352,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
       session.connection = connection;
       const port = secret === undefined ? undefined : await runningServer(connection, name, signal);
       let target = secret !== undefined && port !== undefined ? { port, secret } : await install();
-      while (!(await this.open(session, connection, target, name, signal))) {
+      const description = machineDescription(admission.host);
+      while (!(await this.open(session, connection, target, name, description, signal))) {
         if (installed) throw new Error(`InfiniChat on ${name} did not accept this iPhone. Try again.`);
         target = await install();
       }
@@ -323,7 +373,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
    * Resolves true once the reference is live and this bundle's server for this device answers; false when the
    * socket closed first, as a stale port or another phone's secret makes it.
    */
-  private async open(session: Session, connection: SshConnection, target: Target, name: string,
+  private async open(session: Session, connection: SshConnection, target: Target, name: string, description: string,
     signal: AbortSignal): Promise<boolean> {
     session.link?.close();
     await session.forward?.close().catch(() => {});
@@ -356,8 +406,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
       if (signal.aborted) abort();
     });
     if (!live) return false;
-    const { bundle, device } = ref.server.value;
-    return bundle === SERVER_BUNDLE && device === name;
+    const server = ref.server.value;
+    return server.bundle === SERVER_BUNDLE && server.device === name && server.description === description;
   }
 
   /** The one reference to the machine's InfiniChat, held again only after the server forced it away. */
@@ -370,6 +420,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
     ref.scheduled.subscribe(this.refresh);
     ref.access.subscribe(this.refresh);
     ref.signInAttempt.subscribe(this.refresh);
+    ref.conversation.subscribe(this.refresh);
     // Forced away while connected, as when the server shuts down: connecting again holds a new one.
     ref.onStatus((status) => {
       if (status === 'gone') this.dropped(this.session);
@@ -384,7 +435,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const { view, report } = ref.snapshot.value;
     this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value,
       scheduled: ref.scheduled.value, catalog: ref.catalog.value, access: ref.access.value,
-      signIn: ref.signInAttempt.value };
+      signIn: ref.signInAttempt.value, conversation: ref.conversation.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };
     this.notify();
   };

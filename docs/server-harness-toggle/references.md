@@ -74,6 +74,16 @@ Checked on 2026-10-21. Versions:
 | A member may not be both state and method, at v1.4.0 | chord `src/contract.ts:237` |
 | `AuthRequest.promptAsync({ url })` uses only `redirectUri` (the session's return URL) and `state` (`parseReturnUrl`) | expo-auth-session 58.0.14 `src/AuthRequest.ts:137-201` |
 | The native receiver accepts any non-empty state of at most 1,024 bytes without control characters | `modules/pi-oauth-callback/ios/OAuthCallbackServer.swift:54-55`, `OAuthCallbackHTTP.swift:57-58` |
+| Members a contract may not use include `release`, a reference's own method, at v1.4.0 | chord `src/contract.ts:179-193` |
+| Past the flow-control window (256 KiB), each member's waiting state sits in its own slot and the slots flush in creation order; only frames of one stream stay in order, at v1.4.0 | chord `docs/spec.md:242`, `:287`; `src/connection.ts:325-350` |
+| Node's SQLite close checkpoints the WAL (`TRUNCATE`) and closes, so a clean close leaves no WAL, at v1.4.0 | chord `src/sqlite/node.ts:166` |
+| Partials commit every 100 ms; a resumed generation turns a committed partial into an assistant entry with `stopReason: "aborted"`, after a close or a crash alike, at v1.4.0 | pi-durable `README.md:502`; `src/harness/generation.ts:429-438`, `:214`, `:307` |
+| Upstream session sync hands a running generation over by opening a copy, whose recovery resets it to pending | pi branch `replication` at `2cf6cd898`, `packages/durable/test/sync-e2e.test.ts:143-171` |
+| expo-sqlite opens a database by name in `defaultDatabaseDirectory` (`<Documents>/SQLite` on iOS); `databasePath` is that folder and the name | expo-sqlite 58.0.13 `src/SQLiteDatabase.ts:583`, `src/pathUtils.ts:24-36`, `ios/SQLiteModule.swift:24-30` |
+| Copying only the `.db` of a live WAL database misses commits in its WAL | expo-sqlite skill `references/web-and-config.md`, "Backups and serialization" |
+| `File.writableStream()` writes through `FileHandle(forWritingTo:)`, which needs an existing file; `File.digest('SHA-256')` hashes natively in 64 KiB reads | expo-file-system 58.0.10 `build/File.d.ts:154`, `ios/FileSystemFileHandle.swift:67`, `ios/FileSystemFile.swift:59-90` |
+| `openShell` delivers stdout as native-owned `ArrayBuffer`s; `close()` resolves after `onClosed` | react-native-ssh 0.3.0 `src/index.ts:124-130`, `:241` |
+| expo-modules-core turns a plain path into a file URL | expo-modules-core 58.0.24 `ios/Core/Arguments/Convertibles.swift:13-39`, `ios/Utilities/Utilities.swift:62-83` |
 
 ## Chord over WebSocket in Hermes
 
@@ -142,6 +152,8 @@ A subagent's assessment of branch `replication` at `2cf6cd898`, 2026-10-21. It i
 | Piece 2's asset (`assets/infinichat-server/server.bin`, esbuild 0.28.2, pi 1.4.0) | 8,109,307 bytes, 1,880,796 gzipped |
 | Piece 4's asset, with pi-ai's OAuth flows registered statically | 8,246,243 bytes, 1,907,540 gzipped (bundle `9711b916…`); after the review 8,247,840 bytes (bundle `f296c97f…`) |
 | The server's `catalog` state (six providers, 490 models) | 115,466 bytes of JSON; identical to the phone's own `buildModelCatalog` |
+| Piece 5's asset | 8,256,566 bytes (bundle `96acc658…`) |
+| Moving the realistic copy over loopback (piece 5) | 43,520,560 bytes there in 943 ms, adopted in 57 ms; 39,211,008 bytes back in 156 ms |
 
 ## Piece 2 on macOS
 
@@ -284,6 +296,57 @@ No device or simulator was used, and nothing signed in to a real account.
 | Before the fix: pi-ai's flows without `registerBunOAuthFlows()` | `models.login` rejected with `ERR_MODULE_NOT_FOUND` for `openai-chatgpt.js` next to the bundle |
 | `npx expo export --platform ios` | Bundled (Hermes bytecode, 13 MB) |
 
+## Piece 5 on macOS
+
+**Checks, 2026-10-22**, on the implementer's Mac (arm64; the server on Node 24.5.0 from Homebrew, the phone's code on
+Node 25.6.1), with pi 1.4.0 (tag `4a080252f`), Expo 58.0.17, expo-sqlite 58.0.13, expo-file-system 58.0.10 and
+react-native-ssh 0.3.0 installed. No device or simulator was used. The final run passed 74 of 74 checks. The copies
+ran over loopback, so the times are the Mac's, not Tailscale's.
+- **What ran on the phone's side:** one Node process per launch of the app, with the app's real `ShownInfiniChat`,
+  `InfiniChatMoves`, home record, `RemoteInfiniChat`, `openPhoneInfiniChat`, `openExpoSqliteStorage`,
+  `createRemoteHostRepository`, contract and Chord, wired as `chat-provider.tsx` wires them, bundled with esbuild.
+  A screen was a subscriber on the shown view that recorded every value it got.
+- **Stand-ins, not committed:** react-native-ssh (each command run as sshd runs it, `$SHELL -c` with sshd's `PATH`;
+  `forwardLocal` a loopback pipe; an optional rate limit), expo-sqlite (`node:sqlite`, logging each open and close),
+  expo-sqlite/kv-store and the Keychain (files, so a relaunched process kept them), expo-file-system's `File` (over
+  `node:fs`), expo-crypto, expo-asset, expo-notifications, expo-image-manipulator, expo-location, expo-task-manager and
+  the Live Activity component; React Native's three-argument `WebSocket` as in piece 3.
+- **The model:** pi-ai's faux provider on the phone, scripted per message and streaming slowly.
+- **The server:** started by hand with `TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)`, sshd's `PATH`, no provider variables
+  and outbound HTTPS sent to a closed port. The real asset (bundle `96acc658…`) for everything but the mid-run moves;
+  for those, the same `server/main.ts` built with pi-ai's faux providers added to its models, so a resumed run can
+  finish on the machine.
+- **Never both open:** the phone's opens and closes of its database (from the expo-sqlite stand-in's log) against the
+  machine's `active` spans (from `state.json`'s mtime, polled every 5 ms), and `lsof` sampling both database paths
+  every 25 ms.
+- **The realistic database:** copies of `infinichat.db` and `infinichat.db-wal` from
+  `~/pi-react-native/after-2026-10-21-1.4.0/SQLite`, in a new directory; the original's SHA-256 was the same after.
+  Only counts, ids, sizes and times were printed. The copies were deleted afterwards.
+- **Afterwards:** `~/.infinichat`, every copy and the harness's phone directories were removed; no server, phone
+  process, LaunchAgent or Chord lock socket was left.
+
+| Check | Result |
+| --- | --- |
+| Synthetic round trip, the real server: a new conversation made by the app's own code, two answers from the faux model | Move there 147 ms, back 24 ms (167,936 bytes). Transcript, message ids and controls identical on the machine and back on the phone. After the move there, `infinichat-moved.db` and no `infinichat.db` on the phone, the machine `active` with the files it adopted. After the move back the machine inactive, `data/` in `released/<time>/`, the moved copy gone |
+| The screen through each move (a subscriber on the shown view) | Never `loading`, never fewer messages; the last values until the one switch to the new side |
+| Mid-run move there, the faux server | The answer was streaming on the phone (20 characters in; 24 on the way back). The model was asked once on each side. The machine finished it: one user row, the interrupted attempt as a stopped answer, one complete answer |
+| Mid-run move back | The same, finished on the phone |
+| A send while a move holds the screens | "InfiniChat is moving. Send again once the move is done." Sent twice afterwards with its `requestId`: one user row, one model request, one answer |
+| Realistic copy, `moving-there` at launch (the record only, as a phone killed after closing) | Resumed from step 3 with the database and its WAL as they were: 43,520,560 bytes (39,211,008 + 4,309,552) copied in 943 ms, adopted in 57 ms; the machine’s view `ready` with 1,433 messages 1.30 s after launch |
+| Realistic move back | 39,211,008 bytes (the machine's close checkpointed the WAL into the database) in 156 ms; placed and opened on the phone in 110 ms |
+| Realistic moves with the phone holding it open | There 1.11 s, back 0.25 s; the same 1,433 message ids on each side |
+| Counts, before, after the round trip, and in the machine's released copy | 1,682 entries, 1,840 `optchat.message` and 3,680 `optchat.node` documents, schema 2, integrity check clean, each time |
+| Migration errors | None on either side: the phone and the machine opened the schema-2 database, and the server's log holds Node's experimental-SQLite warning only |
+| The phone killed mid-upload (8 MB/s link, at 13.1 of 39.2 MB) | Record `moving-there`, machine inactive. The relaunch resumed at step 3 and finished there (copy 4.97 s at that rate) |
+| The phone killed mid-download (at 13.1 of 39.2 MB) | Record `moving-back`, machine released and inactive. The relaunch downloaded again and finished on the phone |
+| Cancel during the copy there, and back (12 and 10 repeats) | There: home `phone`, the phone open again, the machine never active. Back: the machine adopted its files again, home `there`. The screens kept their values throughout |
+| The machine killed with `SIGKILL` while holding the conversation | Restarted by hand: it reopened the database at once (`active`), and a relaunched phone showed the same 1,433 messages |
+| The machine restarted while released (the phone killed mid-download) | It opened nothing (`lsof`); the relaunched phone finished the move back |
+| Unreachable machine (new connections refused, live sessions dropped) | A move there stopped at "Connecting to test-mac failed. …" with the phone still open and the record `phone`; a move back stopped at "Closing InfiniChat on test-mac failed. …" with the record `there`. Cancel cleared each. A launch with the conversation there showed the machine at once with its failed connection; Try Again showed the conversation |
+| Never both open, in every section | No overlap between the phone's opens and the machine's `active` spans, and `lsof` never saw both databases open (about 930 samples) |
+| Found by these checks and fixed | The first `ready` overtaking 1,433 messages (`snapshot` now last); a Cancel's queued `closeMachine` handing the next move a closing client whose `connected()` never settled |
+| The stand-in itself | Its channel close first left `cat` waiting on an open stdin, which a real channel close ends; fixed in the stand-in before the repeats |
+
 ## Unverified until a piece checks it
 
 - App Transport Security for `ws://127.0.0.1` through `forwardLocal` on a Release build (piece 3).
@@ -304,7 +367,11 @@ No device or simulator was used, and nothing signed in to a real account.
   into the machine's prompt. On the Mac the receiver and browser were stand-ins and no token exchange reached OpenAI.
 - Piece 4 on Linux, and pi-ai's other sign-in flows on a machine (Anthropic, OpenRouter, xAI), which the phone does
   not offer.
-- Move timings on the real database (piece 5).
+- Piece 5 on the phone: the move with Tailscale's real latency and bandwidth (the Mac's copies ran over loopback),
+  `defaultDatabaseDirectory` and `File` with the app's real container paths, expo-file-system's `writableStream` and
+  `digest` on a 40 MB file, expo-sqlite's close leaving no WAL, the header's progress and the menu's Cancel Move, the
+  screens keeping their scroll and draft through a move, and a killed app relaunching into a move.
+- Piece 5 against Linux, and against a machine whose `released/` holds earlier conversations.
 
 Checked in piece 1: the native web-search wrapper in `createChatModels` never reaches InfiniChat requests. It acts
 only on a request whose signal the chat service's `openai-native-web-search` extension bound

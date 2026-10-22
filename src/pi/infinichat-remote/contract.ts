@@ -30,8 +30,22 @@ export const ServerSchema = Type.Object({
   bundle: Type.String(),
   pi: Type.Object({ durable: Type.String(), ai: Type.String(), chord: Type.String() }),
   device: Type.String(),
+  /** The device's description, the text the phone's device list gives the machine. */
+  description: Type.String(),
 });
 export type InfiniChatServer = Static<typeof ServerSchema>;
+
+const FileSchema = Type.Object({ sha256: Type.String(), size: Type.Number() });
+/** The conversation's database file and the WAL beside it, if one remains, by SHA-256 and size. */
+export const ConversationFilesSchema = Type.Object({ db: FileSchema, wal: Type.Optional(FileSchema) });
+export type ConversationFiles = Static<typeof ConversationFilesSchema>;
+/**
+ * Whether this machine holds the conversation open, and the files it adopted then. Only the side that holds it opens
+ * its database: the phone's home record decides who may, and the server opens it only while `active`.
+ */
+export const ConversationSchema = Type.Object({ active: Type.Boolean(),
+  adopted: Type.Optional(ConversationFilesSchema) });
+export type ConversationState = Static<typeof ConversationSchema>;
 
 /** The provider sign-ins of the machine's own credential store, keyed by provider. */
 export const AccessSchema = Type.Record(Type.String(), ProviderAccessSchema);
@@ -76,7 +90,7 @@ export const InfiniChatRemote = remote('infinichat.remote', {
     owner: {
       state: {
         snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
-        server: ServerSchema, catalog: ModelCatalogSchema, access: AccessSchema,
+        server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
         // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:237`).
         signInAttempt: SignInAttemptSchema,
       },
@@ -98,6 +112,14 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         cancelSignIn: method(),
         setApiKey: method(Type.Object({ providerId: Type.String(), key: Type.String() })),
         signOut: method(Type.Object({ providerId: Type.String() })),
+        // Moving the conversation, as upstream's session sync hands a session over: one side closes its Harness, the
+        // files are copied, the other side opens them. `adopt` opens the files in `data/` when they match, and is
+        // refused while active. `relinquish` (Chord reserves `release`) stops input, closes the Harness and its
+        // storage, and names the files it left; called again, it names them again. `archive` moves released files
+        // where nothing opens them, and is refused while active.
+        adopt: method(ConversationFilesSchema),
+        relinquish: method(undefined, ConversationFilesSchema),
+        archive: method(),
       },
     },
   },

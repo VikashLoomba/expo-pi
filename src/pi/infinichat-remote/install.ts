@@ -7,6 +7,7 @@ import { connectionFailure } from '../execution/remote/channel';
 import { runSshCommand } from '../execution/remote/command-channel';
 import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
 import { HASH, quotePosix, script } from '../execution/remote/provisioning';
+import { machineDescription } from '../infinichat/device-tools';
 import { createCredentialBackend } from '../secure-storage';
 import { loadServerBundle } from './server-assets';
 import { INFINICHAT_SERVER_MANIFEST } from './server-manifest';
@@ -27,7 +28,7 @@ export interface InstalledServer {
 
 const LABEL = 'com.vikashloomba.piagent.infinichat';
 const MARKER = 'INFINICHAT-SETUP';
-const PRINT_MARKER = `printf '%s\\n' "$M"`;
+export const PRINT_MARKER = `printf '%s\\n' "$M"`;
 /** pi-env's `UPLOAD_TIMEOUT_MS`, as provisioning.ts uploads the Pi daemon; other steps keep the 60 s default. */
 const UPLOAD_TIMEOUT_MS = 300_000;
 const CONTROL = /[\x00-\x1f\x7f]/;
@@ -47,13 +48,15 @@ function messages(name: string) {
   };
 }
 
-interface Step {
+export interface Step {
   /** The message for a script that fails or answers without its marker. */
   failure: string;
   /** The message when the step's timeout ends it; by default a connection failure. */
   timedOut?: string;
   input?: Uint8Array;
-  timeoutMs?: number;
+  /** 60 s by default; `null` for none (`runSshCommand`). */
+  timeoutMs?: number | null;
+  onWritten?: (bytes: number) => void;
 }
 type Run = (lines: string[], step: Step) => Promise<string[]>;
 
@@ -61,12 +64,12 @@ type Run = (lines: string[], step: Step) => Promise<string[]>;
  * One POSIX script over the install's connection. Its answer is what it prints after the marker, which comes after
  * anything the account's shell startup files print.
  */
-async function runScript(connection: SshConnection, signal: AbortSignal, name: string, lines: string[],
+export async function runScript(connection: SshConnection, signal: AbortSignal, name: string, lines: string[],
   step: Step): Promise<string[]> {
   let response: { stdout: string; exitCode: number };
   try {
     response = await runSshCommand(connection, script(['set -eu', `M=${MARKER}`, ...lines].join('\n')),
-      { signal, input: step.input, timeoutMs: step.timeoutMs });
+      { signal, input: step.input, timeoutMs: step.timeoutMs, onWritten: step.onWritten });
   } catch (error) {
     if (error instanceof BootstrapError && error.code === 'CANCELLED') throw error;
     if (error instanceof BootstrapError && error.code === 'TIMEOUT' && step.timedOut) throw new Error(step.timedOut);
@@ -324,7 +327,8 @@ export async function installServer(hosts: RemoteHostRepository, machineId: stri
       'if [ -f "$d/secret" ] && cmp -s "$t" "$d/secret"; then r=same; else mv -f "$t" "$d/secret"; r=changed; fi',
       'chmod 600 "$d/secret"', PRINT_MARKER, 'echo "$r"'], { failure: message.files, input: Buffer.from(secret) });
     const restart = secretFile === 'changed';
-    const args = [machine.node, file, 'serve', '--device', name];
+    // The device list's own text for the machine, so the model's memory of it stays true once the conversation moves.
+    const args = [machine.node, file, 'serve', '--device', name, '--description', machineDescription(host)];
     const [manager, linger] = machine.platform === 'darwin'
       ? await run(launchdScript(restart, SERVER_BUNDLE),
         { failure: message.service, timedOut: message.service, input: Buffer.from(launchAgent(args)) })

@@ -4635,7 +4635,7 @@ var require_websocket = __commonJS({
     var http3 = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes: randomBytes2, createHash: createHash3 } = __require("crypto");
+    var { randomBytes: randomBytes2, createHash: createHash4 } = __require("crypto");
     var { Duplex, Readable: Readable2 } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -5316,7 +5316,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash3("sha1").update(key2 + GUID).digest("base64");
+        const digest = createHash4("sha1").update(key2 + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -5688,7 +5688,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http3 = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash3 } = __require("crypto");
+    var { createHash: createHash4 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -5995,7 +5995,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash3("sha1").update(key2 + GUID).digest("base64");
+        const digest = createHash4("sha1").update(key2 + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -7384,11 +7384,11 @@ var init_base64 = __esm({
 });
 
 // node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@3.25.76/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs
-function noop4() {
+function noop5() {
 }
 function makeLogFn(fnLevel, logger, logLevel) {
   if (!logger || levelNumbers[fnLevel] > levelNumbers[logLevel]) {
-    return noop4;
+    return noop5;
   } else {
     return logger[fnLevel].bind(logger);
   }
@@ -7424,7 +7424,7 @@ function defaultLogger() {
   return cachedDefaultLogger;
 }
 function debugLogRequestDetails(logger, message, details) {
-  if (logger.debug === noop4) {
+  if (logger.debug === noop5) {
     return;
   }
   logger.debug(message, formatRequestDetails(details));
@@ -7454,10 +7454,10 @@ var init_log = __esm({
       return void 0;
     };
     noopLogger = {
-      error: noop4,
-      warn: noop4,
-      info: noop4,
-      debug: noop4
+      error: noop5,
+      warn: noop5,
+      info: noop5,
+      debug: noop5
     };
     cachedLoggers = /* @__PURE__ */ new WeakMap();
     formatRequestDetails = (details) => {
@@ -25861,11 +25861,11 @@ var init_line2 = __esm({
 });
 
 // node_modules/.pnpm/openai@7.19.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signature-v4@5.7.3_undici@7.29.0_ws@8.22.0_zod@3.25.76/node_modules/openai/internal/utils/log.mjs
-function noop5() {
+function noop6() {
 }
 function makeLogFn2(fnLevel, logger, logLevel) {
   if (!logger || levelNumbers2[fnLevel] > levelNumbers2[logLevel]) {
-    return noop5;
+    return noop6;
   } else {
     return logger[fnLevel].bind(logger);
   }
@@ -25931,10 +25931,10 @@ var init_log2 = __esm({
       return void 0;
     };
     noopLogger2 = {
-      error: noop5,
-      warn: noop5,
-      info: noop5,
-      debug: noop5
+      error: noop6,
+      warn: noop6,
+      info: noop6,
+      debug: noop6
     };
     cachedLoggers2 = /* @__PURE__ */ new WeakMap();
     sensitiveQueryNames = /* @__PURE__ */ new Set([
@@ -48971,13 +48971,13 @@ var require_ponyfill_es2018 = __commonJS({
       typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global2 = typeof globalThis !== "undefined" ? globalThis : global2 || self, factory(global2.WebStreamsPolyfill = {}));
     })(exports, (function(exports2) {
       "use strict";
-      function noop7() {
+      function noop8() {
         return void 0;
       }
       function typeIsObject(x2) {
         return typeof x2 === "object" && x2 !== null || typeof x2 === "function";
       }
-      const rethrowAssertionErrorRejection = noop7;
+      const rethrowAssertionErrorRejection = noop8;
       function setFunctionName(fn, name) {
         try {
           Object.defineProperty(fn, "name", {
@@ -51606,7 +51606,7 @@ var require_ponyfill_es2018 = __commonJS({
               return newPromise((resolveRead, rejectRead) => {
                 ReadableStreamDefaultReaderRead(reader, {
                   _chunkSteps: (chunk) => {
-                    currentWrite = PerformPromiseThen(WritableStreamDefaultWriterWrite(writer, chunk), void 0, noop7);
+                    currentWrite = PerformPromiseThen(WritableStreamDefaultWriterWrite(writer, chunk), void 0, noop8);
                     resolveRead(false);
                   },
                   _closeSteps: () => resolveRead(true),
@@ -52287,7 +52287,7 @@ var require_ponyfill_es2018 = __commonJS({
       function ReadableStreamFromIterable(asyncIterable) {
         let stream6;
         const iteratorRecord = GetIterator(asyncIterable, "async");
-        const startAlgorithm = noop7;
+        const startAlgorithm = noop8;
         function pullAlgorithm() {
           let nextResult;
           try {
@@ -52339,7 +52339,7 @@ var require_ponyfill_es2018 = __commonJS({
       }
       function ReadableStreamFromDefaultReader(reader) {
         let stream6;
-        const startAlgorithm = noop7;
+        const startAlgorithm = noop8;
         function pullAlgorithm() {
           let readPromise;
           try {
@@ -52658,7 +52658,7 @@ var require_ponyfill_es2018 = __commonJS({
           });
         }
         const sourceCancelPromise = stream6._readableStreamController[CancelSteps](reason);
-        return transformPromiseWith(sourceCancelPromise, noop7);
+        return transformPromiseWith(sourceCancelPromise, noop8);
       }
       function ReadableStreamClose(stream6) {
         stream6._state = "closed";
@@ -53879,7 +53879,7 @@ async function toFormData(Body2, ct) {
   parser.end();
   return formData;
 }
-var s, S, f2, F, LF, CR, SPACE, HYPHEN, COLON, A, Z, lower, noop6, MultipartParser;
+var s, S, f2, F, LF, CR, SPACE, HYPHEN, COLON, A, Z, lower, noop7, MultipartParser;
 var init_multipart_parser = __esm({
   "node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/multipart-parser.js"() {
     init_define_INFINICHAT_PI();
@@ -53911,7 +53911,7 @@ var init_multipart_parser = __esm({
     A = 97;
     Z = 122;
     lower = (c) => c | 32;
-    noop6 = () => {
+    noop7 = () => {
     };
     MultipartParser = class {
       /**
@@ -53920,13 +53920,13 @@ var init_multipart_parser = __esm({
       constructor(boundary) {
         this.index = 0;
         this.flags = 0;
-        this.onHeaderEnd = noop6;
-        this.onHeaderField = noop6;
-        this.onHeadersEnd = noop6;
-        this.onHeaderValue = noop6;
-        this.onPartBegin = noop6;
-        this.onPartData = noop6;
-        this.onPartEnd = noop6;
+        this.onHeaderEnd = noop7;
+        this.onHeaderField = noop7;
+        this.onHeadersEnd = noop7;
+        this.onHeaderValue = noop7;
+        this.onPartBegin = noop7;
+        this.onPartData = noop7;
+        this.onPartEnd = noop7;
         this.boundaryChars = {};
         boundary = "\r\n--" + boundary;
         const ui8a = new Uint8Array(boundary.length);
@@ -61021,7 +61021,7 @@ var require_getCredentials = __commonJS({
     var fs7 = __require("fs");
     var util_1 = __require("util");
     var errorWithCode_1 = require_errorWithCode();
-    var readFile6 = fs7.readFile ? (0, util_1.promisify)(fs7.readFile) : async () => {
+    var readFile7 = fs7.readFile ? (0, util_1.promisify)(fs7.readFile) : async () => {
       throw new errorWithCode_1.ErrorWithCode("use key rather than keyFile.", "MISSING_CREDENTIALS");
     };
     var ExtensionFiles;
@@ -61043,7 +61043,7 @@ var require_getCredentials = __commonJS({
        * @returns A promise that resolves with the credentials.
        */
       async getCredentials() {
-        const key2 = await readFile6(this.keyFilePath, "utf8");
+        const key2 = await readFile7(this.keyFilePath, "utf8");
         let body;
         try {
           body = JSON.parse(key2);
@@ -61069,7 +61069,7 @@ var require_getCredentials = __commonJS({
        * @returns A promise that resolves with the private key.
        */
       async getCredentials() {
-        const privateKey = await readFile6(this.keyFilePath, "utf8");
+        const privateKey = await readFile7(this.keyFilePath, "utf8");
         return { privateKey };
       }
     };
@@ -62710,7 +62710,7 @@ var require_filesubjecttokensupplier = __commonJS({
     exports.FileSubjectTokenSupplier = void 0;
     var util_1 = __require("util");
     var fs7 = __require("fs");
-    var readFile6 = (0, util_1.promisify)(fs7.readFile ?? (() => {
+    var readFile7 = (0, util_1.promisify)(fs7.readFile ?? (() => {
     }));
     var realpath3 = (0, util_1.promisify)(fs7.realpath ?? (() => {
     }));
@@ -62750,7 +62750,7 @@ var require_filesubjecttokensupplier = __commonJS({
           throw err2;
         }
         let subjectToken;
-        const rawText = await readFile6(parsedFilePath, { encoding: "utf8" });
+        const rawText = await readFile7(parsedFilePath, { encoding: "utf8" });
         if (this.formatType === "text") {
           subjectToken = rawText;
         } else if (this.formatType === "json" && this.subjectTokenFieldName) {
@@ -74399,10 +74399,10 @@ function raiseUndiciTimeouts(timeout) {
   }
 }
 function createAttemptSignal(timeout, callerSignal) {
-  const noop7 = () => {
+  const noop8 = () => {
   };
   if (!(timeout && timeout > 0) && !callerSignal) {
-    return { signal: void 0, dispose: noop7 };
+    return { signal: void 0, dispose: noop8 };
   }
   const controller = new AbortController();
   let timeoutHandle;
@@ -88522,7 +88522,7 @@ function timeoutError(timeoutMs) {
   error.body = "";
   return error;
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function requiredNumber(label, value, field) {
@@ -88574,7 +88574,7 @@ function tokenCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 function parseClassifierUsage(value, model2) {
-  if (!isRecord3(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
+  if (!isRecord4(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
     return void 0;
   const input = tokenCount(value.input_tokens);
   const output = tokenCount(value.output_tokens);
@@ -88657,7 +88657,7 @@ function choiceProbabilities(value, id) {
   if (!Array.isArray(value))
     throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
   return Object.fromEntries(value.map((entry2) => {
-    if (!isRecord3(entry2) || typeof entry2.value !== "string") {
+    if (!isRecord4(entry2) || typeof entry2.value !== "string") {
       throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
     }
     return [entry2.value, requiredNumber(LABEL, entry2.probability, `probability for ${id}.${entry2.value}`)];
@@ -88695,7 +88695,7 @@ function parseAnswers(value, context3) {
     throw new Error(`${LABEL} returned an unexpected response`);
   const byName = /* @__PURE__ */ new Map();
   for (const answer2 of value) {
-    if (isRecord3(answer2) && typeof answer2.name === "string")
+    if (isRecord4(answer2) && typeof answer2.name === "string")
       byName.set(answer2.name, answer2);
   }
   return Object.fromEntries(Object.entries(context3.questions).map(([id, question]) => {
@@ -88737,7 +88737,7 @@ var init_openai_decisions = __esm({
           input: wireInput(context3),
           questions: Object.entries(context3.questions).map(([id, question]) => wireQuestion(id, question))
         }, options, NO_RETRY_STATUSES);
-        if (!isRecord3(body))
+        if (!isRecord4(body))
           throw new Error(`${LABEL} returned an unexpected response`);
         const usage = parseClassifierUsage(body.usage, model2);
         if (usage)
@@ -89900,7 +89900,7 @@ var init_openrouter_images = __esm({
 
 // node_modules/.pnpm/@earendil-works+pi-ai@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatur_650820bfd44a3c6cefd0e1345c0a96b9/node_modules/@earendil-works/pi-ai/dist/api/system-one-shared.js
 function probabilities(label, value, id) {
-  if (!isRecord3(value))
+  if (!isRecord4(value))
     throw new Error(`${label} returned invalid probabilities for ${id}`);
   return Object.fromEntries(Object.entries(value).map(([key2, probability]) => [
     key2,
@@ -89908,12 +89908,12 @@ function probabilities(label, value, id) {
   ]));
 }
 function parseAnswers2(label, value, context3) {
-  if (!isRecord3(value))
+  if (!isRecord4(value))
     throw new Error(`${label} returned an unexpected response`);
   const answers = [];
   for (const [id, question] of Object.entries(context3.questions)) {
     const answer2 = value[id];
-    if (!isRecord3(answer2))
+    if (!isRecord4(answer2))
       throw new Error(`${label} did not return an answer for ${id}`);
     if (question.type === "choice") {
       if (answer2.type !== "choice" || typeof answer2.choice !== "string") {
@@ -90063,7 +90063,7 @@ var init_typesafe_system_one = __esm({
       url: (model2) => new URL("systemone", `${model2.baseUrl.replace(/\/+$/u, "")}/`),
       payload: (model2, request2) => ({ model: model2.id, ...request2 }),
       output: (body) => {
-        if (!isRecord3(body))
+        if (!isRecord4(body))
           throw new Error("System One API returned an unexpected response");
         return body;
       }
@@ -90074,9 +90074,9 @@ var init_typesafe_system_one = __esm({
 
 // server/main.ts
 init_define_INFINICHAT_PI();
-import { mkdir as mkdir5 } from "node:fs/promises";
+import { mkdir as mkdir6 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename5, dirname as dirname4, join as join7 } from "node:path";
+import { basename as basename5, dirname as dirname4, join as join8 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -112876,1096 +112876,6 @@ function registerBunOAuthFlows() {
   });
 }
 
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/node.js
-init_define_INFINICHAT_PI();
-
-// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/index.js
-init_define_INFINICHAT_PI();
-
-// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/migrations.js
-init_define_INFINICHAT_PI();
-
-// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/schema.js
-init_define_INFINICHAT_PI();
-function validateSqliteSchemaPrefix(prefix) {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(prefix)) {
-    throw new Error(`Invalid SQLite schema prefix ${JSON.stringify(prefix)}`);
-  }
-  if (prefix.toLowerCase().startsWith("sqlite_")) {
-    throw new Error(`SQLite schema prefix ${JSON.stringify(prefix)} is reserved`);
-  }
-}
-
-// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/migrations.js
-async function applySqliteMigrations(database, migrations, options) {
-  const { table } = options;
-  validateSqliteSchemaPrefix(table);
-  for (let index3 = 0; index3 < migrations.length; index3++) {
-    if (migrations[index3]?.version !== index3 + 1) {
-      throw new Error("SQLite migrations must have contiguous versions starting at 1");
-    }
-  }
-  await database.transaction(async (transaction) => {
-    await transaction.exec(`CREATE TABLE IF NOT EXISTS ${table} (
-			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-			version INTEGER NOT NULL CHECK (version >= 0)
-		) STRICT`);
-    await transaction.run(`INSERT OR IGNORE INTO ${table} (singleton, version) VALUES (1, 0)`);
-    const row = await transaction.get(`SELECT version FROM ${table} WHERE singleton = 1`);
-    if (row === void 0)
-      throw new Error("SQLite schema metadata is missing");
-    const currentVersion = migrations.at(-1)?.version ?? 0;
-    if (row.version > currentVersion) {
-      throw new Error(`SQLite schema version ${row.version} is newer than supported version ${currentVersion}`);
-    }
-    for (const migration of migrations) {
-      if (migration.version <= row.version)
-        continue;
-      for (const statement of migration.statements)
-        await transaction.exec(statement);
-      await transaction.run(`UPDATE ${table} SET version = ? WHERE singleton = 1`, migration.version);
-    }
-  });
-}
-
-// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/node.js
-init_define_INFINICHAT_PI();
-import { mkdir as mkdir2 } from "node:fs/promises";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-var DEFAULT_WAL_AUTO_CHECKPOINT_PAGES = 1e3;
-var DEFAULT_BUSY_TIMEOUT_MS = 5e3;
-var ignore = () => {
-};
-var SerialOperationQueue = class {
-  tail = Promise.resolve();
-  pending = 0;
-  run(operation) {
-    if (this.pending > 0)
-      return this.enqueue(operation);
-    try {
-      return Promise.resolve(operation());
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-  runAsync(operation) {
-    if (this.pending > 0)
-      return this.enqueue(operation);
-    this.pending++;
-    const { promise: barrier, resolve: releaseBarrier } = Promise.withResolvers();
-    this.tail = barrier;
-    let started;
-    try {
-      started = operation();
-    } catch (error) {
-      started = Promise.reject(error);
-    }
-    return started.finally(() => {
-      this.pending--;
-      releaseBarrier();
-    });
-  }
-  enqueue(operation) {
-    this.pending++;
-    return this.release(this.tail.then(operation));
-  }
-  release(operation) {
-    const settled = operation.finally(() => {
-      this.pending--;
-    });
-    this.tail = settled.then(ignore, ignore);
-    return settled;
-  }
-};
-var NodeSqliteExecutor = class {
-  database;
-  statements;
-  constructor(database, statements) {
-    this.database = database;
-    this.statements = statements;
-  }
-  exec(sql) {
-    return this.runOperation(() => {
-      this.database.exec(sql);
-    });
-  }
-  run(sql, ...params) {
-    return this.runOperation(() => {
-      this.statement(sql).run(...params);
-    });
-  }
-  get(sql, ...params) {
-    return this.runOperation(() => this.statement(sql).get(...params));
-  }
-  all(sql, ...params) {
-    return this.runOperation(() => this.statement(sql).all(...params));
-  }
-  statement(sql) {
-    let statement = this.statements.get(sql);
-    if (statement === void 0) {
-      statement = this.database.prepare(sql);
-      this.statements.set(sql, statement);
-    }
-    return statement;
-  }
-};
-var NodeSqliteTransaction = class extends NodeSqliteExecutor {
-  scope;
-  constructor(database, statements, scope) {
-    super(database, statements);
-    this.scope = scope;
-  }
-  async runOperation(operation) {
-    if (!this.scope.active)
-      throw new Error("SQLite transaction handle is no longer active");
-    return operation();
-  }
-};
-var NodeSqliteDatabase = class extends NodeSqliteExecutor {
-  access = new SerialOperationQueue();
-  closed = false;
-  constructor(database) {
-    super(database, /* @__PURE__ */ new Map());
-  }
-  transaction(callback) {
-    return this.access.runAsync(async () => {
-      this.database.exec("BEGIN IMMEDIATE");
-      const scope = { active: true };
-      try {
-        const result = await callback(new NodeSqliteTransaction(this.database, this.statements, scope));
-        scope.active = false;
-        this.database.exec("COMMIT");
-        return result;
-      } catch (error) {
-        scope.active = false;
-        try {
-          this.database.exec("ROLLBACK");
-        } catch (rollbackError) {
-          throw new AggregateError([error, rollbackError], "SQLite transaction failed and rollback failed");
-        }
-        throw error;
-      }
-    });
-  }
-  close() {
-    return this.access.run(() => {
-      if (this.closed)
-        return;
-      this.closed = true;
-      this.statements.clear();
-      try {
-        this.database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-      } finally {
-        this.database.close();
-      }
-    });
-  }
-  runOperation(operation) {
-    return this.access.run(operation);
-  }
-};
-async function openNodeSqliteDatabase(path6, options = {}) {
-  const checkpointPages = options.walAutoCheckpointPages ?? DEFAULT_WAL_AUTO_CHECKPOINT_PAGES;
-  const timeout = options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS;
-  if (path6 !== ":memory:")
-    await mkdir2(dirname(path6), { recursive: true });
-  const database = new DatabaseSync(path6, { timeout });
-  const adapter = new NodeSqliteDatabase(database);
-  try {
-    await adapter.exec("PRAGMA journal_mode = WAL");
-    await adapter.exec("PRAGMA synchronous = NORMAL");
-    await adapter.exec(`PRAGMA wal_autocheckpoint = ${checkpointPages}`);
-    return adapter;
-  } catch (error) {
-    try {
-      await adapter.close();
-    } catch {
-    }
-    throw error;
-  }
-}
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/storage.js
-init_define_INFINICHAT_PI();
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/errors.js
-init_define_INFINICHAT_PI();
-function errorMessage(error) {
-  if (error instanceof Error)
-    return error.message;
-  try {
-    return String(error);
-  } catch {
-    return Object.prototype.toString.call(error);
-  }
-}
-var ReadAfterWrite = class extends Error {
-  constructor(method2) {
-    super(`Tx.${method2}() cannot read tables after the first table write`);
-    this.name = "ReadAfterWrite";
-  }
-};
-var StorageRequestError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "StorageRequestError";
-  }
-};
-var SessionFailed = class extends Error {
-  constructor(cause) {
-    super("Session failed after a storage error; close and reopen it", { cause });
-    this.name = "SessionFailed";
-  }
-};
-var ConversationBusy = class extends Error {
-  conversationId;
-  constructor(conversationId) {
-    super(`Conversation ${conversationId} is busy`);
-    this.name = "ConversationBusy";
-    this.conversationId = conversationId;
-  }
-};
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/ids.js
-init_define_INFINICHAT_PI();
-function idFromNumber(value) {
-  return value;
-}
-function seqFromNumber(value) {
-  return value;
-}
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/scan.js
-init_define_INFINICHAT_PI();
-function scanStart(requested, cursor, fallback) {
-  if (requested !== void 0 && requested !== "ascending" && requested !== "descending") {
-    throw new StorageRequestError(`Invalid scan order: ${String(requested)}`);
-  }
-  if (cursor === void 0)
-    return { order: requested ?? fallback, after: void 0 };
-  const { after, order: stored } = cursor;
-  if (typeof after !== "number" || !Number.isSafeInteger(after))
-    throw new StorageRequestError("Invalid storage cursor");
-  if (stored !== void 0 && stored !== "ascending" && stored !== "descending") {
-    throw new StorageRequestError("Invalid storage cursor");
-  }
-  const order = stored ?? fallback;
-  if (requested !== void 0 && requested !== order) {
-    throw new StorageRequestError(`The cursor continues a ${order} scan; the query asks for ${requested}`);
-  }
-  return { order, after };
-}
-function nextCursor(id, order) {
-  return { after: id, order };
-}
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/migrations.js
-init_define_INFINICHAT_PI();
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/schema.js
-init_define_INFINICHAT_PI();
-var TABLE_NAMES = {
-  durableSchema: "durable_schema",
-  durableMetadata: "durable_metadata",
-  recordIds: "record_ids",
-  conversations: "conversations",
-  entries: "entries",
-  tasks: "tasks",
-  submissions: "submissions",
-  documents: "documents",
-  documentRevisions: "document_revisions"
-};
-var INDEX_NAMES = {
-  conversationsByOwnerConversation: "conversations_by_owner_conversation",
-  conversationsByOwnerTask: "conversations_by_owner_task",
-  entriesByConversation: "entries_by_conversation",
-  entryHeadsByConversation: "entry_heads_by_conversation",
-  tasksByStatus: "tasks_by_status",
-  tasksByConversation: "tasks_by_conversation",
-  tasksByKind: "tasks_by_kind",
-  tasksByAbortRequested: "tasks_by_abort_requested",
-  tasksByBackground: "tasks_by_background",
-  submissionsByRequest: "submissions_by_request",
-  submissionsByConversation: "submissions_by_conversation",
-  submissionsByStatus: "submissions_by_status",
-  documentsByAddress: "documents_by_address",
-  documentsByScope: "documents_by_scope",
-  documentsByScopeKind: "documents_by_scope_kind",
-  documentRevisionsByKind: "document_revisions_by_kind"
-};
-function prefixIdentifiers(names3, prefix) {
-  return Object.fromEntries(Object.entries(names3).map(([key2, name]) => [key2, `${prefix}${name}`]));
-}
-function createSqliteSchema(prefix) {
-  if (prefix !== void 0)
-    validateSqliteSchemaPrefix(prefix);
-  const actualPrefix = prefix ?? "";
-  return {
-    tables: prefixIdentifiers(TABLE_NAMES, actualPrefix),
-    indexes: prefixIdentifiers(INDEX_NAMES, actualPrefix)
-  };
-}
-var DEFAULT_SQLITE_SCHEMA = createSqliteSchema();
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/migrations.js
-function createSqliteMigrations(schema) {
-  const { tables, indexes } = schema;
-  const initialSchema = [
-    `CREATE TABLE ${tables.durableMetadata} (
-			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-			next_id TEXT NOT NULL,
-			next_seq INTEGER NOT NULL
-		) STRICT`,
-    `INSERT INTO ${tables.durableMetadata} (singleton, next_id, next_seq) VALUES (1, '2', 1)`,
-    `CREATE TABLE ${tables.recordIds} (
-			id INTEGER PRIMARY KEY,
-			record_type TEXT NOT NULL CHECK (record_type IN ('conversation', 'entry', 'task', 'submission', 'document'))
-		) STRICT`,
-    `CREATE TABLE ${tables.conversations} (
-			id INTEGER PRIMARY KEY,
-			owner_conversation_id INTEGER,
-			owner_task_id INTEGER,
-			record TEXT NOT NULL CHECK (json_valid(record))
-		) STRICT`,
-    `CREATE INDEX ${indexes.conversationsByOwnerConversation} ON ${tables.conversations} (owner_conversation_id, id)`,
-    `CREATE INDEX ${indexes.conversationsByOwnerTask} ON ${tables.conversations} (owner_task_id, id)`,
-    `CREATE TABLE ${tables.entries} (
-			id INTEGER PRIMARY KEY,
-			conversation_id INTEGER NOT NULL,
-			head INTEGER,
-			commit_seq INTEGER NOT NULL,
-			record TEXT NOT NULL CHECK (json_valid(record))
-		) STRICT`,
-    `CREATE INDEX ${indexes.entriesByConversation} ON ${tables.entries} (conversation_id, id DESC)`,
-    `CREATE INDEX ${indexes.entryHeadsByConversation} ON ${tables.entries} (conversation_id, id DESC) WHERE head IS NOT NULL`,
-    `CREATE TABLE ${tables.tasks} (
-			id INTEGER PRIMARY KEY,
-			conversation_id INTEGER NOT NULL,
-			kind TEXT NOT NULL,
-			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'waiting', 'completing', 'terminal')),
-			abort_requested INTEGER NOT NULL CHECK (abort_requested IN (0, 1)),
-			background INTEGER NOT NULL CHECK (background IN (0, 1)),
-			record TEXT NOT NULL CHECK (json_valid(record))
-		) STRICT`,
-    `CREATE INDEX ${indexes.tasksByStatus} ON ${tables.tasks} (status, id)`,
-    `CREATE INDEX ${indexes.tasksByConversation} ON ${tables.tasks} (conversation_id, id)`,
-    `CREATE INDEX ${indexes.tasksByKind} ON ${tables.tasks} (kind, id)`,
-    `CREATE INDEX ${indexes.tasksByAbortRequested} ON ${tables.tasks} (abort_requested, id)`,
-    `CREATE INDEX ${indexes.tasksByBackground} ON ${tables.tasks} (background, id)`,
-    `CREATE TABLE ${tables.submissions} (
-			id INTEGER PRIMARY KEY,
-			conversation_id INTEGER NOT NULL,
-			request_id TEXT,
-			status TEXT NOT NULL CHECK (status IN ('queued', 'placed', 'done', 'unanswered')),
-			record TEXT NOT NULL CHECK (json_valid(record))
-		) STRICT`,
-    `CREATE INDEX ${indexes.submissionsByRequest} ON ${tables.submissions} (conversation_id, request_id)`,
-    `CREATE INDEX ${indexes.submissionsByConversation} ON ${tables.submissions} (conversation_id, id)`,
-    `CREATE INDEX ${indexes.submissionsByStatus} ON ${tables.submissions} (status, id)`,
-    `CREATE TABLE ${tables.documents} (
-			id INTEGER PRIMARY KEY,
-			kind TEXT NOT NULL,
-			family INTEGER NOT NULL CHECK (family IN (0, 1)),
-			key_value TEXT NOT NULL,
-			scope_kind TEXT NOT NULL CHECK (scope_kind IN ('session', 'conversation', 'task')),
-			owner_id INTEGER NOT NULL,
-			created_at INTEGER NOT NULL,
-			retired_at INTEGER,
-			record TEXT NOT NULL CHECK (json_valid(record))
-		) STRICT`,
-    `CREATE INDEX ${indexes.documentsByAddress}
-			ON ${tables.documents} (kind, scope_kind, owner_id, family, key_value, created_at DESC, retired_at)`,
-    `CREATE INDEX ${indexes.documentsByScope} ON ${tables.documents} (scope_kind, owner_id, id)`,
-    `CREATE INDEX ${indexes.documentsByScopeKind} ON ${tables.documents} (scope_kind, owner_id, kind, id)`,
-    `CREATE TABLE ${tables.documentRevisions} (
-			document_id INTEGER NOT NULL,
-			seq INTEGER NOT NULL,
-			kind TEXT NOT NULL CHECK (kind IN ('base', 'delta')),
-			version INTEGER NOT NULL,
-			content TEXT NOT NULL CHECK (json_valid(content)),
-			PRIMARY KEY (document_id, seq)
-		) STRICT`,
-    `CREATE INDEX ${indexes.documentRevisionsByKind} ON ${tables.documentRevisions} (document_id, kind, seq DESC)`
-  ];
-  const rebuiltTasks = `${tables.tasks}_v2`;
-  const sleepingStatus = [
-    `CREATE TABLE ${rebuiltTasks} (
-			id INTEGER PRIMARY KEY,
-			conversation_id INTEGER NOT NULL,
-			kind TEXT NOT NULL,
-			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'waiting', 'sleeping', 'completing', 'terminal')),
-			abort_requested INTEGER NOT NULL CHECK (abort_requested IN (0, 1)),
-			background INTEGER NOT NULL CHECK (background IN (0, 1)),
-			record TEXT NOT NULL CHECK (json_valid(record))
-		) STRICT`,
-    `INSERT INTO ${rebuiltTasks} (id, conversation_id, kind, status, abort_requested, background, record)
-			SELECT id, conversation_id, kind, status, abort_requested, background, record FROM ${tables.tasks}`,
-    `DROP TABLE ${tables.tasks}`,
-    `ALTER TABLE ${rebuiltTasks} RENAME TO ${tables.tasks}`,
-    `CREATE INDEX ${indexes.tasksByStatus} ON ${tables.tasks} (status, id)`,
-    `CREATE INDEX ${indexes.tasksByConversation} ON ${tables.tasks} (conversation_id, id)`,
-    `CREATE INDEX ${indexes.tasksByKind} ON ${tables.tasks} (kind, id)`,
-    `CREATE INDEX ${indexes.tasksByAbortRequested} ON ${tables.tasks} (abort_requested, id)`,
-    `CREATE INDEX ${indexes.tasksByBackground} ON ${tables.tasks} (background, id)`
-  ];
-  return [
-    { version: 1, statements: initialSchema },
-    { version: 2, statements: sleepingStatus }
-  ];
-}
-var SQLITE_MIGRATIONS = createSqliteMigrations(DEFAULT_SQLITE_SCHEMA);
-var CURRENT_SQLITE_SCHEMA_VERSION = SQLITE_MIGRATIONS.at(-1)?.version ?? 0;
-async function applySqliteMigrationsForSchema(database, schema, migrations = createSqliteMigrations(schema)) {
-  await applySqliteMigrations(database, migrations, { table: schema.tables.durableSchema });
-}
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/storage.js
-var parseJson = (value) => JSON.parse(value);
-var encodeJson = (value) => JSON.stringify(value);
-var encodeIndexedString = (value) => JSON.stringify(value);
-var cursorId = (cursor) => {
-  const after = cursor?.after;
-  if (after === void 0)
-    return void 0;
-  if (typeof after !== "number" || !Number.isSafeInteger(after))
-    throw new StorageRequestError("Invalid storage cursor");
-  return idFromNumber(after);
-};
-var page = (values, limit3, order = "ascending") => {
-  const items = values.slice(0, limit3);
-  if (values.length <= limit3)
-    return { items };
-  return { items, next: nextCursor(items.at(-1).id, order) };
-};
-var scanSql = (start) => start.order === "ascending" ? { clause: "id > ?", param: start.after ?? -1, direction: "ASC" } : { clause: "id < ?", param: start.after ?? Number.MAX_SAFE_INTEGER, direction: "DESC" };
-var scopeColumns = (scope) => {
-  switch (scope.kind) {
-    case "session":
-      return { scopeKind: "session", ownerId: 0 };
-    case "conversation":
-      return { scopeKind: "conversation", ownerId: scope.conversationId };
-    case "task":
-      return { scopeKind: "task", ownerId: scope.taskId };
-  }
-};
-var addressParts = (address) => {
-  const scope = scopeColumns(address.scope);
-  return {
-    kind: encodeIndexedString(address.kind),
-    ...scope,
-    family: address.key === void 0 ? 0 : 1,
-    keyValue: encodeIndexedString(address.key ?? "")
-  };
-};
-var addressKey = (address) => {
-  const parts = addressParts(address);
-  return JSON.stringify([parts.kind, parts.scopeKind, parts.ownerId, parts.family, parts.keyValue]);
-};
-var isAliveAt = (record2, at) => {
-  if (at === "current")
-    return record2.retiredAt === void 0;
-  return record2.createdAt <= at && (record2.retiredAt === void 0 || at < record2.retiredAt);
-};
-var isCurrentOnly = (record2) => record2.scope.kind !== "conversation" || record2.history === "latest";
-var writeId = (write) => {
-  switch (write.type) {
-    case "conversation":
-    case "entry":
-    case "task":
-    case "submission":
-      return write.value.id;
-    case "document.create":
-    case "document.copy":
-      return write.record.id;
-    case "document.change":
-    case "document.retire":
-      return void 0;
-  }
-};
-var SqliteStorage = class _SqliteStorage {
-  db;
-  schema;
-  nextId;
-  closed = false;
-  closing;
-  admittedReads = 0;
-  readsDrained;
-  constructor(db, schema, nextId) {
-    this.db = db;
-    this.schema = schema;
-    this.nextId = nextId;
-  }
-  /** Initialize storage over an owned SQLite database facade. */
-  static async open(db, options = {}) {
-    try {
-      const schema = createSqliteSchema(options.prefix);
-      await applySqliteMigrationsForSchema(db, schema);
-      const metadata = await db.get(`SELECT next_id, next_seq FROM ${schema.tables.durableMetadata} WHERE singleton = 1`);
-      if (metadata === void 0)
-        throw new Error("Durable SQLite metadata is missing");
-      return new _SqliteStorage(db, schema, Number(metadata.next_id));
-    } catch (error) {
-      try {
-        await db.close();
-      } catch {
-      }
-      throw error;
-    }
-  }
-  async commit(writes, _context) {
-    this.assertOpen();
-    const documentActions = this.prepareDocumentActions(writes);
-    const candidateNextId = this.candidateNextId(writes);
-    const seq = await this.db.transaction(async (transaction) => {
-      const metadata = await transaction.get(`SELECT next_id, next_seq FROM ${this.schema.tables.durableMetadata} WHERE singleton = 1`);
-      if (metadata === void 0)
-        throw new Error("Durable SQLite metadata is missing");
-      const committedSeq = seqFromNumber(metadata.next_seq);
-      await this.checkGlobalIds(transaction, writes);
-      await this.checkDocumentActions(transaction, documentActions);
-      for (const write of writes)
-        await this.applyTableWrite(transaction, write, committedSeq);
-      await this.applyDocumentActions(transaction, documentActions, committedSeq);
-      await transaction.run(`UPDATE ${this.schema.tables.durableMetadata} SET next_id = ?, next_seq = ? WHERE singleton = 1`, String(Math.max(Number(metadata.next_id), candidateNextId)), committedSeq + 1);
-      return committedSeq;
-    });
-    this.nextId = Math.max(this.nextId, candidateNextId);
-    return seq;
-  }
-  async mintId() {
-    this.assertOpen();
-    if (!Number.isSafeInteger(this.nextId))
-      throw new Error("ID space is exhausted");
-    return idFromNumber(this.nextId++);
-  }
-  async conversation(id, _context) {
-    this.assertOpen();
-    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.conversations} WHERE id = ?`, id);
-    return row === void 0 ? void 0 : parseJson(row.record);
-  }
-  async scanConversations(query, limit3, cursor, _context) {
-    this.assertOpen();
-    const start = scanStart(query.order, cursor, "ascending");
-    const scan = scanSql(start);
-    const clauses = [scan.clause];
-    const params = [scan.param];
-    if (query.ownerConversationId !== void 0) {
-      clauses.push("owner_conversation_id = ?");
-      params.push(query.ownerConversationId);
-    }
-    if (query.ownerTaskId !== void 0) {
-      clauses.push("owner_task_id = ?");
-      params.push(query.ownerTaskId);
-    }
-    params.push(limit3 + 1);
-    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.conversations} WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`, ...params);
-    return page(rows.map((row) => parseJson(row.record)), limit3, start.order);
-  }
-  entry(idOrConversationId, idOrContext, context3) {
-    return this.admitRead(() => this.readEntry(idOrConversationId, idOrContext, context3));
-  }
-  findLatestHeadMarker(conversationId, atOrBeforeEntryId, _context) {
-    return this.admitRead(() => this.readLatestHeadMarker(conversationId, atOrBeforeEntryId));
-  }
-  scanEntries(query, limit3, cursor, _context) {
-    return this.admitRead(() => this.readEntries(query, limit3, cursor));
-  }
-  async readEntry(idOrConversationId, idOrContext, context3) {
-    const id = context3 === void 0 ? idFromNumber(idOrConversationId) : typeof idOrContext === "number" ? idFromNumber(idOrContext) : void 0;
-    if (id === void 0)
-      throw new StorageRequestError("Storage.entry() requires an entry ID");
-    let conversation;
-    if (context3 !== void 0) {
-      const conversationId = idFromNumber(idOrConversationId);
-      conversation = await this.readConversation(conversationId);
-      if (conversation === void 0)
-        throw new StorageRequestError(`Unknown conversation: ${conversationId}`);
-    }
-    const row = await this.db.get(`SELECT record, commit_seq FROM ${this.schema.tables.entries} WHERE id = ?`, id);
-    if (row === void 0)
-      return void 0;
-    const entry2 = parseJson(row.record);
-    if (conversation !== void 0) {
-      let upperEntryId = Number.POSITIVE_INFINITY;
-      while (conversation.id !== entry2.conversationId) {
-        if (conversation.parent === void 0)
-          return void 0;
-        upperEntryId = Math.min(upperEntryId, conversation.parent.at);
-        conversation = await this.readConversation(conversation.parent.conversationId);
-      }
-      if (entry2.id > upperEntryId)
-        return void 0;
-    }
-    return { entry: entry2, commitSeq: seqFromNumber(row.commit_seq) };
-  }
-  async readLatestHeadMarker(conversationId, atOrBeforeEntryId) {
-    let conversation = await this.readConversation(conversationId);
-    if (conversation === void 0)
-      throw new StorageRequestError(`Unknown conversation: ${conversationId}`);
-    let upper = atOrBeforeEntryId;
-    while (true) {
-      const row = upper === void 0 ? await this.db.get(`SELECT record FROM ${this.schema.tables.entries} WHERE conversation_id = ? AND head IS NOT NULL ORDER BY id DESC LIMIT 1`, conversation.id) : await this.db.get(`SELECT record FROM ${this.schema.tables.entries} WHERE conversation_id = ? AND head IS NOT NULL AND id <= ? ORDER BY id DESC LIMIT 1`, conversation.id, upper);
-      if (row !== void 0)
-        return parseJson(row.record);
-      if (conversation.parent === void 0)
-        return void 0;
-      upper = upper === void 0 ? conversation.parent.at : Math.min(upper, conversation.parent.at);
-      conversation = await this.readConversation(conversation.parent.conversationId);
-    }
-  }
-  async readEntries(query, limit3, cursor) {
-    const { order, after } = scanStart(query.order, cursor, "descending");
-    if (order === "ascending")
-      return this.readEntriesAscending(query, limit3, after);
-    let conversation = await this.readConversation(query.conversationId);
-    if (conversation === void 0)
-      throw new StorageRequestError(`Unknown conversation: ${query.conversationId}`);
-    let upper = query.maxEntryId;
-    if (after !== void 0)
-      upper = Math.min(upper ?? Number.MAX_SAFE_INTEGER, after - 1);
-    const values = [];
-    while (true) {
-      const clauses = ["conversation_id = ?"];
-      const params = [conversation.id];
-      if (query.minEntryId !== void 0) {
-        clauses.push("id >= ?");
-        params.push(query.minEntryId);
-      }
-      if (upper !== void 0) {
-        clauses.push("id <= ?");
-        params.push(upper);
-      }
-      params.push(limit3 + 1 - values.length);
-      const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.entries} WHERE ${clauses.join(" AND ")} ORDER BY id DESC LIMIT ?`, ...params);
-      values.push(...rows.map((row) => parseJson(row.record)));
-      if (values.length > limit3 || conversation.parent === void 0)
-        break;
-      upper = upper === void 0 ? conversation.parent.at : Math.min(upper, conversation.parent.at);
-      if (query.minEntryId !== void 0 && upper < query.minEntryId)
-        break;
-      conversation = await this.readConversation(conversation.parent.conversationId);
-    }
-    return page(values, limit3, "descending");
-  }
-  /** Oldest first: the fork chain's segments from the root conversation forward, each up to its fork point. */
-  async readEntriesAscending(query, limit3, after) {
-    const segments = [];
-    let conversation = await this.readConversation(query.conversationId);
-    if (conversation === void 0)
-      throw new StorageRequestError(`Unknown conversation: ${query.conversationId}`);
-    let upper = query.maxEntryId;
-    while (true) {
-      segments.push({ conversationId: conversation.id, upper });
-      if (conversation.parent === void 0)
-        break;
-      upper = upper === void 0 ? conversation.parent.at : Math.min(upper, conversation.parent.at);
-      if (query.minEntryId !== void 0 && upper < query.minEntryId)
-        break;
-      conversation = await this.readConversation(conversation.parent.conversationId);
-    }
-    let lower2 = query.minEntryId;
-    if (after !== void 0)
-      lower2 = Math.max(lower2 ?? after + 1, after + 1);
-    const values = [];
-    for (const segment of segments.reverse()) {
-      const clauses = ["conversation_id = ?"];
-      const params = [segment.conversationId];
-      if (lower2 !== void 0) {
-        clauses.push("id >= ?");
-        params.push(lower2);
-      }
-      if (segment.upper !== void 0) {
-        clauses.push("id <= ?");
-        params.push(segment.upper);
-      }
-      params.push(limit3 + 1 - values.length);
-      const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.entries} WHERE ${clauses.join(" AND ")} ORDER BY id ASC LIMIT ?`, ...params);
-      values.push(...rows.map((row) => parseJson(row.record)));
-      if (values.length > limit3)
-        break;
-    }
-    return page(values, limit3, "ascending");
-  }
-  async task(id, _context) {
-    this.assertOpen();
-    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.tasks} WHERE id = ?`, id);
-    return row === void 0 ? void 0 : parseJson(row.record);
-  }
-  async scanTasks(query, limit3, cursor, _context) {
-    this.assertOpen();
-    const start = scanStart(query.order, cursor, "ascending");
-    const scan = scanSql(start);
-    const clauses = [scan.clause];
-    const params = [scan.param];
-    if (query.conversationId !== void 0) {
-      clauses.push("conversation_id = ?");
-      params.push(query.conversationId);
-    }
-    if (query.kind !== void 0) {
-      clauses.push("kind = ?");
-      params.push(encodeIndexedString(query.kind));
-    }
-    if (query.status !== void 0) {
-      clauses.push("status = ?");
-      params.push(query.status);
-    }
-    if (query.abortRequested !== void 0) {
-      clauses.push("abort_requested = ?");
-      params.push(query.abortRequested ? 1 : 0);
-    }
-    if (query.background !== void 0) {
-      clauses.push("background = ?");
-      params.push(query.background ? 1 : 0);
-    }
-    params.push(limit3 + 1);
-    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.tasks} WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`, ...params);
-    return page(rows.map((row) => parseJson(row.record)), limit3, start.order);
-  }
-  async submission(id, _context) {
-    this.assertOpen();
-    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.submissions} WHERE id = ?`, id);
-    return row === void 0 ? void 0 : parseJson(row.record);
-  }
-  async scanSubmissions(query, limit3, cursor, _context) {
-    this.assertOpen();
-    const start = scanStart(query.order, cursor, "ascending");
-    const scan = scanSql(start);
-    const clauses = [scan.clause];
-    const params = [scan.param];
-    if (query.conversationId !== void 0) {
-      clauses.push("conversation_id = ?");
-      params.push(query.conversationId);
-    }
-    if (query.status !== void 0) {
-      clauses.push("status = ?");
-      params.push(query.status);
-    }
-    params.push(limit3 + 1);
-    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.submissions} WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`, ...params);
-    return page(rows.map((row) => parseJson(row.record)), limit3, start.order);
-  }
-  async submissionByRequest(conversationId, requestId, _context) {
-    this.assertOpen();
-    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.submissions} WHERE conversation_id = ? AND request_id = ?`, conversationId, encodeIndexedString(requestId));
-    return row === void 0 ? void 0 : parseJson(row.record);
-  }
-  async findDocument(address, at, _context) {
-    this.assertOpen();
-    const parts = addressParts(address);
-    const sql = at === "current" ? `SELECT record FROM ${this.schema.tables.documents}
-					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
-					AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1` : `SELECT record FROM ${this.schema.tables.documents}
-					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
-					AND created_at <= ? AND (retired_at IS NULL OR retired_at > ?)
-					ORDER BY created_at DESC LIMIT 1`;
-    const params = [parts.kind, parts.scopeKind, parts.ownerId, parts.family, parts.keyValue];
-    if (at !== "current")
-      params.push(at, at);
-    const row = await this.db.get(sql, ...params);
-    return row === void 0 ? void 0 : parseJson(row.record);
-  }
-  async document(id, at, _context) {
-    this.assertOpen();
-    return this.db.transaction((transaction) => this.materializeDocument(transaction, id, at));
-  }
-  async scanDocuments(query, limit3, cursor, _context) {
-    this.assertOpen();
-    const scope = scopeColumns(query.scope);
-    const clauses = ["scope_kind = ?", "owner_id = ?", "id > ?"];
-    const params = [scope.scopeKind, scope.ownerId, cursorId(cursor) ?? -1];
-    if (query.kind !== void 0) {
-      clauses.push("kind = ?");
-      params.push(encodeIndexedString(query.kind));
-    }
-    if (query.at === "current") {
-      clauses.push("retired_at IS NULL");
-    } else {
-      clauses.push("created_at <= ?", "(retired_at IS NULL OR retired_at > ?)");
-      params.push(query.at, query.at);
-    }
-    params.push(limit3 + 1);
-    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.documents} WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`, ...params);
-    return page(rows.map((row) => parseJson(row.record)), limit3);
-  }
-  close(_context) {
-    if (this.closing === void 0) {
-      this.closed = true;
-      this.closing = this.closeDatabase();
-    }
-    return this.closing;
-  }
-  async closeDatabase() {
-    if (this.admittedReads > 0) {
-      await new Promise((resolve4) => {
-        this.readsDrained = resolve4;
-      });
-    }
-    await this.db.close();
-  }
-  /**
-   * Run a read that issues several queries. Close waits for admitted reads, so their later queries never reach a
-   * closed database. Single-query reads and transactions are already ordered before close by the database.
-   */
-  async admitRead(read2) {
-    this.assertOpen();
-    this.admittedReads++;
-    try {
-      return await read2();
-    } finally {
-      if (--this.admittedReads === 0)
-        this.readsDrained?.();
-    }
-  }
-  async readConversation(id) {
-    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.conversations} WHERE id = ?`, id);
-    return row === void 0 ? void 0 : parseJson(row.record);
-  }
-  async materializeDocument(executor, id, at) {
-    const row = await executor.get(`SELECT record FROM ${this.schema.tables.documents} WHERE id = ?`, id);
-    if (row === void 0)
-      return void 0;
-    const record2 = parseJson(row.record);
-    if (at !== "current" && isCurrentOnly(record2)) {
-      throw new StorageRequestError(`Document ${id} does not retain historical content`);
-    }
-    if (!isAliveAt(record2, at))
-      return void 0;
-    const upper = at === "current" ? Number.MAX_SAFE_INTEGER : at;
-    const base = await executor.get(`SELECT seq, kind, version, content FROM ${this.schema.tables.documentRevisions}
-				WHERE document_id = ? AND kind = 'base' AND seq <= ? ORDER BY seq DESC LIMIT 1`, id, upper);
-    if (base === void 0)
-      throw new Error(`Document ${id} is missing a required base`);
-    let value = parseJson(base.content);
-    const tail = await executor.all(`SELECT seq, kind, version, content FROM ${this.schema.tables.documentRevisions}
-				WHERE document_id = ? AND seq > ? AND seq <= ? ORDER BY seq`, id, base.seq, upper);
-    for (const revision of tail) {
-      if (revision.kind !== "delta" || revision.version !== base.version) {
-        throw new Error(`Document ${id} crosses a stored version boundary without a base`);
-      }
-      value = apply(value, parseJson(revision.content));
-    }
-    return { record: record2, version: base.version, value, deltasSinceBase: tail.length };
-  }
-  candidateNextId(writes) {
-    let nextId = this.nextId;
-    for (const write of writes) {
-      const id = writeId(write);
-      if (id !== void 0)
-        nextId = Math.max(nextId, id + 1);
-    }
-    return nextId;
-  }
-  async checkGlobalIds(executor, writes) {
-    const claimed = /* @__PURE__ */ new Map();
-    for (const write of writes) {
-      if (write.type === "document.change" || write.type === "document.retire")
-        continue;
-      const document2 = write.type === "document.create" || write.type === "document.copy";
-      const table = document2 ? "document" : write.type;
-      const id = document2 ? write.record.id : write.value.id;
-      const existing = (await executor.get(`SELECT record_type FROM ${this.schema.tables.recordIds} WHERE id = ?`, id))?.record_type;
-      const earlier = claimed.get(id);
-      if (table === "conversation" || table === "entry" || table === "document") {
-        if (existing !== void 0)
-          throw new Error(`ID ${id} already belongs to ${existing}`);
-        if (earlier !== void 0)
-          throw new Error(`ID ${id} is written more than once`);
-      } else {
-        if (existing !== void 0 && existing !== table)
-          throw new Error(`ID ${id} already belongs to ${existing}`);
-        if (earlier !== void 0 && earlier !== table)
-          throw new Error(`ID ${id} is written as two record types`);
-      }
-      claimed.set(id, table);
-    }
-  }
-  prepareDocumentActions(writes) {
-    const actions = /* @__PURE__ */ new Map();
-    for (const write of writes) {
-      if (write.type !== "document.create" && write.type !== "document.copy" && write.type !== "document.change" && write.type !== "document.retire") {
-        continue;
-      }
-      const id = write.type === "document.create" || write.type === "document.copy" ? write.record.id : write.id;
-      let action = actions.get(id);
-      if (action === void 0) {
-        action = { retire: false };
-        actions.set(id, action);
-      }
-      switch (write.type) {
-        case "document.create":
-          if (action.create !== void 0 || action.content !== void 0 || action.copy !== void 0) {
-            throw new Error(`Document ${id} has more than one content command`);
-          }
-          action.create = write.record;
-          action.content = write.content;
-          break;
-        case "document.copy":
-          if (action.create !== void 0 || action.content !== void 0 || action.copy !== void 0) {
-            throw new Error(`Document ${id} has more than one content command`);
-          }
-          action.create = write.record;
-          action.copy = write.source;
-          break;
-        case "document.change":
-          if (action.content !== void 0 || action.copy !== void 0) {
-            throw new Error(`Document ${id} has more than one content command`);
-          }
-          action.content = write.content;
-          break;
-        case "document.retire":
-          if (action.retire)
-            throw new Error(`Document ${id} is retired more than once`);
-          action.retire = true;
-          break;
-      }
-    }
-    return actions;
-  }
-  async checkDocumentActions(executor, actions) {
-    const liveCounts = /* @__PURE__ */ new Map();
-    for (const [id, action] of actions) {
-      if (action.copy !== void 0 && actions.has(action.copy.id)) {
-        throw new Error(`Document copy ${id} source is changed in the copy batch`);
-      }
-      const row = await executor.get(`SELECT record FROM ${this.schema.tables.documents} WHERE id = ?`, id);
-      const existing = row === void 0 ? void 0 : parseJson(row.record);
-      if (action.create === void 0 && existing === void 0)
-        throw new Error(`Unknown document: ${id}`);
-      if (action.create !== void 0 && existing !== void 0)
-        throw new Error(`Document ${id} already exists`);
-      if (existing?.retiredAt !== void 0)
-        throw new Error(`Document ${id} is retired`);
-      if (action.content?.kind === "delta") {
-        const previous = await executor.get(`SELECT version FROM ${this.schema.tables.documentRevisions} WHERE document_id = ? ORDER BY seq DESC LIMIT 1`, id);
-        if (previous === void 0)
-          throw new Error(`Document ${id} delta has no base`);
-        if (previous.version !== action.content.version) {
-          throw new Error(`Document ${id} version transition requires a base`);
-        }
-      }
-      const record2 = action.create ?? existing;
-      const key2 = addressKey(record2);
-      let live = liveCounts.get(key2);
-      if (live === void 0)
-        live = await this.currentDocumentId(executor, record2) === void 0 ? 0 : 1;
-      if (action.retire && existing !== void 0)
-        live--;
-      if (action.create !== void 0 && !action.retire)
-        live++;
-      liveCounts.set(key2, live);
-    }
-    for (const live of liveCounts.values()) {
-      if (live > 1)
-        throw new Error("Document address already has a current incarnation");
-    }
-  }
-  async currentDocumentId(executor, address) {
-    const parts = addressParts(address);
-    const id = (await executor.get(`SELECT id FROM ${this.schema.tables.documents}
-				WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ? AND retired_at IS NULL
-				LIMIT 1`, parts.kind, parts.scopeKind, parts.ownerId, parts.family, parts.keyValue))?.id;
-    return id === void 0 ? void 0 : idFromNumber(id);
-  }
-  async applyTableWrite(executor, write, seq) {
-    switch (write.type) {
-      case "conversation":
-        await this.claimId(executor, write.value.id, "conversation");
-        await executor.run(`INSERT INTO ${this.schema.tables.conversations} (id, owner_conversation_id, owner_task_id, record) VALUES (?, ?, ?, ?)`, write.value.id, write.value.owner?.conversationId ?? null, write.value.owner?.taskId ?? null, encodeJson(write.value));
-        break;
-      case "entry":
-        await this.claimId(executor, write.value.id, "entry");
-        await executor.run(`INSERT INTO ${this.schema.tables.entries} (id, conversation_id, head, commit_seq, record) VALUES (?, ?, ?, ?, ?)`, write.value.id, write.value.conversationId, write.value.head ?? null, seq, encodeJson(write.value));
-        break;
-      case "task":
-        await this.claimId(executor, write.value.id, "task");
-        await executor.run(`INSERT INTO ${this.schema.tables.tasks} (id, conversation_id, kind, status, abort_requested, background, record)
-						VALUES (?, ?, ?, ?, ?, ?, ?)
-						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id, kind = excluded.kind,
-						status = excluded.status, abort_requested = excluded.abort_requested,
-						background = excluded.background, record = excluded.record`, write.value.id, write.value.conversationId, encodeIndexedString(write.value.kind), write.value.state.status, write.value.abortRequested ? 1 : 0, write.value.background ? 1 : 0, encodeJson(write.value));
-        break;
-      case "submission":
-        await this.claimId(executor, write.value.id, "submission");
-        await executor.run(`INSERT INTO ${this.schema.tables.submissions} (id, conversation_id, request_id, status, record) VALUES (?, ?, ?, ?, ?)
-						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id,
-						request_id = excluded.request_id, status = excluded.status, record = excluded.record`, write.value.id, write.value.conversationId, write.value.requestId === void 0 ? null : encodeIndexedString(write.value.requestId), write.value.status, encodeJson(write.value));
-        break;
-      case "document.create":
-      case "document.copy":
-      case "document.change":
-      case "document.retire":
-        break;
-    }
-  }
-  async claimId(executor, id, table) {
-    await executor.run(`INSERT OR IGNORE INTO ${this.schema.tables.recordIds} (id, record_type) VALUES (?, ?)`, id, table);
-  }
-  async applyDocumentActions(executor, actions, seq) {
-    for (const [id, action] of actions) {
-      let content = action.content;
-      if (action.copy !== void 0) {
-        try {
-          const stored = await this.materializeDocument(executor, action.copy.id, action.copy.at);
-          if (stored === void 0)
-            throw new Error(`Fork source document ${action.copy.id} cannot be read`);
-          const create = action.create;
-          if (stored.record.scope.kind !== "conversation" || create.scope.kind !== "conversation" || stored.record.kind !== create.kind || stored.record.key !== create.key || stored.record.history !== create.history || stored.record.fork !== create.fork) {
-            throw new Error(`Fork source document ${action.copy.id} does not match the copied record`);
-          }
-          content = { kind: "base", version: stored.version, value: stored.value };
-        } catch (error) {
-          throw new Error(`Document copy ${id} was rejected`, { cause: error });
-        }
-      }
-      let record2;
-      if (action.create !== void 0) {
-        record2 = {
-          ...action.create,
-          createdAt: seq,
-          ...action.retire ? { retiredAt: seq } : {}
-        };
-        const parts = addressParts(record2);
-        await this.claimId(executor, id, "document");
-        await executor.run(`INSERT INTO ${this.schema.tables.documents}
-						(id, kind, family, key_value, scope_kind, owner_id, created_at, retired_at, record)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, parts.kind, parts.family, parts.keyValue, parts.scopeKind, parts.ownerId, seq, action.retire ? seq : null, encodeJson(record2));
-      } else {
-        const row = await executor.get(`SELECT record FROM ${this.schema.tables.documents} WHERE id = ?`, id);
-        record2 = parseJson(row.record);
-      }
-      if (content !== void 0) {
-        if (content.kind === "base" && isCurrentOnly(record2)) {
-          await executor.run(`DELETE FROM ${this.schema.tables.documentRevisions} WHERE document_id = ?`, id);
-        }
-        const encodedContent = content.kind === "base" ? encodeJson(content.value) : encodeJson(content.ops);
-        await executor.run(`INSERT INTO ${this.schema.tables.documentRevisions} (document_id, seq, kind, version, content) VALUES (?, ?, ?, ?, ?)`, id, seq, content.kind, content.version, encodedContent);
-      }
-      if (action.retire) {
-        if (action.create === void 0) {
-          record2 = { ...record2, retiredAt: seq };
-          await executor.run(`UPDATE ${this.schema.tables.documents} SET retired_at = ?, record = ? WHERE id = ?`, seq, encodeJson(record2), id);
-        }
-        if (isCurrentOnly(record2)) {
-          await executor.run(`DELETE FROM ${this.schema.tables.documentRevisions} WHERE document_id = ?`, id);
-        }
-      }
-    }
-  }
-  assertOpen() {
-    if (this.closed)
-      throw new Error("SqliteStorage is closed");
-  }
-};
-
-// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/node.js
-async function openNodeSqliteStorage(path6, options = {}) {
-  const { prefix, ...databaseOptions } = options;
-  if (prefix !== void 0)
-    validateSqliteSchemaPrefix(prefix);
-  return SqliteStorage.open(await openNodeSqliteDatabase(path6, databaseOptions), { prefix });
-}
-
 // src/pi/infinichat-service.ts
 init_define_INFINICHAT_PI();
 
@@ -114675,6 +113585,17 @@ init_define_INFINICHAT_PI();
 
 // node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/documents.js
 init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/ids.js
+init_define_INFINICHAT_PI();
+function idFromNumber(value) {
+  return value;
+}
+function seqFromNumber(value) {
+  return value;
+}
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/documents.js
 function defineDoc(definition) {
   validateDefinition(definition);
   return { definition };
@@ -114774,6 +113695,44 @@ var SystemEntry = defineEntry("pi.system");
 var ToolResultEntry = defineEntry("pi.tool-result");
 var ResetEntry = defineEntry("pi.reset");
 var CompactionEntry = defineEntry("pi.compaction");
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/errors.js
+init_define_INFINICHAT_PI();
+function errorMessage(error) {
+  if (error instanceof Error)
+    return error.message;
+  try {
+    return String(error);
+  } catch {
+    return Object.prototype.toString.call(error);
+  }
+}
+var ReadAfterWrite = class extends Error {
+  constructor(method2) {
+    super(`Tx.${method2}() cannot read tables after the first table write`);
+    this.name = "ReadAfterWrite";
+  }
+};
+var StorageRequestError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "StorageRequestError";
+  }
+};
+var SessionFailed = class extends Error {
+  constructor(cause) {
+    super("Session failed after a storage error; close and reopen it", { cause });
+    this.name = "SessionFailed";
+  }
+};
+var ConversationBusy = class extends Error {
+  conversationId;
+  constructor(conversationId) {
+    super(`Conversation ${conversationId} is busy`);
+    this.name = "ConversationBusy";
+    this.conversationId = conversationId;
+  }
+};
 
 // node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/harness/agent.js
 init_define_INFINICHAT_PI();
@@ -118369,8 +117328,8 @@ async function startNestedCall(runtime, parentCallId, name, args, options, conte
     const existing = state3.taskId;
     if (existing !== void 0) {
       const input2 = (await tx.task(existing))?.input;
-      const same = input2?.kind === "nested" && input2.call.name === name && jsonEqual(input2.call.arguments, call.arguments);
-      if (!same)
+      const same2 = input2?.kind === "nested" && input2.call.name === name && jsonEqual(input2.call.arguments, call.arguments);
+      if (!same2)
         throw new Error(`Nested call ${call.id} was already made with another tool or other arguments`);
       id = existing;
       replayed = state3.result !== void 0;
@@ -121781,8 +120740,8 @@ var TaskScheduler = class {
         return;
       }
     }
-    const same = jsonEqual2(current.state, next);
-    tx.setTask(withState(same ? current : progressed(current), next));
+    const same2 = jsonEqual2(current.state, next);
+    tx.setTask(withState(same2 ? current : progressed(current), next));
   }
   /**
    * A wait names existing tasks, and `failFast` only tasks the waiter owns. It may not close a cycle in the wait-for
@@ -122756,6 +121715,30 @@ var Harness = {
     return harness;
   }
 };
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/scan.js
+init_define_INFINICHAT_PI();
+function scanStart(requested, cursor, fallback) {
+  if (requested !== void 0 && requested !== "ascending" && requested !== "descending") {
+    throw new StorageRequestError(`Invalid scan order: ${String(requested)}`);
+  }
+  if (cursor === void 0)
+    return { order: requested ?? fallback, after: void 0 };
+  const { after, order: stored } = cursor;
+  if (typeof after !== "number" || !Number.isSafeInteger(after))
+    throw new StorageRequestError("Invalid storage cursor");
+  if (stored !== void 0 && stored !== "ascending" && stored !== "descending") {
+    throw new StorageRequestError("Invalid storage cursor");
+  }
+  const order = stored ?? fallback;
+  if (requested !== void 0 && requested !== order) {
+    throw new StorageRequestError(`The cursor continues a ${order} scan; the query asks for ${requested}`);
+  }
+  return { order, after };
+}
+function nextCursor(id, order) {
+  return { after: id, order };
+}
 
 // src/pi/chat-metadata.ts
 init_define_INFINICHAT_PI();
@@ -127808,10 +126791,1246 @@ function validateOpenAICredential(credential) {
   }
 }
 
+// server/conversation.ts
+init_define_INFINICHAT_PI();
+import { createHash as createHash2 } from "node:crypto";
+import { mkdir as mkdir3, readFile, rename } from "node:fs/promises";
+import { join as join3 } from "node:path";
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/node.js
+init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/index.js
+init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/migrations.js
+init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/schema.js
+init_define_INFINICHAT_PI();
+function validateSqliteSchemaPrefix(prefix) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(prefix)) {
+    throw new Error(`Invalid SQLite schema prefix ${JSON.stringify(prefix)}`);
+  }
+  if (prefix.toLowerCase().startsWith("sqlite_")) {
+    throw new Error(`SQLite schema prefix ${JSON.stringify(prefix)} is reserved`);
+  }
+}
+
+// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/migrations.js
+async function applySqliteMigrations(database, migrations, options) {
+  const { table } = options;
+  validateSqliteSchemaPrefix(table);
+  for (let index3 = 0; index3 < migrations.length; index3++) {
+    if (migrations[index3]?.version !== index3 + 1) {
+      throw new Error("SQLite migrations must have contiguous versions starting at 1");
+    }
+  }
+  await database.transaction(async (transaction) => {
+    await transaction.exec(`CREATE TABLE IF NOT EXISTS ${table} (
+			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+			version INTEGER NOT NULL CHECK (version >= 0)
+		) STRICT`);
+    await transaction.run(`INSERT OR IGNORE INTO ${table} (singleton, version) VALUES (1, 0)`);
+    const row = await transaction.get(`SELECT version FROM ${table} WHERE singleton = 1`);
+    if (row === void 0)
+      throw new Error("SQLite schema metadata is missing");
+    const currentVersion = migrations.at(-1)?.version ?? 0;
+    if (row.version > currentVersion) {
+      throw new Error(`SQLite schema version ${row.version} is newer than supported version ${currentVersion}`);
+    }
+    for (const migration of migrations) {
+      if (migration.version <= row.version)
+        continue;
+      for (const statement of migration.statements)
+        await transaction.exec(statement);
+      await transaction.run(`UPDATE ${table} SET version = ? WHERE singleton = 1`, migration.version);
+    }
+  });
+}
+
+// node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/sqlite/node.js
+init_define_INFINICHAT_PI();
+import { mkdir as mkdir2 } from "node:fs/promises";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+var DEFAULT_WAL_AUTO_CHECKPOINT_PAGES = 1e3;
+var DEFAULT_BUSY_TIMEOUT_MS = 5e3;
+var ignore = () => {
+};
+var SerialOperationQueue = class {
+  tail = Promise.resolve();
+  pending = 0;
+  run(operation) {
+    if (this.pending > 0)
+      return this.enqueue(operation);
+    try {
+      return Promise.resolve(operation());
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+  runAsync(operation) {
+    if (this.pending > 0)
+      return this.enqueue(operation);
+    this.pending++;
+    const { promise: barrier, resolve: releaseBarrier } = Promise.withResolvers();
+    this.tail = barrier;
+    let started;
+    try {
+      started = operation();
+    } catch (error) {
+      started = Promise.reject(error);
+    }
+    return started.finally(() => {
+      this.pending--;
+      releaseBarrier();
+    });
+  }
+  enqueue(operation) {
+    this.pending++;
+    return this.release(this.tail.then(operation));
+  }
+  release(operation) {
+    const settled = operation.finally(() => {
+      this.pending--;
+    });
+    this.tail = settled.then(ignore, ignore);
+    return settled;
+  }
+};
+var NodeSqliteExecutor = class {
+  database;
+  statements;
+  constructor(database, statements) {
+    this.database = database;
+    this.statements = statements;
+  }
+  exec(sql) {
+    return this.runOperation(() => {
+      this.database.exec(sql);
+    });
+  }
+  run(sql, ...params) {
+    return this.runOperation(() => {
+      this.statement(sql).run(...params);
+    });
+  }
+  get(sql, ...params) {
+    return this.runOperation(() => this.statement(sql).get(...params));
+  }
+  all(sql, ...params) {
+    return this.runOperation(() => this.statement(sql).all(...params));
+  }
+  statement(sql) {
+    let statement = this.statements.get(sql);
+    if (statement === void 0) {
+      statement = this.database.prepare(sql);
+      this.statements.set(sql, statement);
+    }
+    return statement;
+  }
+};
+var NodeSqliteTransaction = class extends NodeSqliteExecutor {
+  scope;
+  constructor(database, statements, scope) {
+    super(database, statements);
+    this.scope = scope;
+  }
+  async runOperation(operation) {
+    if (!this.scope.active)
+      throw new Error("SQLite transaction handle is no longer active");
+    return operation();
+  }
+};
+var NodeSqliteDatabase = class extends NodeSqliteExecutor {
+  access = new SerialOperationQueue();
+  closed = false;
+  constructor(database) {
+    super(database, /* @__PURE__ */ new Map());
+  }
+  transaction(callback) {
+    return this.access.runAsync(async () => {
+      this.database.exec("BEGIN IMMEDIATE");
+      const scope = { active: true };
+      try {
+        const result = await callback(new NodeSqliteTransaction(this.database, this.statements, scope));
+        scope.active = false;
+        this.database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        scope.active = false;
+        try {
+          this.database.exec("ROLLBACK");
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], "SQLite transaction failed and rollback failed");
+        }
+        throw error;
+      }
+    });
+  }
+  close() {
+    return this.access.run(() => {
+      if (this.closed)
+        return;
+      this.closed = true;
+      this.statements.clear();
+      try {
+        this.database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      } finally {
+        this.database.close();
+      }
+    });
+  }
+  runOperation(operation) {
+    return this.access.run(operation);
+  }
+};
+async function openNodeSqliteDatabase(path6, options = {}) {
+  const checkpointPages = options.walAutoCheckpointPages ?? DEFAULT_WAL_AUTO_CHECKPOINT_PAGES;
+  const timeout = options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS;
+  if (path6 !== ":memory:")
+    await mkdir2(dirname(path6), { recursive: true });
+  const database = new DatabaseSync(path6, { timeout });
+  const adapter = new NodeSqliteDatabase(database);
+  try {
+    await adapter.exec("PRAGMA journal_mode = WAL");
+    await adapter.exec("PRAGMA synchronous = NORMAL");
+    await adapter.exec(`PRAGMA wal_autocheckpoint = ${checkpointPages}`);
+    return adapter;
+  } catch (error) {
+    try {
+      await adapter.close();
+    } catch {
+    }
+    throw error;
+  }
+}
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/storage.js
+init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/migrations.js
+init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/schema.js
+init_define_INFINICHAT_PI();
+var TABLE_NAMES = {
+  durableSchema: "durable_schema",
+  durableMetadata: "durable_metadata",
+  recordIds: "record_ids",
+  conversations: "conversations",
+  entries: "entries",
+  tasks: "tasks",
+  submissions: "submissions",
+  documents: "documents",
+  documentRevisions: "document_revisions"
+};
+var INDEX_NAMES = {
+  conversationsByOwnerConversation: "conversations_by_owner_conversation",
+  conversationsByOwnerTask: "conversations_by_owner_task",
+  entriesByConversation: "entries_by_conversation",
+  entryHeadsByConversation: "entry_heads_by_conversation",
+  tasksByStatus: "tasks_by_status",
+  tasksByConversation: "tasks_by_conversation",
+  tasksByKind: "tasks_by_kind",
+  tasksByAbortRequested: "tasks_by_abort_requested",
+  tasksByBackground: "tasks_by_background",
+  submissionsByRequest: "submissions_by_request",
+  submissionsByConversation: "submissions_by_conversation",
+  submissionsByStatus: "submissions_by_status",
+  documentsByAddress: "documents_by_address",
+  documentsByScope: "documents_by_scope",
+  documentsByScopeKind: "documents_by_scope_kind",
+  documentRevisionsByKind: "document_revisions_by_kind"
+};
+function prefixIdentifiers(names3, prefix) {
+  return Object.fromEntries(Object.entries(names3).map(([key2, name]) => [key2, `${prefix}${name}`]));
+}
+function createSqliteSchema(prefix) {
+  if (prefix !== void 0)
+    validateSqliteSchemaPrefix(prefix);
+  const actualPrefix = prefix ?? "";
+  return {
+    tables: prefixIdentifiers(TABLE_NAMES, actualPrefix),
+    indexes: prefixIdentifiers(INDEX_NAMES, actualPrefix)
+  };
+}
+var DEFAULT_SQLITE_SCHEMA = createSqliteSchema();
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/migrations.js
+function createSqliteMigrations(schema) {
+  const { tables, indexes } = schema;
+  const initialSchema = [
+    `CREATE TABLE ${tables.durableMetadata} (
+			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+			next_id TEXT NOT NULL,
+			next_seq INTEGER NOT NULL
+		) STRICT`,
+    `INSERT INTO ${tables.durableMetadata} (singleton, next_id, next_seq) VALUES (1, '2', 1)`,
+    `CREATE TABLE ${tables.recordIds} (
+			id INTEGER PRIMARY KEY,
+			record_type TEXT NOT NULL CHECK (record_type IN ('conversation', 'entry', 'task', 'submission', 'document'))
+		) STRICT`,
+    `CREATE TABLE ${tables.conversations} (
+			id INTEGER PRIMARY KEY,
+			owner_conversation_id INTEGER,
+			owner_task_id INTEGER,
+			record TEXT NOT NULL CHECK (json_valid(record))
+		) STRICT`,
+    `CREATE INDEX ${indexes.conversationsByOwnerConversation} ON ${tables.conversations} (owner_conversation_id, id)`,
+    `CREATE INDEX ${indexes.conversationsByOwnerTask} ON ${tables.conversations} (owner_task_id, id)`,
+    `CREATE TABLE ${tables.entries} (
+			id INTEGER PRIMARY KEY,
+			conversation_id INTEGER NOT NULL,
+			head INTEGER,
+			commit_seq INTEGER NOT NULL,
+			record TEXT NOT NULL CHECK (json_valid(record))
+		) STRICT`,
+    `CREATE INDEX ${indexes.entriesByConversation} ON ${tables.entries} (conversation_id, id DESC)`,
+    `CREATE INDEX ${indexes.entryHeadsByConversation} ON ${tables.entries} (conversation_id, id DESC) WHERE head IS NOT NULL`,
+    `CREATE TABLE ${tables.tasks} (
+			id INTEGER PRIMARY KEY,
+			conversation_id INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'waiting', 'completing', 'terminal')),
+			abort_requested INTEGER NOT NULL CHECK (abort_requested IN (0, 1)),
+			background INTEGER NOT NULL CHECK (background IN (0, 1)),
+			record TEXT NOT NULL CHECK (json_valid(record))
+		) STRICT`,
+    `CREATE INDEX ${indexes.tasksByStatus} ON ${tables.tasks} (status, id)`,
+    `CREATE INDEX ${indexes.tasksByConversation} ON ${tables.tasks} (conversation_id, id)`,
+    `CREATE INDEX ${indexes.tasksByKind} ON ${tables.tasks} (kind, id)`,
+    `CREATE INDEX ${indexes.tasksByAbortRequested} ON ${tables.tasks} (abort_requested, id)`,
+    `CREATE INDEX ${indexes.tasksByBackground} ON ${tables.tasks} (background, id)`,
+    `CREATE TABLE ${tables.submissions} (
+			id INTEGER PRIMARY KEY,
+			conversation_id INTEGER NOT NULL,
+			request_id TEXT,
+			status TEXT NOT NULL CHECK (status IN ('queued', 'placed', 'done', 'unanswered')),
+			record TEXT NOT NULL CHECK (json_valid(record))
+		) STRICT`,
+    `CREATE INDEX ${indexes.submissionsByRequest} ON ${tables.submissions} (conversation_id, request_id)`,
+    `CREATE INDEX ${indexes.submissionsByConversation} ON ${tables.submissions} (conversation_id, id)`,
+    `CREATE INDEX ${indexes.submissionsByStatus} ON ${tables.submissions} (status, id)`,
+    `CREATE TABLE ${tables.documents} (
+			id INTEGER PRIMARY KEY,
+			kind TEXT NOT NULL,
+			family INTEGER NOT NULL CHECK (family IN (0, 1)),
+			key_value TEXT NOT NULL,
+			scope_kind TEXT NOT NULL CHECK (scope_kind IN ('session', 'conversation', 'task')),
+			owner_id INTEGER NOT NULL,
+			created_at INTEGER NOT NULL,
+			retired_at INTEGER,
+			record TEXT NOT NULL CHECK (json_valid(record))
+		) STRICT`,
+    `CREATE INDEX ${indexes.documentsByAddress}
+			ON ${tables.documents} (kind, scope_kind, owner_id, family, key_value, created_at DESC, retired_at)`,
+    `CREATE INDEX ${indexes.documentsByScope} ON ${tables.documents} (scope_kind, owner_id, id)`,
+    `CREATE INDEX ${indexes.documentsByScopeKind} ON ${tables.documents} (scope_kind, owner_id, kind, id)`,
+    `CREATE TABLE ${tables.documentRevisions} (
+			document_id INTEGER NOT NULL,
+			seq INTEGER NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('base', 'delta')),
+			version INTEGER NOT NULL,
+			content TEXT NOT NULL CHECK (json_valid(content)),
+			PRIMARY KEY (document_id, seq)
+		) STRICT`,
+    `CREATE INDEX ${indexes.documentRevisionsByKind} ON ${tables.documentRevisions} (document_id, kind, seq DESC)`
+  ];
+  const rebuiltTasks = `${tables.tasks}_v2`;
+  const sleepingStatus = [
+    `CREATE TABLE ${rebuiltTasks} (
+			id INTEGER PRIMARY KEY,
+			conversation_id INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'waiting', 'sleeping', 'completing', 'terminal')),
+			abort_requested INTEGER NOT NULL CHECK (abort_requested IN (0, 1)),
+			background INTEGER NOT NULL CHECK (background IN (0, 1)),
+			record TEXT NOT NULL CHECK (json_valid(record))
+		) STRICT`,
+    `INSERT INTO ${rebuiltTasks} (id, conversation_id, kind, status, abort_requested, background, record)
+			SELECT id, conversation_id, kind, status, abort_requested, background, record FROM ${tables.tasks}`,
+    `DROP TABLE ${tables.tasks}`,
+    `ALTER TABLE ${rebuiltTasks} RENAME TO ${tables.tasks}`,
+    `CREATE INDEX ${indexes.tasksByStatus} ON ${tables.tasks} (status, id)`,
+    `CREATE INDEX ${indexes.tasksByConversation} ON ${tables.tasks} (conversation_id, id)`,
+    `CREATE INDEX ${indexes.tasksByKind} ON ${tables.tasks} (kind, id)`,
+    `CREATE INDEX ${indexes.tasksByAbortRequested} ON ${tables.tasks} (abort_requested, id)`,
+    `CREATE INDEX ${indexes.tasksByBackground} ON ${tables.tasks} (background, id)`
+  ];
+  return [
+    { version: 1, statements: initialSchema },
+    { version: 2, statements: sleepingStatus }
+  ];
+}
+var SQLITE_MIGRATIONS = createSqliteMigrations(DEFAULT_SQLITE_SCHEMA);
+var CURRENT_SQLITE_SCHEMA_VERSION = SQLITE_MIGRATIONS.at(-1)?.version ?? 0;
+async function applySqliteMigrationsForSchema(database, schema, migrations = createSqliteMigrations(schema)) {
+  await applySqliteMigrations(database, migrations, { table: schema.tables.durableSchema });
+}
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/storage.js
+var parseJson = (value) => JSON.parse(value);
+var encodeJson = (value) => JSON.stringify(value);
+var encodeIndexedString = (value) => JSON.stringify(value);
+var cursorId = (cursor) => {
+  const after = cursor?.after;
+  if (after === void 0)
+    return void 0;
+  if (typeof after !== "number" || !Number.isSafeInteger(after))
+    throw new StorageRequestError("Invalid storage cursor");
+  return idFromNumber(after);
+};
+var page = (values, limit3, order = "ascending") => {
+  const items = values.slice(0, limit3);
+  if (values.length <= limit3)
+    return { items };
+  return { items, next: nextCursor(items.at(-1).id, order) };
+};
+var scanSql = (start) => start.order === "ascending" ? { clause: "id > ?", param: start.after ?? -1, direction: "ASC" } : { clause: "id < ?", param: start.after ?? Number.MAX_SAFE_INTEGER, direction: "DESC" };
+var scopeColumns = (scope) => {
+  switch (scope.kind) {
+    case "session":
+      return { scopeKind: "session", ownerId: 0 };
+    case "conversation":
+      return { scopeKind: "conversation", ownerId: scope.conversationId };
+    case "task":
+      return { scopeKind: "task", ownerId: scope.taskId };
+  }
+};
+var addressParts = (address) => {
+  const scope = scopeColumns(address.scope);
+  return {
+    kind: encodeIndexedString(address.kind),
+    ...scope,
+    family: address.key === void 0 ? 0 : 1,
+    keyValue: encodeIndexedString(address.key ?? "")
+  };
+};
+var addressKey = (address) => {
+  const parts = addressParts(address);
+  return JSON.stringify([parts.kind, parts.scopeKind, parts.ownerId, parts.family, parts.keyValue]);
+};
+var isAliveAt = (record2, at) => {
+  if (at === "current")
+    return record2.retiredAt === void 0;
+  return record2.createdAt <= at && (record2.retiredAt === void 0 || at < record2.retiredAt);
+};
+var isCurrentOnly = (record2) => record2.scope.kind !== "conversation" || record2.history === "latest";
+var writeId = (write) => {
+  switch (write.type) {
+    case "conversation":
+    case "entry":
+    case "task":
+    case "submission":
+      return write.value.id;
+    case "document.create":
+    case "document.copy":
+      return write.record.id;
+    case "document.change":
+    case "document.retire":
+      return void 0;
+  }
+};
+var SqliteStorage = class _SqliteStorage {
+  db;
+  schema;
+  nextId;
+  closed = false;
+  closing;
+  admittedReads = 0;
+  readsDrained;
+  constructor(db, schema, nextId) {
+    this.db = db;
+    this.schema = schema;
+    this.nextId = nextId;
+  }
+  /** Initialize storage over an owned SQLite database facade. */
+  static async open(db, options = {}) {
+    try {
+      const schema = createSqliteSchema(options.prefix);
+      await applySqliteMigrationsForSchema(db, schema);
+      const metadata = await db.get(`SELECT next_id, next_seq FROM ${schema.tables.durableMetadata} WHERE singleton = 1`);
+      if (metadata === void 0)
+        throw new Error("Durable SQLite metadata is missing");
+      return new _SqliteStorage(db, schema, Number(metadata.next_id));
+    } catch (error) {
+      try {
+        await db.close();
+      } catch {
+      }
+      throw error;
+    }
+  }
+  async commit(writes, _context) {
+    this.assertOpen();
+    const documentActions = this.prepareDocumentActions(writes);
+    const candidateNextId = this.candidateNextId(writes);
+    const seq = await this.db.transaction(async (transaction) => {
+      const metadata = await transaction.get(`SELECT next_id, next_seq FROM ${this.schema.tables.durableMetadata} WHERE singleton = 1`);
+      if (metadata === void 0)
+        throw new Error("Durable SQLite metadata is missing");
+      const committedSeq = seqFromNumber(metadata.next_seq);
+      await this.checkGlobalIds(transaction, writes);
+      await this.checkDocumentActions(transaction, documentActions);
+      for (const write of writes)
+        await this.applyTableWrite(transaction, write, committedSeq);
+      await this.applyDocumentActions(transaction, documentActions, committedSeq);
+      await transaction.run(`UPDATE ${this.schema.tables.durableMetadata} SET next_id = ?, next_seq = ? WHERE singleton = 1`, String(Math.max(Number(metadata.next_id), candidateNextId)), committedSeq + 1);
+      return committedSeq;
+    });
+    this.nextId = Math.max(this.nextId, candidateNextId);
+    return seq;
+  }
+  async mintId() {
+    this.assertOpen();
+    if (!Number.isSafeInteger(this.nextId))
+      throw new Error("ID space is exhausted");
+    return idFromNumber(this.nextId++);
+  }
+  async conversation(id, _context) {
+    this.assertOpen();
+    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.conversations} WHERE id = ?`, id);
+    return row === void 0 ? void 0 : parseJson(row.record);
+  }
+  async scanConversations(query, limit3, cursor, _context) {
+    this.assertOpen();
+    const start = scanStart(query.order, cursor, "ascending");
+    const scan = scanSql(start);
+    const clauses = [scan.clause];
+    const params = [scan.param];
+    if (query.ownerConversationId !== void 0) {
+      clauses.push("owner_conversation_id = ?");
+      params.push(query.ownerConversationId);
+    }
+    if (query.ownerTaskId !== void 0) {
+      clauses.push("owner_task_id = ?");
+      params.push(query.ownerTaskId);
+    }
+    params.push(limit3 + 1);
+    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.conversations} WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`, ...params);
+    return page(rows.map((row) => parseJson(row.record)), limit3, start.order);
+  }
+  entry(idOrConversationId, idOrContext, context3) {
+    return this.admitRead(() => this.readEntry(idOrConversationId, idOrContext, context3));
+  }
+  findLatestHeadMarker(conversationId, atOrBeforeEntryId, _context) {
+    return this.admitRead(() => this.readLatestHeadMarker(conversationId, atOrBeforeEntryId));
+  }
+  scanEntries(query, limit3, cursor, _context) {
+    return this.admitRead(() => this.readEntries(query, limit3, cursor));
+  }
+  async readEntry(idOrConversationId, idOrContext, context3) {
+    const id = context3 === void 0 ? idFromNumber(idOrConversationId) : typeof idOrContext === "number" ? idFromNumber(idOrContext) : void 0;
+    if (id === void 0)
+      throw new StorageRequestError("Storage.entry() requires an entry ID");
+    let conversation;
+    if (context3 !== void 0) {
+      const conversationId = idFromNumber(idOrConversationId);
+      conversation = await this.readConversation(conversationId);
+      if (conversation === void 0)
+        throw new StorageRequestError(`Unknown conversation: ${conversationId}`);
+    }
+    const row = await this.db.get(`SELECT record, commit_seq FROM ${this.schema.tables.entries} WHERE id = ?`, id);
+    if (row === void 0)
+      return void 0;
+    const entry2 = parseJson(row.record);
+    if (conversation !== void 0) {
+      let upperEntryId = Number.POSITIVE_INFINITY;
+      while (conversation.id !== entry2.conversationId) {
+        if (conversation.parent === void 0)
+          return void 0;
+        upperEntryId = Math.min(upperEntryId, conversation.parent.at);
+        conversation = await this.readConversation(conversation.parent.conversationId);
+      }
+      if (entry2.id > upperEntryId)
+        return void 0;
+    }
+    return { entry: entry2, commitSeq: seqFromNumber(row.commit_seq) };
+  }
+  async readLatestHeadMarker(conversationId, atOrBeforeEntryId) {
+    let conversation = await this.readConversation(conversationId);
+    if (conversation === void 0)
+      throw new StorageRequestError(`Unknown conversation: ${conversationId}`);
+    let upper = atOrBeforeEntryId;
+    while (true) {
+      const row = upper === void 0 ? await this.db.get(`SELECT record FROM ${this.schema.tables.entries} WHERE conversation_id = ? AND head IS NOT NULL ORDER BY id DESC LIMIT 1`, conversation.id) : await this.db.get(`SELECT record FROM ${this.schema.tables.entries} WHERE conversation_id = ? AND head IS NOT NULL AND id <= ? ORDER BY id DESC LIMIT 1`, conversation.id, upper);
+      if (row !== void 0)
+        return parseJson(row.record);
+      if (conversation.parent === void 0)
+        return void 0;
+      upper = upper === void 0 ? conversation.parent.at : Math.min(upper, conversation.parent.at);
+      conversation = await this.readConversation(conversation.parent.conversationId);
+    }
+  }
+  async readEntries(query, limit3, cursor) {
+    const { order, after } = scanStart(query.order, cursor, "descending");
+    if (order === "ascending")
+      return this.readEntriesAscending(query, limit3, after);
+    let conversation = await this.readConversation(query.conversationId);
+    if (conversation === void 0)
+      throw new StorageRequestError(`Unknown conversation: ${query.conversationId}`);
+    let upper = query.maxEntryId;
+    if (after !== void 0)
+      upper = Math.min(upper ?? Number.MAX_SAFE_INTEGER, after - 1);
+    const values = [];
+    while (true) {
+      const clauses = ["conversation_id = ?"];
+      const params = [conversation.id];
+      if (query.minEntryId !== void 0) {
+        clauses.push("id >= ?");
+        params.push(query.minEntryId);
+      }
+      if (upper !== void 0) {
+        clauses.push("id <= ?");
+        params.push(upper);
+      }
+      params.push(limit3 + 1 - values.length);
+      const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.entries} WHERE ${clauses.join(" AND ")} ORDER BY id DESC LIMIT ?`, ...params);
+      values.push(...rows.map((row) => parseJson(row.record)));
+      if (values.length > limit3 || conversation.parent === void 0)
+        break;
+      upper = upper === void 0 ? conversation.parent.at : Math.min(upper, conversation.parent.at);
+      if (query.minEntryId !== void 0 && upper < query.minEntryId)
+        break;
+      conversation = await this.readConversation(conversation.parent.conversationId);
+    }
+    return page(values, limit3, "descending");
+  }
+  /** Oldest first: the fork chain's segments from the root conversation forward, each up to its fork point. */
+  async readEntriesAscending(query, limit3, after) {
+    const segments = [];
+    let conversation = await this.readConversation(query.conversationId);
+    if (conversation === void 0)
+      throw new StorageRequestError(`Unknown conversation: ${query.conversationId}`);
+    let upper = query.maxEntryId;
+    while (true) {
+      segments.push({ conversationId: conversation.id, upper });
+      if (conversation.parent === void 0)
+        break;
+      upper = upper === void 0 ? conversation.parent.at : Math.min(upper, conversation.parent.at);
+      if (query.minEntryId !== void 0 && upper < query.minEntryId)
+        break;
+      conversation = await this.readConversation(conversation.parent.conversationId);
+    }
+    let lower2 = query.minEntryId;
+    if (after !== void 0)
+      lower2 = Math.max(lower2 ?? after + 1, after + 1);
+    const values = [];
+    for (const segment of segments.reverse()) {
+      const clauses = ["conversation_id = ?"];
+      const params = [segment.conversationId];
+      if (lower2 !== void 0) {
+        clauses.push("id >= ?");
+        params.push(lower2);
+      }
+      if (segment.upper !== void 0) {
+        clauses.push("id <= ?");
+        params.push(segment.upper);
+      }
+      params.push(limit3 + 1 - values.length);
+      const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.entries} WHERE ${clauses.join(" AND ")} ORDER BY id ASC LIMIT ?`, ...params);
+      values.push(...rows.map((row) => parseJson(row.record)));
+      if (values.length > limit3)
+        break;
+    }
+    return page(values, limit3, "ascending");
+  }
+  async task(id, _context) {
+    this.assertOpen();
+    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.tasks} WHERE id = ?`, id);
+    return row === void 0 ? void 0 : parseJson(row.record);
+  }
+  async scanTasks(query, limit3, cursor, _context) {
+    this.assertOpen();
+    const start = scanStart(query.order, cursor, "ascending");
+    const scan = scanSql(start);
+    const clauses = [scan.clause];
+    const params = [scan.param];
+    if (query.conversationId !== void 0) {
+      clauses.push("conversation_id = ?");
+      params.push(query.conversationId);
+    }
+    if (query.kind !== void 0) {
+      clauses.push("kind = ?");
+      params.push(encodeIndexedString(query.kind));
+    }
+    if (query.status !== void 0) {
+      clauses.push("status = ?");
+      params.push(query.status);
+    }
+    if (query.abortRequested !== void 0) {
+      clauses.push("abort_requested = ?");
+      params.push(query.abortRequested ? 1 : 0);
+    }
+    if (query.background !== void 0) {
+      clauses.push("background = ?");
+      params.push(query.background ? 1 : 0);
+    }
+    params.push(limit3 + 1);
+    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.tasks} WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`, ...params);
+    return page(rows.map((row) => parseJson(row.record)), limit3, start.order);
+  }
+  async submission(id, _context) {
+    this.assertOpen();
+    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.submissions} WHERE id = ?`, id);
+    return row === void 0 ? void 0 : parseJson(row.record);
+  }
+  async scanSubmissions(query, limit3, cursor, _context) {
+    this.assertOpen();
+    const start = scanStart(query.order, cursor, "ascending");
+    const scan = scanSql(start);
+    const clauses = [scan.clause];
+    const params = [scan.param];
+    if (query.conversationId !== void 0) {
+      clauses.push("conversation_id = ?");
+      params.push(query.conversationId);
+    }
+    if (query.status !== void 0) {
+      clauses.push("status = ?");
+      params.push(query.status);
+    }
+    params.push(limit3 + 1);
+    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.submissions} WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`, ...params);
+    return page(rows.map((row) => parseJson(row.record)), limit3, start.order);
+  }
+  async submissionByRequest(conversationId, requestId, _context) {
+    this.assertOpen();
+    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.submissions} WHERE conversation_id = ? AND request_id = ?`, conversationId, encodeIndexedString(requestId));
+    return row === void 0 ? void 0 : parseJson(row.record);
+  }
+  async findDocument(address, at, _context) {
+    this.assertOpen();
+    const parts = addressParts(address);
+    const sql = at === "current" ? `SELECT record FROM ${this.schema.tables.documents}
+					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
+					AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1` : `SELECT record FROM ${this.schema.tables.documents}
+					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
+					AND created_at <= ? AND (retired_at IS NULL OR retired_at > ?)
+					ORDER BY created_at DESC LIMIT 1`;
+    const params = [parts.kind, parts.scopeKind, parts.ownerId, parts.family, parts.keyValue];
+    if (at !== "current")
+      params.push(at, at);
+    const row = await this.db.get(sql, ...params);
+    return row === void 0 ? void 0 : parseJson(row.record);
+  }
+  async document(id, at, _context) {
+    this.assertOpen();
+    return this.db.transaction((transaction) => this.materializeDocument(transaction, id, at));
+  }
+  async scanDocuments(query, limit3, cursor, _context) {
+    this.assertOpen();
+    const scope = scopeColumns(query.scope);
+    const clauses = ["scope_kind = ?", "owner_id = ?", "id > ?"];
+    const params = [scope.scopeKind, scope.ownerId, cursorId(cursor) ?? -1];
+    if (query.kind !== void 0) {
+      clauses.push("kind = ?");
+      params.push(encodeIndexedString(query.kind));
+    }
+    if (query.at === "current") {
+      clauses.push("retired_at IS NULL");
+    } else {
+      clauses.push("created_at <= ?", "(retired_at IS NULL OR retired_at > ?)");
+      params.push(query.at, query.at);
+    }
+    params.push(limit3 + 1);
+    const rows = await this.db.all(`SELECT record FROM ${this.schema.tables.documents} WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`, ...params);
+    return page(rows.map((row) => parseJson(row.record)), limit3);
+  }
+  close(_context) {
+    if (this.closing === void 0) {
+      this.closed = true;
+      this.closing = this.closeDatabase();
+    }
+    return this.closing;
+  }
+  async closeDatabase() {
+    if (this.admittedReads > 0) {
+      await new Promise((resolve4) => {
+        this.readsDrained = resolve4;
+      });
+    }
+    await this.db.close();
+  }
+  /**
+   * Run a read that issues several queries. Close waits for admitted reads, so their later queries never reach a
+   * closed database. Single-query reads and transactions are already ordered before close by the database.
+   */
+  async admitRead(read2) {
+    this.assertOpen();
+    this.admittedReads++;
+    try {
+      return await read2();
+    } finally {
+      if (--this.admittedReads === 0)
+        this.readsDrained?.();
+    }
+  }
+  async readConversation(id) {
+    const row = await this.db.get(`SELECT record FROM ${this.schema.tables.conversations} WHERE id = ?`, id);
+    return row === void 0 ? void 0 : parseJson(row.record);
+  }
+  async materializeDocument(executor, id, at) {
+    const row = await executor.get(`SELECT record FROM ${this.schema.tables.documents} WHERE id = ?`, id);
+    if (row === void 0)
+      return void 0;
+    const record2 = parseJson(row.record);
+    if (at !== "current" && isCurrentOnly(record2)) {
+      throw new StorageRequestError(`Document ${id} does not retain historical content`);
+    }
+    if (!isAliveAt(record2, at))
+      return void 0;
+    const upper = at === "current" ? Number.MAX_SAFE_INTEGER : at;
+    const base = await executor.get(`SELECT seq, kind, version, content FROM ${this.schema.tables.documentRevisions}
+				WHERE document_id = ? AND kind = 'base' AND seq <= ? ORDER BY seq DESC LIMIT 1`, id, upper);
+    if (base === void 0)
+      throw new Error(`Document ${id} is missing a required base`);
+    let value = parseJson(base.content);
+    const tail = await executor.all(`SELECT seq, kind, version, content FROM ${this.schema.tables.documentRevisions}
+				WHERE document_id = ? AND seq > ? AND seq <= ? ORDER BY seq`, id, base.seq, upper);
+    for (const revision of tail) {
+      if (revision.kind !== "delta" || revision.version !== base.version) {
+        throw new Error(`Document ${id} crosses a stored version boundary without a base`);
+      }
+      value = apply(value, parseJson(revision.content));
+    }
+    return { record: record2, version: base.version, value, deltasSinceBase: tail.length };
+  }
+  candidateNextId(writes) {
+    let nextId = this.nextId;
+    for (const write of writes) {
+      const id = writeId(write);
+      if (id !== void 0)
+        nextId = Math.max(nextId, id + 1);
+    }
+    return nextId;
+  }
+  async checkGlobalIds(executor, writes) {
+    const claimed = /* @__PURE__ */ new Map();
+    for (const write of writes) {
+      if (write.type === "document.change" || write.type === "document.retire")
+        continue;
+      const document2 = write.type === "document.create" || write.type === "document.copy";
+      const table = document2 ? "document" : write.type;
+      const id = document2 ? write.record.id : write.value.id;
+      const existing = (await executor.get(`SELECT record_type FROM ${this.schema.tables.recordIds} WHERE id = ?`, id))?.record_type;
+      const earlier = claimed.get(id);
+      if (table === "conversation" || table === "entry" || table === "document") {
+        if (existing !== void 0)
+          throw new Error(`ID ${id} already belongs to ${existing}`);
+        if (earlier !== void 0)
+          throw new Error(`ID ${id} is written more than once`);
+      } else {
+        if (existing !== void 0 && existing !== table)
+          throw new Error(`ID ${id} already belongs to ${existing}`);
+        if (earlier !== void 0 && earlier !== table)
+          throw new Error(`ID ${id} is written as two record types`);
+      }
+      claimed.set(id, table);
+    }
+  }
+  prepareDocumentActions(writes) {
+    const actions = /* @__PURE__ */ new Map();
+    for (const write of writes) {
+      if (write.type !== "document.create" && write.type !== "document.copy" && write.type !== "document.change" && write.type !== "document.retire") {
+        continue;
+      }
+      const id = write.type === "document.create" || write.type === "document.copy" ? write.record.id : write.id;
+      let action = actions.get(id);
+      if (action === void 0) {
+        action = { retire: false };
+        actions.set(id, action);
+      }
+      switch (write.type) {
+        case "document.create":
+          if (action.create !== void 0 || action.content !== void 0 || action.copy !== void 0) {
+            throw new Error(`Document ${id} has more than one content command`);
+          }
+          action.create = write.record;
+          action.content = write.content;
+          break;
+        case "document.copy":
+          if (action.create !== void 0 || action.content !== void 0 || action.copy !== void 0) {
+            throw new Error(`Document ${id} has more than one content command`);
+          }
+          action.create = write.record;
+          action.copy = write.source;
+          break;
+        case "document.change":
+          if (action.content !== void 0 || action.copy !== void 0) {
+            throw new Error(`Document ${id} has more than one content command`);
+          }
+          action.content = write.content;
+          break;
+        case "document.retire":
+          if (action.retire)
+            throw new Error(`Document ${id} is retired more than once`);
+          action.retire = true;
+          break;
+      }
+    }
+    return actions;
+  }
+  async checkDocumentActions(executor, actions) {
+    const liveCounts = /* @__PURE__ */ new Map();
+    for (const [id, action] of actions) {
+      if (action.copy !== void 0 && actions.has(action.copy.id)) {
+        throw new Error(`Document copy ${id} source is changed in the copy batch`);
+      }
+      const row = await executor.get(`SELECT record FROM ${this.schema.tables.documents} WHERE id = ?`, id);
+      const existing = row === void 0 ? void 0 : parseJson(row.record);
+      if (action.create === void 0 && existing === void 0)
+        throw new Error(`Unknown document: ${id}`);
+      if (action.create !== void 0 && existing !== void 0)
+        throw new Error(`Document ${id} already exists`);
+      if (existing?.retiredAt !== void 0)
+        throw new Error(`Document ${id} is retired`);
+      if (action.content?.kind === "delta") {
+        const previous = await executor.get(`SELECT version FROM ${this.schema.tables.documentRevisions} WHERE document_id = ? ORDER BY seq DESC LIMIT 1`, id);
+        if (previous === void 0)
+          throw new Error(`Document ${id} delta has no base`);
+        if (previous.version !== action.content.version) {
+          throw new Error(`Document ${id} version transition requires a base`);
+        }
+      }
+      const record2 = action.create ?? existing;
+      const key2 = addressKey(record2);
+      let live = liveCounts.get(key2);
+      if (live === void 0)
+        live = await this.currentDocumentId(executor, record2) === void 0 ? 0 : 1;
+      if (action.retire && existing !== void 0)
+        live--;
+      if (action.create !== void 0 && !action.retire)
+        live++;
+      liveCounts.set(key2, live);
+    }
+    for (const live of liveCounts.values()) {
+      if (live > 1)
+        throw new Error("Document address already has a current incarnation");
+    }
+  }
+  async currentDocumentId(executor, address) {
+    const parts = addressParts(address);
+    const id = (await executor.get(`SELECT id FROM ${this.schema.tables.documents}
+				WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ? AND retired_at IS NULL
+				LIMIT 1`, parts.kind, parts.scopeKind, parts.ownerId, parts.family, parts.keyValue))?.id;
+    return id === void 0 ? void 0 : idFromNumber(id);
+  }
+  async applyTableWrite(executor, write, seq) {
+    switch (write.type) {
+      case "conversation":
+        await this.claimId(executor, write.value.id, "conversation");
+        await executor.run(`INSERT INTO ${this.schema.tables.conversations} (id, owner_conversation_id, owner_task_id, record) VALUES (?, ?, ?, ?)`, write.value.id, write.value.owner?.conversationId ?? null, write.value.owner?.taskId ?? null, encodeJson(write.value));
+        break;
+      case "entry":
+        await this.claimId(executor, write.value.id, "entry");
+        await executor.run(`INSERT INTO ${this.schema.tables.entries} (id, conversation_id, head, commit_seq, record) VALUES (?, ?, ?, ?, ?)`, write.value.id, write.value.conversationId, write.value.head ?? null, seq, encodeJson(write.value));
+        break;
+      case "task":
+        await this.claimId(executor, write.value.id, "task");
+        await executor.run(`INSERT INTO ${this.schema.tables.tasks} (id, conversation_id, kind, status, abort_requested, background, record)
+						VALUES (?, ?, ?, ?, ?, ?, ?)
+						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id, kind = excluded.kind,
+						status = excluded.status, abort_requested = excluded.abort_requested,
+						background = excluded.background, record = excluded.record`, write.value.id, write.value.conversationId, encodeIndexedString(write.value.kind), write.value.state.status, write.value.abortRequested ? 1 : 0, write.value.background ? 1 : 0, encodeJson(write.value));
+        break;
+      case "submission":
+        await this.claimId(executor, write.value.id, "submission");
+        await executor.run(`INSERT INTO ${this.schema.tables.submissions} (id, conversation_id, request_id, status, record) VALUES (?, ?, ?, ?, ?)
+						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id,
+						request_id = excluded.request_id, status = excluded.status, record = excluded.record`, write.value.id, write.value.conversationId, write.value.requestId === void 0 ? null : encodeIndexedString(write.value.requestId), write.value.status, encodeJson(write.value));
+        break;
+      case "document.create":
+      case "document.copy":
+      case "document.change":
+      case "document.retire":
+        break;
+    }
+  }
+  async claimId(executor, id, table) {
+    await executor.run(`INSERT OR IGNORE INTO ${this.schema.tables.recordIds} (id, record_type) VALUES (?, ?)`, id, table);
+  }
+  async applyDocumentActions(executor, actions, seq) {
+    for (const [id, action] of actions) {
+      let content = action.content;
+      if (action.copy !== void 0) {
+        try {
+          const stored = await this.materializeDocument(executor, action.copy.id, action.copy.at);
+          if (stored === void 0)
+            throw new Error(`Fork source document ${action.copy.id} cannot be read`);
+          const create = action.create;
+          if (stored.record.scope.kind !== "conversation" || create.scope.kind !== "conversation" || stored.record.kind !== create.kind || stored.record.key !== create.key || stored.record.history !== create.history || stored.record.fork !== create.fork) {
+            throw new Error(`Fork source document ${action.copy.id} does not match the copied record`);
+          }
+          content = { kind: "base", version: stored.version, value: stored.value };
+        } catch (error) {
+          throw new Error(`Document copy ${id} was rejected`, { cause: error });
+        }
+      }
+      let record2;
+      if (action.create !== void 0) {
+        record2 = {
+          ...action.create,
+          createdAt: seq,
+          ...action.retire ? { retiredAt: seq } : {}
+        };
+        const parts = addressParts(record2);
+        await this.claimId(executor, id, "document");
+        await executor.run(`INSERT INTO ${this.schema.tables.documents}
+						(id, kind, family, key_value, scope_kind, owner_id, created_at, retired_at, record)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, parts.kind, parts.family, parts.keyValue, parts.scopeKind, parts.ownerId, seq, action.retire ? seq : null, encodeJson(record2));
+      } else {
+        const row = await executor.get(`SELECT record FROM ${this.schema.tables.documents} WHERE id = ?`, id);
+        record2 = parseJson(row.record);
+      }
+      if (content !== void 0) {
+        if (content.kind === "base" && isCurrentOnly(record2)) {
+          await executor.run(`DELETE FROM ${this.schema.tables.documentRevisions} WHERE document_id = ?`, id);
+        }
+        const encodedContent = content.kind === "base" ? encodeJson(content.value) : encodeJson(content.ops);
+        await executor.run(`INSERT INTO ${this.schema.tables.documentRevisions} (document_id, seq, kind, version, content) VALUES (?, ?, ?, ?, ?)`, id, seq, content.kind, content.version, encodedContent);
+      }
+      if (action.retire) {
+        if (action.create === void 0) {
+          record2 = { ...record2, retiredAt: seq };
+          await executor.run(`UPDATE ${this.schema.tables.documents} SET retired_at = ?, record = ? WHERE id = ?`, seq, encodeJson(record2), id);
+        }
+        if (isCurrentOnly(record2)) {
+          await executor.run(`DELETE FROM ${this.schema.tables.documentRevisions} WHERE document_id = ?`, id);
+        }
+      }
+    }
+  }
+  assertOpen() {
+    if (this.closed)
+      throw new Error("SqliteStorage is closed");
+  }
+};
+
+// node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/storage/sqlite/node.js
+async function openNodeSqliteStorage(path6, options = {}) {
+  const { prefix, ...databaseOptions } = options;
+  if (prefix !== void 0)
+    validateSqliteSchemaPrefix(prefix);
+  return SqliteStorage.open(await openNodeSqliteDatabase(path6, databaseOptions), { prefix });
+}
+
+// server/state.ts
+init_define_INFINICHAT_PI();
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join as join2 } from "node:path";
+var isRecord3 = (value) => typeof value === "object" && value !== null;
+var fileOf = (value) => isRecord3(value) && typeof value.sha256 === "string" && typeof value.size === "number" ? { sha256: value.sha256, size: value.size } : void 0;
+function filesOf(value) {
+  if (!isRecord3(value)) return void 0;
+  const db = fileOf(value.db);
+  const wal = fileOf(value.wal);
+  return db && { db, ...wal === void 0 ? {} : { wal } };
+}
+function readState(home) {
+  let text;
+  try {
+    text = readFileSync(join2(home, "state.json"), "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return { active: false };
+    throw error;
+  }
+  const state3 = JSON.parse(text);
+  if (!isRecord3(state3)) return { active: false };
+  const adopted = filesOf(state3.adopted);
+  return {
+    active: state3.active === true,
+    ...adopted === void 0 ? {} : { adopted },
+    ...typeof state3.timeZone === "string" ? { timeZone: state3.timeZone } : {}
+  };
+}
+function updateState(home, change) {
+  const state3 = change(readState(home));
+  const file = join2(home, "state.json");
+  const temporary = `${file}.${process.pid}`;
+  writeFileSync(temporary, JSON.stringify(state3));
+  renameSync(temporary, file);
+  return state3;
+}
+function restoreTimeZone(home) {
+  const { timeZone } = readState(home);
+  if (timeZone !== void 0) process.env.TZ = timeZone;
+}
+function setTimeZone(home, zone) {
+  Intl.DateTimeFormat("en-US", { timeZone: zone });
+  updateState(home, (state3) => ({ ...state3, timeZone: zone }));
+  process.env.TZ = zone;
+}
+
+// server/conversation.ts
+var noop4 = () => {
+};
+var DATABASE = "infinichat.db";
+async function describe(path6) {
+  let bytes2;
+  try {
+    bytes2 = await readFile(path6);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return void 0;
+    throw error;
+  }
+  return { sha256: createHash2("sha256").update(bytes2).digest("hex"), size: bytes2.byteLength };
+}
+var same = (left, right) => left?.sha256 === right?.sha256 && left?.size === right?.size;
+var ServerConversation = class {
+  constructor(home, openCore) {
+    this.home = home;
+    this.openCore = openCore;
+    this.data = join3(home, "data");
+    const { active, adopted } = readState(home);
+    this.state = { active, ...adopted === void 0 ? {} : { adopted } };
+  }
+  home;
+  openCore;
+  core;
+  state;
+  queue = Promise.resolve();
+  listeners = /* @__PURE__ */ new Set();
+  unfollow = noop4;
+  data;
+  /** The core while this machine holds the conversation open. */
+  get current() {
+    return this.core;
+  }
+  getState = () => this.state;
+  subscribe = (listener) => {
+    this.listeners.add(listener);
+    if (this.listeners.size === 1) this.follow();
+    return () => {
+      this.listeners.delete(listener);
+      if (this.listeners.size) return;
+      this.unfollow();
+      this.unfollow = noop4;
+    };
+  };
+  /** Opens the conversation when this machine held it when it last stopped. */
+  start() {
+    return this.run(async () => {
+      if (this.state.active) await this.open();
+    });
+  }
+  /**
+   * Opens the files the phone copied to `data/` and holds the conversation from then on; pi-durable's recovery then
+   * resumes the work the phone's close interrupted. Refused while this machine holds it, and when the files differ
+   * from the ones the phone verified. `active` is kept first, so a crash while opening reopens them at the restart.
+   */
+  adopt(files) {
+    return this.run(async () => {
+      if (this.state.active) throw new Error("InfiniChat is already open on this machine.");
+      const found = await this.files();
+      if (!same(found?.db, files.db) || !same(found?.wal, files.wal)) {
+        throw new Error("The copied conversation does not match the one this iPhone sent. Try again.");
+      }
+      this.setState({ active: true, adopted: files });
+      try {
+        await this.open();
+      } catch (error) {
+        this.setState({ active: false });
+        throw error;
+      }
+    });
+  }
+  /**
+   * Stops input at once, closes the core (its Harness waits for running task code and writes the tasks it stopped back
+   * as pending) and its storage, and names the files it left in `data/`. Called again, it names them again.
+   */
+  relinquish() {
+    return this.run(async () => {
+      const core = this.core;
+      if (core) {
+        this.core = void 0;
+        this.changed();
+        await core.close();
+      }
+      if (this.state.active) this.setState({ active: false });
+      const files = await this.files();
+      if (!files) throw new Error("This machine holds no InfiniChat conversation.");
+      return files;
+    });
+  }
+  /** Moves the released files to `released/<time>/`, where nothing opens them again. Refused while holding them. */
+  archive() {
+    return this.run(async () => {
+      if (this.state.active) throw new Error("InfiniChat is open on this machine.");
+      await mkdir3(join3(this.home, "released"), { recursive: true, mode: 448 });
+      try {
+        await rename(this.data, join3(this.home, "released", (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")));
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      }
+    });
+  }
+  /** At shutdown: closes the core and keeps `active`, so the next start reopens it. */
+  close() {
+    return this.run(async () => {
+      const core = this.core;
+      this.core = void 0;
+      this.changed();
+      await core?.close();
+    });
+  }
+  run(operation) {
+    const result = this.queue.then(operation);
+    this.queue = result.catch(noop4);
+    return result;
+  }
+  async files() {
+    const db = await describe(join3(this.data, DATABASE));
+    const wal = await describe(join3(this.data, `${DATABASE}-wal`));
+    return db && { db, ...wal === void 0 ? {} : { wal } };
+  }
+  async open() {
+    const storage = await openNodeSqliteStorage(join3(this.data, DATABASE));
+    try {
+      this.core = await this.openCore(storage);
+    } catch (error) {
+      await storage.close(BACKGROUND_CONTEXT).catch(noop4);
+      throw error;
+    }
+    this.changed();
+  }
+  setState(state3) {
+    this.state = state3;
+    updateState(this.home, ({ timeZone }) => ({ ...state3, ...timeZone === void 0 ? {} : { timeZone } }));
+    this.changed();
+  }
+  /** Follows the new core, subscribing before letting the old one go, so a view kept open never detaches. */
+  changed() {
+    if (this.listeners.size) this.follow();
+    this.notify();
+  }
+  follow() {
+    const previous = this.unfollow;
+    const core = this.core;
+    if (core) {
+      const stops = [
+        core.view().subscribe(this.notify),
+        core.subscribe(this.notify),
+        core.scheduled.subscribe(this.notify)
+      ];
+      this.unfollow = () => {
+        for (const stop2 of stops) stop2();
+      };
+    } else {
+      this.unfollow = noop4;
+    }
+    previous();
+  }
+  notify = () => {
+    for (const listener of [...this.listeners]) listener();
+  };
+};
+
 // server/credentials.ts
 init_define_INFINICHAT_PI();
 import { randomUUID } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile as readFile2, rename as rename2, writeFile } from "node:fs/promises";
 var isStringRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "string");
 function parsed(text) {
   try {
@@ -127825,7 +128044,7 @@ function fileCredentialBackend(file) {
   const read2 = async () => {
     let text;
     try {
-      text = await readFile(file, "utf8");
+      text = await readFile2(file, "utf8");
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return {};
       throw error;
@@ -127839,7 +128058,7 @@ function fileCredentialBackend(file) {
       change(items);
       const temporary = `${file}.${process.pid}`;
       await writeFile(temporary, JSON.stringify(items), { mode: 384 });
-      await rename(temporary, file);
+      await rename2(temporary, file);
     });
     writes = written.catch(() => {
     });
@@ -127878,24 +128097,24 @@ function openAILoginOptions(backend) {
 
 // server/devices.ts
 init_define_INFINICHAT_PI();
-import { homedir as homedir2, hostname, userInfo } from "node:os";
-import { join as join3 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { join as join5 } from "node:path";
 
 // node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/env/node.js
 init_define_INFINICHAT_PI();
 import { spawn } from "node:child_process";
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
-import { access, appendFile, lstat as lstat3, mkdir as mkdir3, mkdtemp, opendir, open as openFile, readdir as readdir2, readFile as readFile3, realpath, rename as rename2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
+import { access, appendFile, lstat as lstat3, mkdir as mkdir4, mkdtemp, opendir, open as openFile, readdir as readdir2, readFile as readFile4, realpath, rename as rename3, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir, constants as osConstants, tmpdir as tmpdir2 } from "node:os";
-import { basename, isAbsolute, join as join2, resolve as resolve2, win32 } from "node:path";
+import { basename, isAbsolute, join as join4, resolve as resolve2, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/env/node-watch.js
 init_define_INFINICHAT_PI();
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { watch as fsWatch } from "node:fs";
-import { lstat as lstat2, readdir, readFile as readFile2, stat, statfs } from "node:fs/promises";
+import { lstat as lstat2, readdir, readFile as readFile3, stat, statfs } from "node:fs/promises";
 import { dirname as dirname2, relative, sep } from "node:path";
 var DEBOUNCE_MS = 50;
 var FSEVENTS_SETTLE_MS = 500;
@@ -128140,7 +128359,7 @@ var NodeFileWatcher = class _NodeFileWatcher {
     const record2 = async (path6, stats) => {
       let hash;
       if (this.#mode === "polling" && stats.isFile() && stats.size <= HASH_MAX_BYTES && Date.now() - stats.mtimeMs < HASH_RECENT_MS) {
-        hash = await readFile2(path6).then((content) => createHash2("sha256").update(content).digest("hex"), () => void 0);
+        hash = await readFile3(path6).then((content) => createHash3("sha256").update(content).digest("hex"), () => void 0);
       }
       snapshot.set(path6, entryOf(stats, hash));
     };
@@ -128349,7 +128568,7 @@ function resolvePath2(cwd, path6) {
   if (normalized === "~") {
     normalized = homedir();
   } else if (normalized.startsWith("~/") || process.platform === "win32" && normalized.startsWith("~\\")) {
-    normalized = join2(homedir(), normalized.slice(2));
+    normalized = join4(homedir(), normalized.slice(2));
   } else if (normalized.startsWith("file://")) {
     try {
       normalized = fileURLToPath(normalized);
@@ -128523,7 +128742,7 @@ function getShellEnv(baseEnv, extraEnv, inheritEnv = true) {
 function killProcessTree(pid) {
   if (process.platform === "win32") {
     try {
-      const child = spawn(join2(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(pid)], {
+      const child = spawn(join4(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(pid)], {
         stdio: "ignore",
         detached: true,
         windowsHide: true
@@ -128873,7 +129092,7 @@ var NodeExecutionEnv = class {
     return ok(resolvePath2(this.cwd, path6));
   }
   async joinPath(parts, _context) {
-    return ok(join2(...parts));
+    return ok(join4(...parts));
   }
   async exec(command, options, context3) {
     const signal = context3.abortSignal;
@@ -129122,7 +129341,7 @@ Cannot execute bash commands.`, cause));
     if (aborted)
       return aborted;
     try {
-      return ok(await readFile3(resolved, { encoding: "utf8", signal }));
+      return ok(await readFile4(resolved, { encoding: "utf8", signal }));
     } catch (error) {
       return err(toFileError(error, resolved));
     }
@@ -129155,7 +129374,7 @@ Cannot execute bash commands.`, cause));
     if (aborted)
       return aborted;
     try {
-      return ok(await readFile3(resolved, { signal }));
+      return ok(await readFile4(resolved, { signal }));
     } catch (error) {
       return err(toFileError(error, resolved));
     }
@@ -129204,7 +129423,7 @@ Cannot execute bash commands.`, cause));
     if (aborted)
       return aborted;
     try {
-      await mkdir3(resolve2(resolved, ".."), { recursive: true });
+      await mkdir4(resolve2(resolved, ".."), { recursive: true });
       const afterMkdirAbort = abortResult(signal, resolved);
       if (afterMkdirAbort)
         return afterMkdirAbort;
@@ -129221,7 +129440,7 @@ Cannot execute bash commands.`, cause));
     if (aborted)
       return aborted;
     try {
-      await mkdir3(resolve2(resolved, ".."), { recursive: true });
+      await mkdir4(resolve2(resolved, ".."), { recursive: true });
       const afterMkdirAbort = abortResult(signal, resolved);
       if (afterMkdirAbort)
         return afterMkdirAbort;
@@ -129280,7 +129499,7 @@ Cannot execute bash commands.`, cause));
     if (aborted)
       return aborted;
     try {
-      await rename2(source, destination);
+      await rename3(source, destination);
       return ok(void 0);
     } catch (error) {
       return err(toFileError(error, source));
@@ -129366,7 +129585,7 @@ Cannot execute bash commands.`, cause));
     if (aborted)
       return aborted;
     try {
-      await mkdir3(resolved, { recursive: options?.recursive ?? true });
+      await mkdir4(resolved, { recursive: options?.recursive ?? true });
       return ok(void 0);
     } catch (error) {
       return err(toFileError(error, resolved));
@@ -129390,7 +129609,7 @@ Cannot execute bash commands.`, cause));
       return aborted;
     try {
       prefix ??= "tmp-";
-      return ok(await mkdtemp(join2(tmpdir2(), prefix)));
+      return ok(await mkdtemp(join4(tmpdir2(), prefix)));
     } catch (error) {
       return err(toFileError(error));
     }
@@ -129399,7 +129618,7 @@ Cannot execute bash commands.`, cause));
     const dir = await this.createTempDir("tmp-", context3);
     if (!dir.ok)
       return dir;
-    const filePath = join2(dir.value, `${options?.prefix ?? ""}${randomUUID2()}${options?.suffix ?? ""}`);
+    const filePath = join4(dir.value, `${options?.prefix ?? ""}${randomUUID2()}${options?.suffix ?? ""}`);
     try {
       await writeFile2(filePath, "");
       return ok(filePath);
@@ -130191,8 +130410,8 @@ function prepare2(bytes2, mimeType, limits) {
   }
 }
 function encodeWithin(image, size, maxBytes, jpegFirst) {
-  const same = size.width === image.get_width() && size.height === image.get_height();
-  const scaled = same ? image : resize(image, size.width, size.height, SamplingFilter.Lanczos3);
+  const same2 = size.width === image.get_width() && size.height === image.get_height();
+  const scaled = same2 ? image : resize(image, size.width, size.height, SamplingFilter.Lanczos3);
   try {
     const png = { mimeType: "image/png", encode: () => scaled.get_bytes() };
     const jpegs = JPEG_QUALITIES.map((quality) => ({
@@ -130206,7 +130425,7 @@ function encodeWithin(image, size, maxBytes, jpegFirst) {
     }
     return void 0;
   } finally {
-    if (!same)
+    if (!same2)
       scaled.free();
   }
 }
@@ -130299,12 +130518,12 @@ function infiniChatDevices(list, images) {
 }
 
 // server/devices.ts
-function serverDevices(name) {
-  const work = join3(homedir2(), MACHINE_WORK);
+function serverDevices(name, description) {
+  const work = join5(homedir2(), MACHINE_WORK);
   const device = {
     name,
-    description: `${userInfo().username}@${hostname()}, work dir ~/${MACHINE_WORK}`,
-    environment: async (who) => new NodeExecutionEnv({ cwd: join3(work, who) })
+    description,
+    environment: async (who) => new NodeExecutionEnv({ cwd: join5(work, who) })
   };
   return infiniChatDevices(async () => [device], createPhotonImages(photon_rs_bg_default));
 }
@@ -130312,8 +130531,8 @@ function serverDevices(name) {
 // server/listen.ts
 init_define_INFINICHAT_PI();
 import { timingSafeEqual } from "node:crypto";
-import { readFile as readFile4, rename as rename3, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join4 } from "node:path";
+import { readFile as readFile5, rename as rename4, writeFile as writeFile3 } from "node:fs/promises";
+import { join as join6 } from "node:path";
 init_wrapper();
 function authorized(request2, secret) {
   const given = Buffer.from(request2.headers.authorization ?? "");
@@ -130321,8 +130540,8 @@ function authorized(request2, secret) {
   return given.length === wanted.length && timingSafeEqual(given, wanted);
 }
 async function listen(host, home, bundle) {
-  const secret = Buffer.from((await readFile4(join4(home, "secret"), "utf8")).trim());
-  if (secret.length === 0) throw new Error(`${join4(home, "secret")} is empty.`);
+  const secret = Buffer.from((await readFile5(join6(home, "secret"), "utf8")).trim());
+  if (secret.length === 0) throw new Error(`${join6(home, "secret")} is empty.`);
   const server = new import_websocket_server.default({ host: "127.0.0.1", port: 0 });
   server.on("connection", (socket, request2) => {
     if (!authorized(request2, secret)) {
@@ -130340,9 +130559,9 @@ async function listen(host, home, bundle) {
   });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`Unexpected listening address ${address}.`);
-  const temporary = join4(home, `server.json.${process.pid}`);
+  const temporary = join6(home, `server.json.${process.pid}`);
   await writeFile3(temporary, JSON.stringify({ pid: process.pid, port: address.port, bundle }));
-  await rename3(temporary, join4(home, "server.json"));
+  await rename4(temporary, join6(home, "server.json"));
   console.log(`InfiniChat listening on 127.0.0.1:${address.port}`);
   return server;
 }
@@ -130717,7 +130936,15 @@ var ScheduledSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(Sched
 var ServerSchema = typebox_exports.Object({
   bundle: typebox_exports.String(),
   pi: typebox_exports.Object({ durable: typebox_exports.String(), ai: typebox_exports.String(), chord: typebox_exports.String() }),
-  device: typebox_exports.String()
+  device: typebox_exports.String(),
+  /** The device's description, the text the phone's device list gives the machine. */
+  description: typebox_exports.String()
+});
+var FileSchema = typebox_exports.Object({ sha256: typebox_exports.String(), size: typebox_exports.Number() });
+var ConversationFilesSchema = typebox_exports.Object({ db: FileSchema, wal: typebox_exports.Optional(FileSchema) });
+var ConversationSchema = typebox_exports.Object({
+  active: typebox_exports.Boolean(),
+  adopted: typebox_exports.Optional(ConversationFilesSchema)
 });
 var AccessSchema = typebox_exports.Record(typebox_exports.String(), ProviderAccessSchema);
 var AuthPromptSchema = typebox_exports.Union([
@@ -130756,6 +130983,7 @@ var InfiniChatRemote = remote("infinichat.remote", {
         messages: MessagesSchema,
         scheduled: ScheduledSchema,
         server: ServerSchema,
+        conversation: ConversationSchema,
         catalog: ModelCatalogSchema,
         access: AccessSchema,
         // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:237`).
@@ -130782,7 +131010,15 @@ var InfiniChatRemote = remote("infinichat.remote", {
         answer: method(typebox_exports.Object({ promptId: typebox_exports.Number(), value: typebox_exports.String() })),
         cancelSignIn: method(),
         setApiKey: method(typebox_exports.Object({ providerId: typebox_exports.String(), key: typebox_exports.String() })),
-        signOut: method(typebox_exports.Object({ providerId: typebox_exports.String() }))
+        signOut: method(typebox_exports.Object({ providerId: typebox_exports.String() })),
+        // Moving the conversation, as upstream's session sync hands a session over: one side closes its Harness, the
+        // files are copied, the other side opens them. `adopt` opens the files in `data/` when they match, and is
+        // refused while active. `relinquish` (Chord reserves `release`) stops input, closes the Harness and its
+        // storage, and names the files it left; called again, it names them again. `archive` moves released files
+        // where nothing opens them, and is refused while active.
+        adopt: method(ConversationFilesSchema),
+        relinquish: method(void 0, ConversationFilesSchema),
+        archive: method()
       }
     }
   }
@@ -130790,54 +131026,68 @@ var InfiniChatRemote = remote("infinichat.remote", {
 
 // server/serve.ts
 var callContext = (ctx2) => withAbortSignal(ctx2.signal, BACKGROUND_CONTEXT);
-function serveInfiniChat(host, core, options) {
+var LOADING = { status: "loading" };
+function serveInfiniChat(host, conversation, options) {
   const { credentials, signIn } = options;
+  const core = () => {
+    const open2 = conversation.current;
+    if (!open2) throw new Error(`InfiniChat isn\u2019t open on ${options.server.device}.`);
+    return open2;
+  };
   host.serve(InfiniChatRemote, (_input, _principal, self2) => {
-    const view = core.view();
     const currentSnapshot = () => {
-      const { error } = core.getSnapshot();
-      return { view: view.getSnapshot(), ...error === void 0 ? {} : { report: error } };
+      const open2 = conversation.current;
+      if (!open2) return { view: LOADING };
+      const { error } = open2.getSnapshot();
+      return { view: open2.view().getSnapshot(), ...error === void 0 ? {} : { report: error } };
     };
+    const currentControls = () => conversation.current?.view().getControls() ?? null;
+    const currentMessages = () => conversation.current?.view().getMessages() ?? [];
+    const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? [];
     const snapshot = self2.state("snapshot", SnapshotSchema, { init: currentSnapshot });
-    const controls = self2.state("controls", ControlsSchema, { init: () => view.getControls() ?? null });
-    const messages = self2.state("messages", MessagesSchema, { init: () => view.getMessages() });
-    const scheduled = self2.state("scheduled", ScheduledSchema, { init: () => core.scheduled.getSnapshot() ?? [] });
+    const controls = self2.state("controls", ControlsSchema, { init: currentControls });
+    const messages = self2.state("messages", MessagesSchema, { init: currentMessages });
+    const scheduled = self2.state("scheduled", ScheduledSchema, { init: currentScheduled });
+    const held2 = self2.state("conversation", ConversationSchema, { init: conversation.getState });
     const server = self2.state("server", ServerSchema, { init: () => options.server });
     const catalog = self2.state("catalog", ModelCatalogSchema, { init: () => options.catalog });
     const access3 = self2.state("access", AccessSchema, { init: () => credentials.getSnapshot().providers });
     const signInAttempt = self2.state("signInAttempt", SignInAttemptSchema, { init: () => signIn.getSnapshot() });
     self2.on("access", credentials, (_change, ctx2) => access3.replace(ctx2, credentials.getSnapshot().providers));
     self2.on("signInAttempt", signIn, (_change, ctx2) => signInAttempt.replace(ctx2, signIn.getSnapshot()));
-    const mirror = (_change, ctx2) => {
+    self2.on("conversation", conversation, (_change, ctx2) => {
+      messages.replace(ctx2, currentMessages(), { diff: true });
+      controls.replace(ctx2, currentControls(), { diff: true });
+      scheduled.replace(ctx2, currentScheduled(), { diff: true });
+      held2.replace(ctx2, conversation.getState(), { diff: true });
       snapshot.replace(ctx2, currentSnapshot(), { diff: true });
-      controls.replace(ctx2, view.getControls() ?? null, { diff: true });
-      messages.replace(ctx2, view.getMessages(), { diff: true });
-      scheduled.replace(ctx2, core.scheduled.getSnapshot() ?? [], { diff: true });
-    };
-    self2.on("view", view, mirror);
-    self2.on("report", core, mirror);
-    self2.on("scheduled", core.scheduled, mirror);
+    });
     return {
       variant: "owner",
       snapshot,
       controls,
       messages,
       scheduled,
+      conversation: held2,
       server,
       catalog,
       access: access3,
       signInAttempt,
-      accept: ({ content, requestId }, ctx2) => core.accept(content, requestId, callContext(ctx2)),
-      stop: () => core.stop(),
-      updateSettings: ({ main: main2, summary, instructions }, ctx2) => core.updateSettings(main2, summary, instructions, callContext(ctx2)),
-      cancelScheduled: ({ id, replacement }, ctx2) => core.cancelScheduled(id, replacement, callContext(ctx2)),
-      dismissError: () => core.dismissError(),
+      accept: ({ content, requestId }, ctx2) => core().accept(content, requestId, callContext(ctx2)),
+      stop: () => core().stop(),
+      updateSettings: ({ main: main2, summary, instructions }, ctx2) => core().updateSettings(main2, summary, instructions, callContext(ctx2)),
+      cancelScheduled: ({ id, replacement }, ctx2) => core().cancelScheduled(id, replacement, callContext(ctx2)),
+      dismissError: () => core().dismissError(),
       setTimeZone: ({ zone }) => options.setTimeZone(zone),
       signIn: ({ providerId }) => signIn.signIn(providerId),
       answer: ({ promptId, value }) => signIn.answer(promptId, value),
       cancelSignIn: () => signIn.cancel(),
       setApiKey: ({ providerId, key: key2 }) => signIn.setApiKey(providerId, key2),
-      signOut: ({ providerId }) => signIn.signOut(providerId)
+      signOut: ({ providerId }) => signIn.signOut(providerId),
+      // The move goes on when the caller goes away: a dropped link never leaves it half done.
+      adopt: (files) => conversation.adopt(files),
+      relinquish: () => conversation.relinquish(),
+      archive: () => conversation.archive()
     };
   });
 }
@@ -131016,46 +131266,20 @@ var ServerSignIn = class {
   }
 };
 
-// server/time-zone.ts
-init_define_INFINICHAT_PI();
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join as join6 } from "node:path";
-function restoreTimeZone(home) {
-  let text;
-  try {
-    text = readFileSync(join6(home, "state.json"), "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
-    throw error;
-  }
-  const state3 = JSON.parse(text);
-  if (typeof state3 === "object" && state3 !== null && "timeZone" in state3 && typeof state3.timeZone === "string") {
-    process.env.TZ = state3.timeZone;
-  }
-}
-function setTimeZone(home, zone) {
-  Intl.DateTimeFormat("en-US", { timeZone: zone });
-  const file = join6(home, "state.json");
-  const temporary = `${file}.${process.pid}`;
-  writeFileSync(temporary, JSON.stringify({ timeZone: zone }));
-  renameSync(temporary, file);
-  process.env.TZ = zone;
-}
-
 // server/main.ts
-var USAGE = "Usage: node server.js serve --device <name>";
+var USAGE = "Usage: node server.js serve --device <name> --description <text>";
 registerBunOAuthFlows();
-async function serve(device) {
-  const home = join7(homedir3(), ".infinichat");
+async function serve(device, description) {
+  const home = join8(homedir3(), ".infinichat");
   const stopping = Promise.withResolvers();
   process.once("SIGTERM", () => stopping.resolve(void 0));
   process.once("SIGINT", () => stopping.resolve(void 0));
   const closes = [];
   try {
     closes.push(await processLock("infinichat-server"));
-    await mkdir5(home, { recursive: true, mode: 448 });
+    await mkdir6(home, { recursive: true, mode: 448 });
     restoreTimeZone(home);
-    const backend = fileCredentialBackend(join7(home, "credentials.json"));
+    const backend = fileCredentialBackend(join8(home, "credentials.json"));
     const credentials = new ProviderCredentialStore(
       backend,
       { openai: { validate: validateOpenAICredential } },
@@ -131067,19 +131291,17 @@ async function serve(device) {
     });
     const signIn = new ServerSignIn(models, credentials, openAILoginOptions(backend));
     closes.push(() => signIn.cancel());
-    await mkdir5(join7(home, "data"), { recursive: true });
-    const storage = await openNodeSqliteStorage(join7(home, "data", "infinichat.db"));
-    closes.push(() => storage.close(BACKGROUND_CONTEXT));
-    const core = await InfiniChatService.open({
+    const conversation = new ServerConversation(home, (storage) => InfiniChatService.open({
       storage,
       models,
-      devices: serverDevices(device),
+      devices: serverDevices(device, description),
       machine: device,
       onClosed: (end3) => {
         if (end3.reason === "failed") stopping.resolve(end3);
       }
-    });
-    closes.push(() => core.close());
+    }));
+    await conversation.start();
+    closes.push(() => conversation.close());
     const host = createHost({
       name: "infinichat-server",
       self: { kind: "host" },
@@ -131087,8 +131309,8 @@ async function serve(device) {
     });
     closes.push(() => host.close());
     const bundle = basename5(dirname4(fileURLToPath2(import.meta.url)));
-    serveInfiniChat(host, core, {
-      server: { bundle, pi: define_INFINICHAT_PI_default, device },
+    serveInfiniChat(host, conversation, {
+      server: { bundle, pi: define_INFINICHAT_PI_default, device, description },
       setTimeZone: (zone) => setTimeZone(home, zone),
       catalog: buildModelCatalog(models),
       credentials,
@@ -131112,9 +131334,15 @@ async function serve(device) {
   }
 }
 function main(args) {
-  const { positionals, values } = parseArgs({ args, allowPositionals: true, options: { device: { type: "string" } } });
-  if (positionals.length !== 1 || positionals[0] !== "serve" || !values.device) throw new Error(USAGE);
-  return serve(values.device);
+  const { positionals, values } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { device: { type: "string" }, description: { type: "string" } }
+  });
+  if (positionals.length !== 1 || positionals[0] !== "serve" || !values.device || !values.description) {
+    throw new Error(USAGE);
+  }
+  return serve(values.device, values.description);
 }
 try {
   process.exitCode = await main(process.argv.slice(2));

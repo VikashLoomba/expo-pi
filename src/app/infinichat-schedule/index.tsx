@@ -32,7 +32,6 @@ export default function ScheduledTasksScreen() {
   const [error, setError] = useState<string>();
   const shown = tasks?.filter((task) => !deleted.includes(task.id));
   const remove = async (task: ScheduledTask) => {
-    if (!infiniChat) return;
     setDeleted((current) => [...current, task.id]);
     setError(undefined);
     try {

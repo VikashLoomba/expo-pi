@@ -11,14 +11,14 @@ const unchosen: ChatModelSettings = { model: { provider: '', modelId: '' }, thin
 
 /** InfiniChat's settings as a sheet with its own Stack, so its model lists push with the native back button. */
 export default function InfiniChatSettingsLayout() {
-  const { infiniChat, error: appError } = useChatApp();
+  const { error: appError } = useChatApp();
   const view = useInfiniChatView();
   const conversation = useChatControls(view);
   const status = useChatStatus(view);
   const viewError = useChatError(view);
   const screenOptions = useStackScreenOptions();
   if (!conversation) {
-    return <SettingsUnavailable loading={(!infiniChat || status === 'loading') && !appError}
+    return <SettingsUnavailable loading={status === 'loading' && !appError}
       message={viewError || appError || 'InfiniChat is not available.'} onClose={() => router.back()} />;
   }
   return <InfiniChatSettingsDraftProvider view={view} initial={{ main: conversation.settings,

@@ -15,6 +15,9 @@ import type { OptChatOptions } from './app';
  * A machine's work dir is a folder of its own in the account's home, as UniiChat's `~/.unii/work`.
  */
 export const MACHINE_WORK = '.infinichat/work';
+/** How the device list describes a machine, also on the machine itself once the conversation moves there. */
+export const machineDescription = (host: { username: string; hostname: string }) =>
+  `${host.username}@${host.hostname} over SSH, work dir ~/${MACHINE_WORK}`;
 
 /** One device InfiniChat's tools run on, as the devices list at the start of each message names it. */
 export type Device = {

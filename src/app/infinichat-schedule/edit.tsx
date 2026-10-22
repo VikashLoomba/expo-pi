@@ -35,10 +35,10 @@ function TaskForm({ task }: { task: ScheduledTask }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const changed = draft.task.trim() !== task.task || draft.until !== task.until;
-  const canSave = !!infiniChat && !busy && changed && !!draft.task.trim();
+  const canSave = !busy && changed && !!draft.task.trim();
   /** Deletes the task, or replaces it with `replacement`; either fails once the task has reached InfiniChat. */
   const finish = async (replacement?: ScheduledInput) => {
-    if (!infiniChat || busy) return;
+    if (busy) return;
     if (replacement && replacement.until <= Date.now()) {
       setError('Choose a time in the future.');
       return;
