@@ -19,12 +19,13 @@ const LOADING = { status: 'loading' } as const;
 /**
  * Serves the conversation as InfiniChat's remote object. Its cells mirror the open core's view, its latest report and
  * its scheduled tasks; the view's projection rebuilds its arrays on every update, so each write goes out as a diff.
- * While this machine doesn't hold the conversation, there is no core: the view is loading and the operations refuse.
- * `conversation` says whether it holds it, and `adopt`, `relinquish` and `archive` move it. `server` says which server
- * answers, and `setTimeZone` applies the phone's zone. The account cells mirror this machine's credential store and its
- * sign-in, which outlive the object, so a phone that reconnects finds them again; `catalog` is fixed, because none of
- * the registered providers refreshes its models (pi-ai `refreshModels`). `reach` and `pendingHostKeys` mirror what
- * this machine found of the other machines its tools use, which `setMachines` lists and `acceptHostKey` trusts.
+ * While this machine doesn't hold the conversation, there is no core: the view is loading, the scheduled tasks are null
+ * and the operations refuse. `conversation` says whether it holds it, and `adopt`, `relinquish` and `archive` move it.
+ * `server` says which server answers, and `setTimeZone` applies the phone's zone. The account cells mirror this
+ * machine's credential store and its sign-in, which outlive the object, so a phone that reconnects finds them again;
+ * `catalog` is fixed, because none of the registered providers refreshes its models (pi-ai `refreshModels`). `reach`
+ * and `pendingHostKeys` mirror what this machine found of the other machines its tools use, which `setMachines` lists
+ * and `acceptHostKey` trusts.
  */
 export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: ServerConversation, options: {
   server: InfiniChatServer;
@@ -49,7 +50,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
     };
     const currentControls = () => conversation.current?.view().getControls() ?? null;
     const currentMessages = () => conversation.current?.view().getMessages() ?? [];
-    const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? [];
+    const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? null;
     const snapshot = self.state('snapshot', SnapshotSchema, { init: currentSnapshot });
     const controls = self.state('controls', ControlsSchema, { init: currentControls });
     const messages = self.state('messages', MessagesSchema, { init: currentMessages });

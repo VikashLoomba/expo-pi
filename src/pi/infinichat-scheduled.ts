@@ -20,7 +20,7 @@ function scheduledInput(value: JsonValue): ScheduledInput | undefined {
 
 /**
  * The scheduled tasks still waiting, read again from pi-durable's records whenever the task graph changes. The
- * Scheduled tasks sheet shows them, and on the phone they are mirrored as local notifications.
+ * Scheduled tasks sheet shows them, and the phone mirrors them as local notifications wherever they run.
  */
 export class ScheduledTasks {
   private graph?: AttachedReplicatedState<TaskGraph>;

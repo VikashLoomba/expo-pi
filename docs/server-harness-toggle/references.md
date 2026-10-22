@@ -95,6 +95,11 @@ Checked on 2026-10-21. Versions:
 | `deployDaemon` removes daemons of other contents in `~/.pi/mobile/tools/`, the folder the phone's provisioning uses | pi-env `src/ssh.ts:456` (v1.4.0) |
 | `Connection.close()` stops the daemon, which kills everything it started | pi-env `src/connection.ts:215-216` (v1.4.0) |
 | sshd refuses an address for a while after failed logins (`PerSourcePenalties`, OpenSSH 9.8 and later) | measured on OpenSSH_10.3p1: "activating ipv4 penalty of 15.843 seconds for penalty: failed authentication" |
+| `getAllScheduledNotificationsAsync` returns the pending requests, each with `content.categoryIdentifier` (`null` when none) | expo-notifications 58.1.6 `build/getAllScheduledNotificationsAsync.d.ts`, `build/Notifications.types.d.ts:433`, `:530-534`; `ios/ExpoNotifications/Notifications/NotificationRecords.swift:321` |
+| `scheduleNotificationAsync` adds the request with `UNUserNotificationCenter.add` under the given identifier | expo-notifications 58.1.6 `ios/ExpoNotifications/Notifications/Scheduling/SchedulerModule.swift:40-56` |
+| A request whose identifier matches a pending request replaces it | Apple, `UNNotificationRequest.init(identifier:content:trigger:)`, read 2026-10-22 |
+| A DATE trigger floors its time to whole seconds and becomes a time-interval trigger, which refuses a time not ahead | expo-notifications 58.1.6 `ios/ExpoNotifications/Notifications/TriggerRecords.swift:102-110` |
+| Category identifiers may not contain `:` or `-`; `opensAppToForeground: false` keeps an action in the background | expo-notifications 58.1.6 `build/setNotificationCategoryAsync.d.ts:6`, `build/Notifications.types.d.ts:714-720` |
 
 ## Chord over WebSocket in Hermes
 
@@ -363,6 +368,42 @@ ran over loopback, so the times are the Mac's, not Tailscale's.
 | Found by these checks and fixed | The first `ready` overtaking 1,433 messages (`snapshot` now last); a Cancel's queued `closeMachine` handing the next move a closing client whose `connected()` never settled |
 | The stand-in itself | Its channel close first left `cat` waiting on an open stdin, which a real channel close ends; fixed in the stand-in before the repeats |
 
+## Piece 6 on macOS
+
+**Checks, 2026-10-22**, on the implementer's Mac (arm64; the server on Node 24.5.0 from Homebrew, the phone's code on
+Node 25.6.1), with pi 1.4.0 (tag `4a080252f`), Expo 58.0.17 and expo-notifications 58.1.6 installed. No device or
+simulator was used. 23 of 23 checks passed, in four runs.
+- **What ran on the phone's side:** one Node process with the app's real `ScheduledTaskNotifications`,
+  `KeepAliveController`, `ShownInfiniChat`, `InfiniChatMoves`, home record, `RemoteInfiniChat`,
+  `openPhoneInfiniChat`, `openExpoSqliteStorage`, contract and Chord, wired as `chat-provider.tsx` wires them
+  (`showMachine` included), bundled with esbuild. A relaunch was a second runtime in the same process.
+- **Stand-ins, not committed:** piece 5's for react-native-ssh (refusing any `launchctl` or `systemctl` command),
+  expo-sqlite, the Keychain, `File`, expo-crypto and expo-asset; for expo-notifications, pending requests keyed by
+  identifier with Apple's replacement, the DATE trigger floored to whole seconds, delivery at that time, and
+  `categoryIdentifier` read back; expo-location and the Live Activity, recording each start, update and end.
+- **The models:** a scripted faux model on both sides, the same script: a message `SCHEDULE <name> +<seconds>`
+  calls `schedule_task`, a scheduled task's message is answered `ran <name>` and may schedule the next one, and
+  `STREAM` streams a long answer.
+- **The server:** this commit's `server/main.ts` with the scripted models beside its own, started by hand with a
+  scratch `HOME` and a scratch `TMPDIR` short enough for Chord's lock socket, sshd's `PATH` and outbound HTTPS sent to
+  a closed port. The real `~/.infinichat`, LaunchAgents and SSH were not used. Afterwards no server process, lock
+  socket or scratch directory was left.
+
+| Check | Result |
+| --- | --- |
+| Two tasks scheduled on the phone | Two notifications, category `infinichatScheduledTask` with `run` (background) and `open` (foreground) |
+| Keep-alive for work on the phone | The location stream and the Live Activity started, and ended with the work |
+| Move there | The two requests replaced under their identifiers with `infinichatMachineTask` (Open only) as the screens switched; no cancel, never fewer than two pending |
+| A task the machine's agent schedules; one deleted from the sheet | Its notification added; the deleted one's cancelled |
+| A streamed answer from the machine | 24 store notifications, no read of iOS's pending set (26 with the notifier's list check removed) |
+| Keep-alive for work on the machine | No location stream, no Live Activity start or update |
+| The phone cut off (connections dropped, new ones refused) before a task 12 s out | The notification delivered at its time (floored, 0.44 s early) with the machine's category; the machine ran the task 26 ms after its time and its turn scheduled another; the phone touched nothing meanwhile |
+| Reconnected (as the app becoming active) | The task scheduled meanwhile got its notification; `ran T5` was in the transcript |
+| The server restarted while the phone was cut off | Reconnected to the same set: one read of iOS's set, nothing scheduled or cancelled |
+| Relaunch while the machine is unreachable, then reachable | Nothing touched while it failed; after connecting one read and no change |
+| Move back | The three requests replaced with the phone's category as the screens switched; no cancel, no add; the client's list went `undefined` after `relinquish` |
+| The same run against a server that sends `[]` for a conversation it doesn't hold (piece 5's behaviour) | 3 failures: the move there cancelled both requests right after `adopt` (the list `[]` before the machine had read its tasks) and added them again; the move back cancelled all three after `relinquish` and added them again 32 ms later, once the phone had opened |
+
 ## Piece 7 on macOS
 
 **Checks, 2026-10-22**, on the implementer's Mac (arm64, macOS, Node 24.5.0 from Homebrew for the server and 25.6.1 for
@@ -445,6 +486,8 @@ The final run passed 27 of 27 checks; after the review's fixes, 30 of 30.
   `digest` on a 40 MB file, expo-sqlite's close leaving no WAL, the header's progress and the menu's Cancel Move, the
   screens keeping their scroll and draft through a move, and a killed app relaunching into a move.
 - Piece 5 against Linux, and against a machine whose `released/` holds earlier conversations.
+- Piece 6 on the phone: delivered notifications and their actions on iOS, "Open" and a tap opening the app, a request
+  replaced under its identifier by iOS itself, and the checks of `06` over Tailscale with the phone locked.
 - Piece 7 on the phone: the Remote machines rows and the accept button, the list sent from the real Keychain, and
   the phone's own tools after a move back (their code is unchanged).
 - Piece 7 on Linux, as A or as one of the others, and over Tailscale.

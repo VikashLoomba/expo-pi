@@ -20,7 +20,11 @@ export type InfiniChatPrincipal = { kind: 'owner' } | { kind: 'host' };
 export const SnapshotSchema = Type.Object({ view: ChatViewSnapshotSchema, report: Type.Optional(Type.String()) });
 export const ControlsSchema = Type.Union([InfiniChatControlsSchema, Type.Null()]);
 export const MessagesSchema = Type.ReadonlyObject(Type.Array(ChatMessageSchema));
-export const ScheduledSchema = Type.ReadonlyObject(Type.Array(ScheduledTaskSchema));
+/**
+ * The scheduled tasks still waiting, soonest first; null while this machine doesn't hold the conversation open or
+ * hasn't read them yet, so the phone never takes an empty list it was not given for its notifications.
+ */
+export const ScheduledSchema = Type.Union([Type.ReadonlyObject(Type.Array(ScheduledTaskSchema)), Type.Null()]);
 /**
  * Which server answers: `bundle` names its bundle (the first 32 hex digits of its SHA-256), built with these pi
  * versions, running as the device `--device` named. The phone reinstalls when `bundle` differs from its manifest, and

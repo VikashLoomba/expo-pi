@@ -132810,7 +132810,7 @@ var ChatViewSnapshotSchema = typebox_exports.Object({
 var SnapshotSchema = typebox_exports.Object({ view: ChatViewSnapshotSchema, report: typebox_exports.Optional(typebox_exports.String()) });
 var ControlsSchema = typebox_exports.Union([InfiniChatControlsSchema, typebox_exports.Null()]);
 var MessagesSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(ChatMessageSchema));
-var ScheduledSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(ScheduledTaskSchema));
+var ScheduledSchema = typebox_exports.Union([typebox_exports.ReadonlyObject(typebox_exports.Array(ScheduledTaskSchema)), typebox_exports.Null()]);
 var ServerSchema = typebox_exports.Object({
   bundle: typebox_exports.String(),
   pi: typebox_exports.Object({ durable: typebox_exports.String(), ai: typebox_exports.String(), chord: typebox_exports.String() }),
@@ -132944,7 +132944,7 @@ function serveInfiniChat(host, conversation, options) {
     };
     const currentControls = () => conversation.current?.view().getControls() ?? null;
     const currentMessages = () => conversation.current?.view().getMessages() ?? [];
-    const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? [];
+    const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? null;
     const snapshot = self2.state("snapshot", SnapshotSchema, { init: currentSnapshot });
     const controls = self2.state("controls", ControlsSchema, { init: currentControls });
     const messages = self2.state("messages", MessagesSchema, { init: currentMessages });

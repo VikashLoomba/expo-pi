@@ -78,8 +78,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private notice?: string;
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
-    scheduled: readonly ScheduledTask[]; catalog: ModelCatalog; access: MachineAccess; signIn: SignInAttempt;
-    conversation: ConversationState; reach: Reach; pendingHostKeys: PendingHostKeys;
+    scheduled: readonly ScheduledTask[] | undefined; catalog: ModelCatalog; access: MachineAccess;
+    signIn: SignInAttempt; conversation: ConversationState; reach: Reach; pendingHostKeys: PendingHostKeys;
   };
   private report = NO_REPORT;
   private status: ConnectionStatus = { status: 'connecting' };
@@ -102,6 +102,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   /** The server's latest report, until it is dismissed there. */
   readonly getSnapshot = () => this.report;
   readonly getConnection = () => this.connection;
+  /** The machine's waiting tasks; undefined until connected, and while the machine hasn't opened and read them. */
   readonly scheduled = { subscribe: this.subscribe, getSnapshot: () => this.values?.scheduled };
   private readonly shown: ChatViewSource<InfiniChatControls> = {
     subscribe: this.subscribe,
@@ -456,7 +457,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
     if (ref === undefined || !this.session?.live) return;
     const { view, report } = ref.snapshot.value;
     this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value,
-      scheduled: ref.scheduled.value, catalog: ref.catalog.value, access: ref.access.value,
+      scheduled: ref.scheduled.value ?? undefined, catalog: ref.catalog.value, access: ref.access.value,
       signIn: ref.signInAttempt.value, conversation: ref.conversation.value, reach: ref.reach.value,
       pendingHostKeys: ref.pendingHostKeys.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };

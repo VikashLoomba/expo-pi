@@ -12,6 +12,7 @@ import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
+import { ScheduledTaskNotifications } from '../pi/infinichat-notifications';
 import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
 import { RemoteInfiniChat, type RemoteConnection } from '../pi/infinichat-remote/client';
 import { createInfiniChatHome } from '../pi/infinichat-remote/home';
@@ -82,6 +83,9 @@ function useChatRuntime() {
     // earlier mount's controller has ended its Live Activity before this one adopts any.
     const keepAlive = new KeepAliveController(keepAliveSettings);
     serialize(async () => keepAlive.start());
+    // One notifier for InfiniChat's scheduled tasks, following the side that holds the conversation open, so a move
+    // replaces iOS's pending notifications in place.
+    const notifications = new ScheduledTaskNotifications();
     // The repository reports a failed restore in its own snapshot.
     void remoteHosts.restore().catch(() => {});
     // Account restoration does not depend on SQLite, so a database failure leaves sign-in usable. A provider whose
@@ -104,7 +108,7 @@ function useChatRuntime() {
     const openPhone = async () => {
       if (state.phone || unmounted) return;
       const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
-        storage, models, workspaces, remote, remoteHosts, keepAlive, authError,
+        storage, models, workspaces, remote, remoteHosts, keepAlive, notifications, authError,
         onClosed: (end) => {
           if (end.reason !== 'failed') return;
           serialize(async () => {
@@ -130,6 +134,13 @@ function useChatRuntime() {
       setInfiniChatClient(state.remote);
       return state.remote;
     };
+    // The machine holds the conversation open: the screens show it, and the notifications follow its tasks, which it
+    // starts itself at their time.
+    const showMachine = (opened: RemoteInfiniChat) => {
+      infiniChat.show(opened);
+      notifications.follow({ tasks: opened.scheduled, runsOn: 'machine',
+        report: (error) => setOpenError(`InfiniChat: ${errorText(error)}`) });
+    };
     const moves = new InfiniChatMoves(infiniChatHome, remoteHosts, {
       hold: () => infiniChat.hold(),
       closePhone: () => queued(async () => {
@@ -145,7 +156,7 @@ function useChatRuntime() {
         }
       }),
       machine,
-      show: (opened) => infiniChat.show(opened),
+      show: showMachine,
       // Let go of the client at once, so a move chosen next gets a new one, and close it in order with storage.
       closeMachine: () => {
         const closing = state.remote;
@@ -193,7 +204,7 @@ function useChatRuntime() {
         }
       } else if (home.phase === 'there') {
         const opened = machine(home.machineId);
-        infiniChat.show(opened);
+        showMachine(opened);
         opened.reconnect();
       } else {
         moves.resume();
@@ -230,7 +241,7 @@ function useChatRuntime() {
         // first failure is reported once the rest are done.
         let failure: unknown;
         for (const step of [() => closingPhone?.close(), () => closingRemote?.close(), () => closing?.close(),
-          () => remote.close(), () => keepAlive.close()]) {
+          () => remote.close(), () => keepAlive.close(), () => notifications.close()]) {
           try { await step(); } catch (error) { failure ??= error; }
         }
         if (failure !== undefined) throw failure;
