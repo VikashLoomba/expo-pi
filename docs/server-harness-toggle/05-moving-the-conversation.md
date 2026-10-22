@@ -86,6 +86,9 @@ phone's files, the move did finish, so continue at step 5. Cancelling before `ad
 - **The screen doesn't reload.** While the move runs it keeps the last messages, and it switches its source once the
   new side's first snapshot has arrived. It doesn't remount, so the scroll position and the composer's draft stay
   put; a draft sent during the move keeps its `requestId` and is admitted once, on the new side.
+  - Piece 3 doesn't do this yet: at a toggle `chat-provider.tsx` sets `infiniChat` to `undefined` before it opens the
+    other side, so every InfiniChat screen drops to loading in between. This piece has to keep the old host's last
+    values on screen until the new one has its first snapshot, instead of clearing it.
 - **A reply being streamed starts over.** pi-durable's recovery resets the generation to pending, so the partial
   answer is generated again on the new side.
 - **Only the header changes:** its subtitle shows the step (closing, copying with bytes of total, opening on

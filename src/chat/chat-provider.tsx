@@ -89,7 +89,7 @@ function useChatRuntime() {
     };
     // Returning to the app retries a failed open; an open service ignores the call. InfiniChat has its own database
     // and Harness, opened in the same step, unless it runs on a machine: then it connects there, and returning to the
-    // app reconnects a lost connection.
+    // app reconnects a failed connection.
     const open = () => serialize(async () => {
       const failures: string[] = [];
       if (!state.service) {
@@ -147,7 +147,16 @@ function useChatRuntime() {
       setOpenError(failures.length ? failures.join('\n') : undefined);
     });
     open();
-    const subscription = AppState.addEventListener('change', (appState) => { if (appState === 'active') open(); });
+    // iOS suspends the app only in the background, Chord's pinger and the SSH keepalive with it, so only a return from
+    // there replaces InfiniChat's remote link; returning from inactive (Control Center, a system prompt) doesn't.
+    let previousState = AppState.currentState;
+    const subscription = AppState.addEventListener('change', (appState) => {
+      if (appState === 'active') {
+        if (previousState === 'background' && state.infiniChat instanceof RemoteInfiniChat) state.infiniChat.resume();
+        open();
+      }
+      previousState = appState;
+    });
     // Choosing where InfiniChat runs closes it where it ran, then opens it on the chosen side.
     const unsubscribeChoice = machineChoice.subscribe(() => {
       serialize(async () => {

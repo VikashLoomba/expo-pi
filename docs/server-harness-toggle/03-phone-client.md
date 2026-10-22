@@ -89,7 +89,9 @@ As built, the interface sits beside the core in `src/pi/infinichat-service.ts`, 
      upstream ends the binding at once with `unavailable: no route to infinichat-server` (chord `src/host.ts:1126`).
    - Once the reference is live, the attempt checks the `server` member: its `bundle` must be this app's and its
      `device` the machine's current name. Either mismatch installs, so a renamed machine restarts with its new
-     `--device`. The screens see nothing from a server until that check passes.
+     `--device`. The screens see nothing from a server until that check passes. That restart stops the server
+     mid-turn if one is running; pi-durable resumes the interrupted work when the new server opens the database, as
+     after any restart (pi-durable `README.md:127`).
    - The server's own view starts `loading` on the first hold after the server starts, and publishes `ready` once it
      has read the conversation, so the screens show "Opening this conversation…" for a moment then.
    - Calls run inside `host.root(…, { signal })`. The prefix is stripped with the regular expression
@@ -110,16 +112,25 @@ As built, the interface sits beside the core in `src/pi/infinichat-service.ts`, 
      the server refuses during an attempt never loops.
    - Nothing retries after a failed attempt. The failure stays until the app becomes active or the user acts: a
      call, or "Try Again" on the error notice.
+   - A forward that can't be opened fails with the same fixed SSH messages as a connect (`connectionFailure`).
    - A Chord call on a `loading` reference waits until it is live, with only its `ctx` to cancel it
      (`src/remote.ts:338`). The calls run with a signal the client aborts when an attempt fails, so a call waiting
      through a failed reconnect rejects with that failure, such as "The SSH server could not be reached through
      Tailscale…", instead of waiting until the next attempt.
    - A call in flight when its link closes rejects with `unavailable: link to … closed` (`src/connection.ts:1237`,
-     `:1242`). It may have reached the server, so it shows "The connection to <machine> was lost. Try again.", and
-     the resend keeps its `requestId`.
-   - On app active the provider calls `reconnect()`, which does nothing while the session is live. A connection that
-     died while the app was suspended is noticed by Chord's ping timeout (45 s, `src/connection.ts:440-445`) or the
-     SSH keepalive (react-native-ssh's defaults, 3 × 15 s), whichever ends it first.
+     `:1242`). A call on a reference the server forced away (its shutdown or restart) rejects with that `gone`
+     error (`src/remote.ts:291-297`). Either may have reached the server, so both show "The connection to <machine>
+     was lost. Try again.", and the resend keeps its `requestId`. Measured: a call on the wire when its link was
+     replaced was applied by the server, rejected on the phone, and never resent by Chord.
+   - **Back from the background** (owner decision, 2026-10-22): the link is replaced even when it looks live, as
+     after a drop: a new SSH connection, forward, socket and `host.connect`. iOS suspends the app in the background,
+     and Chord's pinger and react-native-ssh's keepalive with it, so a link that died meanwhile would otherwise show
+     stale state until the ping timeout (45 s, `src/connection.ts:440-445`) or the keepalive (3 × 15 s) noticed.
+     `connect` "Sets (or replaces, after a reconnect) the link" and re-holds with the values kept (`src/host.ts:229-231`,
+     `:956-966`; `src/remote.ts:305-315`). No timer is involved. The provider calls `RemoteInfiniChat.resume()` only
+     when the app state goes from `background` to `active`: returning from `inactive` (Control Center, a system
+     prompt) was never suspended, and calls `reconnect()`, which leaves a live link alone. React Native reports a
+     return from the background as `background` → `active` (`React/CoreModules/RCTAppState.mm:115-124`).
 5. **Close.** Runs when the selection changes or the provider unmounts: `host.close()`, `forward.close()`, then
    `connection.disconnect()`.
 
@@ -144,25 +155,31 @@ As built, the interface sits beside the core in `src/pi/infinichat-service.ts`, 
     machines button uses, and each item has the same symbol. The menu has no title: a root menu's `title` would
     also become the button's label.
   - The subtitle reads "<machine> · <models>" when connected, "Connecting to <machine>…", "Installing InfiniChat on
-    <machine>…" or "Starting InfiniChat on <machine>…" during an attempt, and "<machine> is unreachable" after a
-    failure. The failure's own message shows in the error notice with "Try Again". An install's `notice` shows as a
-    neutral notice with "Dismiss".
+    <machine>…" or "Starting InfiniChat on <machine>…" during an attempt, and "Can’t connect to <machine>" after
+    any failure. It names the machine only once Remote machines are restored, so a launch never flashes a placeholder;
+    until then it shows the models line. The title's accessibility label reads the same line.
+  - The failure's own message shows in the error notice with "Try Again", also when a send failed with that same
+    message, and "Try Again" clears both. An install's `notice` shows as a neutral notice with "Dismiss".
 - **Where the choice is stored.** In app settings storage, like `pi.remote-hosts.v1`. Piece 5 turns it into the home
   record.
 
   As built: `pi.infinichat.machine.v1` in expo-sqlite's kv-store, the machine's ID or nothing for *This iPhone*,
   read and written with the synchronous API as the keep-alive setting is (`src/pi/infinichat-remote/machine-choice.ts`).
-  A machine removed from Remote machines stays chosen: the header says it is unreachable, and the notice shows the
-  repository's "This remote machine was removed" message until *This iPhone* or another machine is chosen.
+  A machine removed from Remote machines stays chosen. Each attempt first restores the machines and looks it up, as
+  `owner.ts` does for a chat's machine, and fails without SSH with InfiniChat's own message: "This machine was
+  removed from Remote machines. Choose This iPhone or another machine in the InfiniChat header." The subtitle reads
+  "Machine removed", and the notice offers no "Try Again".
 - **The provider.** `chat-provider.tsx` opens the local core only when InfiniChat runs on the phone, and a
   `RemoteInfiniChat` otherwise. In remote mode the keep-alive observes nothing for InfiniChat (piece 6), because the
   work isn't on the phone.
 
   As built, the choice is a store the provider's lifecycle effect subscribes to. A change queues the close of the
   current side on the same queue that opens and closes storage, then `open()`. `open()` creates the
-  `RemoteInfiniChat` when a machine is chosen, and calls its `reconnect()` when it already exists, which is how
-  returning to the app reconnects. InfiniChat's keep-alive observation and its local notifications exist only in
-  `openPhoneInfiniChat`, so remote mode has neither.
+  `RemoteInfiniChat` when a machine is chosen, and calls its `reconnect()` when it already exists, so becoming
+  active retries a failed connection; a return from the background calls `resume()` first (step 4). InfiniChat's
+  keep-alive observation and its local notifications exist only in `openPhoneInfiniChat`, so remote mode has neither.
+  A toggle sets `infiniChat` to `undefined` before the other side opens, so the screens show loading in between;
+  piece 5 has to keep the last values instead (see its "What the user sees").
 
 ## Ownership and lifetime
 
@@ -206,13 +223,15 @@ expo-router 58.0.25):
   cast.
 - **Shared admission connect.** `installServer`'s connect moved into `connectAdmitted` in `install.ts`, which the
   client also uses. `install.ts` exports `SERVER_BUNDLE`, `savedSecret` and `runningServer` for the client.
+- **Back from the background replaces the link** (owner decision at review, step 4). It applies to the
+  `background` → `active` transition only, the one iOS suspends the app for.
 
 ## Size
 
 About 350 lines: the interface and provider changes ~80, `client.ts` ~170, the header menu and status ~100.
 
-As built, about 500 lines: `client.ts` 330, of which about a third is comments; `machine-choice.ts` 28; the
-provider +45 net; the header menu, subtitle and notices +45 net; the interface +25; `install.ts` +40 net, for
+As built, about 530 lines after the review: `client.ts` 351, of which about a third is comments; `machine-choice.ts`
+26; the provider +55 net; the header menu, subtitle and notices +55 net; the interface +25; `install.ts` +40 net, for
 `connectAdmitted`, `savedSecret` and `runningServer`. The extra in `client.ts` is the install-when-needed decision,
 the bundle and device check, and the wait for a live reference that also ends when the socket closes.
 

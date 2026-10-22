@@ -57,6 +57,8 @@ Checked on 2026-10-21. Versions:
 | Expo's tsconfig loads the DOM lib, whose `WebSocket` constructor has two parameters; React Native declares three | expo `tsconfig.base.json:9`; react-native `src/types/globals.d.ts:569-578` |
 | `AbortController.abort(reason)` and `signal.reason` | react-native 0.88 `src/private/webapis/dom/abort-api/AbortController.js:63`, `AbortSignal.js:158` |
 | `Stack.Toolbar.MenuAction isOn` is the menu item's `on` state; a root menu's `title` is also the button's label | expo-router 58.0.25 `build/layouts/stack-utils/toolbar/StackToolbarMenu/index.js:186-193`, `:57-64` |
+| A server whose object is forced away (its host closing) sends `gone` for each hold before closing the link; the binding's waiting calls reject with it, at v1.4.0 | chord `src/connection.ts:921-927`, `src/remote.ts:291-297` |
+| iOS app states: a return from the background is `background` → `active`; `inactive` comes from WillResignActive | react-native 0.88 `React/CoreModules/RCTAppState.mm:115-124` |
 
 ## Chord over WebSocket in Hermes
 
@@ -203,6 +205,13 @@ device or simulator was used.
 | Wrong secret (the Keychain held another one than `~/.infinichat/secret`) | The socket was closed with 1008. Install wrote this phone's secret, `kickstart -k` restarted the server, and the client connected: 10.4 s, launchd's respawn throttle (piece 2). The replaced secret was refused with 1008 afterwards |
 | Renamed machine (the server answered as the old `--device`) | Install rewrote the LaunchAgent with the new name, booted it out and in, and connected: 2.4 s |
 | `close()` during an install, at the checking stage | Cancelled in 22–23 ms; no SSH connection or shell left |
+| **After the review**, the same harness with Chord `call` frames counted off the tunnel | 38 of 38 checks |
+| Machine removed from Remote machines | Failed at once, with no SSH connection: "This machine was removed from Remote machines. Choose This iPhone or another machine in the InfiniChat header." |
+| `resume()` while the link is live (back from the background) | The link was replaced in 21 ms over one new SSH connection, and the old one closed. While connecting, the view stayed `ready` with the same controls and messages |
+| A call made while the link was being replaced | Waited, then went through; one `updateSettings` frame on the wire |
+| A call already on the wire when the link was replaced | Rejected with "The connection to test-mac was lost. Try again."; one frame, never resent. The server applied it anyway: its instructions were there after the next connect |
+| Becoming active from `inactive` (`reconnect()` on a live link) | No new SSH connection |
+| The server stopped by `SIGTERM` while connected | The reference went `gone` and the client reconnected by itself, keeping the last values. A call in that window rejected with "The connection to test-mac was lost. Try again.", not Chord's text. Install started the stopped LaunchAgent again, and the client connected in 1.34 s |
 | `npx expo export --platform ios` | Bundled (Hermes bytecode, 13 MB) |
 
 ## Unverified until a piece checks it
@@ -213,6 +222,8 @@ device or simulator was used.
   and after Tailscale goes off and on, a killed app, and a send admitted once after a reconnect (the server has no
   credentials until piece 4).
 - Piece 3 against Linux: the systemd and detached branches of install-when-needed.
+- Piece 3: a call waiting on a `loading` reference when the server refuses its re-hold with `gone`. The server stops
+  accepting before its host closes, so this could not be produced on the Mac; a call made after `gone` was checked.
 - Linux user services, with and without lingering, and the detached start (piece 2: checked on macOS with stand-ins
   only).
 - `launchctl bootstrap gui/<uid>` from a real SSH session, and an SSH session's `TMPDIR` on macOS (piece 2: run from a

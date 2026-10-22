@@ -41,9 +41,11 @@ export default function InfiniChatScreen() {
   const conversation = useChatControls(view);
   const serviceError = useInfiniChatError();
   const connection = useInfiniChatConnection();
-  const { hosts } = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
-  const machine = infiniChatMachine === null ? undefined
-    : hosts.find((host) => host.id === infiniChatMachine)?.name ?? 'Remote machine';
+  const machines = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  const remote = infiniChatMachine !== null;
+  // Named once the machines are restored, so a launch never shows a placeholder name first.
+  const machine = machines.hosts.find((host) => host.id === infiniChatMachine)?.name;
+  const removed = remote && machines.ready && machine === undefined;
   const [draft, setDraft] = useState(emptyDraft);
   const changeDraft = useCallback((text: string) => {
     setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
@@ -123,20 +125,26 @@ export default function InfiniChatScreen() {
       setStopping(false);
     }
   };
-  // A machine that can't be reached is tried again when the user asks, and when the app becomes active.
+  // A machine that can't be reached is tried again when the user asks, and when the app becomes active; a send that
+  // failed with the same error offers the same. A removed machine has nothing to try again.
   const connectionError = connection?.status === 'failed' ? connection.error : undefined;
   const messageError = localError || connectionError || conversation?.error || serviceError || appError
     || access.error;
-  const retry = !localError && connectionError ? connection?.retry : undefined;
+  const retry = !removed && connectionError && (!localError || localError === connectionError) ? () => {
+    setLocalError(undefined);
+    connection?.retry();
+  } : undefined;
   const dismiss = localError ? () => setLocalError(undefined)
     : connectionError || conversation?.error ? undefined
       : serviceError ? () => service?.dismissError()
         : appError ? dismissError : undefined;
   const working = busy ? `Working… · ${settingsLabel}` : settingsLabel;
-  const subtitle = machine === undefined ? working
-    : connection?.status === 'failed' ? `${machine} is unreachable`
-      : connection?.status === 'connecting' ? connecting(machine, connection.stage)
-        : `${machine} · ${working}`;
+  const subtitle = removed ? 'Machine removed'
+    : machine === undefined ? working
+      : connection?.status === 'failed' ? `Can’t connect to ${machine}`
+        : connection?.status === 'connecting' ? connecting(machine, connection.stage)
+          : `${machine} · ${working}`;
+  const runsOn = !remote ? PHONE : removed ? 'a removed machine' : machine ?? 'a remote machine';
   const accountStatus = !access.ready ? 'Restoring your connection…'
     : access.error ? `Reconnect ${provider?.name || providerId} in Account`
       : `Connect ${provider?.name || providerId || 'your provider'} to send a message`;
@@ -145,7 +153,7 @@ export default function InfiniChatScreen() {
   return <View testID="infinichat-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
     <Stack.Screen options={{ title: TITLE,
       headerTitle: () => <Pressable testID="open-infinichat-settings" accessibilityRole="button"
-        accessibilityLabel={`InfiniChat settings. ${settingsLabel}`}
+        accessibilityLabel={`InfiniChat settings. ${subtitle}`}
         accessibilityHint="Choose the main and summary models and their reasoning effort."
         accessibilityState={{ disabled: settingsDisabled }} disabled={settingsDisabled} onPress={openSettings}
         style={styles.headerTitle}>
@@ -159,14 +167,12 @@ export default function InfiniChatScreen() {
       </Pressable>,
     }} />
     <Stack.Toolbar placement="right">
-      <Stack.Toolbar.Menu icon={machine === undefined ? 'iphone' : 'server.rack'}
-        accessibilityLabel={`InfiniChat runs on ${machine ?? PHONE}`}
+      <Stack.Toolbar.Menu icon={remote ? 'server.rack' : 'iphone'} accessibilityLabel={`InfiniChat runs on ${runsOn}`}
         accessibilityHint="Choose this iPhone or one of your remote machines.">
-        <Stack.Toolbar.MenuAction icon="iphone" isOn={infiniChatMachine === null}
-          onPress={() => chooseInfiniChatMachine(null)}>
+        <Stack.Toolbar.MenuAction icon="iphone" isOn={!remote} onPress={() => chooseInfiniChatMachine(null)}>
           {PHONE}
         </Stack.Toolbar.MenuAction>
-        {hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
+        {machines.hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
           isOn={host.id === infiniChatMachine} onPress={() => chooseInfiniChatMachine(host.id)}>
           {host.name}
         </Stack.Toolbar.MenuAction>)}

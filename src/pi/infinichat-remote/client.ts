@@ -4,6 +4,7 @@ import type { SshConnection, SshLocalForward } from '@osuki-dev/react-native-ssh
 
 import type { ChatMessage } from '../../chat/types';
 import type { ChatViewSnapshot, ChatViewSource } from '../chat-view';
+import { connectionFailure } from '../execution/remote/channel';
 import type { RemoteHostRepository } from '../execution/remote/hosts';
 import type { ScheduledTask } from '../infinichat-scheduled';
 import type { InfiniChatHost, InfiniChatSnapshot } from '../infinichat-service';
@@ -28,9 +29,10 @@ interface Session { connection?: SshConnection; forward?: SshLocalForward; link?
 type Target = { port: number; secret: string };
 
 /**
- * React Native's WebSocket takes request headers as a third argument (`Libraries/WebSocket/WebSocket.js:100`, typed
- * so in its `globals.d.ts`), but Expo's tsconfig loads the DOM lib first, whose constructor declares two. A
- * constructor of fewer parameters is assignable to this type as it is.
+ * React Native's own declaration of its WebSocket constructor, restated from
+ * `react-native/src/types/globals.d.ts:569-578`: request headers are the third argument
+ * (`Libraries/WebSocket/WebSocket.js:100`). Expo's tsconfig loads the DOM lib first, whose constructor declares two,
+ * and a constructor of fewer parameters is assignable to this type as it is.
  */
 type HeaderWebSocket = new (url: string, protocols: undefined, options: { headers: Record<string, string> }) =>
   WebSocket;
@@ -125,8 +127,18 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   /**
+   * The app is back from the background. iOS suspended Chord's pinger and the SSH keepalive meanwhile, so a link that
+   * looks live may be dead: replace it as after a drop. `host.connect` re-holds the reference, which keeps its values.
+   */
+  resume(): void {
+    this.dropped(this.session);
+    this.reconnect();
+  }
+
+  /**
    * Connects unless connected or connecting, on demand as the daemon connection restarts: when the socket, the tunnel
-   * or the SSH session closes, when the app becomes active, and when the user acts. A failure stays until then.
+   * or the SSH session closes, when the app becomes active, and when the user acts. A failure stays until then. Coming
+   * back from the background replaces even a live link (`resume`).
    */
   reconnect(): void {
     if (this.closed || this.attempt || this.session?.live) return;
@@ -190,9 +202,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
       return await this.host.root((ctx) => run(ref, ctx), { signal });
     } catch (error) {
       if (isChordError(error, 'aborted') && error.cause instanceof Error) throw error.cause;
-      // The server may have received a call whose link closed under it; the screens resend with the same request ID,
-      // which OptChat admits once.
-      if (isChordError(error, 'unavailable') && !this.session?.live) {
+      // The server may have received a call whose link closed under it, or whose reference it forced away; the screens
+      // resend with the same request ID, which OptChat admits once.
+      if ((isChordError(error, 'unavailable') || isChordError(error, 'gone')) && !this.session?.live) {
         throw new Error(`The connection to ${this.name} was lost. Try again.`);
       }
       throw plain(error);
@@ -217,6 +229,12 @@ export class RemoteInfiniChat implements InfiniChatHost {
       return server;
     };
     try {
+      // As owner.ts checks a chat's machine, with InfiniChat's own way out.
+      await this.hosts.restore();
+      if (!this.hosts.get(this.machineId)) {
+        throw new Error('This machine was removed from Remote machines. Choose This iPhone or another machine in the '
+          + 'InfiniChat header.');
+      }
       const secret = await savedSecret(this.machineId);
       const admission = await this.hosts.admit(this.machineId);
       const name = admission.host.name;
@@ -249,7 +267,10 @@ export class RemoteInfiniChat implements InfiniChatHost {
     session.link?.close();
     await session.forward?.close().catch(() => {});
     session.forward = await connection.forwardLocal({ remoteHost: '127.0.0.1', remotePort: target.port },
-      { onClosed: (reason) => { if (reason !== undefined) this.dropped(session); } });
+      { onClosed: (reason) => { if (reason !== undefined) this.dropped(session); } })
+      .catch((error: unknown) => {
+        throw connectionFailure(error);
+      });
     const socket = new NativeWebSocket(`ws://127.0.0.1:${session.forward.localPort}`, undefined,
       { headers: { authorization: `Bearer ${target.secret}` } });
     // The client side of a link never deflates, which Hermes could not inflate anyway.

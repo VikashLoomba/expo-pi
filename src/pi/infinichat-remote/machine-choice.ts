@@ -2,8 +2,6 @@ import Storage from 'expo-sqlite/kv-store';
 
 const KEY = 'pi.infinichat.machine.v1';
 
-export type InfiniChatMachineChoice = ReturnType<typeof createInfiniChatMachineChoice>;
-
 /**
  * Where InfiniChat runs: this iPhone (`null`) or the machine in Remote machines with this ID. Stored with the app's
  * other settings (expo-sqlite kv-store), as the machines themselves are, and subscribable like the other stores.
