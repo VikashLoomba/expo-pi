@@ -13,7 +13,7 @@ import { openNodeStore } from '../src/node.mjs';
 const ctx = BACKGROUND_CONTEXT;
 const ValueDoc = defineDoc<{ value: string }>({
   kind: 'storage-proof', version: 1, scope: 'conversation', history: 'latest',
-  fork: 'current', initial: () => ({ value: '' }),
+  fork: 'current', checkpointWhen: () => true, initial: () => ({ value: '' }),
 });
 
 test('Linux exclusive writer, FULL transaction storage, and exact reopen', async () => {
@@ -45,7 +45,7 @@ test('acknowledged native records survive SIGKILL and kernel ownership releases'
      import { Harness, createRegistry, defineDoc } from '@earendil-works/pi-durable';
      import { createModels } from '@earendil-works/pi-ai';
      import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-     const Doc = defineDoc({ kind: 'storage-proof', version: 1, scope: 'conversation', history: 'latest', fork: 'current', initial: () => ({value: ''}) });
+     const Doc = defineDoc({ kind: 'storage-proof', version: 1, scope: 'conversation', history: 'latest', fork: 'current', checkpointWhen: () => true, initial: () => ({value: ''}) });
      const owner = await openNodeStore(${JSON.stringify(dir)});
      const h = await Harness.open(owner.storage, {models: createModels(), registry: createRegistry()}, BACKGROUND_CONTEXT);
      const root = await h.root(BACKGROUND_CONTEXT, {init: async (tx,id) => { (await tx.doc(Doc,id)).value = 'committed before process death'; }});

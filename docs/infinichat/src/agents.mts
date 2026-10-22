@@ -48,6 +48,7 @@ export const AgentDirectoryDoc = defineDoc({
   scope: "conversation",
   history: "latest",
   fork: "current",
+  checkpointWhen: () => true,
   initial: (): { names: string[]; pendingReports: string[] } => ({
     names: [],
     pendingReports: [],
@@ -73,6 +74,7 @@ export const PrivateAgentDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => true,
   // Version 1 was the one task an agent was: it answered once and was told nothing more. One still under way goes on
   // as the agent's call.
   migrate: (value) => {
@@ -103,6 +105,7 @@ export const AgentReportDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => true,
   // Version 1 reported only an agent that ended on its own.
   migrate: (value) => ({
     ...(value as Omit<AgentReport, "stopped"> & { consumed: boolean }),
@@ -484,7 +487,9 @@ export const agentTask = (setup: SubagentSetup) =>
             () => Boolean(told.value?.waiting.length) || !live.value?.run,
             invocation,
           );
-          // A failed run leaves what was steered to it queued; withdrawn, it ends with the call.
+          // pi-durable withdraws what was steered to a run that failed (`afterFailedRun: "withdraw"`), but a run
+          // whose task faulted keeps its inbox (spec "afterFailedRun"). Withdrawn here, that input ends with the
+          // call too.
           const inbox = await runtime.snapshot(
             InboxDoc,
             conversationId,
@@ -510,7 +515,8 @@ export const agentTask = (setup: SubagentSetup) =>
               } as const;
             }
             if ((await tx.doc(LiveDoc, conversationId)).run) return undefined;
-            // The call's replies, as UniiChat reports them: each answer once, and each failure but a withdrawal.
+            // The call's replies, as UniiChat reports them: each answer once, and each failure but a withdrawal, by
+            // a stop or by a failed run.
             const replies: string[] = [];
             const answers = new Set<EntryId>();
             for (const id of sent) {
@@ -535,7 +541,8 @@ export const agentTask = (setup: SubagentSetup) =>
                 replies.push(text);
               } else if (
                 settled?.status === "unanswered" &&
-                settled.reason !== "aborted"
+                settled.reason !== "aborted" &&
+                settled.reason !== "run_failed"
               ) {
                 const why = `failed: ${typeof settled.detail === "string" ? settled.detail : settled.reason}`;
                 if (!replies.includes(why)) replies.push(why);
@@ -596,7 +603,12 @@ export async function agentWork(
   root: ConversationId,
 ): Promise<{ id: TaskId; name: string }[]> {
   const work: { id: TaskId; name: string }[] = [];
-  for (const status of ["pending", "running", "waiting"] as const) {
+  for (const status of [
+    "pending",
+    "running",
+    "waiting",
+    "sleeping",
+  ] as const) {
     let cursor: Cursor | undefined;
     do {
       const page = await tx.scanTasks(
@@ -662,6 +674,7 @@ export const AgentCallDoc = defineDocFamily<{ result: string | null }, null>({
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => true,
   // Version 1 recorded the one agent an `agent` call launched.
   migrate: (value) => {
     const { taskId, name } = value as { taskId: TaskId | null; name: string };

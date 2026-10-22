@@ -44,6 +44,7 @@ export const ConfigDoc = defineDoc<{ summary: SummarySelection | null }>({
   scope: "conversation",
   history: "latest",
   fork: "current",
+  checkpointWhen: () => true,
   initial: () => ({ summary: null }),
 });
 type BuildScratch = {
@@ -59,6 +60,7 @@ export const BuildScratchDoc = defineDoc<BuildScratch>({
   kind: "optchat.build-scratch",
   version: 2,
   scope: "task",
+  checkpointWhen: () => true,
   // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
   migrate: (value) => {
     const { replies, ...scratch } = value as Omit<BuildScratch, "last"> & {
@@ -361,13 +363,14 @@ export const BuildNode = defineTask<
           // minute. With the Harness's retries off, it is tried again at the next message.
           if (retry.enabled) {
             return {
-              status: "running",
+              status: "sleeping",
               checkpoint: {
                 phase: "retry",
                 attempt,
                 retries: retries + 1,
                 until,
               },
+              until,
             };
           }
           await release(tx, r.conversationId, task.input.ref, task.id);
@@ -390,9 +393,10 @@ export const BuildNode = defineTask<
         };
       }, ctx);
     },
+    // After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
     retry: async (task, r, ctx) => {
       const { attempt, retries, until } = task.state.checkpoint;
-      await r.sleep(until, ctx);
+      if (until > r.now()) return r.sleepUntil(until, task.state.checkpoint, ctx);
       await r.commit(
         () => ({
           status: "running",

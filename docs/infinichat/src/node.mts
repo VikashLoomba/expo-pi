@@ -3,7 +3,7 @@ import { closeSync, fsyncSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { Context } from '@earendil-works/chord';
-import { openNodeSqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite/node';
+import { openNodeSqliteDatabase } from '@earendil-works/chord/sqlite/node';
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 
 function syncDirectory(directory: string): void {

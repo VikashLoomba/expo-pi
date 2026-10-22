@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: UniiChat’s [compaction tasks](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L176-L190), [`JOBS`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L143), [`ctx`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L584-L586), [build admission](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L588-L656), [build and `over`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L726-L816) and [patient calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/AskAI.ts#L7-L13), [pi-durable’s compaction retry phase](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/src/harness/compaction.ts#L185-L227), [native tasks](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1657-L1933), [task-local documents](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [terminal transitions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1952-L1987).
+Sources: UniiChat’s [compaction tasks](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L176-L190), [`JOBS`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L143), [`ctx`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L584-L586), [build admission](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L588-L656), [build and `over`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L726-L816) and [patient calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/AskAI.ts#L7-L13), [pi-durable’s compaction retry phase](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/src/harness/compaction.ts#L188-L232), [native tasks](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L1745-L2039), [task-local documents](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L1067-L1423), [terminal transitions](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L2058-L2093).
 
 A summary task freezes its complete source and permitted built-only contextual view when admitted. It uses the same static system prompt and offered tool schemas as a normal turn, resolved from the root conversation’s agent when each request is made, with tool use disabled. It does not invoke the agent’s effectful tools. UniiChat’s compactions send the system prompt without tools; this port keeps offering them until the caching work, which is deferred. The summary model and thinking level are the host’s `ConfigDoc` selection; nothing is admitted while it is unset.
 
@@ -12,7 +12,7 @@ The exact task wording is UniiChat’s `LEAF` and `MERGE`. Include the 512-dash 
 
 A reply without a line is the model’s own failure and fails alike when asked again: one cut at `length`, an error the provider gave a stop reason for (a refusal) that pi-ai’s `isRetryableAssistantError` does not class as retryable, a tool call or empty text. Its node is the shortest line an earlier try wrote, else the source with its newlines flattened to spaces and cut to 512 UTF-8 bytes, as UniiChat clips it.
 
-Any other failure only delays a summary, as UniiChat’s patient calls ask again till one is answered: a provider error, retryable or not (overload, rate limits, 5xx, network, a missing credential), a thrown error or a summary model that is unavailable. The task checkpoints a `retry` phase, sleeps on the Harness clock until pi-ai’s `retryDelayMs` backoff for that retry under the Harness `retry` settings (capped at `maxAgentDelayMs`, a minute by default), and asks again, without pi-durable’s `maxRetries` bound; the phase follows pi-durable’s own compaction task. Only with the Harness `retry` settings disabled does such a failure release its slot, eligible again at the next new semantic message, not a timer loop. Accepted external input and later assistant/tool/result messages count as new progress; replaying a duplicate request does not. Do not count one accepted input a second time when projecting its native entry.
+Any other failure only delays a summary, as UniiChat’s patient calls ask again till one is answered: a provider error, retryable or not (overload, rate limits, 5xx, network, a missing credential), a thrown error or a summary model that is unavailable. The task commits a `sleeping` state with the `retry` phase as its checkpoint, until pi-ai’s `retryDelayMs` backoff for that retry under the Harness `retry` settings (capped at `maxAgentDelayMs`, a minute by default), so the wait holds no invocation and survives a restart; the `retry` phase sleeps again if it runs early, then asks again, without pi-durable’s `maxRetries` bound. Both follow pi-durable’s own compaction task. Only with the Harness `retry` settings disabled does such a failure release its slot, eligible again at the next new semantic message, not a timer loop. Accepted external input and later assistant/tool/result messages count as new progress; replaying a duplicate request does not. Do not count one accepted input a second time when projecting its native entry.
 
 Changed shapes migrate through pi-durable, as it reads them: `MemoryDoc` is version 2, as above; the scratch document is version 2, a version 1 scratch keeping its last too-long reply’s line as `last`, and `BuildNode` is version 2, a version 1 `request` checkpoint gaining `retries: 0`.
 
@@ -73,6 +73,7 @@ export const ConfigDoc = defineDoc<{ summary: SummarySelection | null }>({
   scope: "conversation",
   history: "latest",
   fork: "current",
+  checkpointWhen: () => true,
   initial: () => ({ summary: null }),
 });
 type BuildScratch = {
@@ -88,6 +89,7 @@ export const BuildScratchDoc = defineDoc<BuildScratch>({
   kind: "optchat.build-scratch",
   version: 2,
   scope: "task",
+  checkpointWhen: () => true,
   // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
   migrate: (value) => {
     const { replies, ...scratch } = value as Omit<BuildScratch, "last"> & {
@@ -390,13 +392,14 @@ export const BuildNode = defineTask<
           // minute. With the Harness's retries off, it is tried again at the next message.
           if (retry.enabled) {
             return {
-              status: "running",
+              status: "sleeping",
               checkpoint: {
                 phase: "retry",
                 attempt,
                 retries: retries + 1,
                 until,
               },
+              until,
             };
           }
           await release(tx, r.conversationId, task.input.ref, task.id);
@@ -419,9 +422,10 @@ export const BuildNode = defineTask<
         };
       }, ctx);
     },
+    // After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
     retry: async (task, r, ctx) => {
       const { attempt, retries, until } = task.state.checkpoint;
-      await r.sleep(until, ctx);
+      if (until > r.now()) return r.sleepUntil(until, task.state.checkpoint, ctx);
       await r.commit(
         () => ({
           status: "running",

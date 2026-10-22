@@ -39,6 +39,7 @@ export const MessageDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => false,
   initial: (seed) => {
     if (!seed) throw new Error("Missing canonical message");
     return seed;
@@ -62,6 +63,7 @@ export const NodeDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => false,
   initial: (value) => ({ value }),
 });
 export type View = {
@@ -93,6 +95,7 @@ export const MemoryDoc = defineDoc<MemoryState>({
   scope: "conversation",
   history: "latest",
   fork: "current",
+  checkpointWhen: () => true,
   // Version 1 took leaves and parents in turn; builds now start in the order the messages came.
   migrate: (value) => {
     const { nextQueue: _turn, ...memory } = value as MemoryState & {

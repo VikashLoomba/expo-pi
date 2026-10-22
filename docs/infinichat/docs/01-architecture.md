@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-This package implements the behavior of [UniiChat’s released source](https://github.com/VictorTaelin/UniiChat/tree/0500bf6a8ea4bf0ce047488562022b1b6532cc30) at commit `0500bf6` using **pi-durable 1.3.0**; [the references](10-references.md#where-this-port-differs-from-uniichat) list where it still differs. The guide defines semantic behavior; UniiChat’s JSON-lines logs and `view.json` are represented by native documents, not mirrored application files.
+This package implements the behavior of [UniiChat’s released source](https://github.com/VictorTaelin/UniiChat/tree/0500bf6a8ea4bf0ce047488562022b1b6532cc30) at commit `0500bf6` using **pi-durable 1.4.0**; [the references](10-references.md#where-this-port-differs-from-uniichat) list where it still differs. The guide defines semantic behavior; UniiChat’s JSON-lines logs and `view.json` are represented by native documents, not mirrored application files.
 
 The user has one ongoing chat. Every fresh logical turn sees the saved memory view and its new input, not the previous turn’s provider transcript. Native context resets preserve the stored transcript. Native tasks manage the coordinator, summary builds, and requested background agents. Native documents hold permanent originals, immutable built nodes, exact saved views, and application policy state.
 
@@ -19,7 +19,7 @@ Pi owns transactions, persisted task checkpoints, task ownership, cancellation, 
 
 The implementation listings are generated directly from the package source. A host adapter supplies credentials, model selection, native platform tools, storage and process lifetime. It must not implement missing OptChat tree, view, compaction or turn policy.
 
-Sources: [native concepts](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/README.md#L80-L101), [task definitions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1657-L1933), [task ownership](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1989-L2269), [documents](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335).
+Sources: [native concepts](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/README.md#L92-L113), [task definitions](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L1745-L2039), [task ownership](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L2095-L2402), [documents](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L1067-L1423).
 
 ## Public API
 

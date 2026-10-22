@@ -2,13 +2,13 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: UniiChat’s [agents](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L14-L16), [subagent prompt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L123-L190), [`spawn` and `tell`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L199-L202), [their calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L491-L539), [an agent’s calls and report](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L557-L599), [stop](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L656-L661), [names](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Names.ts#L1-L50), [report text](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Call.ts#L60-L62), [a report’s turn](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L709-L726), [agents at work](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L259-L265) and [agent logs](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1153-L1194), [native conversation ownership](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1989-L2269), [background-agent example](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/test/examples/23-subagent-background.ts#L186-L197) and [its anchor and reporter](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/test/examples/23-subagent-background.ts#L56-L126).
+Sources: UniiChat’s [agents](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L14-L16), [subagent prompt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L123-L190), [`spawn` and `tell`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L199-L202), [their calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L491-L539), [an agent’s calls and report](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L557-L599), [stop](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L656-L661), [names](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Names.ts#L1-L50), [report text](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Call.ts#L60-L62), [a report’s turn](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L709-L726), [agents at work](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L259-L265) and [agent logs](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1153-L1194), [native conversation ownership](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L2095-L2402), [background-agent example](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/test/examples/23-subagent-background.ts#L187-L198) and [its anchor and reporter](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/test/examples/23-subagent-background.ts#L57-L127).
 
 Subagents are optional and used only when the user requests them. The master has UniiChat’s two agent tools. `spawn(tasks, effort)` starts one subagent per task, in parallel, and answers at once with their names. A name is UniiChat’s: a common adjective and noun from its `Names.ts` lists, capitalized and joined, such as FireAnt, drawn again while taken. `effort` is the thinking level the subagents work at, by default the main agent’s. `tell(name, message)` sends an agent one more message: an agent with a call under way is told through that call, reading it between its tool calls, and the call’s report answers it; an idle one goes on from its chat in a call of its own and replies; a name that isn’t an agent’s answers `No agent <name> to tell.` Both tools are in the `optchat.master` extension, which a subagent’s conversation goes without, so a subagent starts no agents. A third, `schedule_task(task, run_after)`, is this port’s own and starts no agent: at `run_after` the task reaches the main agent itself as a work message, through a waiting background task the host mirrors as a local notification; see [the host](08-host-and-lifecycle.md#expo-host). A call’s answer is kept by the call’s task ID in the agent-call record, so a native replay of the call answers alike without starting anything twice.
 
-Each call of an agent, UniiChat’s [`Tools.run`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L557-L572), is one native background task, shaped after [pi-durable’s background-subagent example](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/test/examples/23-subagent-background.ts#L73-L126), and the call alone sends to the agent’s conversation. The agent’s document names the call under way and keeps what the agent is told meanwhile: `spawn` starts a call per task, and `tell` starts one for an idle agent, else adds the message to the call’s. The call’s `prepare` phase waits until the main memory has summarized the messages before the call, as UniiChat calls an agent anew, reads the host’s turn state outside its commit, reporting a failure and going on without it, and in one commit creates a new agent’s conversation or resets an idle one’s context, then freezes the call’s message: the main view, the turn state, then the agent’s log, its lines numbered `i|kind: text` as `zoom(name)` shows them, ending with a `user:` line for its message and one for each told before the call began. A new agent’s conversation is owned by an anchor, a background task that ends at once, as the example’s is, so it outlives the call that created it and only a stop reaches its work. It is configured as the example configures one: a copy of the root’s agent without the `optchat.master` extension, so without the master’s prompt or the agent tools, with the subagents’ prompt followed by the user’s instructions, its name as its working directory, the folder a host’s device tools run it in, and the spawn’s effort as its thinking level. A message’s entry keeps its own words, so the agent’s log shows them without the view and devices sent with them. A call task that ended without clearing its place, as one that faulted would, holds no call: `tell` reads its task’s state and starts a new call, which takes along what the ended one was told, first.
+Each call of an agent, UniiChat’s [`Tools.run`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L557-L572), is one native background task, shaped after [pi-durable’s background-subagent example](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/test/examples/23-subagent-background.ts#L74-L127), and the call alone sends to the agent’s conversation. The agent’s document names the call under way and keeps what the agent is told meanwhile: `spawn` starts a call per task, and `tell` starts one for an idle agent, else adds the message to the call’s. The call’s `prepare` phase waits until the main memory has summarized the messages before the call, as UniiChat calls an agent anew, reads the host’s turn state outside its commit, reporting a failure and going on without it, and in one commit creates a new agent’s conversation or resets an idle one’s context, then freezes the call’s message: the main view, the turn state, then the agent’s log, its lines numbered `i|kind: text` as `zoom(name)` shows them, ending with a `user:` line for its message and one for each told before the call began. A new agent’s conversation is owned by an anchor, a background task that ends at once, as the example’s is, so it outlives the call that created it and only a stop reaches its work. It is configured as the example configures one: a copy of the root’s agent without the `optchat.master` extension, so without the master’s prompt or the agent tools, with the subagents’ prompt followed by the user’s instructions, its name as its working directory, the folder a host’s device tools run it in, and the spawn’s effort as its thinking level. A message’s entry keeps its own words, so the agent’s log shows them without the view and devices sent with them. A call task that ended without clearing its place, as one that faulted would, holds no call: `tell` reads its task’s state and starts a new call, which takes along what the ended one was told, first.
 
-The call’s `deliver` phase submits that message and watches the agent’s document and its conversation. What the agent is told while the call delivers goes in as a steer, each under the call’s request ID and its place, so the agent reads it between its tool calls. A run that fails leaves what was steered to it queued: the call withdraws it once the conversation rests. When the conversation rests with nothing more told, the call reports at once, in the commit that ends it.
+The call’s `deliver` phase submits that message and watches the agent’s document and its conversation. What the agent is told while the call delivers goes in as a steer, each under the call’s request ID and its place, so the agent reads it between its tool calls. What was steered to a run that failed is withdrawn by pi-durable (`afterFailedRun: "withdraw"`), so it ends with the call; a run whose task faulted keeps its queue (pi-durable’s spec), so once the conversation rests the call withdraws it with an abort, and it ends with the call too. When the conversation rests and nothing more is told, the call reports at once, in the commit that ends it.
 
 The subagents’ prompt is UniiChat’s, `SUB_HEAD` verbatim, `VIEW_DOC` and `DEVICES`, renamed and without the devices paragraph as the master’s is; its images are marked `[image]`, without a file. An agent’s intermediate replies and tools stay in its own conversation and never become main-chat memory.
 
@@ -77,6 +77,7 @@ export const AgentDirectoryDoc = defineDoc({
   scope: "conversation",
   history: "latest",
   fork: "current",
+  checkpointWhen: () => true,
   initial: (): { names: string[]; pendingReports: string[] } => ({
     names: [],
     pendingReports: [],
@@ -102,6 +103,7 @@ export const PrivateAgentDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => true,
   // Version 1 was the one task an agent was: it answered once and was told nothing more. One still under way goes on
   // as the agent's call.
   migrate: (value) => {
@@ -132,6 +134,7 @@ export const AgentReportDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => true,
   // Version 1 reported only an agent that ended on its own.
   migrate: (value) => ({
     ...(value as Omit<AgentReport, "stopped"> & { consumed: boolean }),
@@ -513,7 +516,9 @@ export const agentTask = (setup: SubagentSetup) =>
             () => Boolean(told.value?.waiting.length) || !live.value?.run,
             invocation,
           );
-          // A failed run leaves what was steered to it queued; withdrawn, it ends with the call.
+          // pi-durable withdraws what was steered to a run that failed (`afterFailedRun: "withdraw"`), but a run
+          // whose task faulted keeps its inbox (spec "afterFailedRun"). Withdrawn here, that input ends with the
+          // call too.
           const inbox = await runtime.snapshot(
             InboxDoc,
             conversationId,
@@ -539,7 +544,8 @@ export const agentTask = (setup: SubagentSetup) =>
               } as const;
             }
             if ((await tx.doc(LiveDoc, conversationId)).run) return undefined;
-            // The call's replies, as UniiChat reports them: each answer once, and each failure but a withdrawal.
+            // The call's replies, as UniiChat reports them: each answer once, and each failure but a withdrawal, by
+            // a stop or by a failed run.
             const replies: string[] = [];
             const answers = new Set<EntryId>();
             for (const id of sent) {
@@ -564,7 +570,8 @@ export const agentTask = (setup: SubagentSetup) =>
                 replies.push(text);
               } else if (
                 settled?.status === "unanswered" &&
-                settled.reason !== "aborted"
+                settled.reason !== "aborted" &&
+                settled.reason !== "run_failed"
               ) {
                 const why = `failed: ${typeof settled.detail === "string" ? settled.detail : settled.reason}`;
                 if (!replies.includes(why)) replies.push(why);
@@ -625,7 +632,12 @@ export async function agentWork(
   root: ConversationId,
 ): Promise<{ id: TaskId; name: string }[]> {
   const work: { id: TaskId; name: string }[] = [];
-  for (const status of ["pending", "running", "waiting"] as const) {
+  for (const status of [
+    "pending",
+    "running",
+    "waiting",
+    "sleeping",
+  ] as const) {
     let cursor: Cursor | undefined;
     do {
       const page = await tx.scanTasks(
@@ -691,6 +703,7 @@ export const AgentCallDoc = defineDocFamily<{ result: string | null }, null>({
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => true,
   // Version 1 recorded the one agent an `agent` call launched.
   migrate: (value) => {
     const { taskId, name } = value as { taskId: TaskId | null; name: string };

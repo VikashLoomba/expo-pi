@@ -112,7 +112,11 @@ async function agentHarness(route: FauxResponseStep, work: () => Promise<void> =
       models,
       registry,
       onReport: (error) => reports.push(error),
-      settings: { toolExecution: 'sequential', steeringMode: 'all', followUpMode: 'all' },
+      // As openOptChat sets them.
+      settings: {
+        toolExecution: 'sequential', steeringMode: 'all', followUpMode: 'all', afterFailedRun: 'withdraw',
+        restartLimit: Infinity,
+      },
     },
     context,
   );
@@ -543,7 +547,8 @@ test('a call whose run fails reports the failure, and what it was told meanwhile
       (tx) => tx.submissionByRequest(agent.conversationId, `optchat:agent:${call.id}:1`),
       context,
     );
-    assert.equal(steer?.status === 'unanswered' ? steer.reason : steer?.status, 'aborted');
+    // pi-durable withdrew it with the failed run (`afterFailedRun: 'withdraw'`).
+    assert.equal(steer?.status === 'unanswered' ? steer.reason : steer?.status, 'run_failed');
     const after = await f.agent(name);
     assert.equal(after.calling, null);
     assert.deepEqual(after.waiting, []);

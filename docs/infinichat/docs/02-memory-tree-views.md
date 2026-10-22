@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: UniiChat’s [Memory.ts design](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1-L50), [message pages](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L428-L456), [node sources](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L575-L586), [view sizes](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L826-L829), [`flat`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L985-L990), [view batches and due merges](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L831-L956) and [view rendering](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1005-L1018), [native document scopes and lifetime](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L983-L1335), [transactions](https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/docs/spec.md#L1589-L1655).
+Sources: UniiChat’s [Memory.ts design](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1-L50), [message pages](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L428-L456), [node sources](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L575-L586), [view sizes](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L826-L829), [`flat`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L985-L990), [view batches and due merges](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L831-L956) and [view rendering](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1005-L1018), [native document scopes and lifetime](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L1067-L1423), [transactions](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L1677-L1743).
 
 ## Canonical records
 
@@ -80,6 +80,7 @@ export const MessageDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => false,
   initial: (seed) => {
     if (!seed) throw new Error("Missing canonical message");
     return seed;
@@ -103,6 +104,7 @@ export const NodeDoc = defineDocFamily<
   history: "latest",
   fork: "current",
   family: true,
+  checkpointWhen: () => false,
   initial: (value) => ({ value }),
 });
 export type View = {
@@ -134,6 +136,7 @@ export const MemoryDoc = defineDoc<MemoryState>({
   scope: "conversation",
   history: "latest",
   fork: "current",
+  checkpointWhen: () => true,
   // Version 1 took leaves and parents in turn; builds now start in the order the messages came.
   migrate: (value) => {
     const { nextQueue: _turn, ...memory } = value as MemoryState & {
