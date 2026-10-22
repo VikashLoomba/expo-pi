@@ -14,7 +14,8 @@ import type { ScheduledInput } from '../infinichat/schedule';
 import type { ChatModelSettings, ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
 import {
-  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type SignInAttempt,
+  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type Machine,
+  type PendingHostKeys, type Reach, type SignInAttempt,
 } from './contract';
 import {
   connectAdmitted, installServer, runningServer, savedSecret, SERVER_BUNDLE, type InstallStage,
@@ -61,7 +62,8 @@ function plain(error: unknown): Error {
  * tunnelled over SSH to the server's loopback port (piece 1's `server/listen.ts`). The host holds the contract once;
  * after a lost link `host.connect` re-holds it, and the screens keep the last values meanwhile. It borrows the
  * machine record and the phone's secret, and closes only the connections it opened, which are its own: the tools'
- * daemon connections in owner.ts are not used while the machine runs InfiniChat.
+ * daemon connections in owner.ts are not used while the machine runs InfiniChat. The machine's own tools reach the
+ * other configured machines with its own SSH; it hears of them on every connect and whenever Remote machines change.
  */
 export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
@@ -77,15 +79,20 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
     scheduled: readonly ScheduledTask[]; catalog: ModelCatalog; access: MachineAccess; signIn: SignInAttempt;
-    conversation: ConversationState;
+    conversation: ConversationState; reach: Reach; pendingHostKeys: PendingHostKeys;
   };
   private report = NO_REPORT;
   private status: ConnectionStatus = { status: 'connecting' };
   private connection: RemoteConnection = this.status;
   private closed = false;
   private closing?: Promise<void>;
+  /** The latest list of the other machines on its way to the server; each waits for the one before. */
+  private machinesSent: Promise<void> = Promise.resolve();
+  private readonly stopHosts: () => void;
 
-  constructor(private readonly hosts: RemoteHostRepository, readonly machineId: string) {}
+  constructor(private readonly hosts: RemoteHostRepository, readonly machineId: string) {
+    this.stopHosts = hosts.subscribe(() => this.sendMachines());
+  }
 
   /** One store for the view, the report, the scheduled tasks and the connection. */
   readonly subscribe = (listener: () => void) => {
@@ -113,6 +120,12 @@ export class RemoteInfiniChat implements InfiniChatHost {
   readonly getSignIn = () => this.values?.signIn;
   /** Whether the machine holds the conversation open, and the files it adopted; undefined until connected. */
   readonly getConversation = () => this.values?.conversation;
+  /**
+   * Whether the machine reached each other machine the last time it tried, and the host keys it found there that wait
+   * for this phone; undefined until connected.
+   */
+  readonly getReach = () => this.values?.reach;
+  readonly getPendingHostKeys = () => this.values?.pendingHostKeys;
 
   /**
    * Resolves once connected to this app's server for the machine, installing it as needed. Rejects as a call waiting
@@ -177,6 +190,11 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   signOut(providerId: string): Promise<void> {
     return this.call((ref, ctx) => ref.signOut({ providerId }, ctx));
+  }
+
+  /** Trusts the host keys with these fingerprints that machine `id` presented to this machine. */
+  acceptHostKey(id: string, fingerprints: string[]): Promise<void> {
+    return this.call((ref, ctx) => ref.acceptHostKey({ id, fingerprints }, ctx));
   }
 
   /**
@@ -280,6 +298,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   close(): Promise<void> {
     this.closing ??= (async () => {
       this.closed = true;
+      this.stopHosts();
       this.attempt?.abort();
       this.calls.abort(new Error(`InfiniChat no longer runs on ${this.name}.`));
       this.listeners.clear();
@@ -361,6 +380,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
       this.refresh();
       // The next connect sends it again, so one lost with its link changes nothing.
       this.ref?.setTimeZone({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone }).catch(() => {});
+      this.sendMachines();
     } catch (error) {
       if (this.session === session) this.session = undefined;
       await this.dispose(session);
@@ -421,6 +441,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     ref.access.subscribe(this.refresh);
     ref.signInAttempt.subscribe(this.refresh);
     ref.conversation.subscribe(this.refresh);
+    ref.reach.subscribe(this.refresh);
+    ref.pendingHostKeys.subscribe(this.refresh);
     // Forced away while connected, as when the server shuts down: connecting again holds a new one.
     ref.onStatus((status) => {
       if (status === 'gone') this.dropped(this.session);
@@ -435,10 +457,30 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const { view, report } = ref.snapshot.value;
     this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value,
       scheduled: ref.scheduled.value, catalog: ref.catalog.value, access: ref.access.value,
-      signIn: ref.signInAttempt.value, conversation: ref.conversation.value };
+      signIn: ref.signInAttempt.value, conversation: ref.conversation.value, reach: ref.reach.value,
+      pendingHostKeys: ref.pendingHostKeys.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };
     this.notify();
   };
+
+  /**
+   * Tells a connected server the other configured machines, each with the host key this phone pinned for it, never
+   * their credentials. One that fails changes nothing: the next connect sends them again.
+   */
+  private sendMachines(): void {
+    this.machinesSent = this.machinesSent.then(async () => {
+      const ref = this.ref;
+      if (this.closed || ref === undefined || !this.session?.live) return;
+      const others = this.hosts.getSnapshot().hosts.filter((host) => host.id !== this.machineId);
+      const machines = await Promise.all(others.map(async (host): Promise<Machine> => {
+        const { id, name, hostname, port, username } = host;
+        const { trustedHostKey } = await this.hosts.admit(id);
+        return { id, name, hostname, port, username, ...(trustedHostKey === undefined ? {}
+          : { hostKey: { algorithm: trustedHostKey.algorithm, fingerprint: trustedHostKey.fingerprint } }) };
+      }));
+      await ref.setMachines({ machines });
+    }).catch(() => {});
+  }
 
   /** A live session lost its socket, its tunnel or its SSH connection: dispose of it and connect again. */
   private dropped(session: Session | undefined) {

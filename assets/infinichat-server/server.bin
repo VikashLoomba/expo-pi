@@ -52,7 +52,7 @@ var __toBinaryNode = Uint8Array.fromBase64 || ((base64) => new Uint8Array(Buffer
 var define_INFINICHAT_PI_default;
 var init_define_INFINICHAT_PI = __esm({
   "<define:INFINICHAT_PI>"() {
-    define_INFINICHAT_PI_default = { durable: "1.4.0", ai: "1.4.0", chord: "1.4.0" };
+    define_INFINICHAT_PI_default = { durable: "1.4.0", ai: "1.4.0", chord: "1.4.0", env: "1.4.0" };
   }
 });
 
@@ -152,8 +152,8 @@ function getBunSandboxEnvValue(name) {
   if (procEnvCache === null) {
     procEnvCache = /* @__PURE__ */ new Map();
     try {
-      const { readFileSync: readFileSync2 } = __require("node:fs");
-      const data = readFileSync2("/proc/self/environ", "utf-8");
+      const { readFileSync: readFileSync3 } = __require("node:fs");
+      const data = readFileSync3("/proc/self/environ", "utf-8");
       for (const entry2 of data.split("\0")) {
         const idx = entry2.indexOf("=");
         if (idx > 0) {
@@ -2417,7 +2417,7 @@ var require_buffer_util = __commonJS({
     init_define_INFINICHAT_PI();
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
-    function concat(list, totalLength) {
+    function concat2(list, totalLength) {
       if (list.length === 0) return EMPTY_BUFFER;
       if (list.length === 1) return list[0];
       const target = Buffer.allocUnsafe(totalLength);
@@ -2463,7 +2463,7 @@ var require_buffer_util = __commonJS({
       return buf;
     }
     module.exports = {
-      concat,
+      concat: concat2,
       mask: _mask,
       toArrayBuffer,
       toBuffer,
@@ -2806,9 +2806,9 @@ var require_permessage_deflate = __commonJS({
        * @private
        */
       _decompress(data, fin, callback) {
-        const endpoint = this._isServer ? "client" : "server";
+        const endpoint2 = this._isServer ? "client" : "server";
         if (!this._inflate) {
-          const key2 = `${endpoint}_max_window_bits`;
+          const key2 = `${endpoint2}_max_window_bits`;
           const windowBits = typeof this.params[key2] !== "number" ? zlib3.Z_DEFAULT_WINDOWBITS : this.params[key2];
           this._inflate = zlib3.createInflateRaw({
             ...this._options.zlibInflateOptions,
@@ -2841,7 +2841,7 @@ var require_permessage_deflate = __commonJS({
           } else {
             this._inflate[kTotalLength] = 0;
             this._inflate[kBuffers] = [];
-            if (fin && this.params[`${endpoint}_no_context_takeover`]) {
+            if (fin && this.params[`${endpoint2}_no_context_takeover`]) {
               this._inflate.reset();
             }
           }
@@ -2857,9 +2857,9 @@ var require_permessage_deflate = __commonJS({
        * @private
        */
       _compress(data, fin, callback) {
-        const endpoint = this._isServer ? "server" : "client";
+        const endpoint2 = this._isServer ? "server" : "client";
         if (!this._deflate) {
-          const key2 = `${endpoint}_max_window_bits`;
+          const key2 = `${endpoint2}_max_window_bits`;
           const windowBits = typeof this.params[key2] !== "number" ? zlib3.Z_DEFAULT_WINDOWBITS : this.params[key2];
           this._deflate = zlib3.createDeflateRaw({
             ...this._options.zlibDeflateOptions,
@@ -2885,7 +2885,7 @@ var require_permessage_deflate = __commonJS({
           this._deflate[kCallback] = null;
           this._deflate[kTotalLength] = 0;
           this._deflate[kBuffers] = [];
-          if (fin && this.params[`${endpoint}_no_context_takeover`]) {
+          if (fin && this.params[`${endpoint2}_no_context_takeover`]) {
             this._deflate.reset();
           }
           callback(null, data2);
@@ -3136,7 +3136,7 @@ var require_receiver = __commonJS({
       kStatusCode,
       kWebSocket
     } = require_constants();
-    var { concat, toArrayBuffer, unmask } = require_buffer_util();
+    var { concat: concat2, toArrayBuffer, unmask } = require_buffer_util();
     var { isValidStatusCode, isValidUTF8 } = require_validation();
     var FastBuffer = Buffer[Symbol.species];
     var GET_INFO = 0;
@@ -3613,9 +3613,9 @@ var require_receiver = __commonJS({
         if (this._opcode === 2) {
           let data;
           if (this._binaryType === "nodebuffer") {
-            data = concat(fragments, messageLength);
+            data = concat2(fragments, messageLength);
           } else if (this._binaryType === "arraybuffer") {
-            data = toArrayBuffer(concat(fragments, messageLength));
+            data = toArrayBuffer(concat2(fragments, messageLength));
           } else if (this._binaryType === "blob") {
             data = new Blob(fragments);
           } else {
@@ -3633,7 +3633,7 @@ var require_receiver = __commonJS({
             });
           }
         } else {
-          const buf = concat(fragments, messageLength);
+          const buf = concat2(fragments, messageLength);
           if (!this._skipUTF8Validation && !isValidUTF8(buf)) {
             const error = this.createError(
               Error,
@@ -4635,7 +4635,7 @@ var require_websocket = __commonJS({
     var http3 = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes: randomBytes2, createHash: createHash4 } = __require("crypto");
+    var { randomBytes: randomBytes4, createHash: createHash5 } = __require("crypto");
     var { Duplex, Readable: Readable2 } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -5186,7 +5186,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort = isSecure ? 443 : 80;
-      const key2 = randomBytes2(16).toString("base64");
+      const key2 = randomBytes4(16).toString("base64");
       const request2 = isSecure ? https2.request : http3.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -5316,7 +5316,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash4("sha1").update(key2 + GUID).digest("base64");
+        const digest = createHash5("sha1").update(key2 + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -5688,7 +5688,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http3 = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash4 } = __require("crypto");
+    var { createHash: createHash5 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -5995,7 +5995,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash4("sha1").update(key2 + GUID).digest("base64");
+        const digest = createHash5("sha1").update(key2 + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -6387,7 +6387,7 @@ function getBrowserInfo() {
   }
   return null;
 }
-var isRunningInBrowser, getPlatformProperties, normalizeArch, normalizePlatform, _platformHeaders, getPlatformHeaders;
+var isRunningInBrowser, getPlatformProperties, normalizeArch2, normalizePlatform, _platformHeaders, getPlatformHeaders;
 var init_detect_platform = __esm({
   "node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@3.25.76/node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs"() {
     init_define_INFINICHAT_PI();
@@ -6407,7 +6407,7 @@ var init_detect_platform = __esm({
           "X-Stainless-Lang": "js",
           "X-Stainless-Package-Version": VERSION,
           "X-Stainless-OS": normalizePlatform(Deno.build.os),
-          "X-Stainless-Arch": normalizeArch(Deno.build.arch),
+          "X-Stainless-Arch": normalizeArch2(Deno.build.arch),
           "X-Stainless-Runtime": "deno",
           "X-Stainless-Runtime-Version": typeof Deno.version === "string" ? Deno.version : Deno.version?.deno ?? "unknown"
         };
@@ -6427,7 +6427,7 @@ var init_detect_platform = __esm({
           "X-Stainless-Lang": "js",
           "X-Stainless-Package-Version": VERSION,
           "X-Stainless-OS": normalizePlatform(globalThis.process.platform ?? "unknown"),
-          "X-Stainless-Arch": normalizeArch(globalThis.process.arch ?? "unknown"),
+          "X-Stainless-Arch": normalizeArch2(globalThis.process.arch ?? "unknown"),
           "X-Stainless-Runtime": "node",
           "X-Stainless-Runtime-Version": globalThis.process.version ?? "unknown"
         };
@@ -6452,7 +6452,7 @@ var init_detect_platform = __esm({
         "X-Stainless-Runtime-Version": "unknown"
       };
     };
-    normalizeArch = (arch) => {
+    normalizeArch2 = (arch) => {
       if (arch === "x32")
         return "x32";
       if (arch === "x86_64" || arch === "x64")
@@ -7384,11 +7384,11 @@ var init_base64 = __esm({
 });
 
 // node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@3.25.76/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs
-function noop5() {
+function noop6() {
 }
 function makeLogFn(fnLevel, logger, logLevel) {
   if (!logger || levelNumbers[fnLevel] > levelNumbers[logLevel]) {
-    return noop5;
+    return noop6;
   } else {
     return logger[fnLevel].bind(logger);
   }
@@ -7424,7 +7424,7 @@ function defaultLogger() {
   return cachedDefaultLogger;
 }
 function debugLogRequestDetails(logger, message, details) {
-  if (logger.debug === noop5) {
+  if (logger.debug === noop6) {
     return;
   }
   logger.debug(message, formatRequestDetails(details));
@@ -7454,10 +7454,10 @@ var init_log = __esm({
       return void 0;
     };
     noopLogger = {
-      error: noop5,
-      warn: noop5,
-      info: noop5,
-      debug: noop5
+      error: noop6,
+      warn: noop6,
+      info: noop6,
+      debug: noop6
     };
     cachedLoggers = /* @__PURE__ */ new WeakMap();
     formatRequestDetails = (details) => {
@@ -7549,13 +7549,13 @@ var init_credentials = __esm({
       }
       validateProfileName(profileName);
       const { fs: fs7, path: path6 } = await Promise.resolve().then(() => (init_node(), node_exports));
-      const configPath = path6.join(rootConfigPath, "configs", `${profileName}.json`);
+      const configPath2 = path6.join(rootConfigPath, "configs", `${profileName}.json`);
       let configRaw;
       try {
-        configRaw = await fs7.promises.readFile(configPath, "utf-8");
+        configRaw = await fs7.promises.readFile(configPath2, "utf-8");
       } catch (err2) {
         if (err2?.code !== "ENOENT") {
-          throw new Error(`failed to read config file ${configPath}: ${err2}`);
+          throw new Error(`failed to read config file ${configPath2}: ${err2}`);
         }
         configRaw = null;
       }
@@ -7590,10 +7590,10 @@ var init_credentials = __esm({
       try {
         config = JSON.parse(configRaw);
       } catch (err2) {
-        throw new Error(`failed to parse config file ${configPath}: ${err2}`);
+        throw new Error(`failed to parse config file ${configPath2}: ${err2}`);
       }
       if (!config.authentication) {
-        throw new Error(`config file ${configPath} is missing "authentication"`);
+        throw new Error(`config file ${configPath2} is missing "authentication"`);
       }
       const authType = config.authentication.type;
       if (authType !== "oidc_federation" && authType !== "user_oauth") {
@@ -12083,10 +12083,10 @@ async function setupSkills(ctx2) {
   for (const skill of session.agent.skills) {
     try {
       const version = await client.beta.skills.versions.retrieve(skill.version, { skill_id: skill.skill_id });
-      let dirname5 = path.basename(version.name.trim());
-      if (dirname5 === "" || dirname5 === "." || dirname5 === "..")
-        dirname5 = skill.skill_id;
-      const dest = path.resolve(skillsRoot, dirname5);
+      let dirname6 = path.basename(version.name.trim());
+      if (dirname6 === "" || dirname6 === "." || dirname6 === "..")
+        dirname6 = skill.skill_id;
+      const dest = path.resolve(skillsRoot, dirname6);
       if (dest !== skillsRoot && !dest.startsWith(skillsRoot + path.sep)) {
         log.warn("skill name escapes the skills dir; skipping", {
           component: "agent-tool-context",
@@ -16747,12 +16747,12 @@ var init_BetaToolRunnerStream = __esm({
           __classPrivateFieldSet(this, _BetaToolRunnerStream_emitted, (_a7 = __classPrivateFieldGet2(this, _BetaToolRunnerStream_emitted, "f"), _a7++, _a7), "f");
           const [streamEvent, snapshot] = args;
           const block = streamEvent.type === "content_block_stop" ? snapshot.content[streamEvent.index] : void 0;
-          const closed = block?.type === "tool_use" ? block : void 0;
-          if (closed) {
-            __classPrivateFieldGet2(this, _BetaToolRunnerStream_toolCalls, "f").push(closed);
+          const closed2 = block?.type === "tool_use" ? block : void 0;
+          if (closed2) {
+            __classPrivateFieldGet2(this, _BetaToolRunnerStream_toolCalls, "f").push(closed2);
           }
           super._emit(event, ...args);
-          __classPrivateFieldGet2(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_track).call(this, streamEvent, closed);
+          __classPrivateFieldGet2(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_track).call(this, streamEvent, closed2);
           __classPrivateFieldGet2(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_release).call(this);
         }
         [(_BetaToolRunnerStream_onToolCall = /* @__PURE__ */ new WeakMap(), _BetaToolRunnerStream_emitted = /* @__PURE__ */ new WeakMap(), _BetaToolRunnerStream_readers = /* @__PURE__ */ new WeakMap(), _BetaToolRunnerStream_toolCalls = /* @__PURE__ */ new WeakMap(), _BetaToolRunnerStream_closed = /* @__PURE__ */ new WeakMap(), _BetaToolRunnerStream_ready = /* @__PURE__ */ new WeakMap(), _BetaToolRunnerStream_fallback = /* @__PURE__ */ new WeakMap(), _BetaToolRunnerStream_instances = /* @__PURE__ */ new WeakSet(), Symbol.asyncIterator)]() {
@@ -16787,7 +16787,7 @@ var init_BetaToolRunnerStream = __esm({
           };
         }
       }
-      _BetaToolRunnerStream_track = function _BetaToolRunnerStream_track2(event, closed) {
+      _BetaToolRunnerStream_track = function _BetaToolRunnerStream_track2(event, closed2) {
         if (__classPrivateFieldGet2(this, _BetaToolRunnerStream_fallback, "f")) {
           return;
         }
@@ -16801,8 +16801,8 @@ var init_BetaToolRunnerStream = __esm({
           __classPrivateFieldGet2(this, _BetaToolRunnerStream_ready, "f").push({ toolUse: __classPrivateFieldGet2(this, _BetaToolRunnerStream_closed, "f"), event: __classPrivateFieldGet2(this, _BetaToolRunnerStream_emitted, "f") });
           __classPrivateFieldSet(this, _BetaToolRunnerStream_closed, void 0, "f");
         }
-        if (closed) {
-          __classPrivateFieldSet(this, _BetaToolRunnerStream_closed, closed, "f");
+        if (closed2) {
+          __classPrivateFieldSet(this, _BetaToolRunnerStream_closed, closed2, "f");
         }
       }, _BetaToolRunnerStream_release = function _BetaToolRunnerStream_release2() {
         if (this.errored || this.controller.signal.aborted) {
@@ -25861,11 +25861,11 @@ var init_line2 = __esm({
 });
 
 // node_modules/.pnpm/openai@7.19.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signature-v4@5.7.3_undici@7.29.0_ws@8.22.0_zod@3.25.76/node_modules/openai/internal/utils/log.mjs
-function noop6() {
+function noop7() {
 }
 function makeLogFn2(fnLevel, logger, logLevel) {
   if (!logger || levelNumbers2[fnLevel] > levelNumbers2[logLevel]) {
-    return noop6;
+    return noop7;
   } else {
     return logger[fnLevel].bind(logger);
   }
@@ -25931,10 +25931,10 @@ var init_log2 = __esm({
       return void 0;
     };
     noopLogger2 = {
-      error: noop6,
-      warn: noop6,
-      info: noop6,
-      debug: noop6
+      error: noop7,
+      warn: noop7,
+      info: noop7,
+      debug: noop7
     };
     cachedLoggers2 = /* @__PURE__ */ new WeakMap();
     sensitiveQueryNames = /* @__PURE__ */ new Set([
@@ -26050,7 +26050,7 @@ function createAbortableSSESource(body, signal) {
     return: () => reader.cancel()
   } : ReadableStreamToAsyncIterable2(body)[Symbol.asyncIterator]();
   const ended = { value: void 0, done: true };
-  let closed = false;
+  let closed2 = false;
   let canceled = false;
   let cancellation;
   let interrupt;
@@ -26061,7 +26061,7 @@ function createAbortableSSESource(body, signal) {
     })
   );
   const cancel = () => {
-    if (canceled || closed) {
+    if (canceled || closed2) {
       return cancellation;
     }
     canceled = true;
@@ -26091,7 +26091,7 @@ function createAbortableSSESource(body, signal) {
           return ended;
         }
         if (result.done) {
-          closed = true;
+          closed2 = true;
           return ended;
         }
         return { value: result.value, done: false };
@@ -26137,7 +26137,7 @@ function createAbortableSSESource(body, signal) {
       } catch (error) {
         cleanupError = error;
       }
-      if (!closed) {
+      if (!closed2) {
         const pending = cancel();
         if (pending && !failed && !signal.aborted) {
           try {
@@ -26372,7 +26372,7 @@ var init_streaming3 = __esm({
         async function* iterLines() {
           const lineDecoder = new LineDecoder2();
           const reader = readableStream.getReader();
-          let closed = false;
+          let closed2 = false;
           let cancelPromise;
           const cancel = () => {
             cancelPromise ?? (cancelPromise = reader.cancel());
@@ -26387,7 +26387,7 @@ var init_streaming3 = __esm({
             while (true) {
               const { value: chunk, done } = await reader.read();
               if (done) {
-                closed = true;
+                closed2 = true;
                 break;
               }
               if (controller.signal.aborted) {
@@ -26411,7 +26411,7 @@ var init_streaming3 = __esm({
             }
           } finally {
             controller.signal.removeEventListener("abort", cancel);
-            if (!closed) {
+            if (!closed2) {
               cancel();
             }
             reader.releaseLock();
@@ -26717,7 +26717,7 @@ function getBrowserInfo2() {
   }
   return null;
 }
-var isRunningInBrowser2, getPlatformProperties2, normalizeArch2, normalizePlatform2, _platformHeaders2, getPlatformHeaders2;
+var isRunningInBrowser2, getPlatformProperties2, normalizeArch3, normalizePlatform2, _platformHeaders2, getPlatformHeaders2;
 var init_detect_platform2 = __esm({
   "node_modules/.pnpm/openai@7.19.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signature-v4@5.7.3_undici@7.29.0_ws@8.22.0_zod@3.25.76/node_modules/openai/internal/detect-platform.mjs"() {
     init_define_INFINICHAT_PI();
@@ -26737,7 +26737,7 @@ var init_detect_platform2 = __esm({
           "X-Stainless-Lang": "js",
           "X-Stainless-Package-Version": VERSION2,
           "X-Stainless-OS": normalizePlatform2(Deno.build.os),
-          "X-Stainless-Arch": normalizeArch2(Deno.build.arch),
+          "X-Stainless-Arch": normalizeArch3(Deno.build.arch),
           "X-Stainless-Runtime": "deno",
           "X-Stainless-Runtime-Version": typeof Deno.version === "string" ? Deno.version : Deno.version?.deno ?? "unknown"
         };
@@ -26757,7 +26757,7 @@ var init_detect_platform2 = __esm({
           "X-Stainless-Lang": "js",
           "X-Stainless-Package-Version": VERSION2,
           "X-Stainless-OS": normalizePlatform2(globalThis.process.platform ?? "unknown"),
-          "X-Stainless-Arch": normalizeArch2(globalThis.process.arch ?? "unknown"),
+          "X-Stainless-Arch": normalizeArch3(globalThis.process.arch ?? "unknown"),
           "X-Stainless-Runtime": "node",
           "X-Stainless-Runtime-Version": globalThis.process.version ?? "unknown"
         };
@@ -26782,7 +26782,7 @@ var init_detect_platform2 = __esm({
         "X-Stainless-Runtime-Version": "unknown"
       };
     };
-    normalizeArch2 = (arch) => {
+    normalizeArch3 = (arch) => {
       if (arch === "x32")
         return "x32";
       if (arch === "x86_64" || arch === "x64")
@@ -27305,11 +27305,11 @@ function resolveDataResidency(options) {
   if (hasOwn2(options, "baseURL")) {
     throw new OpenAIError("The `dataResidency` and `baseURL` options are mutually exclusive.");
   }
-  const endpoint = endpoints.get(options.dataResidency);
-  if (endpoint === void 0) {
+  const endpoint2 = endpoints.get(options.dataResidency);
+  if (endpoint2 === void 0) {
     throw new OpenAIError("Invalid `dataResidency`; expected one of: global, us, eu, ae.");
   }
-  return endpoint;
+  return endpoint2;
 }
 var endpoints;
 var init_data_residency = __esm({
@@ -27774,10 +27774,10 @@ var init_workload_identity_auth = __esm({
           redirect: "manual"
         });
         if (!response.ok) {
-          const errorText2 = await response.text();
+          const errorText3 = await response.text();
           let body2 = void 0;
           try {
-            body2 = JSON.parse(errorText2);
+            body2 = JSON.parse(errorText3);
           } catch {
           }
           if (response.status === 400 || response.status === 401 || response.status === 403) {
@@ -32313,9 +32313,9 @@ function observeSerializedChatCompletionParserParams(body, initial, update) {
         }
         const owner = actualToolOwners.get(index3);
         const source = owner ? originalToolOwners.get(owner) : void 0;
-        const frame = { source };
-        frames[index3] = frame;
-        toolFrames.set(value, frame);
+        const frame2 = { source };
+        frames[index3] = frame2;
+        toolFrames.set(value, frame2);
         return;
       }
       const tool = toolFrames.get(holder);
@@ -32357,9 +32357,9 @@ function observeSerializedChatCompletionParserParams(body, initial, update) {
       if (tools) {
         const serializedTools = [];
         for (let index3 = 0; index3 < frames.length; index3 += 1) {
-          const frame = frames[index3];
-          if (frame) {
-            serializedTools[index3] = snapshotSerializedParserTool(frame);
+          const frame2 = frames[index3];
+          if (frame2) {
+            serializedTools[index3] = snapshotSerializedParserTool(frame2);
           }
         }
         snapshot.tools = serializedTools;
@@ -48971,13 +48971,13 @@ var require_ponyfill_es2018 = __commonJS({
       typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global2 = typeof globalThis !== "undefined" ? globalThis : global2 || self, factory(global2.WebStreamsPolyfill = {}));
     })(exports, (function(exports2) {
       "use strict";
-      function noop8() {
+      function noop9() {
         return void 0;
       }
       function typeIsObject(x2) {
         return typeof x2 === "object" && x2 !== null || typeof x2 === "function";
       }
-      const rethrowAssertionErrorRejection = noop8;
+      const rethrowAssertionErrorRejection = noop9;
       function setFunctionName(fn, name) {
         try {
           Object.defineProperty(fn, "name", {
@@ -51606,7 +51606,7 @@ var require_ponyfill_es2018 = __commonJS({
               return newPromise((resolveRead, rejectRead) => {
                 ReadableStreamDefaultReaderRead(reader, {
                   _chunkSteps: (chunk) => {
-                    currentWrite = PerformPromiseThen(WritableStreamDefaultWriterWrite(writer, chunk), void 0, noop8);
+                    currentWrite = PerformPromiseThen(WritableStreamDefaultWriterWrite(writer, chunk), void 0, noop9);
                     resolveRead(false);
                   },
                   _closeSteps: () => resolveRead(true),
@@ -52287,7 +52287,7 @@ var require_ponyfill_es2018 = __commonJS({
       function ReadableStreamFromIterable(asyncIterable) {
         let stream6;
         const iteratorRecord = GetIterator(asyncIterable, "async");
-        const startAlgorithm = noop8;
+        const startAlgorithm = noop9;
         function pullAlgorithm() {
           let nextResult;
           try {
@@ -52339,7 +52339,7 @@ var require_ponyfill_es2018 = __commonJS({
       }
       function ReadableStreamFromDefaultReader(reader) {
         let stream6;
-        const startAlgorithm = noop8;
+        const startAlgorithm = noop9;
         function pullAlgorithm() {
           let readPromise;
           try {
@@ -52658,7 +52658,7 @@ var require_ponyfill_es2018 = __commonJS({
           });
         }
         const sourceCancelPromise = stream6._readableStreamController[CancelSteps](reason);
-        return transformPromiseWith(sourceCancelPromise, noop8);
+        return transformPromiseWith(sourceCancelPromise, noop9);
       }
       function ReadableStreamClose(stream6) {
         stream6._state = "closed";
@@ -53879,7 +53879,7 @@ async function toFormData(Body2, ct) {
   parser.end();
   return formData;
 }
-var s, S, f2, F, LF, CR, SPACE, HYPHEN, COLON, A, Z, lower, noop7, MultipartParser;
+var s, S, f2, F, LF, CR, SPACE, HYPHEN, COLON, A, Z, lower, noop8, MultipartParser;
 var init_multipart_parser = __esm({
   "node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/multipart-parser.js"() {
     init_define_INFINICHAT_PI();
@@ -53911,7 +53911,7 @@ var init_multipart_parser = __esm({
     A = 97;
     Z = 122;
     lower = (c) => c | 32;
-    noop7 = () => {
+    noop8 = () => {
     };
     MultipartParser = class {
       /**
@@ -53920,13 +53920,13 @@ var init_multipart_parser = __esm({
       constructor(boundary) {
         this.index = 0;
         this.flags = 0;
-        this.onHeaderEnd = noop7;
-        this.onHeaderField = noop7;
-        this.onHeadersEnd = noop7;
-        this.onHeaderValue = noop7;
-        this.onPartBegin = noop7;
-        this.onPartData = noop7;
-        this.onPartEnd = noop7;
+        this.onHeaderEnd = noop8;
+        this.onHeaderField = noop8;
+        this.onHeadersEnd = noop8;
+        this.onHeaderValue = noop8;
+        this.onPartBegin = noop8;
+        this.onPartData = noop8;
+        this.onPartEnd = noop8;
         this.boundaryChars = {};
         boundary = "\r\n--" + boundary;
         const ui8a = new Uint8Array(boundary.length);
@@ -55443,7 +55443,7 @@ var require_gaxios = __commonJS({
     var retry_js_1 = require_retry3();
     var stream_1 = __require("stream");
     var interceptor_js_1 = require_interceptor();
-    var randomUUID4 = async () => globalThis.crypto?.randomUUID() || (await import("crypto")).randomUUID();
+    var randomUUID5 = async () => globalThis.crypto?.randomUUID() || (await import("crypto")).randomUUID();
     var HTTP_STATUS_NO_CONTENT = 204;
     var Gaxios = class {
       agentCache = /* @__PURE__ */ new Map();
@@ -55716,7 +55716,7 @@ var require_gaxios = __commonJS({
          */
         ["Blob", "File", "FormData"].includes(opts.data?.constructor?.name || "");
         if (opts.multipart?.length) {
-          const boundary = await randomUUID4();
+          const boundary = await randomUUID5();
           preparedHeaders.set("content-type", `multipart/related; boundary=${boundary}`);
           opts.body = stream_1.Readable.from(this.getMultipartRequest(opts.multipart, boundary));
         } else if (shouldDirectlyPassData) {
@@ -56307,7 +56307,7 @@ var require_bignumber = __commonJS({
             return arr.reverse();
           }
           return function(str, baseIn, baseOut, sign, callerIsToString) {
-            var alphabet, d, e2, k, r2, x2, xc, y, i2 = str.indexOf("."), dp = DECIMAL_PLACES, rm3 = ROUNDING_MODE;
+            var alphabet, d, e2, k, r2, x2, xc, y, i2 = str.indexOf("."), dp = DECIMAL_PLACES, rm4 = ROUNDING_MODE;
             if (i2 >= 0) {
               k = POW_PRECISION;
               POW_PRECISION = 0;
@@ -56333,7 +56333,7 @@ var require_bignumber = __commonJS({
               x2.c = xc;
               x2.e = e2;
               x2.s = sign;
-              x2 = div(x2, y, dp, rm3, baseOut);
+              x2 = div(x2, y, dp, rm4, baseOut);
               xc = x2.c;
               r2 = x2.r;
               e2 = x2.e;
@@ -56342,7 +56342,7 @@ var require_bignumber = __commonJS({
             i2 = xc[d];
             k = baseOut / 2;
             r2 = r2 || d < 0 || xc[d + 1] != null;
-            r2 = rm3 < 4 ? (i2 != null || r2) && (rm3 == 0 || rm3 == (x2.s < 0 ? 3 : 2)) : i2 > k || i2 == k && (rm3 == 4 || r2 || rm3 == 6 && xc[d - 1] & 1 || rm3 == (x2.s < 0 ? 8 : 7));
+            r2 = rm4 < 4 ? (i2 != null || r2) && (rm4 == 0 || rm4 == (x2.s < 0 ? 3 : 2)) : i2 > k || i2 == k && (rm4 == 4 || r2 || rm4 == 6 && xc[d - 1] & 1 || rm4 == (x2.s < 0 ? 8 : 7));
             if (d < 1 || !xc[0]) {
               str = r2 ? toFixedPoint(alphabet.charAt(1), -dp, alphabet.charAt(0)) : alphabet.charAt(0);
             } else {
@@ -56400,7 +56400,7 @@ var require_bignumber = __commonJS({
             }
             for (; !a[0] && a.length > 1; a.splice(0, 1)) ;
           }
-          return function(x2, y, dp, rm3, base) {
+          return function(x2, y, dp, rm4, base) {
             var cmp, e2, i2, more, n, prod, prodL, q, qc, rem, remL, rem0, xi, xL, yc0, yL, yz, s2 = x2.s == y.s ? 1 : -1, xc = x2.c, yc = y.c;
             if (!xc || !xc[0] || !yc || !yc[0]) {
               return new BigNumber2(
@@ -56497,7 +56497,7 @@ var require_bignumber = __commonJS({
             }
             if (base == BASE) {
               for (i2 = 1, s2 = qc[0]; s2 >= 10; s2 /= 10, i2++) ;
-              round(q, dp + (q.e = i2 + e2 * LOG_BASE - 1) + 1, rm3, more);
+              round(q, dp + (q.e = i2 + e2 * LOG_BASE - 1) + 1, rm4, more);
             } else {
               q.e = e2;
               q.r = +more;
@@ -56505,10 +56505,10 @@ var require_bignumber = __commonJS({
             return q;
           };
         })();
-        function format(n, i2, rm3, id) {
+        function format(n, i2, rm4, id) {
           var c0, e2, ne, len, str;
-          if (rm3 == null) rm3 = ROUNDING_MODE;
-          else intCheck(rm3, 0, 8);
+          if (rm4 == null) rm4 = ROUNDING_MODE;
+          else intCheck(rm4, 0, 8);
           if (!n.c) return n.toString();
           c0 = n.c[0];
           ne = n.e;
@@ -56516,7 +56516,7 @@ var require_bignumber = __commonJS({
             str = coeffToString(n.c);
             str = id == 1 || id == 2 && (ne <= TO_EXP_NEG || ne >= TO_EXP_POS) ? toExponential(str, ne) : toFixedPoint(str, ne, "0");
           } else {
-            n = round(new BigNumber2(n), i2, rm3);
+            n = round(new BigNumber2(n), i2, rm4);
             e2 = n.e;
             str = coeffToString(n.c);
             len = str.length;
@@ -56589,7 +56589,7 @@ var require_bignumber = __commonJS({
             x2.c = x2.e = null;
           };
         })();
-        function round(x2, sd, rm3, r2) {
+        function round(x2, sd, rm4, r2) {
           var d, i2, j, k, n, ni, rd, xc = x2.c, pows10 = POWS_TEN;
           if (xc) {
             out: {
@@ -56624,8 +56624,8 @@ var require_bignumber = __commonJS({
               // The expression  n % pows10[d - j - 1]  returns all digits of n to the right
               // of the digit at j, e.g. if n is 908714 and j is 2, the expression gives 714.
               xc[ni + 1] != null || (j < 0 ? n : n % pows10[d - j - 1]);
-              r2 = rm3 < 4 ? (rd || r2) && (rm3 == 0 || rm3 == (x2.s < 0 ? 3 : 2)) : rd > 5 || rd == 5 && (rm3 == 4 || r2 || rm3 == 6 && // Check whether the digit to the left of the rounding digit is odd.
-              (i2 > 0 ? j > 0 ? n / pows10[d - j] : 0 : xc[ni - 1]) % 10 & 1 || rm3 == (x2.s < 0 ? 8 : 7));
+              r2 = rm4 < 4 ? (rd || r2) && (rm4 == 0 || rm4 == (x2.s < 0 ? 3 : 2)) : rd > 5 || rd == 5 && (rm4 == 4 || r2 || rm4 == 6 && // Check whether the digit to the left of the rounding digit is odd.
+              (i2 > 0 ? j > 0 ? n / pows10[d - j] : 0 : xc[ni - 1]) % 10 & 1 || rm4 == (x2.s < 0 ? 8 : 7));
               if (sd < 1 || !xc[0]) {
                 xc.length = 0;
                 if (r2) {
@@ -56690,13 +56690,13 @@ var require_bignumber = __commonJS({
         P.comparedTo = function(y, b) {
           return compare(this, new BigNumber2(y, b));
         };
-        P.decimalPlaces = P.dp = function(dp, rm3) {
+        P.decimalPlaces = P.dp = function(dp, rm4) {
           var c, n, v, x2 = this;
           if (dp != null) {
             intCheck(dp, 0, MAX);
-            if (rm3 == null) rm3 = ROUNDING_MODE;
-            else intCheck(rm3, 0, 8);
-            return round(new BigNumber2(x2), dp + x2.e + 1, rm3);
+            if (rm4 == null) rm4 = ROUNDING_MODE;
+            else intCheck(rm4, 0, 8);
+            return round(new BigNumber2(x2), dp + x2.e + 1, rm4);
           }
           if (!(c = x2.c)) return null;
           n = ((v = c.length - 1) - bitFloor(this.e / LOG_BASE)) * LOG_BASE;
@@ -56779,11 +56779,11 @@ var require_bignumber = __commonJS({
           if (nIsNeg) y = ONE.div(y);
           return m2 ? y.mod(m2) : k ? round(y, POW_PRECISION, ROUNDING_MODE, more) : y;
         };
-        P.integerValue = function(rm3) {
+        P.integerValue = function(rm4) {
           var n = new BigNumber2(this);
-          if (rm3 == null) rm3 = ROUNDING_MODE;
-          else intCheck(rm3, 0, 8);
-          return round(n, n.e + 1, rm3);
+          if (rm4 == null) rm4 = ROUNDING_MODE;
+          else intCheck(rm4, 0, 8);
+          return round(n, n.e + 1, rm4);
         };
         P.isEqualTo = P.eq = function(y, b) {
           return compare(this, new BigNumber2(y, b)) === 0;
@@ -57010,13 +57010,13 @@ var require_bignumber = __commonJS({
           }
           return normalise(y, xc, ye);
         };
-        P.precision = P.sd = function(sd, rm3) {
+        P.precision = P.sd = function(sd, rm4) {
           var c, n, v, x2 = this;
           if (sd != null && sd !== !!sd) {
             intCheck(sd, 1, MAX);
-            if (rm3 == null) rm3 = ROUNDING_MODE;
-            else intCheck(rm3, 0, 8);
-            return round(new BigNumber2(x2), sd, rm3);
+            if (rm4 == null) rm4 = ROUNDING_MODE;
+            else intCheck(rm4, 0, 8);
+            return round(new BigNumber2(x2), sd, rm4);
           }
           if (!(c = x2.c)) return null;
           v = c.length - 1;
@@ -57086,36 +57086,36 @@ var require_bignumber = __commonJS({
           }
           return round(r2, r2.e + DECIMAL_PLACES + 1, ROUNDING_MODE, m2);
         };
-        P.toExponential = function(dp, rm3) {
+        P.toExponential = function(dp, rm4) {
           if (dp != null) {
             intCheck(dp, 0, MAX);
             dp++;
           }
-          return format(this, dp, rm3, 1);
+          return format(this, dp, rm4, 1);
         };
-        P.toFixed = function(dp, rm3) {
+        P.toFixed = function(dp, rm4) {
           if (dp != null) {
             intCheck(dp, 0, MAX);
             dp = dp + this.e + 1;
           }
-          return format(this, dp, rm3);
+          return format(this, dp, rm4);
         };
-        P.toFormat = function(dp, rm3, format2) {
+        P.toFormat = function(dp, rm4, format2) {
           var str, x2 = this;
           if (format2 == null) {
-            if (dp != null && rm3 && typeof rm3 == "object") {
-              format2 = rm3;
-              rm3 = null;
+            if (dp != null && rm4 && typeof rm4 == "object") {
+              format2 = rm4;
+              rm4 = null;
             } else if (dp && typeof dp == "object") {
               format2 = dp;
-              dp = rm3 = null;
+              dp = rm4 = null;
             } else {
               format2 = FORMAT;
             }
           } else if (typeof format2 != "object") {
             throw Error(bignumberError + "Argument not an object: " + format2);
           }
-          str = x2.toFixed(dp, rm3);
+          str = x2.toFixed(dp, rm4);
           if (x2.c) {
             var i2, arr = str.split("."), g1 = +format2.groupSize, g2 = +format2.secondaryGroupSize, groupSeparator = format2.groupSeparator || "", intPart = arr[0], fractionPart = arr[1], isNeg = x2.s < 0, intDigits = isNeg ? intPart.slice(1) : intPart, len = intDigits.length;
             if (g2) {
@@ -57183,9 +57183,9 @@ var require_bignumber = __commonJS({
         P.toNumber = function() {
           return +valueOf(this);
         };
-        P.toPrecision = function(sd, rm3) {
+        P.toPrecision = function(sd, rm4) {
           if (sd != null) intCheck(sd, 1, MAX);
-          return format(this, sd, rm3, 2);
+          return format(this, sd, rm4, 2);
         };
         P.toString = function(b) {
           var str, n = this, s2 = n.s, e2 = n.e;
@@ -61021,7 +61021,7 @@ var require_getCredentials = __commonJS({
     var fs7 = __require("fs");
     var util_1 = __require("util");
     var errorWithCode_1 = require_errorWithCode();
-    var readFile7 = fs7.readFile ? (0, util_1.promisify)(fs7.readFile) : async () => {
+    var readFile8 = fs7.readFile ? (0, util_1.promisify)(fs7.readFile) : async () => {
       throw new errorWithCode_1.ErrorWithCode("use key rather than keyFile.", "MISSING_CREDENTIALS");
     };
     var ExtensionFiles;
@@ -61043,7 +61043,7 @@ var require_getCredentials = __commonJS({
        * @returns A promise that resolves with the credentials.
        */
       async getCredentials() {
-        const key2 = await readFile7(this.keyFilePath, "utf8");
+        const key2 = await readFile8(this.keyFilePath, "utf8");
         let body;
         try {
           body = JSON.parse(key2);
@@ -61069,7 +61069,7 @@ var require_getCredentials = __commonJS({
        * @returns A promise that resolves with the private key.
        */
       async getCredentials() {
-        const privateKey = await readFile7(this.keyFilePath, "utf8");
+        const privateKey = await readFile8(this.keyFilePath, "utf8");
         return { privateKey };
       }
     };
@@ -62710,7 +62710,7 @@ var require_filesubjecttokensupplier = __commonJS({
     exports.FileSubjectTokenSupplier = void 0;
     var util_1 = __require("util");
     var fs7 = __require("fs");
-    var readFile7 = (0, util_1.promisify)(fs7.readFile ?? (() => {
+    var readFile8 = (0, util_1.promisify)(fs7.readFile ?? (() => {
     }));
     var realpath3 = (0, util_1.promisify)(fs7.realpath ?? (() => {
     }));
@@ -62750,7 +62750,7 @@ var require_filesubjecttokensupplier = __commonJS({
           throw err2;
         }
         let subjectToken;
-        const rawText = await readFile7(parsedFilePath, { encoding: "utf8" });
+        const rawText = await readFile8(parsedFilePath, { encoding: "utf8" });
         if (this.formatType === "text") {
           subjectToken = rawText;
         } else if (this.formatType === "json" && this.subjectTokenFieldName) {
@@ -62925,25 +62925,25 @@ var require_certificatesubjecttokensupplier = __commonJS({
        * @returns An object containing the certificate and key paths.
        */
       async #getCertAndKeyPaths() {
-        const configPath = this.certificateConfigPath;
+        const configPath2 = this.certificateConfigPath;
         let fileContents;
         try {
-          fileContents = await fs7.promises.readFile(configPath, "utf8");
+          fileContents = await fs7.promises.readFile(configPath2, "utf8");
         } catch (err2) {
-          throw new CertificateSourceUnavailableError(`Failed to read certificate config file at: ${configPath}`);
+          throw new CertificateSourceUnavailableError(`Failed to read certificate config file at: ${configPath2}`);
         }
         try {
           const config = JSON.parse(fileContents);
           const certPath = config?.cert_configs?.workload?.cert_path;
           const keyPath = config?.cert_configs?.workload?.key_path;
           if (!certPath || !keyPath) {
-            throw new InvalidConfigurationError(`Certificate config file (${configPath}) is missing required "cert_path" or "key_path" in the workload config.`);
+            throw new InvalidConfigurationError(`Certificate config file (${configPath2}) is missing required "cert_path" or "key_path" in the workload config.`);
           }
           return { certPath, keyPath };
         } catch (e2) {
           if (e2 instanceof InvalidConfigurationError)
             throw e2;
-          throw new InvalidConfigurationError(`Failed to parse certificate config from ${configPath}: ${e2.message}`);
+          throw new InvalidConfigurationError(`Failed to parse certificate config from ${configPath2}: ${e2.message}`);
         }
       }
       /**
@@ -65116,10 +65116,10 @@ var require_googleauth = __commonJS({
           const client = await this.#pendingAuthClient;
           if (client instanceof gdchclient_1.GdchClient && !client.apiAudience) {
             const opts = this.clientOptions;
-            const endpoint = opts.apiEndpoint || opts.servicePath;
-            if (endpoint) {
-              const scheme = endpoint.startsWith("http") ? "" : "https://";
-              const formattedAudience = `${scheme}${endpoint}`.replace(/\/+$/, "");
+            const endpoint2 = opts.apiEndpoint || opts.servicePath;
+            if (endpoint2) {
+              const scheme = endpoint2.startsWith("http") ? "" : "https://";
+              const formattedAudience = `${scheme}${endpoint2}`.replace(/\/+$/, "");
               const newClient = client.createWithGdchAudience(formattedAudience);
               this.cachedCredential = newClient;
               return newClient;
@@ -65240,10 +65240,10 @@ var require_googleauth = __commonJS({
        * sign('data', 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/');
        * ```
        */
-      async sign(data, endpoint) {
+      async sign(data, endpoint2) {
         const client = await this.getClient();
         const universe = await this.getUniverseDomain();
-        endpoint = endpoint || `https://iamcredentials.${universe}/v1/projects/-/serviceAccounts/`;
+        endpoint2 = endpoint2 || `https://iamcredentials.${universe}/v1/projects/-/serviceAccounts/`;
         if (client instanceof impersonated_1.Impersonated) {
           const signed = await client.sign(data);
           return signed.signedBlob;
@@ -65257,10 +65257,10 @@ var require_googleauth = __commonJS({
         if (!creds.client_email) {
           throw new Error("Cannot sign data without `client_email`.");
         }
-        return this.signBlob(crypto4, creds.client_email, data, endpoint);
+        return this.signBlob(crypto4, creds.client_email, data, endpoint2);
       }
-      async signBlob(crypto4, emailOrUniqueId, data, endpoint) {
-        const url = new URL(endpoint + `${emailOrUniqueId}:signBlob`);
+      async signBlob(crypto4, emailOrUniqueId, data, endpoint2) {
+        const url = new URL(endpoint2 + `${emailOrUniqueId}:signBlob`);
         const res = await this.request({
           method: "POST",
           url: url.href,
@@ -65688,7 +65688,7 @@ var require_src5 = __commonJS({
 // node_modules/.pnpm/@google+genai@2.21.0/node_modules/@google/genai/dist/node/index.mjs
 import { createWriteStream as createWriteStream2 } from "fs";
 import * as fs6 from "fs/promises";
-import { writeFile as writeFile4 } from "fs/promises";
+import { writeFile as writeFile5 } from "fs/promises";
 import { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
 import * as path5 from "path";
@@ -74399,10 +74399,10 @@ function raiseUndiciTimeouts(timeout) {
   }
 }
 function createAttemptSignal(timeout, callerSignal) {
-  const noop8 = () => {
+  const noop9 = () => {
   };
   if (!(timeout && timeout > 0) && !callerSignal) {
-    return { signal: void 0, dispose: noop8 };
+    return { signal: void 0, dispose: noop9 };
   }
   const controller = new AbortController();
   let timeoutHandle;
@@ -80257,7 +80257,7 @@ function getApiKeyFromEnv() {
   }
   return envGoogleApiKey || envGeminiApiKey || void 0;
 }
-var import_p_retry, import_google_auth_library, _defaultBaseGeminiUrl, _defaultBaseVertexUrl, BaseModule, Outcome, Language, FunctionResponseScheduling, Type2, AuthType, HttpElementLocation, ApiSpec, Environment, SafetyPolicy, PhishBlockThreshold, Behavior, DynamicRetrievalConfigMode, ThinkingLevel, PersonGeneration, ProminentPeople, HarmCategory, HarmBlockMethod, HarmBlockThreshold, FunctionCallingConfigMode, FinishReason, HarmProbability, HarmSeverity, UrlRetrievalStatus, BlockedReason, TrafficType, MediaModality, ModelStage, MediaResolution, Modality, Delivery, AspectRatio, ImageSize, TuningMode, AdapterSize, ResponseParseType, MatchOperation, ReinforcementTuningThinkingLevel, JobState, TuningJobState, AggregationMetric, PairwiseChoice, VideoOrientation, TuningSpeed, TuningTask, DocumentState, ServiceTier, MediaProcessing, PartMediaResolutionLevel, ToolType, ResourceScope, FeatureSelectionPreference, EmbeddingApiType, SafetyFilterLevel, ImagePromptLanguage, MaskReferenceMode, ControlReferenceType, SubjectReferenceType, EditMode, SegmentMode, VideoGenerationReferenceType, VideoGenerationMaskMode, VideoCompressionQuality, ImageResizeMode, TuningMethod, FileState, FileSource, TurnCompleteReason, InteractionStatus, VadSignalType, VoiceActivityType, StartSensitivity, EndSensitivity, ActivityHandling, TurnCoverage, AudioTranscriptionConfigMode, Scale, MusicGenerationMode, LiveMusicPlaybackControl, HttpResponse, GenerateContentResponse, EmbedContentResponse, GenerateImagesResponse, EditImageResponse, UpscaleImageResponse, RecontextImageResponse, SegmentImageResponse, ListModelsResponse, DeleteModelResponse, CountTokensResponse, ComputeTokensResponse, GenerateVideosOperation, ListTuningJobsResponse, CancelTuningJobResponse, ValidateRewardResponse, DeleteCachedContentResponse, ListCachedContentsResponse, ListDocumentsResponse, ListFileSearchStoresResponse, UploadToFileSearchStoreResumableResponse, ImportFileOperation, ListFilesResponse, CreateFileResponse, DeleteFileResponse, RegisterFilesResponse, ListBatchJobsResponse, LiveServerMessage, LiveMusicServerMessage, UploadToFileSearchStoreOperation, PagedItem, Pager, Batches4, Caches, Chats, Chat2, ApiError, Files$1, CONTENT_TYPE_HEADER, SERVER_TIMEOUT_HEADER, USER_AGENT_HEADER, GOOGLE_API_CLIENT_HEADER, SDK_VERSION, LIBRARY_LABEL, VERTEX_AI_API_DEFAULT_VERSION, GOOGLE_AI_API_DEFAULT_VERSION, MULTI_REGIONAL_LOCATIONS, DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_INITIAL_DELAY, DEFAULT_RETRY_MAX_DELAY, DEFAULT_RETRY_EXP_BASE, DEFAULT_RETRY_JITTER, DEFAULT_RETRY_HTTP_STATUS_CODES, ApiClient, MCP_LABEL, hasMcpToolUsageFromMcpToTool, McpCallableTool, LiveMusic, LiveMusicSession, FUNCTION_RESPONSE_REQUIRES_ID, Live2, defaultLiveSendClientContentParamerters, Session, DEFAULT_MAX_REMOTE_CALLS, Models4, Operations, Tokens, Documents, FileSearchStores, envMemo, GoogleGenAISecurityProvider, GoogleGenAIAuthHook, HTTPClientError, UnexpectedClientError, InvalidRequestError, RequestAbortedError, RequestTimeoutError, ConnectionError, GoogleGenAiError, GeminiNextGenAPIClientError, APIError3, APIUserAbortError3, APIConnectionError3, APIConnectionTimeoutError3, BadRequestError3, AuthenticationError3, PermissionDeniedError3, NotFoundError3, ConflictError3, UnprocessableEntityError3, RateLimitError3, InternalServerError3, SDKHooks, hasOwn3, ServerList, SDK_METADATA, encodeForm, encodeSimple, encodeFormQuery, DEFAULT_FETCHER, HTTPClient, mediaParamSeparator, codeRangeRE$1, defaultBackoff, PermanentError, TemporaryError, codeRangeRE, gt, webWorkerLike, isBrowserLike, ClientSDK, jsonLikeContentTypeRE, jsonlLikeContentTypeRE, GoogleGenAiDefaultError, Stream5, CR2, LF2, BOUNDARIES, MAX_BOUNDARY_LEN, DEFAULT_CONTENT_TYPES, headerValRE, SecurityErrorCode, SecurityError, _a6, APIPromise3, Agents3, Files8, Environments3, CancelInteractionByIdServerError, CancelInteractionByIdClientError, CreateInteractionServerError, CreateInteractionClientError, DeleteInteractionServerError, DeleteInteractionClientError, GetInteractionByIdServerError, GetInteractionByIdClientError, Interactions, Triggers, Webhooks3, GoogleGenAI$1, LEGACY_LYRIA_MODELS, GeminiNextGenInteractions, GeminiNextGenAgents, GeminiNextGenWebhooks, GeminiNextGenTriggers, GeminiNextGenEnvironmentFiles, GeminiNextGenEnvironments, GOOGLE_API_KEY_HEADER, REQUIRED_VERTEX_AI_SCOPE, NodeAuth, NodeDownloader, NodeWebSocketFactory, NodeWebSocket, Tunings, MAX_CHUNK_SIZE, MAX_RETRY_COUNT, INITIAL_RETRY_DELAY_MS, DELAY_MULTIPLIER, X_GOOG_UPLOAD_STATUS_HEADER_FIELD, NodeUploader, NodeFiles, LANGUAGE_LABEL_PREFIX, GoogleGenAI2;
+var import_p_retry, import_google_auth_library, _defaultBaseGeminiUrl, _defaultBaseVertexUrl, BaseModule, Outcome, Language, FunctionResponseScheduling, Type2, AuthType, HttpElementLocation, ApiSpec, Environment, SafetyPolicy, PhishBlockThreshold, Behavior, DynamicRetrievalConfigMode, ThinkingLevel, PersonGeneration, ProminentPeople, HarmCategory, HarmBlockMethod, HarmBlockThreshold, FunctionCallingConfigMode, FinishReason, HarmProbability, HarmSeverity, UrlRetrievalStatus, BlockedReason, TrafficType, MediaModality, ModelStage, MediaResolution, Modality, Delivery, AspectRatio, ImageSize, TuningMode, AdapterSize, ResponseParseType, MatchOperation, ReinforcementTuningThinkingLevel, JobState, TuningJobState, AggregationMetric, PairwiseChoice, VideoOrientation, TuningSpeed, TuningTask, DocumentState, ServiceTier, MediaProcessing, PartMediaResolutionLevel, ToolType, ResourceScope, FeatureSelectionPreference, EmbeddingApiType, SafetyFilterLevel, ImagePromptLanguage, MaskReferenceMode, ControlReferenceType, SubjectReferenceType, EditMode, SegmentMode, VideoGenerationReferenceType, VideoGenerationMaskMode, VideoCompressionQuality, ImageResizeMode, TuningMethod, FileState, FileSource, TurnCompleteReason, InteractionStatus, VadSignalType, VoiceActivityType, StartSensitivity, EndSensitivity, ActivityHandling, TurnCoverage, AudioTranscriptionConfigMode, Scale, MusicGenerationMode, LiveMusicPlaybackControl, HttpResponse, GenerateContentResponse, EmbedContentResponse, GenerateImagesResponse, EditImageResponse, UpscaleImageResponse, RecontextImageResponse, SegmentImageResponse, ListModelsResponse, DeleteModelResponse, CountTokensResponse, ComputeTokensResponse, GenerateVideosOperation, ListTuningJobsResponse, CancelTuningJobResponse, ValidateRewardResponse, DeleteCachedContentResponse, ListCachedContentsResponse, ListDocumentsResponse, ListFileSearchStoresResponse, UploadToFileSearchStoreResumableResponse, ImportFileOperation, ListFilesResponse, CreateFileResponse, DeleteFileResponse, RegisterFilesResponse, ListBatchJobsResponse, LiveServerMessage, LiveMusicServerMessage, UploadToFileSearchStoreOperation, PagedItem, Pager, Batches4, Caches, Chats, Chat2, ApiError, Files$1, CONTENT_TYPE_HEADER, SERVER_TIMEOUT_HEADER, USER_AGENT_HEADER, GOOGLE_API_CLIENT_HEADER, SDK_VERSION, LIBRARY_LABEL, VERTEX_AI_API_DEFAULT_VERSION, GOOGLE_AI_API_DEFAULT_VERSION, MULTI_REGIONAL_LOCATIONS, DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_INITIAL_DELAY, DEFAULT_RETRY_MAX_DELAY, DEFAULT_RETRY_EXP_BASE, DEFAULT_RETRY_JITTER, DEFAULT_RETRY_HTTP_STATUS_CODES, ApiClient, MCP_LABEL, hasMcpToolUsageFromMcpToTool, McpCallableTool, LiveMusic, LiveMusicSession, FUNCTION_RESPONSE_REQUIRES_ID, Live2, defaultLiveSendClientContentParamerters, Session2, DEFAULT_MAX_REMOTE_CALLS, Models4, Operations, Tokens, Documents, FileSearchStores, envMemo, GoogleGenAISecurityProvider, GoogleGenAIAuthHook, HTTPClientError, UnexpectedClientError, InvalidRequestError, RequestAbortedError, RequestTimeoutError, ConnectionError, GoogleGenAiError, GeminiNextGenAPIClientError, APIError3, APIUserAbortError3, APIConnectionError3, APIConnectionTimeoutError3, BadRequestError3, AuthenticationError3, PermissionDeniedError3, NotFoundError3, ConflictError3, UnprocessableEntityError3, RateLimitError3, InternalServerError3, SDKHooks, hasOwn3, ServerList, SDK_METADATA, encodeForm, encodeSimple, encodeFormQuery, DEFAULT_FETCHER, HTTPClient, mediaParamSeparator, codeRangeRE$1, defaultBackoff, PermanentError, TemporaryError, codeRangeRE, gt, webWorkerLike, isBrowserLike, ClientSDK, jsonLikeContentTypeRE, jsonlLikeContentTypeRE, GoogleGenAiDefaultError, Stream5, CR2, LF2, BOUNDARIES, MAX_BOUNDARY_LEN, DEFAULT_CONTENT_TYPES, headerValRE, SecurityErrorCode, SecurityError, _a6, APIPromise3, Agents3, Files8, Environments3, CancelInteractionByIdServerError, CancelInteractionByIdClientError, CreateInteractionServerError, CreateInteractionClientError, DeleteInteractionServerError, DeleteInteractionClientError, GetInteractionByIdServerError, GetInteractionByIdClientError, Interactions, Triggers, Webhooks3, GoogleGenAI$1, LEGACY_LYRIA_MODELS, GeminiNextGenInteractions, GeminiNextGenAgents, GeminiNextGenWebhooks, GeminiNextGenTriggers, GeminiNextGenEnvironmentFiles, GeminiNextGenEnvironments, GOOGLE_API_KEY_HEADER, REQUIRED_VERTEX_AI_SCOPE, NodeAuth, NodeDownloader, NodeWebSocketFactory, NodeWebSocket, Tunings, MAX_CHUNK_SIZE, MAX_RETRY_COUNT, INITIAL_RETRY_DELAY_MS, DELAY_MULTIPLIER, X_GOOG_UPLOAD_STATUS_HEADER_FIELD, NodeUploader, NodeFiles, LANGUAGE_LABEL_PREFIX, GoogleGenAI2;
 var init_node3 = __esm({
   "node_modules/.pnpm/@google+genai@2.21.0/node_modules/@google/genai/dist/node/index.mjs"() {
     init_define_INFINICHAT_PI();
@@ -83596,7 +83596,7 @@ var init_node3 = __esm({
           clientMessage = liveConnectParametersToMldev(this.apiClient, liveConnectParameters);
         }
         delete clientMessage["config"];
-        const session = new Session(conn, this.apiClient);
+        const session = new Session2(conn, this.apiClient);
         conn.send(JSON.stringify(clientMessage));
         await setupCompletePromise;
         sessionResolved = true;
@@ -83613,7 +83613,7 @@ var init_node3 = __esm({
     defaultLiveSendClientContentParamerters = {
       turnComplete: true
     };
-    Session = class {
+    Session2 = class {
       constructor(conn, apiClient) {
         this.conn = conn;
         this.apiClient = apiClient;
@@ -87074,7 +87074,7 @@ var init_node3 = __esm({
             await finished(writer);
           } else {
             try {
-              await writeFile4(params.downloadPath, response, {
+              await writeFile5(params.downloadPath, response, {
                 encoding: "base64"
               });
             } catch (error) {
@@ -88522,7 +88522,7 @@ function timeoutError(timeoutMs) {
   error.body = "";
   return error;
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function requiredNumber(label, value, field) {
@@ -88574,7 +88574,7 @@ function tokenCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 function parseClassifierUsage(value, model2) {
-  if (!isRecord4(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
+  if (!isRecord5(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
     return void 0;
   const input = tokenCount(value.input_tokens);
   const output = tokenCount(value.output_tokens);
@@ -88657,7 +88657,7 @@ function choiceProbabilities(value, id) {
   if (!Array.isArray(value))
     throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
   return Object.fromEntries(value.map((entry2) => {
-    if (!isRecord4(entry2) || typeof entry2.value !== "string") {
+    if (!isRecord5(entry2) || typeof entry2.value !== "string") {
       throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
     }
     return [entry2.value, requiredNumber(LABEL, entry2.probability, `probability for ${id}.${entry2.value}`)];
@@ -88695,7 +88695,7 @@ function parseAnswers(value, context3) {
     throw new Error(`${LABEL} returned an unexpected response`);
   const byName = /* @__PURE__ */ new Map();
   for (const answer2 of value) {
-    if (isRecord4(answer2) && typeof answer2.name === "string")
+    if (isRecord5(answer2) && typeof answer2.name === "string")
       byName.set(answer2.name, answer2);
   }
   return Object.fromEntries(Object.entries(context3.questions).map(([id, question]) => {
@@ -88737,7 +88737,7 @@ var init_openai_decisions = __esm({
           input: wireInput(context3),
           questions: Object.entries(context3.questions).map(([id, question]) => wireQuestion(id, question))
         }, options, NO_RETRY_STATUSES);
-        if (!isRecord4(body))
+        if (!isRecord5(body))
           throw new Error(`${LABEL} returned an unexpected response`);
         const usage = parseClassifierUsage(body.usage, model2);
         if (usage)
@@ -89900,7 +89900,7 @@ var init_openrouter_images = __esm({
 
 // node_modules/.pnpm/@earendil-works+pi-ai@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatur_650820bfd44a3c6cefd0e1345c0a96b9/node_modules/@earendil-works/pi-ai/dist/api/system-one-shared.js
 function probabilities(label, value, id) {
-  if (!isRecord4(value))
+  if (!isRecord5(value))
     throw new Error(`${label} returned invalid probabilities for ${id}`);
   return Object.fromEntries(Object.entries(value).map(([key2, probability]) => [
     key2,
@@ -89908,12 +89908,12 @@ function probabilities(label, value, id) {
   ]));
 }
 function parseAnswers2(label, value, context3) {
-  if (!isRecord4(value))
+  if (!isRecord5(value))
     throw new Error(`${label} returned an unexpected response`);
   const answers = [];
   for (const [id, question] of Object.entries(context3.questions)) {
     const answer2 = value[id];
-    if (!isRecord4(answer2))
+    if (!isRecord5(answer2))
       throw new Error(`${label} did not return an answer for ${id}`);
     if (question.type === "choice") {
       if (answer2.type !== "choice" || typeof answer2.choice !== "string") {
@@ -90063,7 +90063,7 @@ var init_typesafe_system_one = __esm({
       url: (model2) => new URL("systemone", `${model2.baseUrl.replace(/\/+$/u, "")}/`),
       payload: (model2, request2) => ({ model: model2.id, ...request2 }),
       output: (body) => {
-        if (!isRecord4(body))
+        if (!isRecord5(body))
           throw new Error("System One API returned an unexpected response");
         return body;
       }
@@ -90074,10 +90074,10 @@ var init_typesafe_system_one = __esm({
 
 // server/main.ts
 init_define_INFINICHAT_PI();
-import { mkdir as mkdir6 } from "node:fs/promises";
+import { mkdir as mkdir7 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename5, dirname as dirname4, join as join8 } from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { basename as basename5, dirname as dirname5, join as join10 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
 import { parseArgs } from "node:util";
 
 // node_modules/.pnpm/@earendil-works+chord@1.4.0/node_modules/@earendil-works/chord/dist/index.js
@@ -98701,15 +98701,15 @@ _Stack_instances = /* @__PURE__ */ new WeakSet(), _Stack_StackFrame = function _
     });
   }
 }, _Stack_BuildBase = function _Stack_BuildBase2(stack) {
-  const frame = this.retrievedFrames[this.retrievedFrames.length - 1];
-  const base = frame ? new URL(frame.base) : new URL(resolve_exports.DefaultBase);
-  const scoped = frame ? stack.slice(frame.idDepth) : stack;
+  const frame2 = this.retrievedFrames[this.retrievedFrames.length - 1];
+  const base = frame2 ? new URL(frame2.base) : new URL(resolve_exports.DefaultBase);
+  const scoped = frame2 ? stack.slice(frame2.idDepth) : stack;
   return scoped.reduce((result, schema) => new URL(schema.$id, result), base).href;
 }, _Stack_ResourceBaseURL = function _Stack_ResourceBaseURL2() {
-  const frame = this.retrievedFrames[this.retrievedFrames.length - 1];
-  if (!frame)
+  const frame2 = this.retrievedFrames[this.retrievedFrames.length - 1];
+  if (!frame2)
     return __classPrivateFieldGet(this, _Stack_instances, "m", _Stack_BuildBase).call(this, this.resourceIds);
-  return this.resourceIds.slice(frame.resourceDepth).reduce((result, schema) => new URL(schema.$id, result), new URL(frame.base)).href;
+  return this.resourceIds.slice(frame2.resourceDepth).reduce((result, schema) => new URL(schema.$id, result), new URL(frame2.base)).href;
 }, _Stack_ReferenceBaseURL = function _Stack_ReferenceBaseURL2() {
   if (this.retrievedFrames.length > 0)
     return __classPrivateFieldGet(this, _Stack_instances, "m", _Stack_ResourceBaseURL).call(this);
@@ -98718,9 +98718,9 @@ _Stack_instances = /* @__PURE__ */ new WeakSet(), _Stack_StackFrame = function _
     return this.LexicalBaseURL();
   return __classPrivateFieldGet(this, _Stack_instances, "m", _Stack_ResourceBaseURL).call(this);
 }, _Stack_LexicalSchema = function _Stack_LexicalSchema2() {
-  const frame = this.retrievedFrames[this.retrievedFrames.length - 1];
-  if (frame)
-    return this.ids.length > frame.idDepth ? this.ids[this.ids.length - 1] : frame.schema;
+  const frame2 = this.retrievedFrames[this.retrievedFrames.length - 1];
+  if (frame2)
+    return this.ids.length > frame2.idDepth ? this.ids[this.ids.length - 1] : frame2.schema;
   return this.ids.length > 0 ? this.ids[this.ids.length - 1] : this.schema;
 }, _Stack_RegisterResourceAnchorArray = function _Stack_RegisterResourceAnchorArray2(schema) {
   schema.forEach((schema2) => __classPrivateFieldGet(this, _Stack_instances, "m", _Stack_RegisterResourceAnchors).call(this, schema2, false));
@@ -106985,22 +106985,22 @@ var ChildReloads = class {
   constructor(host) {
     this.#host = host;
   }
-  handle(connection, frame) {
-    if (frame.t === "prepare") {
+  handle(connection, frame2) {
+    if (frame2.t === "prepare") {
       if (this.#operation !== void 0) {
         const error = new ChordError("unavailable", "a reload is already running", { reason: "reload_running" });
-        connection.send({ t: "vote", reload: frame.reload, error: toWireError(error) });
+        connection.send({ t: "vote", reload: frame2.reload, error: toWireError(error) });
         return;
       }
-      const operation2 = { id: frame.reload, reload: void 0, state: "loading", cancelled: false };
+      const operation2 = { id: frame2.reload, reload: void 0, state: "loading", cancelled: false };
       this.#operation = operation2;
-      this.#run(operation2, connection, frame).catch((error) => this.#host.report(error));
+      this.#run(operation2, connection, frame2).catch((error) => this.#host.report(error));
       return;
     }
     const operation = this.#operation;
-    if (operation === void 0 || operation.id !== frame.reload)
+    if (operation === void 0 || operation.id !== frame2.reload)
       return;
-    if (frame.t === "abort") {
+    if (frame2.t === "abort") {
       this.#cancel(operation);
       return;
     }
@@ -107027,10 +107027,10 @@ var ChildReloads = class {
     this.#operation = void 0;
     operation.reload?.rollback().catch((error) => this.#host.report(error)).finally(() => endReload(this.#host));
   }
-  async #run(operation, connection, frame) {
+  async #run(operation, connection, frame2) {
     const cancelled = () => new ChordError("aborted", "reload aborted by the server", { reason: "aborted" });
     try {
-      operation.reload = await beginReload(this.#host, frame.plugins, frame.options, frame.codeVersion);
+      operation.reload = await beginReload(this.#host, frame2.plugins, frame2.options, frame2.codeVersion);
       if (operation.cancelled)
         throw cancelled();
       operation.state = "preparing";
@@ -107038,7 +107038,7 @@ var ChildReloads = class {
       if (operation.cancelled)
         throw cancelled();
       operation.state = "prepared";
-      connection.send({ t: "vote", reload: frame.reload, report: operation.reload.summary() });
+      connection.send({ t: "vote", reload: frame2.reload, report: operation.reload.summary() });
     } catch (error) {
       if (operation.reload !== void 0) {
         await operation.reload.rollback().catch((cleanup) => this.#host.report(cleanup));
@@ -107047,7 +107047,7 @@ var ChildReloads = class {
       if (this.#operation === operation)
         this.#operation = void 0;
       if (!operation.cancelled)
-        connection.send({ t: "vote", reload: frame.reload, error: toWireError(error) });
+        connection.send({ t: "vote", reload: frame2.reload, error: toWireError(error) });
     }
   }
 };
@@ -107067,15 +107067,15 @@ var BaseLink = class {
   get closed() {
     return this.#closed;
   }
-  send(frame) {
+  send(frame2) {
     if (this.#closed)
       return void 0;
-    return this.transmit(frame);
+    return this.transmit(frame2);
   }
   receive(handler) {
     this.#handler = handler;
-    for (const frame of this.#queue.splice(0))
-      handler(frame);
+    for (const frame2 of this.#queue.splice(0))
+      handler(frame2);
   }
   onClose(handler) {
     if (this.#closed)
@@ -107093,31 +107093,31 @@ var BaseLink = class {
     this.ended(reason);
   }
   /** Delivers a parsed frame from the transport, after any frame still being decoded (`deliverLater`). */
-  deliver(frame) {
+  deliver(frame2) {
     if (this.#decoding !== void 0)
-      this.deliverLater(Promise.resolve(frame));
+      this.deliverLater(Promise.resolve(frame2));
     else
-      this.#deliverNow(frame);
+      this.#deliverNow(frame2);
   }
   /** Delivers a frame that is still being decoded (inflated in a browser); later frames wait for it, in order. */
-  deliverLater(frame) {
-    const next = (this.#decoding ?? Promise.resolve()).then(() => frame).then((decoded) => this.#deliverNow(decoded), () => this.close("protocol error")).finally(() => {
+  deliverLater(frame2) {
+    const next = (this.#decoding ?? Promise.resolve()).then(() => frame2).then((decoded) => this.#deliverNow(decoded), () => this.close("protocol error")).finally(() => {
       if (this.#decoding === next)
         this.#decoding = void 0;
     });
     this.#decoding = next;
   }
-  #deliverNow(frame) {
+  #deliverNow(frame2) {
     if (this.#closed)
       return;
-    if (frame.t === "bye") {
-      this.ended(frame.reason ?? "peer closed");
+    if (frame2.t === "bye") {
+      this.ended(frame2.reason ?? "peer closed");
       return;
     }
     if (this.#handler === void 0)
-      this.#queue.push(frame);
+      this.#queue.push(frame2);
     else
-      this.#handler(frame);
+      this.#handler(frame2);
   }
   /** Marks the link closed (transport ended) and notifies once. */
   ended(reason) {
@@ -107150,15 +107150,15 @@ function unpack(value) {
   return JSON.parse(zlib.inflateRawSync(value.bytes).toString("utf8"));
 }
 var PAYLOAD_FIELDS = /* @__PURE__ */ new Set(["args", "value"]);
-function payloadField(frame) {
-  if (frame.t === "call")
-    return frame.args === void 0 ? void 0 : "args";
-  if (frame.t === "result" || frame.t === "state")
-    return frame.value === void 0 ? void 0 : "value";
+function payloadField(frame2) {
+  if (frame2.t === "call")
+    return frame2.args === void 0 ? void 0 : "args";
+  if (frame2.t === "result" || frame2.t === "state")
+    return frame2.value === void 0 ? void 0 : "value";
   return void 0;
 }
-function envelopeOf(frame, field) {
-  const envelope2 = { ...frame };
+function envelopeOf(frame2, field) {
+  const envelope2 = { ...frame2 };
   delete envelope2[field];
   return envelope2;
 }
@@ -107179,14 +107179,14 @@ function unpackObject(message) {
 }
 var encoder3 = new TextEncoder();
 var decoder2 = new TextDecoder();
-function packMessage(frame, compress) {
-  const field = payloadField(frame);
+function packMessage(frame2, compress) {
+  const field = payloadField(frame2);
   if (field === void 0)
-    return JSON.stringify(frame);
-  const value = frame[field];
+    return JSON.stringify(frame2);
+  const value = frame2[field];
   const json2 = value instanceof Packed ? void 0 : JSON.stringify(value);
   const bytes2 = packedBytes(value, compress, json2);
-  const envelope2 = envelopeOf(frame, field);
+  const envelope2 = envelopeOf(frame2, field);
   if (bytes2 === void 0) {
     const head2 = JSON.stringify(envelope2);
     return `${head2.slice(0, -1)},${JSON.stringify(field)}:${json2}}`;
@@ -107213,10 +107213,10 @@ async function inflate(bytes2) {
   return JSON.parse(await new Response(stream6).text());
 }
 function parseFrame(data) {
-  const frame = unpackObject(JSON.parse(data));
-  if (frame === null || typeof frame !== "object" || typeof frame.t !== "string")
+  const frame2 = unpackObject(JSON.parse(data));
+  if (frame2 === null || typeof frame2 !== "object" || typeof frame2.t !== "string")
     throw new TypeError("not a frame");
-  return frame;
+  return frame2;
 }
 var OPEN = 1;
 var WebSocketLink = class extends BaseLink {
@@ -107257,8 +107257,8 @@ var WebSocketLink = class extends BaseLink {
     });
     socket.addEventListener("close", () => this.ended("socket closed"));
   }
-  transmit(frame) {
-    const data = packMessage(frame, this.#compress);
+  transmit(frame2) {
+    const data = packMessage(frame2, this.#compress);
     if (this.#socket.readyState === OPEN)
       this.#socket.send(data);
     else
@@ -107297,12 +107297,12 @@ var RelayRef = class {
   awaiting = /* @__PURE__ */ new Set();
   calls = /* @__PURE__ */ new Map();
   #waiters = /* @__PURE__ */ new Set();
-  constructor(origin, frame, principal, originTag) {
+  constructor(origin, frame2, principal, originTag) {
     this.origin = origin;
-    this.frame = frame;
+    this.frame = frame2;
     this.principal = principal;
     this.originTag = originTag;
-    this.stateWanted = frame.state !== false;
+    this.stateWanted = frame2.state !== false;
     this.generation = origin.generation;
   }
   get originId() {
@@ -107370,27 +107370,27 @@ var RelayRef = class {
     this.down?.send({ t: "resync", hold: this.downId, m: m2 });
   }
   /** A shape from downstream: forwarded at once; the members of the first unit then skip the origin's window. */
-  shape(frame) {
+  shape(frame2) {
     if (this.closed)
       return;
     if (!this.#shaped) {
       this.#shaped = true;
       if (this.frame.again !== true)
-        this.urgent = new Set(frame.state);
+        this.urgent = new Set(frame2.state);
     }
-    this.origin.send({ ...frame, id: this.originId });
+    this.origin.send({ ...frame2, id: this.originId });
   }
   /** A state frame from downstream. */
-  state(frame) {
+  state(frame2) {
     if (this.closed)
       return;
-    const m2 = frame.m;
+    const m2 = frame2.m;
     if (this.awaiting.has(m2)) {
-      if (frame.as === "ops")
+      if (frame2.as === "ops")
         return;
       this.awaiting.delete(m2);
     }
-    const out = { ...frame, hold: this.originId };
+    const out = { ...frame2, hold: this.originId };
     if (this.urgent?.delete(m2) === true) {
       this.origin.send(out);
       return;
@@ -107525,7 +107525,7 @@ var Connection = class {
     this.#maxCalls = config.maxCalls ?? Number.POSITIVE_INFINITY;
     this.#onProtocolMismatch = config.onProtocolMismatch;
     link.onClose((reason) => this.#closed(reason));
-    link.receive((frame) => this.#receive(frame));
+    link.receive((frame2) => this.#receive(frame2));
     this.send({
       t: "hello",
       protocol: PROTOCOL_VERSION,
@@ -107554,8 +107554,8 @@ var Connection = class {
   get name() {
     return this.role === "upstream" ? this.#parentName : this.peer.name;
   }
-  send(frame) {
-    const size = this.link.send(frame) ?? 0;
+  send(frame2) {
+    const size = this.link.send(frame2) ?? 0;
     if (this.#peerAcks === false)
       return;
     this.#sent++;
@@ -107563,11 +107563,11 @@ var Connection = class {
     this.#unackedBytes += size;
   }
   /** Sends a state frame, or keeps it waiting (see the class comment). */
-  sendState(frame, overflow) {
-    const key2 = stateKey(frame.hold, frame.m);
+  sendState(frame2, overflow) {
+    const key2 = stateKey(frame2.hold, frame2.m);
     let slot = this.#pending.get(key2);
     if (slot === void 0 && !this.#full) {
-      this.send(frame);
+      this.send(frame2);
       return;
     }
     if (slot?.kind === "unit")
@@ -107575,8 +107575,8 @@ var Connection = class {
     if (slot === void 0) {
       slot = {
         kind: "state",
-        hold: frame.hold,
-        m: frame.m,
+        hold: frame2.hold,
+        m: frame2.m,
         base: void 0,
         ops: [],
         size: 0,
@@ -107585,9 +107585,9 @@ var Connection = class {
       };
       this.#pending.set(key2, slot);
     }
-    if (frame.as !== "ops") {
+    if (frame2.as !== "ops") {
       this.#pendingBytes -= slot.size;
-      slot.base = frame;
+      slot.base = frame2;
       slot.ops = [];
       slot.size = 0;
       slot.lazy = false;
@@ -107595,12 +107595,12 @@ var Connection = class {
     }
     if (slot.lazy)
       return;
-    const size = JSON.stringify(frame.ops).length;
+    const size = JSON.stringify(frame2.ops).length;
     if (this.#pendingBytes + size > this.#pendingCap)
       this.#makeRoom(size, slot);
     if (slot.lazy || this.#pending.get(key2) !== slot)
       return;
-    for (const op of frame.ops ?? [])
+    for (const op of frame2.ops ?? [])
       slot.ops.push(op);
     slot.size += size;
     this.#pendingBytes += size;
@@ -107830,70 +107830,70 @@ var Connection = class {
     });
   }
   // ─── receiving ───
-  #receive(frame) {
+  #receive(frame2) {
     if (this.#mismatched)
       return;
     this.#lastSeen = Date.now();
-    if (!isFrame(frame)) {
+    if (!isFrame(frame2)) {
       this.#violation("malformed frame");
       return;
     }
-    if (frame.t === "ack") {
-      this.#onAck(frame.n);
+    if (frame2.t === "ack") {
+      this.#onAck(frame2.n);
       return;
     }
     this.#received++;
     try {
-      this.#dispatch(frame);
+      this.#dispatch(frame2);
     } catch (error) {
       this.host.report(error);
     }
     this.#scheduleAck();
   }
-  #dispatch(frame) {
-    switch (frame.t) {
+  #dispatch(frame2) {
+    switch (frame2.t) {
       case "hello":
-        this.#onHello(frame);
+        this.#onHello(frame2);
         return;
       case "ping":
-        this.send({ t: "pong", n: frame.n });
+        this.send({ t: "pong", n: frame2.n });
         return;
       case "pong":
       case "bye":
       case "ack":
         return;
       case "hold":
-        this.#onHold(frame);
+        this.#onHold(frame2);
         return;
       case "release":
-        this.#dropServed(frame.id, true);
+        this.#dropServed(frame2.id, true);
         return;
       case "call":
-        this.#onCall(frame);
+        this.#onCall(frame2);
         return;
       case "cancel":
-        this.incoming.get(frame.id)?.abort(new ChordError("aborted", "cancelled by caller"));
+        this.incoming.get(frame2.id)?.abort(new ChordError("aborted", "cancelled by caller"));
         return;
       case "sub":
       case "unsub":
-        this.#onWantState(frame.hold, frame.t === "sub");
+        this.#onWantState(frame2.hold, frame2.t === "sub");
         return;
       case "resync":
-        this.#onResync(frame.hold, frame.m);
+        this.#onResync(frame2.hold, frame2.m);
         return;
       case "shape":
       case "gone":
-        this.#onHoldReply(frame);
+        this.#onHoldReply(frame2);
         return;
       case "result":
-        this.#onResult(frame);
+        this.#onResult(frame2);
         return;
       case "state":
-        this.#onState(frame);
+        this.#onState(frame2);
         return;
       case "root_end":
-        this.#admitted.delete(frame.rootId);
-        this.host.foreignRootEnded(frame.rootId, this);
+        this.#admitted.delete(frame2.rootId);
+        this.host.foreignRootEnded(frame2.rootId, this);
         return;
       case "invalidate":
       case "prepare":
@@ -107901,27 +107901,27 @@ var Connection = class {
       case "abort":
       case "retire":
         if (this.role !== "upstream") {
-          this.#violation(`${frame.t} from a child`);
+          this.#violation(`${frame2.t} from a child`);
           return;
         }
-        if (frame.t === "invalidate") {
-          this.host.invalidatePrincipal(frame.pattern).catch((error) => this.host.report(error));
-        } else if (frame.t === "retire")
-          this.host.allowRetire(frame.codeVersion);
+        if (frame2.t === "invalidate") {
+          this.host.invalidatePrincipal(frame2.pattern).catch((error) => this.host.report(error));
+        } else if (frame2.t === "retire")
+          this.host.allowRetire(frame2.codeVersion);
         else
-          this.host.onReloadFrame(this, frame);
+          this.host.onReloadFrame(this, frame2);
         return;
       case "vote": {
         if (this.role !== "downstream" || this.peer.kind !== "host") {
           this.#violation("vote from a non-participant");
           return;
         }
-        const vote = this.votes.get(frame.reload);
-        this.votes.delete(frame.reload);
-        if (frame.error === void 0)
-          vote?.resolve(frame.report);
+        const vote = this.votes.get(frame2.reload);
+        this.votes.delete(frame2.reload);
+        if (frame2.error === void 0)
+          vote?.resolve(frame2.report);
         else
-          vote?.reject(fromWireError(frame.error));
+          vote?.reject(fromWireError(frame2.error));
         return;
       }
     }
@@ -107930,100 +107930,100 @@ var Connection = class {
    * The peer's hello must agree with what this side decided about it. A downstream host announces its code version:
    * the host either finds it in step or fences and reconciles it (never renumbers).
    */
-  #onHello(frame) {
-    if ((frame.protocol ?? 1) !== PROTOCOL_VERSION) {
-      this.#protocolMismatch(frame.protocol ?? 1);
+  #onHello(frame2) {
+    if ((frame2.protocol ?? 1) !== PROTOCOL_VERSION) {
+      this.#protocolMismatch(frame2.protocol ?? 1);
       return;
     }
     if (this.#peerAcks === void 0) {
-      this.#peerAcks = frame.acks === true;
+      this.#peerAcks = frame2.acks === true;
       if (!this.#peerAcks) {
         this.#unacked = [];
         this.#unackedBytes = 0;
       }
     }
     if (this.role === "upstream") {
-      if (frame.kind !== "host") {
+      if (frame2.kind !== "host") {
         this.#violation("parent is not a host");
         return;
       }
-      this.#parentName ??= frame.name;
+      this.#parentName ??= frame2.name;
       return;
     }
-    if (frame.kind !== this.peer.kind || this.peer.name !== void 0 && frame.name !== this.peer.name) {
-      this.#violation(`hello ${frame.kind} ${frame.name} does not match the accepted ${this.peer.kind} ${this.peer.name ?? ""}`);
+    if (frame2.kind !== this.peer.kind || this.peer.name !== void 0 && frame2.name !== this.peer.name) {
+      this.#violation(`hello ${frame2.kind} ${frame2.name} does not match the accepted ${this.peer.kind} ${this.peer.name ?? ""}`);
       return;
     }
     if (this.peer.kind === "host")
-      this.host.peerHello(this, frame.codeVersion);
+      this.host.peerHello(this, frame2.codeVersion);
   }
   /**
    * Principal stamping: a downstream link acts as the principal it was accepted with, whatever the frame says. Only
    * the parent may forward a principal (relayed requests); its own requests act as the principal given to `connect`.
    */
-  #principalOf(frame) {
+  #principalOf(frame2) {
     if (this.role === "downstream")
       return this.principal;
-    return frame.principal ?? this.principal;
+    return frame2.principal ?? this.principal;
   }
   /**
    * The client connection a hold comes from: this link's own id for a client link (whatever the frame says), the id
    * the parent forwarded for a relayed hold, none for a host's own holds.
    */
-  #originOf(frame) {
-    return this.role === "downstream" ? this.originId : frame.origin;
+  #originOf(frame2) {
+    return this.role === "downstream" ? this.originId : frame2.origin;
   }
-  #onHold(frame) {
-    if (this.served.has(frame.id)) {
-      this.#violation(`duplicate hold id ${frame.id}`);
+  #onHold(frame2) {
+    if (this.served.has(frame2.id)) {
+      this.#violation(`duplicate hold id ${frame2.id}`);
       return;
     }
-    const principal = this.#principalOf(frame);
-    const origin = this.#originOf(frame);
+    const principal = this.#principalOf(frame2);
+    const origin = this.#originOf(frame2);
     const client = origin !== void 0;
-    if (frame.at !== this.host.name) {
+    if (frame2.at !== this.host.name) {
       if (this.role === "upstream") {
-        this.send({ t: "gone", id: frame.id, error: toWireError(unavailable(`${this.host.name} does not relay`)) });
+        this.send({ t: "gone", id: frame2.id, error: toWireError(unavailable(`${this.host.name} does not relay`)) });
         return;
       }
-      const relay = new RelayRef(this, frame, principal, origin);
-      this.served.set(frame.id, { kind: "relay", relay });
+      const relay = new RelayRef(this, frame2, principal, origin);
+      this.served.set(frame2.id, { kind: "relay", relay });
       this.host.relay(relay).catch((error) => relay.close(error, { releaseDown: true, notify: true }));
       return;
     }
     let ref;
     try {
-      const token = contractFromDescription(frame.token);
+      const token = contractFromDescription(frame2.token);
       if (token.scope !== "remote")
         throw invalid("token", `${token.name} is local; only remote types cross links`);
-      if (resolveHost(token.name, token.description.host, frame.input) !== this.host.name)
+      if (resolveHost(token.name, token.description.host, frame2.input) !== this.host.name)
         throw invalid("placement", `${token.name} with this input does not live on ${this.host.name}`);
-      const acquired = this.host.acquire(token, frame.input, { principal }, client ? "client" : "connection");
+      const acquired = this.host.acquire(token, frame2.input, { principal }, client ? "client" : "connection");
       if (!(acquired instanceof RefImpl))
         throw unavailable("not a local reference");
       ref = acquired;
     } catch (error) {
-      this.send({ t: "gone", id: frame.id, error: toWireError(client ? clientError(error) : error) });
+      this.send({ t: "gone", id: frame2.id, error: toWireError(client ? clientError(error) : error) });
       return;
     }
     const served = {
       kind: "local",
-      id: frame.id,
+      id: frame2.id,
       ref,
       principal,
       origin,
-      wantsState: frame.state !== false,
-      again: frame.again === true,
+      wantsState: frame2.state !== false,
+      again: frame2.again === true,
       unitSent: false,
       feeds: /* @__PURE__ */ new Map()
     };
-    this.served.set(frame.id, served);
+    this.served.set(frame2.id, served);
     ref.onShape(() => this.#unit(served));
     ref.goneListeners.add((error) => {
-      if (this.served.get(frame.id) !== served)
+      if (this.served.get(frame2.id) !== served)
         return;
-      this.#dropServed(frame.id, false);
-      this.send({ t: "gone", id: frame.id, error: toWireError(error) });
+      this.#dropServed(frame2.id, false);
+      this.send({ t: "gone", id: frame2.id, error: toWireError(error) });
     });
     if (ref.status === "live")
       this.#unit(served);
@@ -108082,10 +108082,10 @@ var Connection = class {
       ...shape.variant === void 0 ? {} : { variant: shape.variant },
       members: shape.members,
       contract: shape.contract,
-      state: snaps.map((frame) => frame.m)
+      state: snaps.map((frame2) => frame2.m)
     });
-    for (const frame of snaps)
-      this.send(frame);
+    for (const frame2 of snaps)
+      this.send(frame2);
     for (const [name, feed] of attached)
       this.#replay(served, name, feed);
   }
@@ -108206,36 +108206,36 @@ var Connection = class {
     if (release2)
       served.ref.release();
   }
-  #onCall(frame) {
-    if (this.incoming.has(frame.id)) {
-      this.#violation(`duplicate call id ${frame.id}`);
+  #onCall(frame2) {
+    if (this.incoming.has(frame2.id)) {
+      this.#violation(`duplicate call id ${frame2.id}`);
       return;
     }
     if (this.incoming.size >= this.#maxCalls) {
       const error = new ChordError("unavailable", `Too many calls in progress on this connection (${this.#maxCalls}); wait for earlier ones to finish`, { reason: "too_many_calls" });
-      this.send({ t: "result", id: frame.id, error: toWireError(error) });
+      this.send({ t: "result", id: frame2.id, error: toWireError(error) });
       return;
     }
-    const served = this.served.get(frame.hold);
+    const served = this.served.get(frame2.hold);
     if (served === void 0) {
-      this.send({ t: "result", id: frame.id, error: toWireError(new ChordError("gone", "unknown hold")) });
+      this.send({ t: "result", id: frame2.id, error: toWireError(new ChordError("gone", "unknown hold")) });
       return;
     }
     const controller = new AbortController();
-    this.incoming.set(frame.id, controller);
-    const root = this.peer.kind === "host" ? this.#admitRoot(frame.root) : void 0;
+    this.incoming.set(frame2.id, controller);
+    const root = this.peer.kind === "host" ? this.#admitRoot(frame2.root) : void 0;
     const principal = served.kind === "local" ? served.principal : served.relay.principal;
     const options = { principal, signal: controller.signal };
-    const run2 = served.kind === "local" ? (ctx2) => served.ref.object.call(served.ref, frame.member, unpack(frame.args), ctx2) : (ctx2) => relayCall(
+    const run2 = served.kind === "local" ? (ctx2) => served.ref.object.call(served.ref, frame2.member, unpack(frame2.args), ctx2) : (ctx2) => relayCall(
       served.relay,
-      frame,
+      frame2,
       { rootId: ctx2.rootId, codeVersion: ctx2.codeVersion },
       // The root's signal: a cancel from the origin and the root's code version retiring both reach it.
       ctx2.signal,
       this.host
     );
     const result = root === void 0 ? this.host.root(run2, options) : this.host.joinRoot(root.rootId, root.codeVersion, run2, { ...options, from: this });
-    result.then((value) => this.send({ t: "result", id: frame.id, value }), (error) => this.send({ t: "result", id: frame.id, error: toWireError(error) })).finally(() => this.incoming.delete(frame.id));
+    result.then((value) => this.send({ t: "result", id: frame2.id, value }), (error) => this.send({ t: "result", id: frame2.id, error: toWireError(error) })).finally(() => this.incoming.delete(frame2.id));
   }
   /**
    * A child that connected behind this host runs roots of a code version this host never had (it was fenced and is
@@ -108255,67 +108255,67 @@ var Connection = class {
     }
     return { rootId: root.rootId, codeVersion };
   }
-  #onHoldReply(frame) {
-    const relay = this.relayedRefs.get(frame.id);
+  #onHoldReply(frame2) {
+    const relay = this.relayedRefs.get(frame2.id);
     if (relay !== void 0) {
-      if (frame.t === "gone")
-        relay.close(fromWireError(frame.error), { releaseDown: false, notify: true });
+      if (frame2.t === "gone")
+        relay.close(fromWireError(frame2.error), { releaseDown: false, notify: true });
       else
-        relay.shape(frame);
+        relay.shape(frame2);
       return;
     }
-    const binding = this.remotes.get(frame.id);
+    const binding = this.remotes.get(frame2.id);
     if (binding === void 0)
       return;
-    if (frame.t === "gone") {
-      this.remotes.delete(frame.id);
-      binding.gone(fromWireError(frame.error));
+    if (frame2.t === "gone") {
+      this.remotes.delete(frame2.id);
+      binding.gone(fromWireError(frame2.error));
       return;
     }
-    binding.shaped({ variant: frame.variant, members: frame.members, contract: frame.contract }, frame.state);
+    binding.shaped({ variant: frame2.variant, members: frame2.members, contract: frame2.contract }, frame2.state);
   }
-  #onResult(frame) {
-    const relayed = this.relayedCalls.get(frame.id);
+  #onResult(frame2) {
+    const relayed = this.relayedCalls.get(frame2.id);
     if (relayed !== void 0) {
-      relayed.finish(frame.error === void 0 ? void 0 : fromWireError(frame.error), frame.value);
+      relayed.finish(frame2.error === void 0 ? void 0 : fromWireError(frame2.error), frame2.value);
       return;
     }
-    const pending = this.calls.get(frame.id);
-    this.calls.delete(frame.id);
-    if (frame.error !== void 0) {
-      pending?.reject(fromWireError(frame.error));
+    const pending = this.calls.get(frame2.id);
+    this.calls.delete(frame2.id);
+    if (frame2.error !== void 0) {
+      pending?.reject(fromWireError(frame2.error));
       return;
     }
     let value;
     try {
-      value = unpack(frame.value);
+      value = unpack(frame2.value);
     } catch (error) {
       pending?.reject(error);
       return;
     }
     pending?.resolve(value);
   }
-  #onState(frame) {
-    const relay = this.relayedRefs.get(frame.hold);
+  #onState(frame2) {
+    const relay = this.relayedRefs.get(frame2.hold);
     if (relay !== void 0) {
-      relay.state(frame);
+      relay.state(frame2);
       return;
     }
-    const binding = this.remotes.get(frame.hold);
+    const binding = this.remotes.get(frame2.hold);
     if (binding === void 0)
       return;
-    if (!(frame.value instanceof Packed)) {
-      binding.state(frame.m, frame);
+    if (!(frame2.value instanceof Packed)) {
+      binding.state(frame2.m, frame2);
       return;
     }
     let value;
     try {
-      value = unpack(frame.value);
+      value = unpack(frame2.value);
     } catch (error) {
-      binding.state(frame.m, { as: "error", error: toWireError(error) });
+      binding.state(frame2.m, { as: "error", error: toWireError(error) });
       return;
     }
-    binding.state(frame.m, { ...frame, value });
+    binding.state(frame2.m, { ...frame2, value });
   }
   // ─── lifetime ───
   #closed(reason) {
@@ -108360,7 +108360,7 @@ var Connection = class {
 };
 var stateKey = (hold, m2) => `s${hold}\0${m2}`;
 var unitKey = (hold) => `u${hold}`;
-async function relayCall(relay, frame, root, signal, host) {
+async function relayCall(relay, frame2, root, signal, host) {
   const abortError2 = () => new ChordError("aborted", "call cancelled", { cause: signal.reason });
   if (signal.aborted)
     throw abortError2();
@@ -108379,11 +108379,11 @@ async function relayCall(relay, frame, root, signal, host) {
     if (relay.closed)
       throw new ChordError("gone", "relayed hold closed");
     return await new Promise((resolve4, reject) => {
-      const call = new RelayCall(relay, frame.id, down.nextId(), { resolve: resolve4, reject });
+      const call = new RelayCall(relay, frame2.id, down.nextId(), { resolve: resolve4, reject });
       onCancel = () => call.cancel(abortError2(), true);
       signal.addEventListener("abort", onCancel, { once: true });
       host.rootSent(root.rootId, down);
-      down.send({ t: "call", id: call.downId, hold: relay.downId, member: frame.member, args: frame.args, root });
+      down.send({ t: "call", id: call.downId, hold: relay.downId, member: frame2.member, args: frame2.args, root });
     });
   } finally {
     signal.removeEventListener("abort", onAbort);
@@ -108597,11 +108597,11 @@ var RemoteBinding = class {
       this.#apply();
   }
   /** A state frame for member `name` of the current hold. */
-  state(name, frame) {
+  state(name, frame2) {
     if (this.ended)
       return;
-    if (frame.as === "error") {
-      const error = fromWireError(frame.error);
+    if (frame2.as === "error") {
+      const error = fromWireError(frame2.error);
       if (!this.hydrated && this.stateOn) {
         this.gone(error);
         this.close();
@@ -108610,17 +108610,17 @@ var RemoteBinding = class {
       return;
     }
     const pending = this.#pending;
-    if (frame.as === "ops") {
+    if (frame2.as === "ops") {
       const target = pending?.values.get(name) ?? this.members.get(name);
       if (target === void 0)
         return;
-      const ops = target.decoder.decode(frame.ops ?? []);
+      const ops = target.decoder.decode(frame2.ops ?? []);
       target.value = applyImmutable(target.value, ops);
       if (target === this.members.get(name))
         this.#deliver(name, { type: "ops", ops, value: target.value });
       return;
     }
-    const fresh = { value: frame.value, decoder: decoder() };
+    const fresh = { value: frame2.value, decoder: decoder() };
     if (pending !== void 0 && (pending.missing.has(name) || pending.values.has(name))) {
       pending.values.set(name, fresh);
       pending.missing.delete(name);
@@ -109839,8 +109839,8 @@ var HostImpl = class {
     const children = [...this.connections].some((connection) => connection.role === "downstream" && connection.peer.kind === "host");
     return children || options.remote !== void 0 || options.remoteRemove !== void 0 ? runClusterReload(this, plugins, options) : runReload(this, plugins, options);
   }
-  onReloadFrame(connection, frame) {
-    this.#childReloads.handle(connection, frame);
+  onReloadFrame(connection, frame2) {
+    this.#childReloads.handle(connection, frame2);
   }
   rememberRemoteModules(remote2, remove) {
     for (const prefix of /* @__PURE__ */ new Set([...Object.keys(remote2 ?? {}), ...Object.keys(remove ?? {})])) {
@@ -110043,7 +110043,7 @@ var StateSubscriber = class {
     this.#listener = listener;
     this.#reportError = reportError;
   }
-  push(frame) {
+  push(frame2) {
     if (this.#closed)
       return;
     if (this.#pending.length === 100) {
@@ -110052,16 +110052,16 @@ var StateSubscriber = class {
       if (hydration !== void 0)
         this.#pending.push(hydration);
     }
-    this.#pending.push(frame);
+    this.#pending.push(frame2);
   }
   drain() {
     if (this.#running || this.#closed)
       return;
     this.#running = true;
-    for (let frame = this.#pending.shift(); frame !== void 0; frame = this.#pending.shift()) {
+    for (let frame2 = this.#pending.shift(); frame2 !== void 0; frame2 = this.#pending.shift()) {
       this.#started = true;
       try {
-        const result = this.#listener(frame.value, frame.context, frame.delivery);
+        const result = this.#listener(frame2.value, frame2.context, frame2.delivery);
         if (isPromiseLike(result)) {
           void Promise.resolve(result).then(() => this.#resume(), (error) => {
             this.#report(error);
@@ -110214,7 +110214,7 @@ var AttachedReplicatedStateImpl = class {
     return this.#publisher.subscribe(listener);
   }
   activate() {
-    this.#attachment.activate((frame) => this.#receive(frame));
+    this.#attachment.activate((frame2) => this.#receive(frame2));
   }
   dispose() {
     if (this.#disposed)
@@ -110222,17 +110222,17 @@ var AttachedReplicatedStateImpl = class {
     this.#disposed = true;
     this.#attachment.dispose();
   }
-  #receive(frame) {
+  #receive(frame2) {
     if (this.#disposed)
       return;
     try {
-      assertCursor(frame.cursor, "frame");
+      assertCursor(frame2.cursor, "frame");
       const expected = this.#cursor + 1;
-      if (frame.cursor !== expected) {
-        throw new Error(`Replicated state source cursor has a gap: expected ${expected}, received ${frame.cursor}`);
+      if (frame2.cursor !== expected) {
+        throw new Error(`Replicated state source cursor has a gap: expected ${expected}, received ${frame2.cursor}`);
       }
-      this.#cursor = frame.cursor;
-      this.#publisher.publish(frame.value, frame.context);
+      this.#cursor = frame2.cursor;
+      this.#publisher.publish(frame2.value, frame2.context);
     } catch (error) {
       this.#fail(toError(error));
     }
@@ -113831,14 +113831,14 @@ var CommittedStateSource = class {
     this.#cursor += 1;
     if (value === null)
       this.#retired = true;
-    const frame = {
+    const frame2 = {
       cursor: this.#cursor,
       value,
       ops,
       context: context3
     };
     for (const attachment of [...this.#attachments])
-      attachment.publish(frame);
+      attachment.publish(frame2);
   }
   /** Stop publishing; the attached states keep their last value. A failure ends them the same way. */
   closeSession() {
@@ -113880,10 +113880,10 @@ var SessionSourceAttachment = class {
     this.#listener = listener;
     this.#drain();
   }
-  publish(frame) {
+  publish(frame2) {
     if (this.#disposed)
       return;
-    this.#frames.push(frame);
+    this.#frames.push(frame2);
     if (!this.#activated || this.#delivering || this.#scheduled)
       return;
     this.#scheduled = true;
@@ -113915,10 +113915,10 @@ var SessionSourceAttachment = class {
     this.#delivering = true;
     try {
       while (!this.#disposed) {
-        const frame = this.#frames.shift();
-        if (frame === void 0)
+        const frame2 = this.#frames.shift();
+        if (frame2 === void 0)
           break;
-        listener(frame);
+        listener(frame2);
       }
     } finally {
       this.#delivering = false;
@@ -114019,13 +114019,13 @@ var CommittedWatch = class {
     this.#running = true;
     try {
       while (this.#end === void 0) {
-        const frame = this.#pending.shift();
-        if (frame === void 0)
+        const frame2 = this.#pending.shift();
+        if (frame2 === void 0)
           break;
-        this.#value = frame.value;
-        const deliveryContext = withoutAbortSignal(frame.context);
+        this.#value = frame2.value;
+        const deliveryContext = withoutAbortSignal(frame2.context);
         try {
-          await this.#listener(frame.value, frame.ops, deliveryContext);
+          await this.#listener(frame2.value, frame2.ops, deliveryContext);
         } catch (error) {
           if (this.#end === void 0) {
             this.#report(error);
@@ -114033,7 +114033,7 @@ var CommittedWatch = class {
           }
           break;
         }
-        if (frame.value === null) {
+        if (frame2.value === null) {
           this.#terminate({ reason: "retired" });
           break;
         }
@@ -122807,7 +122807,7 @@ async function spawnAgent(tx, rootId, task, text, effort) {
 }
 function agentTools(rootId, task) {
   const call = (tx, name, message) => startCall(tx, rootId, task, name, message);
-  const spawn3 = defineTool({
+  const spawn5 = defineTool({
     name: "spawn",
     description: `Start one subagent per task, in parallel, and return their names at once. Each one's report reaches you as a message "[Name] report" when it finishes. A subagent sees the view and the user's instructions, but knows what you want only from its task.`,
     replay: "safe",
@@ -122857,7 +122857,7 @@ function agentTools(rootId, task) {
       return { output: [{ type: "text", text }] };
     }
   });
-  return [spawn3, tell];
+  return [spawn5, tell];
 }
 
 // src/pi/infinichat/schedule.ts
@@ -130450,6 +130450,7 @@ var photon_rs_bg_default = __toBinaryNode("AGFzbQEAAAABwwZnYAAAYAABf2AAAn9/YAABb
 // src/pi/infinichat/device-tools.ts
 init_define_INFINICHAT_PI();
 var MACHINE_WORK = ".infinichat/work";
+var machineDescription = (host) => `${host.username}@${host.hostname} over SSH, work dir ~/${MACHINE_WORK}`;
 var deviceParameter = typebox_exports.String({ description: "The device to run on, from the list at the start of the message" });
 var kept = ({ name, description, replay, outputLimits, structuredOutputSchema, callers }) => ({
   name,
@@ -130518,14 +130519,14 @@ function infiniChatDevices(list, images) {
 }
 
 // server/devices.ts
-function serverDevices(name, description) {
+function serverDevices(name, description, machines) {
   const work = join5(homedir2(), MACHINE_WORK);
   const device = {
     name,
     description,
     environment: async (who) => new NodeExecutionEnv({ cwd: join5(work, who) })
   };
-  return infiniChatDevices(async () => [device], createPhotonImages(photon_rs_bg_default));
+  return infiniChatDevices(async () => [device, ...machines.devices()], createPhotonImages(photon_rs_bg_default));
 }
 
 // server/listen.ts
@@ -130565,6 +130566,1879 @@ async function listen(host, home, bundle) {
   console.log(`InfiniChat listening on 127.0.0.1:${address.port}`);
   return server;
 }
+
+// server/machines.ts
+init_define_INFINICHAT_PI();
+import { readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join8 } from "node:path";
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/index.js
+init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/connection.js
+init_define_INFINICHAT_PI();
+import { spawn as spawn2 } from "node:child_process";
+import { randomBytes as randomBytes2 } from "node:crypto";
+var REQUEST = 1;
+var RESULT = 2;
+var ERROR = 3;
+var EVENT = 4;
+var CANCEL = 5;
+var PING = 6;
+var MAX_FRAME = 16 * 1024 * 1024;
+var PING_INTERVAL_MS = 5e3;
+var SILENCE_LIMIT_MS = 3e4;
+var START_TIMEOUT_MS = 6e4;
+var RemoteError = class extends Error {
+  code;
+  path;
+  fields;
+  constructor(fields) {
+    super(typeof fields.message === "string" ? fields.message : "Remote operation failed");
+    this.name = "RemoteError";
+    this.code = typeof fields.code === "string" ? fields.code : "unknown";
+    if (typeof fields.path === "string")
+      this.path = fields.path;
+    this.fields = fields;
+  }
+};
+function nodePlatform(info) {
+  const platforms = { windows: "win32", macos: "darwin" };
+  const archs = { x86_64: "x64", aarch64: "arm64", x86: "ia32" };
+  return { platform: platforms[info.os] ?? info.os, arch: archs[info.arch] ?? info.arch };
+}
+function wellFormed(_key, value) {
+  return typeof value === "string" ? value.toWellFormed() : value;
+}
+function frame(type, id, json2, payload = new Uint8Array(0)) {
+  const body = Buffer.from(JSON.stringify(json2, wellFormed), "utf8");
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(9 + body.length + payload.length, 0);
+  header.writeUInt8(type, 4);
+  header.writeUInt32BE(id, 5);
+  header.writeUInt32BE(body.length, 9);
+  return Buffer.concat([header, body, payload]);
+}
+function lost(message) {
+  return new RemoteError({ code: "unknown", message, lost: true });
+}
+function isConnectionLost(error) {
+  return error instanceof RemoteError && error.fields.lost === true;
+}
+function closed() {
+  return new RemoteError({ code: "unknown", message: "Connection closed" });
+}
+var Session = class {
+  id;
+  child;
+  token;
+  pending = /* @__PURE__ */ new Map();
+  /** Received bytes not yet parsed, without concatenating on every chunk. */
+  chunks = [];
+  buffered = 0;
+  synced = false;
+  lastSeen = Date.now();
+  timer;
+  live = true;
+  constructor(id, child, token) {
+    this.id = id;
+    this.child = child;
+    this.token = token;
+  }
+  /** The first `length` buffered bytes as one buffer, without consuming them. */
+  peek(length) {
+    if (this.chunks[0].length < length) {
+      this.chunks = [Buffer.concat(this.chunks)];
+    }
+    return this.chunks[0].subarray(0, length);
+  }
+  consume(length) {
+    this.buffered -= length;
+    while (length > 0) {
+      const first2 = this.chunks[0];
+      if (first2.length <= length) {
+        this.chunks.shift();
+        length -= first2.length;
+      } else {
+        this.chunks[0] = first2.subarray(length);
+        length = 0;
+      }
+    }
+  }
+};
+var Connection2 = class {
+  #options;
+  #session;
+  #ready;
+  #sessions = 0;
+  #nextId = 1;
+  #closed = false;
+  constructor(options) {
+    this.#options = options;
+  }
+  /** Connect if needed and return what the daemon reported about its machine. */
+  async info() {
+    return (await this.#connect()).info;
+  }
+  /** Connect if needed and return the live session's id. */
+  async session() {
+    return (await this.#connect()).session.id;
+  }
+  async request(op, json2, options = {}) {
+    if (options.session !== void 0) {
+      const current = this.#session;
+      if (current === void 0 || current.id !== options.session || !current.live) {
+        throw lost("pi-env connection lost");
+      }
+      return this.#send(current, op, json2, options);
+    }
+    const { session } = await this.#connect();
+    return this.#send(session, op, json2, options);
+  }
+  /** Stop the daemon; it kills everything it started. */
+  close() {
+    this.#closed = true;
+    if (this.#session)
+      this.#teardown(this.#session, closed());
+  }
+  /** Kill one `exec` without aborting it. */
+  kill(id, session) {
+    const current = this.#session;
+    if (current?.id === session && current.live)
+      this.#write(current, frame(CANCEL, id, { mode: "kill" }));
+  }
+  #connect() {
+    if (this.#closed)
+      return Promise.reject(closed());
+    if (this.#ready === void 0) {
+      const ready = this.#start();
+      this.#ready = ready;
+      ready.catch(() => {
+        if (this.#ready === ready)
+          this.#ready = void 0;
+      });
+    }
+    return this.#ready;
+  }
+  #send(session, op, json2, options) {
+    if (!session.live)
+      return Promise.reject(lost("pi-env connection lost"));
+    const id = this.#nextId++;
+    return new Promise((resolve4, reject) => {
+      const onAbort = () => this.#write(session, frame(CANCEL, id, {}));
+      const done = () => options.signal?.removeEventListener("abort", onAbort);
+      session.pending.set(id, {
+        resolve: (value) => {
+          done();
+          resolve4(value);
+        },
+        reject: (error) => {
+          done();
+          reject(error);
+        },
+        ...options.onEvent ? { onEvent: options.onEvent } : {}
+      });
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      options.onStart?.(id, session.id);
+      this.#write(session, frame(REQUEST, id, { ...json2, op }, options.payload));
+      if (options.signal?.aborted)
+        onAbort();
+    });
+  }
+  #write(session, data) {
+    if (session.live)
+      session.child.stdin.write(data);
+  }
+  async #start() {
+    let command;
+    try {
+      const option = this.#options.command;
+      command = typeof option === "function" ? await option() : option;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new RemoteError({ code: "spawn_error", message, lost: true });
+    }
+    if (this.#closed)
+      throw closed();
+    const [program, ...args] = command;
+    if (program === void 0)
+      throw new RemoteError({ code: "spawn_error", message: "No daemon command" });
+    const token = randomBytes2(16).toString("hex");
+    const child = spawn2(program, [...args, "serve", "--token", token], { stdio: ["pipe", "pipe", "pipe"] });
+    const session = new Session(++this.#sessions, child, token);
+    this.#session = session;
+    let startTimer;
+    const failed = new Promise((_resolve, reject) => {
+      startTimer = setTimeout(() => reject(lost(`pi-env did not answer within ${START_TIMEOUT_MS / 1e3} s`)), START_TIMEOUT_MS);
+      child.once("error", (error) => reject(new RemoteError({ code: "spawn_error", message: error.message, lost: true })));
+      child.once("exit", (code) => reject(lost(`pi-env exited with code ${code} before it was ready`)));
+    });
+    failed.catch(() => {
+    });
+    child.stdout.on("data", (chunk) => this.#onData(session, chunk));
+    child.stderr.on("data", (chunk) => this.#options.onLog?.(chunk.toString("utf8")));
+    child.on("error", () => this.#teardown(session, lost("pi-env connection lost")));
+    child.on("exit", () => this.#teardown(session, lost("pi-env connection lost")));
+    child.stdin.on("error", () => {
+    });
+    session.timer = setInterval(() => {
+      this.#write(session, frame(PING, 0, {}));
+      if (Date.now() - session.lastSeen > SILENCE_LIMIT_MS) {
+        this.#teardown(session, lost("pi-env connection timed out"));
+      }
+    }, PING_INTERVAL_MS);
+    session.timer.unref();
+    try {
+      const { json: json2 } = await Promise.race([this.#send(session, "hello", { protocol: 1 }, {}), failed]);
+      if (json2.protocol !== 1)
+        throw lost(`Unsupported protocol ${json2.protocol}`);
+      return { info: json2, session };
+    } catch (error) {
+      this.#teardown(session, error instanceof Error ? error : lost(String(error)));
+      throw error;
+    } finally {
+      clearTimeout(startTimer);
+    }
+  }
+  #teardown(session, error) {
+    if (!session.live)
+      return;
+    session.live = false;
+    clearInterval(session.timer);
+    if (this.#session === session) {
+      this.#session = void 0;
+      this.#ready = void 0;
+    }
+    session.child.stdin.end();
+    session.child.kill();
+    const pending = [...session.pending.values()];
+    session.pending.clear();
+    for (const request2 of pending)
+      request2.reject(error);
+  }
+  #onData(session, chunk) {
+    if (!session.live)
+      return;
+    session.lastSeen = Date.now();
+    session.chunks.push(chunk);
+    session.buffered += chunk.length;
+    if (!session.synced) {
+      const marker = Buffer.from(`PI-ENV ${session.token}
+`, "utf8");
+      const all = session.peek(session.buffered);
+      const index3 = all.indexOf(marker);
+      if (index3 === -1) {
+        if (session.buffered > 1024 * 1024) {
+          session.consume(session.buffered - marker.length);
+        }
+        return;
+      }
+      const noise = all.subarray(0, index3).toString("utf8").trim();
+      if (noise !== "")
+        this.#options.onLog?.(noise);
+      session.consume(index3 + marker.length);
+      session.synced = true;
+    }
+    while (session.live && session.buffered >= 4) {
+      const length = session.peek(4).readUInt32BE(0);
+      if (length < 9 || length > MAX_FRAME) {
+        this.#teardown(session, lost("Corrupt frame from pi-env"));
+        return;
+      }
+      if (session.buffered < 4 + length)
+        return;
+      const body = session.peek(4 + length).subarray(4);
+      const type = body.readUInt8(0);
+      const id = body.readUInt32BE(1);
+      const jsonLength = body.readUInt32BE(5);
+      let json2;
+      try {
+        if (9 + jsonLength > length)
+          throw new Error("JSON length out of range");
+        const parsed2 = JSON.parse(body.subarray(9, 9 + jsonLength).toString("utf8"));
+        if (typeof parsed2 !== "object" || parsed2 === null || Array.isArray(parsed2))
+          throw new Error("not an object");
+        json2 = parsed2;
+      } catch {
+        this.#teardown(session, lost("Corrupt frame from pi-env"));
+        return;
+      }
+      const payload = new Uint8Array(body.subarray(9 + jsonLength));
+      session.consume(4 + length);
+      this.#dispatch(session, type, id, json2, payload);
+    }
+  }
+  #dispatch(session, type, id, json2, payload) {
+    const pending = session.pending.get(id);
+    if (type === EVENT) {
+      pending?.onEvent?.(json2, payload);
+      return;
+    }
+    if (type !== RESULT && type !== ERROR)
+      return;
+    if (pending === void 0)
+      return;
+    session.pending.delete(id);
+    if (type === RESULT)
+      pending.resolve({ json: json2, payload, session: session.id });
+    else
+      pending.reject(new RemoteError(json2));
+  }
+};
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/list-files.js
+init_define_INFINICHAT_PI();
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/errors.js
+init_define_INFINICHAT_PI();
+function abortResult2(signal, path6) {
+  return signal?.aborted ? err(new FileError("aborted", "aborted", path6)) : void 0;
+}
+function toFileError2(error, fallbackPath) {
+  if (error instanceof FileError)
+    return error;
+  if (!(error instanceof RemoteError)) {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    return new FileError("unknown", cause.message, fallbackPath, cause);
+  }
+  const path6 = error.path ?? fallbackPath;
+  switch (error.code) {
+    case "aborted":
+      return new FileError("aborted", error.message, path6, error);
+    case "ENOENT":
+      return new FileError("not_found", error.message, path6, error);
+    case "EACCES":
+    case "EPERM":
+      return new FileError("permission_denied", error.message, path6, error);
+    case "ENOTDIR":
+      return new FileError("not_directory", error.message, path6, error);
+    case "EISDIR":
+      return new FileError("is_directory", error.message, path6, error);
+    case "EINVAL":
+    case "SYMLINK":
+    case "NOT_REGULAR":
+      return new FileError("invalid", error.message, path6, error);
+  }
+  return new FileError("unknown", error.message, path6, error);
+}
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/list-files.js
+var KINDS = { 102: "file", 100: "directory", 108: "symlink" };
+async function listFilesOver(connection, path6, options, context3) {
+  for (const key2 of ["maxEntries", "maxBytes", "timeoutMs"]) {
+    const value = options?.[key2];
+    if (value !== void 0 && (!Number.isSafeInteger(value) || value < 0)) {
+      return err(new FileError("invalid", `${key2} must be a non-negative safe integer`, path6));
+    }
+  }
+  const aborted = abortResult2(context3.abortSignal, path6);
+  if (aborted)
+    return aborted;
+  try {
+    if (!(await connection.info()).features?.includes("listFiles")) {
+      return err(new FileError("not_supported", "The pi-env daemon does not list files; update it", path6));
+    }
+    const { json: json2, payload } = await connection.request(
+      "listFiles",
+      // Fields left undefined are not sent; the daemon applies the defaults.
+      {
+        path: path6,
+        hidden: options?.hidden,
+        gitignore: options?.gitignore,
+        exclude: options?.exclude,
+        maxEntries: options?.maxEntries,
+        maxBytes: options?.maxBytes,
+        timeoutMs: options?.timeoutMs
+      },
+      context3.abortSignal ? { signal: context3.abortSignal } : {}
+    );
+    const afterAbort = abortResult2(context3.abortSignal, path6);
+    if (afterAbort)
+      return afterAbort;
+    const entries = [];
+    const bytes2 = Buffer.from(payload.buffer, payload.byteOffset, payload.length);
+    for (let start = 0; start < bytes2.length; ) {
+      const end2 = bytes2.indexOf(0, start);
+      if (end2 === -1)
+        break;
+      const kind = KINDS[bytes2[start]];
+      if (kind !== void 0)
+        entries.push({ path: bytes2.toString("utf8", start + 1, end2), kind });
+      start = end2 + 1;
+    }
+    return ok({ entries, truncated: json2.truncated === true });
+  } catch (error) {
+    return err(toFileError2(error, path6));
+  }
+}
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/remote-env.js
+init_define_INFINICHAT_PI();
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { posix, win32 as win322 } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/watch.js
+init_define_INFINICHAT_PI();
+var RECONNECT_FIRST_MS = 1e3;
+var RECONNECT_MAX_MS = 3e4;
+var RemoteWatcher = class _RemoteWatcher {
+  #connection;
+  #targets;
+  #onChange;
+  #options;
+  #mode = "native";
+  #closed = false;
+  #controller;
+  #request;
+  #wake;
+  constructor(connection, targets, onChange, options) {
+    this.#connection = connection;
+    this.#targets = targets;
+    this.#onChange = onChange;
+    this.#options = options;
+  }
+  /** Watch `targets` (resolved paths); fails like `NodeFileWatcher.open` if coverage cannot be established. */
+  static async open(connection, targets, onChange, options = {}) {
+    const watcher = new _RemoteWatcher(connection, targets, onChange, options);
+    await watcher.#start();
+    return watcher;
+  }
+  get mode() {
+    return this.#mode;
+  }
+  async close(_context) {
+    if (this.#closed)
+      return;
+    this.#closed = true;
+    this.#wake?.();
+    this.#controller?.abort();
+    await this.#request;
+  }
+  #deliver(change) {
+    if (this.#closed)
+      return;
+    try {
+      this.#onChange(change);
+    } catch {
+    }
+  }
+  /** Open the daemon's watcher; resolves once it reports coverage. */
+  #start() {
+    return new Promise((resolve4, reject) => {
+      let ready = false;
+      const controller = new AbortController();
+      this.#controller = controller;
+      const request2 = this.#connection.request("watch", {
+        targets: this.#targets.map((target) => ({
+          path: target.path,
+          recursive: target.recursive === true,
+          exclude: { hidden: target.exclude?.hidden === true, names: [...target.exclude?.names ?? []] }
+        })),
+        ...this.#options
+      }, {
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (event.kind === "ready") {
+            ready = true;
+            this.#mode = event.mode === "polling" ? "polling" : "native";
+            resolve4();
+          } else if (event.kind === "change") {
+            if (event.mode === "polling")
+              this.#mode = "polling";
+            if (event.overflow === true)
+              this.#deliver({ overflow: true });
+            else
+              this.#deliver({ paths: event.paths });
+          } else if (event.kind === "error") {
+            const code = event.code === "permission_denied" ? "permission_denied" : "invalid";
+            this.#deliver({ error: new FileError(code, String(event.message)) });
+            this.#closed = true;
+          }
+        }
+      });
+      this.#request = request2.then(() => {
+      }, (error) => {
+        if (!ready) {
+          reject(error);
+          return;
+        }
+        if (this.#closed)
+          return;
+        if (isConnectionLost(error)) {
+          void this.#reconnect();
+          return;
+        }
+        this.#deliver({ error: toFileError2(error) });
+        this.#closed = true;
+      });
+    });
+  }
+  async #reconnect() {
+    for (let delay2 = RECONNECT_FIRST_MS; !this.#closed; delay2 = Math.min(delay2 * 2, RECONNECT_MAX_MS)) {
+      await new Promise((resolve4) => {
+        const timer = setTimeout(resolve4, delay2);
+        timer.unref();
+        this.#wake = () => {
+          clearTimeout(timer);
+          resolve4();
+        };
+      });
+      this.#wake = void 0;
+      if (this.#closed)
+        return;
+      try {
+        await this.#start();
+        this.#deliver({ overflow: true });
+        return;
+      } catch (error) {
+        if (isConnectionLost(error))
+          continue;
+        this.#deliver({ error: toFileError2(error) });
+        this.#closed = true;
+        return;
+      }
+    }
+  }
+};
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/remote-env.js
+var MAX_TIMEOUT_MS2 = 2147483647;
+var MAX_TIMEOUT_SECONDS3 = MAX_TIMEOUT_MS2 / 1e3;
+var READ_CHUNK2 = 256 * 1024;
+var READ_DEPTH = 8;
+var WRITE_CHUNK = 512 * 1024;
+var WRITE_DEPTH = 8;
+var READ_FILE_CHUNK = 512 * 1024;
+var READ_FILE_UNKNOWN_CHUNK = 64 * 1024;
+var READ_FILE_MAX = 2 ** 31 - 1;
+var LINE_CHUNK = 64 * 1024;
+async function remotePath(connection) {
+  return nodePlatform(await connection.info()).platform === "win32" ? win322 : posix;
+}
+function toInfo(path6, remote2, paths) {
+  if (remote2.kind === "other")
+    return err(new FileError("invalid", "Unsupported file type", path6));
+  return ok({
+    name: paths.basename(path6),
+    path: path6,
+    kind: remote2.kind,
+    size: remote2.size,
+    mtimeMs: remote2.mtimeSec * 1e3 + remote2.mtimeNsec / 1e6
+  });
+}
+function concat(chunks, total) {
+  if (chunks.length === 1)
+    return chunks[0];
+  const bytes2 = new Uint8Array(total);
+  let position = 0;
+  for (const chunk of chunks) {
+    bytes2.set(chunk, position);
+    position += chunk.length;
+  }
+  return bytes2;
+}
+async function readRange(read2, offset, length, chunk, aborted) {
+  const chunks = [];
+  let total = 0;
+  let next = offset;
+  const inFlight = [];
+  while (total < length) {
+    while (inFlight.length < READ_DEPTH && next < offset + length) {
+      const size = Math.min(offset + length - next, chunk);
+      const bytes3 = read2(next, size);
+      bytes3.catch(() => {
+      });
+      inFlight.push({ length: size, bytes: bytes3 });
+      next += size;
+    }
+    const head = inFlight.shift();
+    const bytes2 = await head.bytes;
+    if (aborted())
+      return void 0;
+    if (bytes2.length === 0)
+      break;
+    chunks.push(bytes2);
+    total += bytes2.length;
+    if (bytes2.length < head.length) {
+      inFlight.length = 0;
+      next = offset + total;
+    }
+  }
+  return { chunks, total };
+}
+var Handle = class {
+  env;
+  id;
+  session;
+  path;
+  constructor(env2, id, session, path6) {
+    this.env = env2;
+    this.id = id;
+    this.session = session;
+    this.path = path6;
+  }
+  request(op, json2 = {}, options = {}) {
+    return this.env.connection.request(op, { ...json2, handle: this.id }, { ...options, session: this.session });
+  }
+  async pread(offset, length) {
+    return (await this.request("pread", { ...offset === void 0 ? {} : { offset }, length })).payload;
+  }
+  async close() {
+    await this.request("close").catch(() => void 0);
+  }
+};
+var RemoteBinaryReader = class {
+  #handle;
+  #closed = false;
+  constructor(handle) {
+    this.#handle = handle;
+  }
+  get #path() {
+    return this.#handle.path;
+  }
+  #closedResult() {
+    return this.#closed ? err(new FileError("invalid", "Binary reader is closed", this.#path)) : void 0;
+  }
+  async info(context3) {
+    const early = abortResult2(context3.abortSignal, this.#path) ?? this.#closedResult();
+    if (early)
+      return early;
+    try {
+      const { json: json2 } = await this.#handle.request("fstat");
+      return toInfo(this.#path, json2, await remotePath(this.#handle.env.connection));
+    } catch (error) {
+      return err(toFileError2(error, this.#path));
+    }
+  }
+  async read(offset, length, context3) {
+    const early = abortResult2(context3.abortSignal, this.#path) ?? this.#closedResult();
+    if (early)
+      return early;
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 0) {
+      return err(new FileError("invalid", "Offset and length must be non-negative safe integers", this.#path));
+    }
+    try {
+      const read2 = await readRange((at, size) => this.#handle.pread(at, size), offset, length, READ_CHUNK2, () => context3.abortSignal?.aborted === true);
+      if (read2 === void 0)
+        return err(new FileError("aborted", "aborted", this.#path));
+      return ok(concat(read2.chunks, read2.total));
+    } catch (error) {
+      return err(toFileError2(error, this.#path));
+    }
+  }
+  async scanLines(options, context3) {
+    const early = abortResult2(context3.abortSignal, this.#path) ?? this.#closedResult();
+    if (early)
+      return early;
+    const { startLine, endLine } = options;
+    if (!Number.isSafeInteger(startLine) || startLine < 0 || endLine !== void 0 && (!Number.isSafeInteger(endLine) || endLine <= startLine)) {
+      return err(new FileError("invalid", "Invalid line range", this.#path));
+    }
+    try {
+      const { json: json2 } = await this.#handle.request("scanLines", { startLine, ...endLine === void 0 ? {} : { endLine } }, context3.abortSignal ? { signal: context3.abortSignal } : {});
+      return ok(json2);
+    } catch (error) {
+      return err(toFileError2(error, this.#path));
+    }
+  }
+  async close(_context) {
+    if (this.#closed)
+      return;
+    this.#closed = true;
+    await this.#handle.close();
+  }
+};
+var RemoteDirReader = class {
+  #handle;
+  #done = false;
+  #closed = false;
+  constructor(handle) {
+    this.#handle = handle;
+  }
+  async next(maxEntries, context3) {
+    const path6 = this.#handle.path;
+    const aborted = abortResult2(context3.abortSignal, path6);
+    if (aborted)
+      return aborted;
+    if (this.#closed)
+      return err(new FileError("invalid", "Directory reader is closed", path6));
+    if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+      return err(new FileError("invalid", "maxEntries must be a positive safe integer", path6));
+    }
+    const entries = [];
+    try {
+      const paths = await remotePath(this.#handle.env.connection);
+      while (!this.#done && entries.length < maxEntries) {
+        const { json: json2 } = await this.#handle.request("readdir", { max: maxEntries - entries.length });
+        const loopAbort = abortResult2(context3.abortSignal, path6);
+        if (loopAbort)
+          return loopAbort;
+        for (const entry2 of json2.entries) {
+          const entryPath = paths.resolve(path6, entry2.name);
+          if (entry2.error !== void 0) {
+            if (entry2.error.code === "ENOENT")
+              continue;
+            return err(toFileError2(new RemoteError(entry2.error), entryPath));
+          }
+          const info = toInfo(entryPath, entry2.info, paths);
+          if (info.ok)
+            entries.push(info.value);
+        }
+        this.#done = json2.done === true;
+      }
+      return ok({ entries, done: this.#done });
+    } catch (error) {
+      return err(toFileError2(error, path6));
+    }
+  }
+  async close(_context) {
+    if (this.#closed)
+      return;
+    this.#closed = true;
+    await this.#handle.close();
+  }
+};
+var RemoteTextLineReader = class {
+  #handle;
+  #decoder = new StreamDecoder();
+  #offset = 0;
+  #buffered = "";
+  #ended = false;
+  #closed = false;
+  constructor(handle) {
+    this.#handle = handle;
+  }
+  async readLine(context3) {
+    const path6 = this.#handle.path;
+    const aborted = abortResult2(context3.abortSignal, path6);
+    if (aborted)
+      return aborted;
+    if (this.#closed)
+      return err(new FileError("invalid", "Text line reader is closed", path6));
+    try {
+      while (true) {
+        const newline = this.#buffered.indexOf("\n");
+        if (newline !== -1) {
+          const text = this.#buffered.slice(0, newline);
+          this.#buffered = this.#buffered.slice(newline + 1);
+          return ok({ text, terminated: true });
+        }
+        if (this.#ended) {
+          if (this.#buffered.length === 0)
+            return ok(void 0);
+          const text = this.#buffered;
+          this.#buffered = "";
+          return ok({ text, terminated: false });
+        }
+        const bytes2 = await this.#handle.pread(this.#offset, LINE_CHUNK);
+        const afterReadAbort = abortResult2(context3.abortSignal, path6);
+        if (afterReadAbort)
+          return afterReadAbort;
+        this.#offset += bytes2.length;
+        if (bytes2.length === 0) {
+          this.#buffered += this.#decoder.decode();
+          this.#ended = true;
+        } else {
+          this.#buffered += this.#decoder.decode(bytes2);
+        }
+      }
+    } catch (error) {
+      return err(toFileError2(error, path6));
+    }
+  }
+  async close(_context) {
+    if (this.#closed)
+      return;
+    this.#closed = true;
+    this.#buffered = "";
+    await this.#handle.close();
+  }
+};
+var RemoteExecutionEnv = class {
+  id;
+  cwd;
+  connection;
+  #shellPath;
+  #shellEnv;
+  #watchOptions;
+  /** Running commands this environment started, for `cleanup()`. */
+  #running = /* @__PURE__ */ new Map();
+  constructor(options) {
+    this.id = options.id;
+    this.cwd = options.cwd;
+    this.connection = options.connection;
+    this.#shellPath = options.shellPath;
+    this.#shellEnv = options.shellEnv;
+    this.#watchOptions = options.watch ?? {};
+  }
+  /** Node's `resolvePath` on the remote system, with its home directory and working directories. */
+  async #resolve(path6) {
+    const info = await this.connection.info();
+    const windows = nodePlatform(info).platform === "win32";
+    const paths = windows ? win322 : posix;
+    let normalized = path6;
+    if (normalized === "~") {
+      normalized = info.home;
+    } else if (normalized.startsWith("~/") || windows && normalized.startsWith("~\\")) {
+      normalized = paths.join(info.home, normalized.slice(2));
+    } else if (normalized.startsWith("file://")) {
+      try {
+        normalized = fileURLToPath2(normalized, { windows });
+      } catch {
+      }
+    }
+    if (paths.isAbsolute(normalized))
+      return paths.resolve(normalized);
+    if (windows) {
+      const drive = /^([a-zA-Z]:)(?![\\/])/.exec(normalized)?.[1];
+      if (drive !== void 0 && drive.toLowerCase() !== this.cwd.slice(0, 2).toLowerCase()) {
+        let base = info.driveCwds[drive.toUpperCase()] ?? info.cwd;
+        if (base.slice(0, 2).toLowerCase() !== drive.toLowerCase() && base[2] === "\\")
+          base = `${drive}\\`;
+        return win322.resolve(base, normalized);
+      }
+    }
+    return paths.resolve(this.cwd, normalized);
+  }
+  async #fileOp(path6, context3, run2, check = "before") {
+    let resolved;
+    try {
+      resolved = await this.#resolve(path6);
+    } catch (error) {
+      return err(toFileError2(error, path6));
+    }
+    const aborted = abortResult2(context3.abortSignal, resolved);
+    if (aborted)
+      return aborted;
+    try {
+      const value = await run2(resolved);
+      if (check === "both") {
+        const after = abortResult2(context3.abortSignal, resolved);
+        if (after)
+          return after;
+      }
+      return ok(value);
+    } catch (error) {
+      return err(toFileError2(error, resolved));
+    }
+  }
+  async #open(resolved, json2) {
+    const reply = await this.connection.request("open", { path: resolved, ...json2 });
+    return { handle: new Handle(this, reply.json.handle, reply.session, resolved), json: reply.json };
+  }
+  async absolutePath(path6, _context) {
+    try {
+      return ok(await this.#resolve(path6));
+    } catch (error) {
+      return err(toFileError2(error, path6));
+    }
+  }
+  async joinPath(parts, _context) {
+    try {
+      return ok((await remotePath(this.connection)).join(...parts));
+    } catch (error) {
+      return err(toFileError2(error));
+    }
+  }
+  /** Node's `readFile`, with or without UTF-8 decoding, over a file opened like `open(path, "r")`. */
+  async #readFile(path6, encoding, context3) {
+    const signal = context3.abortSignal;
+    return this.#fileOp(path6, context3, async (resolved) => {
+      const { handle, json: json2 } = await this.#open(resolved, { mode: "read" });
+      const aborted = () => signal?.aborted === true;
+      const abort = () => new FileError("aborted", "The operation was aborted", resolved);
+      try {
+        if (json2.statError !== void 0)
+          throw new RemoteError(json2.statError);
+        if (aborted())
+          throw abort();
+        const stat5 = json2.stat;
+        const size = stat5.kind === "file" ? stat5.size : 0;
+        if (size > READ_FILE_MAX) {
+          throw new FileError("unknown", `File size (${size}) is greater than 2 GiB`, resolved);
+        }
+        if (size === 0) {
+          const decoder5 = new StringDecoder("utf8");
+          const chunks = [];
+          let total2 = 0;
+          let text2 = "";
+          while (true) {
+            if (aborted())
+              throw abort();
+            const bytes2 = await handle.pread(void 0, READ_FILE_UNKNOWN_CHUNK);
+            if (bytes2.length === 0)
+              break;
+            total2 += bytes2.length;
+            chunks.push(bytes2);
+            if (encoding)
+              text2 += decoder5.write(bytes2);
+          }
+          if (!encoding)
+            return Buffer.concat(chunks, total2);
+          return total2 === 0 ? "" : text2 + decoder5.end();
+        }
+        if (!encoding) {
+          if (size <= READ_FILE_CHUNK)
+            return Buffer.from(await handle.pread(0, size));
+          const read2 = await readRange((at, length2) => handle.pread(at, length2), 0, size, READ_FILE_CHUNK, aborted);
+          if (read2 === void 0)
+            throw abort();
+          return Buffer.concat(read2.chunks, read2.total);
+        }
+        const length = Math.min(size, READ_FILE_CHUNK);
+        const decoder4 = new StringDecoder("utf8");
+        let text = "";
+        let total = 0;
+        let first2 = true;
+        const inFlight = [];
+        let next = 0;
+        while (true) {
+          while (inFlight.length < READ_DEPTH) {
+            const bytes3 = handle.pread(next, length);
+            bytes3.catch(() => {
+            });
+            inFlight.push(bytes3);
+            next += length;
+          }
+          const bytes2 = await inFlight.shift();
+          if (aborted())
+            throw abort();
+          total += bytes2.length;
+          if (bytes2.length === 0 || total === size || bytes2.length !== length) {
+            return first2 ? Buffer.from(bytes2).toString("utf8") : text + decoder4.end(Buffer.from(bytes2));
+          }
+          text += decoder4.write(Buffer.from(bytes2));
+          first2 = false;
+        }
+      } finally {
+        await handle.close();
+      }
+    });
+  }
+  async readTextFile(path6, context3) {
+    return await this.#readFile(path6, true, context3);
+  }
+  async readBinaryFile(path6, context3) {
+    return await this.#readFile(path6, false, context3);
+  }
+  async openBinaryReader(path6, options, context3) {
+    const opened = await this.#fileOp(path6, context3, async (resolved) => {
+      return (await this.#open(resolved, { noFollow: options?.noFollow === true })).handle;
+    });
+    if (!opened.ok)
+      return opened;
+    const aborted = abortResult2(context3.abortSignal, opened.value.path);
+    if (aborted) {
+      await opened.value.close();
+      return aborted;
+    }
+    return ok(new RemoteBinaryReader(opened.value));
+  }
+  async openTextLineReader(path6, context3) {
+    const opened = await this.#fileOp(path6, context3, async (resolved) => {
+      return (await this.#open(resolved, { mode: "read" })).handle;
+    });
+    if (!opened.ok)
+      return opened;
+    const aborted = abortResult2(context3.abortSignal, opened.value.path);
+    if (aborted) {
+      await opened.value.close();
+      return aborted;
+    }
+    return ok(new RemoteTextLineReader(opened.value));
+  }
+  async readTextLines(path6, options, context3) {
+    if (options?.maxLines !== void 0 && options.maxLines <= 0)
+      return ok([]);
+    const opened = await this.openTextLineReader(path6, context3);
+    if (!opened.ok)
+      return opened;
+    const lines2 = [];
+    try {
+      while (options?.maxLines === void 0 || lines2.length < options.maxLines) {
+        const line = await opened.value.readLine(context3);
+        if (!line.ok)
+          return line;
+        if (line.value === void 0)
+          break;
+        lines2.push(line.value.text);
+      }
+      return ok(lines2);
+    } finally {
+      await opened.value.close(context3);
+    }
+  }
+  /**
+   * Node's `writeFile` (abort checked before each 512 KiB write) or `appendFile` (no checks, one after): the first
+   * request creates parents, opens, and writes the first chunk; later chunks go to the same open file.
+   */
+  async #write(path6, content, append, context3) {
+    const bytes2 = typeof content === "string" ? Buffer.from(content, "utf8") : content;
+    const signal = append ? void 0 : context3.abortSignal;
+    return this.#fileOp(path6, context3, async (resolved) => {
+      const first2 = bytes2.subarray(0, WRITE_CHUNK);
+      const keep = bytes2.length > WRITE_CHUNK;
+      const reply = await this.connection.request("write", { path: resolved, append, keep }, { payload: first2 });
+      if (!keep)
+        return;
+      const handle = new Handle(this, reply.json.handle, reply.session, resolved);
+      const inFlight = [];
+      try {
+        for (let offset = WRITE_CHUNK; offset < bytes2.length; offset += WRITE_CHUNK) {
+          if (signal?.aborted) {
+            const failed = (await Promise.allSettled(inFlight)).find((result) => result.status === "rejected");
+            if (failed !== void 0)
+              throw failed.reason;
+            throw new FileError("aborted", "The operation was aborted", resolved);
+          }
+          const written = handle.request("writeChunk", {}, { payload: bytes2.subarray(offset, offset + WRITE_CHUNK) });
+          written.catch(() => {
+          });
+          inFlight.push(written);
+          if (inFlight.length >= WRITE_DEPTH)
+            await inFlight.shift();
+        }
+        for (const written of inFlight)
+          await written;
+      } finally {
+        await Promise.allSettled(inFlight);
+        await handle.close();
+      }
+    }, append ? "both" : "before");
+  }
+  writeFile(path6, content, context3) {
+    return this.#write(path6, content, false, context3);
+  }
+  appendFile(path6, content, context3) {
+    return this.#write(path6, content, true, context3);
+  }
+  async truncateFile(path6, size, context3) {
+    return this.#fileOp(path6, context3, async (resolved) => {
+      if (!Number.isSafeInteger(size) || size < 0) {
+        throw new FileError("invalid", "File size must be a non-negative safe integer", resolved);
+      }
+      await this.connection.request("truncate", { path: resolved, size });
+    }, "both");
+  }
+  flushFile(path6, context3) {
+    return this.#fileOp(path6, context3, async (resolved) => {
+      await this.connection.request("fsync", { path: resolved });
+    }, "both");
+  }
+  async renameFile(sourcePath, destinationPath, context3) {
+    let source;
+    let destination;
+    try {
+      source = await this.#resolve(sourcePath);
+      destination = await this.#resolve(destinationPath);
+    } catch (error) {
+      return err(toFileError2(error, sourcePath));
+    }
+    const aborted = abortResult2(context3.abortSignal, destination);
+    if (aborted)
+      return aborted;
+    try {
+      await this.connection.request("rename", { path: source, to: destination });
+      return ok(void 0);
+    } catch (error) {
+      return err(toFileError2(error, source));
+    }
+  }
+  async fileInfo(path6, context3) {
+    const result = await this.#fileOp(path6, context3, async (resolved) => {
+      const { json: json2 } = await this.connection.request("lstat", { path: resolved });
+      return toInfo(resolved, json2, await remotePath(this.connection));
+    });
+    return result.ok ? result.value : result;
+  }
+  listDir(path6, context3) {
+    return this.#fileOp(path6, context3, async (resolved) => {
+      const { handle } = await this.#openDir(resolved);
+      const entries = [];
+      try {
+        for (let done = false; !done; ) {
+          const { json: json2 } = await handle.request("readdir", { max: 1e3 });
+          entries.push(...json2.entries);
+          done = json2.done === true;
+        }
+      } finally {
+        await handle.close();
+      }
+      const paths = await remotePath(this.connection);
+      if (paths === posix) {
+        const key2 = (entry2) => Buffer.from(entry2.raw ?? Buffer.from(entry2.name, "utf8"));
+        entries.sort((a, b) => Buffer.compare(key2(a), key2(b)));
+      }
+      const infos = [];
+      for (const entry2 of entries) {
+        if (context3.abortSignal?.aborted)
+          throw new FileError("aborted", "aborted", resolved);
+        const entryPath = paths.resolve(resolved, entry2.name);
+        if (entry2.error !== void 0)
+          throw toFileError2(new RemoteError(entry2.error), entryPath);
+        const info = toInfo(entryPath, entry2.info, paths);
+        if (info.ok)
+          infos.push(info.value);
+      }
+      return infos;
+    });
+  }
+  /** Through the daemon; `not_supported` with a daemon released before `listFiles`. */
+  async listFiles(path6, options, context3) {
+    let resolved;
+    try {
+      resolved = await this.#resolve(path6);
+    } catch (error) {
+      return err(toFileError2(error, path6));
+    }
+    return listFilesOver(this.connection, resolved, options, context3);
+  }
+  async #openDir(resolved) {
+    const reply = await this.connection.request("opendir", { path: resolved });
+    return { handle: new Handle(this, reply.json.handle, reply.session, resolved) };
+  }
+  async openDirReader(path6, context3) {
+    const opened = await this.#fileOp(path6, context3, async (resolved) => (await this.#openDir(resolved)).handle);
+    if (!opened.ok)
+      return opened;
+    const aborted = abortResult2(context3.abortSignal, opened.value.path);
+    if (aborted) {
+      await opened.value.close();
+      return aborted;
+    }
+    return ok(new RemoteDirReader(opened.value));
+  }
+  canonicalPath(path6, context3) {
+    return this.#fileOp(path6, context3, async (resolved) => {
+      const { json: json2 } = await this.connection.request("realpath", { path: resolved });
+      return json2.path;
+    });
+  }
+  async exists(path6, context3) {
+    const result = await this.fileInfo(path6, context3);
+    if (result.ok)
+      return ok(true);
+    if (result.error.code === "not_found")
+      return ok(false);
+    return err(result.error);
+  }
+  createDir(path6, options, context3) {
+    return this.#fileOp(path6, context3, async (resolved) => {
+      await this.connection.request("mkdir", { path: resolved, recursive: options?.recursive ?? true });
+    });
+  }
+  remove(path6, options, context3) {
+    return this.#fileOp(path6, context3, async (resolved) => {
+      await this.connection.request("rm", {
+        path: resolved,
+        recursive: options?.recursive ?? false,
+        force: options?.force ?? false
+      });
+    });
+  }
+  async createTempDir(prefix, context3) {
+    const aborted = abortResult2(context3.abortSignal);
+    if (aborted)
+      return aborted;
+    try {
+      const { tmpdir: tmpdir4 } = await this.connection.info();
+      const paths = await remotePath(this.connection);
+      const { json: json2 } = await this.connection.request("mkdtemp", { path: paths.join(tmpdir4, prefix ?? "tmp-") });
+      return ok(json2.path);
+    } catch (error) {
+      return err(toFileError2(error));
+    }
+  }
+  async createTempFile(options, context3) {
+    const dir = await this.createTempDir("tmp-", context3);
+    if (!dir.ok)
+      return dir;
+    let filePath = "";
+    try {
+      const paths = await remotePath(this.connection);
+      filePath = paths.join(dir.value, `${options?.prefix ?? ""}${randomUUID3()}${options?.suffix ?? ""}`);
+      await this.connection.request("write", { path: filePath, append: false, parents: false }, { payload: new Uint8Array(0) });
+      return ok(filePath);
+    } catch (error) {
+      return err(toFileError2(error, filePath));
+    }
+  }
+  async watch(targets, onChange, context3) {
+    const aborted = abortResult2(context3.abortSignal);
+    if (aborted)
+      return aborted;
+    try {
+      const resolved = await Promise.all(targets.map(async (target) => ({ ...target, path: await this.#resolve(target.path) })));
+      const afterResolve = abortResult2(context3.abortSignal);
+      if (afterResolve)
+        return afterResolve;
+      const watcher = await RemoteWatcher.open(this.connection, resolved, onChange, this.#watchOptions);
+      const afterOpen = abortResult2(context3.abortSignal);
+      if (afterOpen) {
+        await watcher.close(context3);
+        return afterOpen;
+      }
+      return ok(watcher);
+    } catch (error) {
+      return err(toFileError2(error));
+    }
+  }
+  async exec(command, options, context3) {
+    const signal = context3.abortSignal;
+    if (signal?.aborted)
+      return err(new ExecutionError("aborted", "aborted"));
+    const timeout = options?.timeout;
+    if (timeout !== void 0) {
+      if (!Number.isFinite(timeout) || timeout <= 0) {
+        return err(new ExecutionError("timeout", "Invalid timeout: must be a finite number of seconds"));
+      }
+      if (timeout * 1e3 > MAX_TIMEOUT_MS2) {
+        return err(new ExecutionError("timeout", `Invalid timeout: maximum is ${MAX_TIMEOUT_SECONDS3} seconds`));
+      }
+    }
+    const inheritEnv = options?.inheritEnv ?? true;
+    let cwd;
+    try {
+      cwd = options?.cwd ? await this.#resolve(options.cwd) : this.cwd;
+    } catch (error) {
+      return err(new ExecutionError("unknown", error instanceof Error ? error.message : String(error)));
+    }
+    if (signal?.aborted)
+      return err(new ExecutionError("aborted", "aborted"));
+    const env2 = {};
+    for (const [key2, value] of Object.entries(inheritEnv ? { ...this.#shellEnv, ...options?.env } : { ...options?.env })) {
+      if (value !== void 0)
+        env2[key2.toWellFormed()] = value;
+    }
+    let callbackError;
+    let settled = false;
+    let running;
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      const { json: json2 } = await this.connection.request("exec", {
+        ...typeof command === "string" ? { command } : { argv: [...command] },
+        cwd,
+        env: env2,
+        inheritEnv,
+        ...this.#shellPath === void 0 ? {} : { shellPath: this.#shellPath },
+        ...timeout === void 0 ? {} : { timeoutMs: timeout * 1e3 },
+        ...options?.spill === void 0 ? {} : { spill: options.spill },
+        ...options?.window === void 0 ? {} : { window: options.window }
+      }, {
+        signal: controller.signal,
+        onStart: (requestId, session) => {
+          running = requestId;
+          this.#running.set(requestId, session);
+        },
+        onEvent: (event, payload) => {
+          if (settled || callbackError !== void 0 || event.kind !== "output")
+            return;
+          const text = Buffer.from(payload.buffer, payload.byteOffset, payload.length).toString("utf8");
+          if (text === "" || options?.onOutput === void 0)
+            return;
+          const info = { stream: event.stream === "stderr" ? "stderr" : "stdout" };
+          if (event.skipped !== void 0)
+            info.skipped = event.skipped;
+          try {
+            options.onOutput(text, context3, info);
+          } catch (error) {
+            const cause = error instanceof Error ? error : new Error(String(error));
+            callbackError = new ExecutionError("callback_error", cause.message, cause);
+            controller.abort();
+          }
+        }
+      });
+      if (callbackError)
+        return err(callbackError);
+      return ok({
+        exitCode: json2.exitCode,
+        ...typeof json2.spillPath === "string" ? { spillPath: json2.spillPath } : {}
+      });
+    } catch (error) {
+      if (callbackError)
+        return err(callbackError);
+      if (!(error instanceof RemoteError)) {
+        return err(new ExecutionError("unknown", error instanceof Error ? error.message : String(error)));
+      }
+      const failure = error.code === "timeout" ? new ExecutionError("timeout", `timeout:${timeout}`) : error.code === "aborted" ? new ExecutionError("aborted", "aborted") : error.code === "shell_unavailable" || error.code === "spawn_error" ? new ExecutionError(error.code, error.message) : new ExecutionError("unknown", error.message);
+      if (typeof error.fields.spillPath === "string")
+        failure.spillPath = error.fields.spillPath;
+      return err(failure);
+    } finally {
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      if (running !== void 0)
+        this.#running.delete(running);
+    }
+  }
+  async cleanup(_context) {
+    for (const [id, session] of this.#running)
+      this.connection.kill(id, session);
+    this.#running.clear();
+  }
+};
+
+// node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/ssh.js
+init_define_INFINICHAT_PI();
+import { spawn as spawn3 } from "node:child_process";
+import { createHash as createHash4, randomBytes as randomBytes3 } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir as mkdir5, mkdtemp as mkdtemp2, readFile as readFile6, rename as rename5, rm as rm3, writeFile as writeFile4 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { dirname as dirname3, join as join7 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+var HostKeyUnknownError = class extends Error {
+};
+var HostKeyChangedError = class extends Error {
+};
+var SshError = class extends Error {
+  exitCode;
+  stderr;
+  constructor(message, exitCode, stderr) {
+    super(message);
+    this.exitCode = exitCode;
+    this.stderr = stderr;
+  }
+};
+var packageRoot = fileURLToPath3(new URL("..", import.meta.url));
+function checkField(name, value) {
+  if (value === "" || value.startsWith("-") || /[\s\x00-\x1f\x7f]/.test(value)) {
+    throw new Error(`Invalid ${name}: ${JSON.stringify(value)}`);
+  }
+}
+function configPath(name, path6) {
+  if (path6 === "" || /["\x00-\x1f\x7f]/.test(path6))
+    throw new Error(`Invalid ${name}: ${JSON.stringify(path6)}`);
+  return `"${path6.replaceAll("%", "%%")}"`;
+}
+function sshArguments(target, strictHostKeys = true, knownHostsFile = target.knownHostsFile) {
+  checkField("host", target.host);
+  checkField("host key alias", target.hostKeyAlias);
+  if (target.user !== void 0)
+    checkField("user", target.user);
+  if (target.port !== void 0 && (!Number.isInteger(target.port) || target.port < 1 || target.port > 65535)) {
+    throw new Error(`Invalid port: ${target.port}`);
+  }
+  const option = (setting) => ["-o", setting];
+  return [
+    ...target.configFile === void 0 ? [] : ["-F", target.configFile],
+    "-T",
+    "-a",
+    "-x",
+    ...option("BatchMode=yes"),
+    ...option("ClearAllForwardings=yes"),
+    ...option("ForwardAgent=no"),
+    ...option("ForwardX11=no"),
+    ...option("ControlMaster=no"),
+    ...option("ControlPath=none"),
+    ...option("RemoteCommand=none"),
+    ...option("PermitLocalCommand=no"),
+    ...option("SendEnv=-*"),
+    ...option("ServerAliveInterval=15"),
+    ...option(`StrictHostKeyChecking=${strictHostKeys ? "yes" : "accept-new"}`),
+    ...option(`UserKnownHostsFile=${configPath("known hosts file", knownHostsFile)}`),
+    ...option("GlobalKnownHostsFile=none"),
+    ...option("HashKnownHosts=no"),
+    ...option(`HostKeyAlias=${target.hostKeyAlias}`),
+    ...target.user === void 0 ? [] : ["-l", target.user],
+    ...target.port === void 0 ? [] : ["-p", String(target.port)],
+    ...target.identityFile === void 0 ? [] : [
+      ...option(`IdentityFile=${configPath("identity file", target.identityFile)}`),
+      ...option("IdentitiesOnly=yes")
+    ],
+    "--",
+    target.host
+  ];
+}
+var SSH_TIMEOUT_MS = 6e4;
+var UPLOAD_TIMEOUT_MS = 3e5;
+function runSsh(target, command, options = {}) {
+  return new Promise((resolve4, reject) => {
+    const args = options.args ?? sshArguments(target);
+    const child = spawn3(target.ssh ?? "ssh", [...args, command], { stdio: ["pipe", "pipe", "pipe"] });
+    const timeoutMs = options.timeoutMs ?? SSH_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      child.kill();
+      const diagnostics = Buffer.concat(stderr).toString("utf8");
+      reject(new SshError(`ssh ${target.host} did not finish within ${timeoutMs / 1e3} s: ${diagnostics.trim()}`, null, diagnostics));
+    }, timeoutMs);
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.stdin.on("error", () => {
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(new SshError(error.message, null, ""));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const output = Buffer.concat(stdout).toString("utf8");
+      const diagnostics = Buffer.concat(stderr).toString("utf8");
+      if (code === 0)
+        return resolve4(output);
+      if (/REMOTE HOST IDENTIFICATION HAS CHANGED/.test(diagnostics)) {
+        return reject(new HostKeyChangedError(`The host key of ${target.host} changed; remove the old key to continue`));
+      }
+      if (/Host key verification failed|No .* host key is known/.test(diagnostics)) {
+        return reject(new HostKeyUnknownError(`The host key of ${target.host} is not trusted yet`));
+      }
+      reject(new SshError(`ssh ${target.host} failed with exit code ${code}: ${diagnostics.trim()}`, code, diagnostics));
+    });
+    child.stdin.end(options.stdin ?? new Uint8Array(0));
+  });
+}
+async function scanHostKey(target) {
+  const directory = await mkdtemp2(join7(tmpdir3(), "pi-env-hostkey-"));
+  try {
+    const scanned2 = join7(directory, "known_hosts");
+    await runSsh(target, "exit 0", { args: sshArguments(target, false, scanned2) }).catch((error) => {
+      if (!(error instanceof SshError) && !(error instanceof HostKeyUnknownError))
+        throw error;
+    });
+    const lines2 = existsSync(scanned2) ? (await readFile6(scanned2, "utf8")).split("\n").filter((line) => line.trim() !== "") : [];
+    if (lines2.length === 0)
+      throw new Error(`No host key received from ${target.host}`);
+    const fingerprints = await new Promise((resolve4, reject) => {
+      const child = spawn3("ssh-keygen", ["-lf", scanned2], { stdio: ["ignore", "pipe", "pipe"] });
+      let output = "";
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString("utf8");
+      });
+      child.on("error", reject);
+      child.on("close", () => resolve4(output.split("\n").filter((line) => line.trim() !== "")));
+    });
+    return { lines: lines2, fingerprints };
+  } finally {
+    await rm3(directory, { recursive: true, force: true });
+  }
+}
+function parseHostKeyLine(alias, line) {
+  const [host, type, key2] = line.trim().split(/\s+/);
+  if (host !== alias || type === void 0 || key2 === void 0 || !/^(ssh-[a-z0-9-]+|ecdsa-sha2-[a-z0-9-]+|sk-[a-z0-9@.-]+)$/.test(type) || !/^[A-Za-z0-9+/]+={0,2}$/.test(key2)) {
+    throw new Error(`Not a host key line for ${alias}: ${JSON.stringify(line)}`);
+  }
+  return { type, key: key2 };
+}
+var knownHostsChanges = /* @__PURE__ */ new Map();
+async function changeKnownHosts(file, change) {
+  const previous = knownHostsChanges.get(file) ?? Promise.resolve();
+  const next = previous.catch(() => {
+  }).then(async () => {
+    await mkdir5(dirname3(file), { recursive: true, mode: 448 });
+    const existing = existsSync(file) ? (await readFile6(file, "utf8")).split("\n").filter((line) => line !== "") : [];
+    const lines2 = change(existing);
+    const temporary = `${file}.${randomBytes3(6).toString("hex")}.tmp`;
+    await writeFile4(temporary, lines2.length === 0 ? "" : `${lines2.join("\n")}
+`, { mode: 384, flag: "wx" });
+    await rename5(temporary, file).catch(async (error) => {
+      await rm3(temporary, { force: true });
+      throw error;
+    });
+  });
+  knownHostsChanges.set(file, next);
+  try {
+    await next;
+  } finally {
+    if (knownHostsChanges.get(file) === next)
+      knownHostsChanges.delete(file);
+  }
+}
+async function acceptHostKey(target, lines2) {
+  const alias = target.hostKeyAlias;
+  const accepted = lines2.map((line) => ({ line: line.trim(), ...parseHostKeyLine(alias, line) }));
+  await changeKnownHosts(target.knownHostsFile, (existing) => {
+    const trusted = /* @__PURE__ */ new Map();
+    for (const line of existing) {
+      const [host, type, key2] = line.trim().split(/\s+/);
+      if (host === alias && type !== void 0 && key2 !== void 0)
+        trusted.set(type, key2);
+    }
+    const added = [];
+    for (const { line, type, key: key2 } of accepted) {
+      const known = trusted.get(type);
+      if (known === key2)
+        continue;
+      if (known !== void 0) {
+        throw new HostKeyChangedError(`The ${type} host key of ${target.host} changed; forget the old key first`);
+      }
+      trusted.set(type, key2);
+      added.push(line);
+    }
+    return [...existing, ...added];
+  });
+}
+async function forgetHostKey(target) {
+  await changeKnownHosts(target.knownHostsFile, (existing) => existing.filter((line) => line.trim().split(/\s+/)[0] !== target.hostKeyAlias));
+}
+var POSIX_PROBE = `sh -c 'echo PI-ENV-PROBE; uname -s; uname -m; uname -o 2>/dev/null || echo -; printf "%s\\n" "$HOME" "\${TMPDIR:--}" "\${LD_PRELOAD:--}"'`;
+function powershell(script) {
+  return `powershell -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
+}
+var WINDOWS_PROBE = powershell("'PI-ENV-PROBE'; 'Windows'; [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString(); '-'; $HOME; '-'; '-'");
+function normalizeArch(machine) {
+  const lower2 = machine.toLowerCase();
+  if (lower2 === "x86_64" || lower2 === "amd64" || lower2 === "x64")
+    return "x64";
+  if (lower2 === "aarch64" || lower2 === "arm64")
+    return "arm64";
+  throw new Error(`Unsupported remote architecture: ${machine}`);
+}
+function parseProbe(target, output) {
+  const lines2 = output.split(/\r?\n/);
+  const start = lines2.indexOf("PI-ENV-PROBE");
+  if (start === -1)
+    throw new Error(`Unexpected answer from ${target.host}: ${output.trim()}`);
+  const [system = "", machine = "", os2 = "", home = "", tmpdir4 = "-", preload = "-"] = lines2.slice(start + 1);
+  return { system, machine, os: os2, home, tmpdir: tmpdir4, preload };
+}
+function termuxWarnings(probe) {
+  const warnings = [];
+  if (probe.tmpdir === "-")
+    warnings.push("TMPDIR is not set; Termux's sshd normally sets it to $PREFIX/tmp.");
+  if (!probe.preload.includes("termux-exec")) {
+    warnings.push("termux-exec is not loaded (LD_PRELOAD); scripts with #!/usr/bin/env shebangs will fail.");
+  }
+  warnings.push("Android may suspend Termux; run termux-wake-lock on the device to keep the connection alive.");
+  return warnings;
+}
+async function detectPlatform(target) {
+  let probe;
+  try {
+    probe = parseProbe(target, await runSsh(target, POSIX_PROBE));
+  } catch (error) {
+    if (error instanceof HostKeyUnknownError || error instanceof HostKeyChangedError)
+      throw error;
+    probe = parseProbe(target, await runSsh(target, WINDOWS_PROBE));
+  }
+  if (/^(MINGW|MSYS|CYGWIN)/.test(probe.system))
+    probe = parseProbe(target, await runSsh(target, WINDOWS_PROBE));
+  const arch = normalizeArch(probe.machine);
+  const { system, os: os2, home } = probe;
+  if (system === "Windows") {
+    const shell = (await runSsh(target, "echo %OS%")).includes("Windows_NT") ? "cmd" : "powershell";
+    return { platform: "windows", arch, home, shell, warnings: [] };
+  }
+  if (system === "Darwin")
+    return { platform: "darwin", arch, home, warnings: [] };
+  if (system === "Linux") {
+    const android = os2 === "Android";
+    return { platform: android ? "android" : "linux", arch, home, warnings: android ? termuxWarnings(probe) : [] };
+  }
+  throw new Error(`Unsupported remote system: ${system}`);
+}
+function packagedDaemon(remote2) {
+  const name = `pi-env-${remote2.platform}-${remote2.arch}`;
+  return join7(packageRoot, "bin", name, remote2.platform === "windows" ? "pi-env.exe" : "pi-env");
+}
+function quotePosix(text) {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+function quotePowerShell(text) {
+  return `'${text.replaceAll("'", "''")}'`;
+}
+function daemonPath(remote2, sha256) {
+  const name = `pi-env-${sha256.slice(0, 32)}`;
+  return remote2.platform === "windows" ? `${remote2.home}\\.pi\\mobile\\tools\\${name}.exe` : `${remote2.home}/.pi/mobile/tools/${name}`;
+}
+var POSIX_HASH = `hash() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | sed 's/.*= //'; else echo none; fi; }`;
+async function checkDaemon(target, remote2, file, sha256) {
+  if (remote2.platform === "windows") {
+    const check2 = powershell(`$f = ${quotePowerShell(file)}; if ((Test-Path -LiteralPath $f) -and ((Get-FileHash -Algorithm SHA256 -LiteralPath $f).Hash.ToLower() -eq '${sha256}')) { 'present' } else { 'missing' }`);
+    return (await runSsh(target, check2)).trim().endsWith("present") ? "present" : "missing";
+  }
+  const check = `${POSIX_HASH}; f=${quotePosix(file)}; if [ -f "$f" ] && [ "$(hash "$f")" = ${sha256} ]; then echo present; elif [ "$(hash /dev/null)" = none ]; then echo nohash; else echo missing; fi`;
+  return (await runSsh(target, `sh -c ${quotePosix(check)}`)).trim().split("\n").at(-1) ?? "missing";
+}
+async function deployDaemon(target, remote2, binary = packagedDaemon(remote2)) {
+  if (!existsSync(binary))
+    throw new Error(`No pi-env daemon for ${remote2.platform}-${remote2.arch} at ${binary}`);
+  const bytes2 = await readFile6(binary);
+  const sha256 = createHash4("sha256").update(bytes2).digest("hex");
+  const file = daemonPath(remote2, sha256);
+  const state3 = await checkDaemon(target, remote2, file, sha256);
+  if (state3 === "present")
+    return file;
+  if (state3 === "nohash")
+    throw new Error(`${target.host} has no sha256sum, shasum or openssl to verify pi-env`);
+  if (remote2.platform === "windows") {
+    const upload2 = powershell([
+      "$ErrorActionPreference = 'Stop'",
+      `$f = ${quotePowerShell(file)}`,
+      "$d = Split-Path -Parent $f",
+      "New-Item -ItemType Directory -Force -Path $d | Out-Null",
+      "$t = Join-Path $d ('.pi-env-' + [guid]::NewGuid().ToString() + '.tmp')",
+      // PowerShell reads redirected stdin itself, as text lines for `$input`, so the binary comes as base64 lines
+      // up to an end marker: Windows' sshd may never pass on the end of stdin.
+      "$text = New-Object System.Text.StringBuilder",
+      "foreach ($line in $input) { if ($line -eq 'PI-ENV-END') { break }; [void]$text.Append($line) }",
+      "$bytes = [Convert]::FromBase64String($text.ToString())",
+      "$out = [IO.File]::Open($t, 'CreateNew', 'Write', 'None'); $out.Write($bytes, 0, $bytes.Length); $out.Close()",
+      `if ((Get-FileHash -Algorithm SHA256 -LiteralPath $t).Hash.ToLower() -ne '${sha256}') { Remove-Item -LiteralPath $t; throw 'pi-env upload is corrupt' }`,
+      // A running daemon or a virus scanner can hold the old file for a moment.
+      "for ($i = 0; ; $i++) { try { Move-Item -Force -LiteralPath $t -Destination $f; break } catch { if ($i -ge 20) { throw }; Start-Sleep -Milliseconds 250 } }",
+      // Older daemons; one that is running stays until it exits.
+      "Get-ChildItem -LiteralPath $d -Filter 'pi-env-*.exe' | Where-Object { $_.FullName -ne $f } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -ErrorAction SilentlyContinue }",
+      "'deployed'"
+    ].join("; "));
+    const lines2 = bytes2.toString("base64").replace(/.{1,76}/g, "$&\n");
+    await runSsh(target, upload2, { stdin: Buffer.from(`${lines2}PI-ENV-END
+`), timeoutMs: UPLOAD_TIMEOUT_MS });
+    return file;
+  }
+  const upload = [
+    "set -e",
+    POSIX_HASH,
+    `f=${quotePosix(file)}`,
+    'd=$(dirname "$f")',
+    'mkdir -p "$d"',
+    'chmod 700 "$d"',
+    't=$(mktemp "$d/.pi-env.XXXXXX")',
+    'cat > "$t"',
+    `if [ "$(hash "$t")" != ${sha256} ]; then rm -f "$t"; echo "pi-env upload is corrupt" >&2; exit 1; fi`,
+    'chmod 700 "$t"',
+    'mv -f "$t" "$f"',
+    // Older daemons; running ones keep their file open until they exit.
+    'for old in "$d"/pi-env-*; do [ "$old" = "$f" ] || rm -f "$old"; done',
+    "echo deployed"
+  ].join("\n");
+  await runSsh(target, `sh -c ${quotePosix(upload)}`, { stdin: bytes2, timeoutMs: UPLOAD_TIMEOUT_MS });
+  return file;
+}
+function launchCommand(remote2, file, loginShell) {
+  if (remote2.platform === "windows") {
+    if (remote2.shell === "powershell")
+      return `& ${quotePowerShell(file)}`;
+    return file.includes(" ") ? `"${file}"` : file;
+  }
+  if (loginShell)
+    return `exec "$SHELL" -lc 'exec "$0" "$@"' ${quotePosix(file)}`;
+  return quotePosix(file);
+}
+function sshConnectionFor(options, state3) {
+  return new Connection2({
+    command: async () => {
+      if (state3.remote === void 0) {
+        const remote2 = await detectPlatform(options);
+        for (const warning of remote2.warnings)
+          options.onLog?.(`${warning}
+`);
+        state3.remote = remote2;
+      }
+      const file = state3.verified ?? await deployDaemon(options, state3.remote, options.binary ?? packagedDaemon(state3.remote));
+      state3.verified = void 0;
+      return [
+        options.ssh ?? "ssh",
+        ...sshArguments(options),
+        launchCommand(state3.remote, file, options.loginShell === true)
+      ];
+    },
+    ...options.onLog === void 0 ? {} : { onLog: options.onLog }
+  });
+}
+async function connectSsh(options) {
+  const remote2 = await detectPlatform(options);
+  const verified = await deployDaemon(options, remote2, options.binary ?? packagedDaemon(remote2));
+  for (const warning of remote2.warnings)
+    options.onLog?.(`${warning}
+`);
+  return { connection: sshConnectionFor(options, { remote: remote2, verified }), remote: remote2 };
+}
+
+// server/machines.ts
+var noop5 = () => {
+};
+var isRecord4 = (value) => typeof value === "object" && value !== null;
+var errorText2 = (error) => error instanceof Error ? error.message : String(error);
+var endpoint = ({ id, hostname, port, username }) => JSON.stringify([id, hostname, port, username]);
+function machineOf(value) {
+  if (!isRecord4(value)) return [];
+  const { id, name, hostname, port, username, hostKey } = value;
+  if (typeof id !== "string" || typeof name !== "string" || typeof hostname !== "string" || typeof port !== "number" || typeof username !== "string") return [];
+  const pinned = isRecord4(hostKey) && typeof hostKey.algorithm === "string" && typeof hostKey.fingerprint === "string" ? { algorithm: hostKey.algorithm, fingerprint: hostKey.fingerprint } : void 0;
+  return [{ id, name, hostname, port, username, ...pinned === void 0 ? {} : { hostKey: pinned } }];
+}
+function readMachines(file) {
+  let text;
+  try {
+    text = readFileSync2(file, "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  }
+  try {
+    const machines = JSON.parse(text);
+    return Array.isArray(machines) ? machines.flatMap((machine) => machineOf(machine)) : [];
+  } catch {
+    return [];
+  }
+}
+function scanned(name, { lines: lines2, fingerprints }) {
+  if (lines2.length !== fingerprints.length) throw new Error(`The SSH host key of ${name} could not be read.`);
+  return lines2.map((line, index3) => ({
+    line,
+    algorithm: line.split(/\s+/)[1] ?? "",
+    fingerprint: fingerprints[index3].split(/\s+/)[1] ?? ""
+  }));
+}
+var ServerMachines = class {
+  /** `self` names this machine in messages. */
+  constructor(home, self2) {
+    this.self = self2;
+    this.file = join8(home, "machines.json");
+    this.knownHosts = join8(home, "known_hosts");
+    this.machines = readMachines(this.file);
+  }
+  self;
+  machines;
+  connections = /* @__PURE__ */ new Map();
+  /** The scans waiting for the phone, with the lines it would accept. */
+  waiting = /* @__PURE__ */ new Map();
+  reach = {};
+  pending = {};
+  listeners = /* @__PURE__ */ new Set();
+  closed = false;
+  file;
+  knownHosts;
+  subscribe = (listener) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  getReach = () => this.reach;
+  getPending = () => this.pending;
+  /** The machines as devices, under the names and descriptions the phone's device list gives them. */
+  devices() {
+    return this.machines.map((machine) => ({
+      name: machine.name,
+      description: machineDescription(machine),
+      environment: async (who) => {
+        const { connection, info } = await this.started(machine);
+        return new RemoteExecutionEnv({
+          connection,
+          id: `pi-env:${machine.id}`,
+          cwd: `${info.home}/${MACHINE_WORK}/${who}`
+        });
+      }
+    }));
+  }
+  /** Keeps the phone's list, lets go of the connections to machines it removed or moved, and tries each machine. */
+  set(machines) {
+    const temporary = `${this.file}.${process.pid}`;
+    writeFileSync2(temporary, JSON.stringify(machines), { mode: 384 });
+    renameSync2(temporary, this.file);
+    const before = new Map(this.machines.map((machine) => [machine.id, endpoint(machine)]));
+    this.machines = machines;
+    const kept2 = new Set(machines.map(endpoint));
+    for (const [key2, opening] of this.connections) {
+      if (kept2.has(key2)) continue;
+      this.connections.delete(key2);
+      void opening.then((connection) => connection.close(), noop5);
+    }
+    const same2 = (id) => machines.some((machine) => machine.id === id && before.get(id) === endpoint(machine));
+    this.reach = Object.fromEntries(Object.entries(this.reach).filter(([id]) => same2(id)));
+    for (const id of this.waiting.keys()) {
+      if (!same2(id)) this.waiting.delete(id);
+    }
+    this.publish();
+    for (const machine of machines) void this.started(machine).catch(noop5);
+  }
+  /** Trusts the keys waiting for machine `id` once the phone accepted these fingerprints, then tries it again. */
+  async acceptHostKey(id, fingerprints) {
+    const machine = this.machines.find((candidate) => candidate.id === id);
+    const waiting = this.waiting.get(id);
+    if (machine === void 0 || waiting === void 0) {
+      throw new Error(`No SSH host key of that machine waits for approval on ${this.self}.`);
+    }
+    if (waiting.keys.length !== fingerprints.length || waiting.keys.some(({ fingerprint }) => !fingerprints.includes(fingerprint))) {
+      throw new Error(`The SSH host key ${machine.name} presents to ${this.self} changed again. Compare it again.`);
+    }
+    const target = this.target(machine);
+    if (waiting.changed) await forgetHostKey(target);
+    await acceptHostKey(target, waiting.lines);
+    this.waiting.delete(id);
+    this.publish();
+    void this.started(machine).catch(noop5);
+  }
+  /** At shutdown, once the conversation's tools stopped: stops each machine's daemon, also one still connecting. */
+  close() {
+    this.closed = true;
+    for (const opening of this.connections.values()) void opening.then((connection) => connection.close(), noop5);
+    this.connections.clear();
+  }
+  /** How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its ID. */
+  target(machine) {
+    return {
+      host: machine.hostname,
+      port: machine.port,
+      user: machine.username,
+      knownHostsFile: this.knownHosts,
+      hostKeyAlias: machine.id
+    };
+  }
+  /** Its connection, started, and what its daemon reported: what each use needs, and what `reach` shows of it. */
+  async started(machine) {
+    if (this.closed) throw new Error(`InfiniChat is stopping on ${this.self}.`);
+    const key2 = endpoint(machine);
+    const opening = this.connections.get(key2) ?? this.open(machine);
+    this.connections.set(key2, opening);
+    try {
+      const connection = await opening;
+      const info = await connection.info();
+      this.record(machine, void 0);
+      return { connection, info };
+    } catch (error) {
+      if (this.connections.get(key2) === opening) {
+        this.connections.delete(key2);
+        void opening.then((connection) => connection.close(), noop5);
+      }
+      this.record(machine, error);
+      throw error;
+    }
+  }
+  /** `connectSsh`, trusting the machine's host key first when it is the one the phone pinned. */
+  async open(machine) {
+    const target = this.target(machine);
+    try {
+      return (await connectSsh(target)).connection;
+    } catch (error) {
+      if (!(error instanceof HostKeyUnknownError) && !(error instanceof HostKeyChangedError)) throw error;
+      const changed = error instanceof HostKeyChangedError;
+      const keys = scanned(machine.name, await scanHostKey(target));
+      const pinned = keys.filter(({ fingerprint }) => fingerprint === machine.hostKey?.fingerprint);
+      if (pinned.length === 0) {
+        if (this.listed(machine)) this.waiting.set(machine.id, { lines: keys.map(({ line }) => line), keys, changed });
+        throw new Error(changed ? `The SSH host key ${machine.name} presents to ${this.self} changed. Compare its fingerprint in Remote machines on the phone, and accept it there only if you know why it changed.` : `${this.self} doesn\u2019t trust the SSH host key ${machine.name} presents yet. Compare its fingerprint in Remote machines on the phone, then accept it there.`);
+      }
+      if (changed) await forgetHostKey(target);
+      await acceptHostKey(target, pinned.map(({ line }) => line));
+      return (await connectSsh(target)).connection;
+    }
+  }
+  listed(machine) {
+    return this.machines.some((listed) => listed.id === machine.id && endpoint(listed) === endpoint(machine));
+  }
+  /** What the latest attempt found of a machine that is still listed as it was tried. */
+  record(machine, error) {
+    if (!this.listed(machine)) return;
+    this.reach = {
+      ...this.reach,
+      [machine.id]: error === void 0 ? { reachable: true } : { reachable: false, error: errorText2(error) }
+    };
+    if (error === void 0) this.waiting.delete(machine.id);
+    this.publish();
+  }
+  publish() {
+    this.pending = Object.fromEntries([...this.waiting].map(([id, { keys, changed }]) => [id, { keys: keys.map(({ algorithm, fingerprint }) => ({ algorithm, fingerprint })), changed }]));
+    for (const listener of [...this.listeners]) listener();
+  }
+};
 
 // server/models.ts
 init_define_INFINICHAT_PI();
@@ -130935,7 +132809,7 @@ var MessagesSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(ChatMe
 var ScheduledSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(ScheduledTaskSchema));
 var ServerSchema = typebox_exports.Object({
   bundle: typebox_exports.String(),
-  pi: typebox_exports.Object({ durable: typebox_exports.String(), ai: typebox_exports.String(), chord: typebox_exports.String() }),
+  pi: typebox_exports.Object({ durable: typebox_exports.String(), ai: typebox_exports.String(), chord: typebox_exports.String(), env: typebox_exports.String() }),
   device: typebox_exports.String(),
   /** The device's description, the text the phone's device list gives the machine. */
   description: typebox_exports.String()
@@ -130946,6 +132820,23 @@ var ConversationSchema = typebox_exports.Object({
   active: typebox_exports.Boolean(),
   adopted: typebox_exports.Optional(ConversationFilesSchema)
 });
+var HostKeySchema = typebox_exports.Object({ algorithm: typebox_exports.String(), fingerprint: typebox_exports.String() });
+var MachineSchema = typebox_exports.Object({
+  id: typebox_exports.String(),
+  name: typebox_exports.String(),
+  hostname: typebox_exports.String(),
+  port: typebox_exports.Number(),
+  username: typebox_exports.String(),
+  hostKey: typebox_exports.Optional(HostKeySchema)
+});
+var ReachSchema = typebox_exports.Record(typebox_exports.String(), typebox_exports.Union([
+  typebox_exports.Object({ reachable: typebox_exports.Literal(true) }),
+  typebox_exports.Object({ reachable: typebox_exports.Literal(false), error: typebox_exports.String() })
+]));
+var PendingHostKeysSchema = typebox_exports.Record(
+  typebox_exports.String(),
+  typebox_exports.Object({ keys: typebox_exports.Array(HostKeySchema), changed: typebox_exports.Boolean() })
+);
 var AccessSchema = typebox_exports.Record(typebox_exports.String(), ProviderAccessSchema);
 var AuthPromptSchema = typebox_exports.Union([
   typebox_exports.Object({
@@ -130987,7 +132878,9 @@ var InfiniChatRemote = remote("infinichat.remote", {
         catalog: ModelCatalogSchema,
         access: AccessSchema,
         // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:237`).
-        signInAttempt: SignInAttemptSchema
+        signInAttempt: SignInAttemptSchema,
+        reach: ReachSchema,
+        pendingHostKeys: PendingHostKeysSchema
       },
       methods: {
         accept: method(typebox_exports.Object({ content: UserInputSchema, requestId: typebox_exports.String() })),
@@ -131018,7 +132911,11 @@ var InfiniChatRemote = remote("infinichat.remote", {
         // where nothing opens them, and is refused while active.
         adopt: method(ConversationFilesSchema),
         relinquish: method(void 0, ConversationFilesSchema),
-        archive: method()
+        archive: method(),
+        // The other machines, sent on every connect and whenever Remote machines change; the server keeps them for
+        // its tools while the phone is away. `acceptHostKey` trusts the pending keys with these fingerprints.
+        setMachines: method(typebox_exports.Object({ machines: typebox_exports.Array(MachineSchema) })),
+        acceptHostKey: method(typebox_exports.Object({ id: typebox_exports.String(), fingerprints: typebox_exports.Array(typebox_exports.String()) }))
       }
     }
   }
@@ -131028,7 +132925,7 @@ var InfiniChatRemote = remote("infinichat.remote", {
 var callContext = (ctx2) => withAbortSignal(ctx2.signal, BACKGROUND_CONTEXT);
 var LOADING = { status: "loading" };
 function serveInfiniChat(host, conversation, options) {
-  const { credentials, signIn } = options;
+  const { credentials, signIn, machines } = options;
   const core = () => {
     const open2 = conversation.current;
     if (!open2) throw new Error(`InfiniChat isn\u2019t open on ${options.server.device}.`);
@@ -131055,6 +132952,12 @@ function serveInfiniChat(host, conversation, options) {
     const signInAttempt = self2.state("signInAttempt", SignInAttemptSchema, { init: () => signIn.getSnapshot() });
     self2.on("access", credentials, (_change, ctx2) => access3.replace(ctx2, credentials.getSnapshot().providers));
     self2.on("signInAttempt", signIn, (_change, ctx2) => signInAttempt.replace(ctx2, signIn.getSnapshot()));
+    const reach = self2.state("reach", ReachSchema, { init: machines.getReach });
+    const pendingHostKeys = self2.state("pendingHostKeys", PendingHostKeysSchema, { init: machines.getPending });
+    self2.on("machines", machines, (_change, ctx2) => {
+      reach.replace(ctx2, machines.getReach());
+      pendingHostKeys.replace(ctx2, machines.getPending());
+    });
     self2.on("conversation", conversation, (_change, ctx2) => {
       messages.replace(ctx2, currentMessages(), { diff: true });
       controls.replace(ctx2, currentControls(), { diff: true });
@@ -131073,6 +132976,8 @@ function serveInfiniChat(host, conversation, options) {
       catalog,
       access: access3,
       signInAttempt,
+      reach,
+      pendingHostKeys,
       accept: ({ content, requestId }, ctx2) => core().accept(content, requestId, callContext(ctx2)),
       stop: () => core().stop(),
       updateSettings: ({ main: main2, summary, instructions }, ctx2) => core().updateSettings(main2, summary, instructions, callContext(ctx2)),
@@ -131087,7 +132992,9 @@ function serveInfiniChat(host, conversation, options) {
       // The move goes on when the caller goes away: a dropped link never leaves it half done.
       adopt: (files) => conversation.adopt(files),
       relinquish: () => conversation.relinquish(),
-      archive: () => conversation.archive()
+      archive: () => conversation.archive(),
+      setMachines: ({ machines: list }) => machines.set(list),
+      acceptHostKey: ({ id, fingerprints }) => machines.acceptHostKey(id, fingerprints)
     };
   });
 }
@@ -131270,16 +133177,16 @@ var ServerSignIn = class {
 var USAGE = "Usage: node server.js serve --device <name> --description <text>";
 registerBunOAuthFlows();
 async function serve(device, description) {
-  const home = join8(homedir3(), ".infinichat");
+  const home = join10(homedir3(), ".infinichat");
   const stopping = Promise.withResolvers();
   process.once("SIGTERM", () => stopping.resolve(void 0));
   process.once("SIGINT", () => stopping.resolve(void 0));
   const closes = [];
   try {
     closes.push(await processLock("infinichat-server"));
-    await mkdir6(home, { recursive: true, mode: 448 });
+    await mkdir7(home, { recursive: true, mode: 448 });
     restoreTimeZone(home);
-    const backend = fileCredentialBackend(join8(home, "credentials.json"));
+    const backend = fileCredentialBackend(join10(home, "credentials.json"));
     const credentials = new ProviderCredentialStore(
       backend,
       { openai: { validate: validateOpenAICredential } },
@@ -131291,10 +133198,12 @@ async function serve(device, description) {
     });
     const signIn = new ServerSignIn(models, credentials, openAILoginOptions(backend));
     closes.push(() => signIn.cancel());
+    const machines = new ServerMachines(home, device);
+    closes.push(() => machines.close());
     const conversation = new ServerConversation(home, (storage) => InfiniChatService.open({
       storage,
       models,
-      devices: serverDevices(device, description),
+      devices: serverDevices(device, description, machines),
       machine: device,
       onClosed: (end3) => {
         if (end3.reason === "failed") stopping.resolve(end3);
@@ -131308,13 +133217,14 @@ async function serve(device, description) {
       principalKey: (principal) => principal.kind
     });
     closes.push(() => host.close());
-    const bundle = basename5(dirname4(fileURLToPath2(import.meta.url)));
+    const bundle = basename5(dirname5(fileURLToPath4(import.meta.url)));
     serveInfiniChat(host, conversation, {
       server: { bundle, pi: define_INFINICHAT_PI_default, device, description },
       setTimeZone: (zone) => setTimeZone(home, zone),
       catalog: buildModelCatalog(models),
       credentials,
-      signIn
+      signIn,
+      machines
     });
     const server = await listen(host, home, bundle);
     closes.push(() => server.close());

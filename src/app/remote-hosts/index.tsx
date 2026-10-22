@@ -6,7 +6,7 @@ import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, StyleSheet } from 'react-native';
 
-import { useChatApp } from '@/chat/chat-provider';
+import { useChatApp, useInfiniChatMachines } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteHost } from '@/pi/execution/remote/hosts';
@@ -23,6 +23,9 @@ export default function RemoteHostsScreen() {
   const colors = useChatColors();
   const { remoteHosts } = useChatApp();
   const snapshot = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  // While InfiniChat runs on a machine, its tools reach the others with that machine's own SSH.
+  const infiniChat = useInfiniChatMachines();
+  const infiniChatHost = infiniChat && snapshot.hosts.find((host) => host.id === infiniChat.machineId);
   const [busy, setBusy] = useState<string>();
   const [testing, setTesting] = useState(false);
   const [progress, setProgress] = useState('Connecting through Tailscale…');
@@ -114,6 +117,51 @@ export default function RemoteHostsScreen() {
     }
   };
   const restore = () => { void remoteHosts.restore().catch(() => {}); };
+  const acceptOnInfiniChatHost = async (host: RemoteHost, fingerprints: string[]) => {
+    if (!infiniChat) return;
+    setBusy(host.id);
+    setNotice(undefined);
+    try {
+      await infiniChat.accept(host.id, fingerprints);
+    } catch (error) {
+      setNotice({ message: error instanceof Error ? error.message : 'Could not accept the SSH host key.',
+        error: true });
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  /** Whether the machine InfiniChat runs on reaches `host`, and the host key it waits to have accepted there. */
+  const reachFromInfiniChat = (host: RemoteHost) => {
+    const reaches = infiniChat?.reach;
+    if (!infiniChatHost || !reaches || host.id === infiniChatHost.id) return null;
+    const from = infiniChatHost.name;
+    const reach = reaches[host.id];
+    const waiting = infiniChat.pending?.[host.id];
+    const failed = waiting !== undefined || (reach !== undefined && !reach.reachable);
+    const status = waiting !== undefined ? (waiting.changed ? 'SSH host key changed' : 'SSH host key to verify')
+      : reach === undefined ? 'Checking…' : reach.reachable ? 'Reachable' : 'Can’t connect';
+    return <>
+      <LabeledContent label={`From ${from}`}>
+        <Text modifiers={[failed ? foregroundStyle(colors.danger) : secondary]}>{status}</Text>
+      </LabeledContent>
+      {waiting === undefined && reach !== undefined && !reach.reachable && <Text
+        modifiers={[secondary, font({ textStyle: 'footnote' }), textSelection(true)]}>{reach.error}</Text>}
+      {waiting !== undefined && <>
+        <Text modifiers={[secondary]}>
+          {`Compare this fingerprint with the SSH server’s host key using a trusted source before ${from} `
+            + 'accepts it.'}
+        </Text>
+        {waiting.keys.map((key) => <Text key={key.fingerprint}
+          modifiers={[font({ design: 'monospaced', textStyle: 'callout' }), textSelection(true)]}>
+          {`${key.algorithm} ${key.fingerprint}`}
+        </Text>)}
+        <Button
+          label={waiting.changed ? `Accept verified replacement key on ${from}` : `Accept verified key on ${from}`}
+          modifiers={[disable(!!busy)]}
+          onPress={() => { void acceptOnInfiniChatHost(host, waiting.keys.map((key) => key.fingerprint)); }} />
+      </>}
+    </>;
+  };
 
   return <>
     <Stack.Toolbar placement="right">
@@ -159,6 +207,7 @@ export default function RemoteHostsScreen() {
           <LabeledContent label="Credential">
             <Text modifiers={[secondary]}>{host.credentialType === 'password' ? 'Password' : 'Private key'}</Text>
           </LabeledContent>
+          {reachFromInfiniChat(host)}
           <Button label="Test connection" systemImage="bolt.horizontal" modifiers={[disable(!!busy)]}
             onPress={() => { void test(host); }} />
           <Button label="Edit machine" systemImage="pencil" modifiers={[disable(!!busy)]}

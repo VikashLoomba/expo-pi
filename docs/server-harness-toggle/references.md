@@ -84,6 +84,17 @@ Checked on 2026-10-21. Versions:
 | `File.writableStream()` writes through `FileHandle(forWritingTo:)`, which needs an existing file; `File.digest('SHA-256')` hashes natively in 64 KiB reads | expo-file-system 58.0.10 `build/File.d.ts:154`, `ios/FileSystemFileHandle.swift:67`, `ios/FileSystemFile.swift:59-90` |
 | `openShell` delivers stdout as native-owned `ArrayBuffer`s; `close()` resolves after `onClosed` | react-native-ssh 0.3.0 `src/index.ts:124-130`, `:241` |
 | expo-modules-core turns a plain path into a file URL | expo-modules-core 58.0.24 `ios/Core/Arguments/Convertibles.swift:13-39`, `ios/Utilities/Utilities.swift:62-83` |
+| pi-env 1.4.0 from npm (`sha512-WOO3…`, the tarball `scripts/sync-pi-daemon-assets.mjs` pins), tag `4a080252f`; its README example scans, accepts, then connects | pi-env `README.md:12-29`; `test/ssh.test.ts`, `test/ssh-external.test.ts:29-54` |
+| `binary` is one path for whatever system is detected: `options.binary ?? packagedDaemon(remote)`, at the first start and at every restart | pi-env `src/ssh.ts:500-501`, `:536` (v1.4.0) |
+| `packagedDaemon` is `bin/pi-env-<platform>-<arch>/pi-env` under `new URL("..", import.meta.url)`; in a single-file bundle that is the bundle folder's parent (measured, esbuild 0.28.2) | pi-env `src/ssh.ts:57`, `:356-360` (v1.4.0) |
+| `connectSsh` rejects with `HostKeyUnknownError` or `HostKeyChangedError` (`detectPlatform` rethrows them); a lazy start turns any failure into a `RemoteError` `spawn_error` with only the message | pi-env `src/ssh.ts:329-336`, `:532-540`; `src/connection.ts:268-276` (v1.4.0) |
+| A `Connection` forgets a failed start, and the next request tries again | pi-env `src/connection.ts:232` (v1.4.0) |
+| `scanHostKey` connects with `accept-new` to a temporary file, ignores the authentication failure, and returns its lines with `ssh-keygen -lf`'s fingerprints of that file | pi-env `src/ssh.ts:182-206` (v1.4.0) |
+| `acceptHostKey` takes plain lines for the alias and refuses a different key of a type already trusted; `forgetHostKey` drops every key of the alias | pi-env `src/ssh.ts:210-286` (v1.4.0) |
+| `detectPlatform` runs the PowerShell probe after any other failure of the POSIX one, so an unauthorized client fails to log in twice | pi-env `src/ssh.ts:329-339` (v1.4.0) |
+| `deployDaemon` removes daemons of other contents in `~/.pi/mobile/tools/`, the folder the phone's provisioning uses | pi-env `src/ssh.ts:456` (v1.4.0) |
+| `Connection.close()` stops the daemon, which kills everything it started | pi-env `src/connection.ts:215-216` (v1.4.0) |
+| sshd refuses an address for a while after failed logins (`PerSourcePenalties`, OpenSSH 9.8 and later) | measured on OpenSSH_10.3p1: "activating ipv4 penalty of 15.843 seconds for penalty: failed authentication" |
 
 ## Chord over WebSocket in Hermes
 
@@ -153,6 +164,8 @@ A subagent's assessment of branch `replication` at `2cf6cd898`, 2026-10-21. It i
 | Piece 4's asset, with pi-ai's OAuth flows registered statically | 8,246,243 bytes, 1,907,540 gzipped (bundle `9711b916…`); after the review 8,247,840 bytes (bundle `f296c97f…`) |
 | The server's `catalog` state (six providers, 490 models) | 115,466 bytes of JSON; identical to the phone's own `buildModelCatalog` |
 | Piece 5's asset | 8,256,566 bytes (bundle `96acc658…`) |
+| Piece 7's asset, with pi-env's client | 8,332,200 bytes (bundle `371e7043…`) |
+| The four pi-env daemons uploaded beside the bundle (piece 7) | 8,560,960 bytes, once per pi-env version |
 | Moving the realistic copy over loopback (piece 5) | 43,520,560 bytes there in 943 ms, adopted in 57 ms; 39,211,008 bytes back in 156 ms |
 
 ## Piece 2 on macOS
@@ -350,6 +363,60 @@ ran over loopback, so the times are the Mac's, not Tailscale's.
 | Found by these checks and fixed | The first `ready` overtaking 1,433 messages (`snapshot` now last); a Cancel's queued `closeMachine` handing the next move a closing client whose `connected()` never settled |
 | The stand-in itself | Its channel close first left `cat` waiting on an open stdin, which a real channel close ends; fixed in the stand-in before the repeats |
 
+## Piece 7 on macOS
+
+**Checks, 2026-10-22**, on the implementer's Mac (arm64, macOS, Node 24.5.0 from Homebrew for the server and 25.6.1 for
+the harness, OpenSSH_10.3p1), with pi 1.4.0 and pi-env 1.4.0 (tag `4a080252f`). No device, simulator or Linux machine
+was used, and nothing in `~/.ssh` was read beyond the client's own configuration or written.
+- **Machine A:** a server under a scratch HOME and a short scratch TMPDIR (its own Chord lock). The real asset was
+  installed by the app's real `install.ts`, driven by the real `RemoteInfiniChat` and `RemoteHostRepository`, with
+  the stand-ins of pieces 3–5 for react-native-ssh, the Keychain, expo-crypto, expo-asset and expo-file-system, and
+  React Native's `WebSocket`.
+  - The stand-in answered `uname` as Linux, so install took the detached branch. No launchd label was shared with
+    the parallel piece 6 checks.
+  - A's "own agent" was a scratch `ssh-agent` holding a scratch key.
+- **The other machines:** disposable `sshd -D` instances on 127.0.0.1, set up as pi-env's own `test/ssh.test.ts` sets
+  one up: their own host keys, their own authorized-keys files in scratch, and `SetEnv HOME=` a scratch home.
+  - lab-b authorized the scratch key, and the phone pinned its key.
+  - lab-c didn't authorize it; the phone pinned its key.
+  - lab-d was a closed port.
+  - lab-e authorized it, but the phone pinned another key (lab-c's).
+- **Phase 2:** the same `server/main.ts` built with a scripted faux model beside the real ones. "RUN <device>
+  <command>" made it call `bash` on that device, and the harness read each tool result from the model's next request.
+- **Afterwards:** the scratch HOMEs, keys, agent and sshd instances were removed, and no server, daemon, `ssh` or
+  lock socket was left.
+
+The final run passed 27 of 27 checks.
+
+| Check | Result |
+| --- | --- |
+| Install with nothing on A | Stages connecting → checking → uploading → starting; connected in 1.7 s. The four daemons in `~/.infinichat/server/bin/pi-env-<target>/pi-env`, mode `0600`, each with the manifest's SHA-256 |
+| Readiness cleanup | A stale bundle folder removed; `bin/` and this bundle's folder kept |
+| `setMachines` on connect, then the checks | All four reached a result 0.5 s after connecting |
+| lab-b, pinned key matches | Accepted without asking (`known_hosts`: `<id> ssh-ed25519 <key>`); reachable; pi-env deployed `pi-env-0e1f7839…` into lab-b's home |
+| lab-c, key matches, A not authorized | Key accepted; reach "ssh 127.0.0.1 failed with exit code 255: vikashloomba@127.0.0.1: Permission denied (publickey)." |
+| lab-d, closed port | Reach "ssh 127.0.0.1 failed with exit code 255: ssh: connect to host 127.0.0.1 port 52203: Connection refused" |
+| lab-e, pinned key differs | `pendingHostKeys`: its ED25519 fingerprint, `changed: false`; nothing in `known_hosts`; reach "studio doesn’t trust the SSH host key lab-e presents yet. Compare its fingerprint in Remote machines on the phone, then accept it there." |
+| `machines.json` | The four other machines, mode `0600`: `id`, `name`, `hostname`, `port`, `username`, `hostKey: { algorithm, fingerprint }`; no credential or public key, and not A |
+| Accept with another fingerprint | Refused: "…changed again. Compare it again." |
+| Accept lab-e from the phone | Trusted; reachable 0.35 s later; nothing pending |
+| Install again | No upload (connecting → checking → starting); the daemons' mtimes unchanged |
+| One daemon deleted, install again | Only it uploaded, with the right hash |
+| `SIGTERM` | The server exited and no daemon was left on lab-b or lab-e |
+| Phase 2: a call on A itself | `NodeExecutionEnv` in `~/.infinichat/work/main` |
+| The device list the model saw | `"studio"` with the phone's description for it, then lab-b, lab-c, lab-d and lab-e with `machineDescription`; no `"phone"` |
+| `bash` on lab-b | Ran there in `<lab-b home>/.infinichat/work/main`, 66 ms after the first call (connection already up from the check) |
+| `bash` on lab-c | The call's result was pi-env's error. In the final run: "ssh 127.0.0.1 failed with exit code 255: Connection closed by 127.0.0.1 port 52202". lab-c's sshd had penalised the address after the earlier failed logins (`PerSourcePenalties`, 15.8 s); in an earlier run it read "…Permission denied (publickey)." |
+| `bash` on lab-d | "ssh 127.0.0.1 failed with exit code 255: ssh: connect to host 127.0.0.1 port 52203: Connection refused" |
+| `bash` on lab-e after a server restart | Ran: the accepted key persisted in `known_hosts` |
+| lab-b's host key replaced, its daemon killed | The first call got pi-env's own lazy-restart message, "The host key of 127.0.0.1 changed; remove the old key to continue". The next: "The SSH host key lab-b presents to studio changed. Compare its fingerprint in Remote machines on the phone, and accept it there only if you know why it changed.", with `pendingHostKeys` `changed: true` and the new fingerprint |
+| Not accepted | The call after was refused the same way: blocked |
+| Accepted from the phone | The old key forgotten, one line for lab-b with the new key; the next call ran |
+| Replaced again, and the phone re-pinned the new key (Remote machines' accept) | The phone sent the list again. After the daemon was killed, the first call got pi-env's message again; the next replaced the key without asking and ran |
+| lab-e removed on the phone | The list followed (`machines.json` three machines); lab-e's daemon ended at once; a call naming it: "Unknown device \"lab-e\". The devices are \"studio\", \"lab-b\", \"lab-c\", \"lab-d\"." |
+| Shutdown | Exit 0; no daemon left on lab-b |
+| Found by these checks | The harness's faux model first read the oldest `RUN` in OptChat's message; fixed in the harness. A server left by a crashed run held the scratch lock, so the next install's readiness timed out ("InfiniChat did not start on studio."), as designed |
+
 ## Unverified until a piece checks it
 
 - App Transport Security for `ws://127.0.0.1` through `forwardLocal` on a Release build (piece 3).
@@ -375,6 +442,11 @@ ran over loopback, so the times are the Mac's, not Tailscale's.
   `digest` on a 40 MB file, expo-sqlite's close leaving no WAL, the header's progress and the menu's Cancel Move, the
   screens keeping their scroll and draft through a move, and a killed app relaunching into a move.
 - Piece 5 against Linux, and against a machine whose `released/` holds earlier conversations.
+- Piece 7 on the phone: the Remote machines rows and the accept button, the list sent from the real Keychain, and
+  the phone's own tools after a move back (their code is unchanged).
+- Piece 7 on Linux, as A or as one of the others, and over Tailscale.
+- Piece 7 with a macOS LaunchAgent server using the owner's real keys or launchd's `SSH_AUTH_SOCK`,
+  passphrase-protected keys, and machines that present several host keys.
 
 Checked in piece 1: the native web-search wrapper in `createChatModels` never reaches InfiniChat requests. It acts
 only on a request whose signal the chat service's `openai-native-web-search` extension bound

@@ -18,6 +18,7 @@ import { ServerConversation } from './conversation';
 import { fileCredentialBackend, openAILoginOptions } from './credentials';
 import { serverDevices } from './devices';
 import { listen } from './listen';
+import { ServerMachines } from './machines';
 import { createServerModels } from './models';
 import { serveInfiniChat } from './serve';
 import { ServerSignIn } from './sign-in';
@@ -58,9 +59,13 @@ async function serve(device: string, description: string): Promise<number> {
     const signIn = new ServerSignIn(models, credentials, openAILoginOptions(backend));
     // Ends an attempt still under way, after the host has closed the links that could start another.
     closes.push(() => signIn.cancel());
+    // The other machines' connections close after the conversation, whose tools use them, as the phone's provider
+    // closes its remote owner after both Harnesses.
+    const machines = new ServerMachines(home, device);
+    closes.push(() => machines.close());
     // Open only while this machine holds the conversation; the phone moves it here and back.
     const conversation = new ServerConversation(home, (storage) => InfiniChatService.open({
-      storage, models, devices: serverDevices(device, description), machine: device,
+      storage, models, devices: serverDevices(device, description, machines), machine: device,
       onClosed: (end) => {
         if (end.reason === 'failed') stopping.resolve(end);
       },
@@ -77,7 +82,7 @@ async function serve(device: string, description: string): Promise<number> {
     const bundle = basename(dirname(fileURLToPath(import.meta.url)));
     serveInfiniChat(host, conversation, {
       server: { bundle, pi: INFINICHAT_PI, device, description }, setTimeZone: (zone) => setTimeZone(home, zone),
-      catalog: buildModelCatalog(models), credentials, signIn,
+      catalog: buildModelCatalog(models), credentials, signIn, machines,
     });
     const server = await listen(host, home, bundle);
     // Stops accepting first; the host closes the connections already accepted.

@@ -2,12 +2,14 @@ import type { Ctx, Host } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 
 import {
-  AccessSchema, ControlsSchema, ConversationSchema, InfiniChatRemote, MessagesSchema, ScheduledSchema, ServerSchema,
-  SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal, type InfiniChatServer,
+  AccessSchema, ControlsSchema, ConversationSchema, InfiniChatRemote, MessagesSchema, PendingHostKeysSchema,
+  ReachSchema, ScheduledSchema, ServerSchema, SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal,
+  type InfiniChatServer,
 } from '../src/pi/infinichat-remote/contract';
 import { ModelCatalogSchema, type ModelCatalog } from '../src/pi/model-catalog';
 import type { ProviderCredentialStore } from '../src/pi/provider-credentials';
 import type { ServerConversation } from './conversation';
+import type { ServerMachines } from './machines';
 import type { ServerSignIn } from './sign-in';
 
 /** A call's context for the core's own waits: the caller cancels the wait, never the work. */
@@ -21,7 +23,8 @@ const LOADING = { status: 'loading' } as const;
  * `conversation` says whether it holds it, and `adopt`, `relinquish` and `archive` move it. `server` says which server
  * answers, and `setTimeZone` applies the phone's zone. The account cells mirror this machine's credential store and its
  * sign-in, which outlive the object, so a phone that reconnects finds them again; `catalog` is fixed, because none of
- * the registered providers refreshes its models (pi-ai `refreshModels`).
+ * the registered providers refreshes its models (pi-ai `refreshModels`). `reach` and `pendingHostKeys` mirror what
+ * this machine found of the other machines its tools use, which `setMachines` lists and `acceptHostKey` trusts.
  */
 export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: ServerConversation, options: {
   server: InfiniChatServer;
@@ -29,8 +32,9 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
   catalog: ModelCatalog;
   credentials: ProviderCredentialStore;
   signIn: ServerSignIn;
+  machines: ServerMachines;
 }) {
-  const { credentials, signIn } = options;
+  const { credentials, signIn, machines } = options;
   const core = () => {
     const open = conversation.current;
     if (!open) throw new Error(`InfiniChat isn’t open on ${options.server.device}.`);
@@ -57,6 +61,12 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
     const signInAttempt = self.state('signInAttempt', SignInAttemptSchema, { init: () => signIn.getSnapshot() });
     self.on('access', credentials, (_change, ctx) => access.replace(ctx, credentials.getSnapshot().providers));
     self.on('signInAttempt', signIn, (_change, ctx) => signInAttempt.replace(ctx, signIn.getSnapshot()));
+    const reach = self.state('reach', ReachSchema, { init: machines.getReach });
+    const pendingHostKeys = self.state('pendingHostKeys', PendingHostKeysSchema, { init: machines.getPending });
+    self.on('machines', machines, (_change, ctx) => {
+      reach.replace(ctx, machines.getReach());
+      pendingHostKeys.replace(ctx, machines.getPending());
+    });
     // The open core's view attaches once this object follows it and publishes when it has read the conversation, so
     // every cell also catches up on what changed while the object went live, or while the core came or went.
     // The snapshot goes last. Past Chord's flow-control window each member's state waits in a slot of its own, flushed
@@ -83,6 +93,8 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       catalog,
       access,
       signInAttempt,
+      reach,
+      pendingHostKeys,
       accept: ({ content, requestId }, ctx) => core().accept(content, requestId, callContext(ctx)),
       stop: () => core().stop(),
       updateSettings: ({ main, summary, instructions }, ctx) =>
@@ -99,6 +111,8 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       adopt: (files) => conversation.adopt(files),
       relinquish: () => conversation.relinquish(),
       archive: () => conversation.archive(),
+      setMachines: ({ machines: list }) => machines.set(list),
+      acceptHostKey: ({ id, fingerprints }) => machines.acceptHostKey(id, fingerprints),
     };
   });
 }

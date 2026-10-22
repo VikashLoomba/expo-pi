@@ -28,7 +28,7 @@ export const ScheduledSchema = Type.ReadonlyObject(Type.Array(ScheduledTaskSchem
  */
 export const ServerSchema = Type.Object({
   bundle: Type.String(),
-  pi: Type.Object({ durable: Type.String(), ai: Type.String(), chord: Type.String() }),
+  pi: Type.Object({ durable: Type.String(), ai: Type.String(), chord: Type.String(), env: Type.String() }),
   device: Type.String(),
   /** The device's description, the text the phone's device list gives the machine. */
   description: Type.String(),
@@ -46,6 +46,31 @@ export type ConversationFiles = Static<typeof ConversationFilesSchema>;
 export const ConversationSchema = Type.Object({ active: Type.Boolean(),
   adopted: Type.Optional(ConversationFilesSchema) });
 export type ConversationState = Static<typeof ConversationSchema>;
+
+/** An SSH host key as Remote machines shows it: its algorithm and OpenSSH's `SHA256:` fingerprint. */
+const HostKeySchema = Type.Object({ algorithm: Type.String(), fingerprint: Type.String() });
+/**
+ * Another configured machine, which the server's tools reach with the server's own SSH (pi-env), and the host key the
+ * phone pinned for it, if any. Never its credentials.
+ */
+export const MachineSchema = Type.Object({
+  id: Type.String(), name: Type.String(), hostname: Type.String(), port: Type.Number(), username: Type.String(),
+  hostKey: Type.Optional(HostKeySchema),
+});
+export type Machine = Static<typeof MachineSchema>;
+/** Per machine ID, whether the server reached it the last time it tried, and pi-env's error when it didn't. */
+export const ReachSchema = Type.Record(Type.String(), Type.Union([
+  Type.Object({ reachable: Type.Literal(true) }),
+  Type.Object({ reachable: Type.Literal(false), error: Type.String() }),
+]));
+export type Reach = Static<typeof ReachSchema>;
+/**
+ * Per machine ID, the host keys the server's scan found that it doesn't trust, which only the phone can accept;
+ * `changed` when they replace a key it trusted.
+ */
+export const PendingHostKeysSchema = Type.Record(Type.String(),
+  Type.Object({ keys: Type.Array(HostKeySchema), changed: Type.Boolean() }));
+export type PendingHostKeys = Static<typeof PendingHostKeysSchema>;
 
 /** The provider sign-ins of the machine's own credential store, keyed by provider. */
 export const AccessSchema = Type.Record(Type.String(), ProviderAccessSchema);
@@ -93,6 +118,7 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
         // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:237`).
         signInAttempt: SignInAttemptSchema,
+        reach: ReachSchema, pendingHostKeys: PendingHostKeysSchema,
       },
       methods: {
         accept: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
@@ -120,6 +146,10 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         adopt: method(ConversationFilesSchema),
         relinquish: method(undefined, ConversationFilesSchema),
         archive: method(),
+        // The other machines, sent on every connect and whenever Remote machines change; the server keeps them for
+        // its tools while the phone is away. `acceptHostKey` trusts the pending keys with these fingerprints.
+        setMachines: method(Type.Object({ machines: Type.Array(MachineSchema) })),
+        acceptHostKey: method(Type.Object({ id: Type.String(), fingerprints: Type.Array(Type.String()) })),
       },
     },
   },

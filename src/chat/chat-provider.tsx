@@ -501,6 +501,21 @@ export function useInfiniChatConnection(): (RemoteConnection & { retry(): void; 
   };
 }
 
+/**
+ * What the machine InfiniChat runs on found of the other machines its tools reach over its own SSH, and accepting a
+ * host key there; undefined while InfiniChat runs on this iPhone. `reach` is undefined until it is connected.
+ */
+export function useInfiniChatMachines() {
+  const remote = useShownMachine();
+  const subscribe = remote?.subscribe ?? subscribeNothing;
+  const getReach = () => remote?.getReach();
+  const getPending = () => remote?.getPendingHostKeys();
+  const reach = useSyncExternalStore(subscribe, getReach, getReach);
+  const pending = useSyncExternalStore(subscribe, getPending, getPending);
+  return remote && { machineId: remote.machineId, reach, pending,
+    accept: (id: string, fingerprints: string[]) => remote.acceptHostKey(id, fingerprints) };
+}
+
 const noCatalog: ModelCatalog = [];
 const notReady: ProviderAccess = { ready: false, connected: false };
 

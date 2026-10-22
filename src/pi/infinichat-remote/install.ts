@@ -5,6 +5,8 @@ import { getRandomBytesAsync } from 'expo-crypto';
 import { BootstrapError } from '../execution/remote/bootstrap-errors';
 import { connectionFailure } from '../execution/remote/channel';
 import { runSshCommand } from '../execution/remote/command-channel';
+import { loadPackagedDaemon, type DaemonPlatform } from '../execution/remote/daemon-assets';
+import { PI_DAEMON_MANIFEST } from '../execution/remote/daemon-manifest';
 import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
 import { HASH, quotePosix, script } from '../execution/remote/provisioning';
 import { machineDescription } from '../infinichat/device-tools';
@@ -37,6 +39,13 @@ const CONTROL = /[\x00-\x1f\x7f]/;
 // ignored.
 const TICK = `tick() { printf '\\n'; sleep 1; }`;
 const PID = `sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$s"`;
+/**
+ * The pi-env daemons the app ships, which the server deploys to the other machines its tools use. pi-env takes the one
+ * for each system it detects from `bin/` beside its package (`packagedDaemon`, `src/ssh.ts:356-360` at v1.4.0); in the
+ * single-file bundle that is `bin/` beside the bundle folders, and its options name no binary per system.
+ */
+const DAEMONS: readonly DaemonPlatform[] = [{ platform: 'darwin', arch: 'arm64' }, { platform: 'darwin', arch: 'x64' },
+  { platform: 'linux', arch: 'arm64' }, { platform: 'linux', arch: 'x64' }];
 
 /** Fixed messages: remote output never reaches one. */
 function messages(name: string) {
@@ -242,7 +251,10 @@ function readyScript(bundle: string): string[] {
     '  fi',
     '  tick',
     'done',
-    'for d in "$HOME/.infinichat/server"/*; do [ "$d" = "$current" ] || rm -rf "$d"; done',
+    // `bin/` holds the pi-env daemons, which every bundle shares.
+    'for d in "$HOME/.infinichat/server"/*; do',
+    '  [ "$d" = "$current" ] || [ "$d" = "$HOME/.infinichat/server/bin" ] || rm -rf "$d"',
+    'done',
     PRINT_MARKER, 'cat "$s"'];
 }
 
@@ -303,20 +315,39 @@ export async function installServer(hosts: RemoteHostRepository, machineId: stri
     const machine = await detect(run, name);
     const { sha256 } = INFINICHAT_SERVER_MANIFEST;
     const file = `${machine.home}/.infinichat/server/${SERVER_BUNDLE}/server.js`;
-    const [state] = await run([HASH, `f=${quotePosix(file)}`, PRINT_MARKER,
+    const daemons = DAEMONS.map((daemon) => {
+      const target = `${daemon.platform}-${daemon.arch}` as const;
+      return { daemon, target, sha256: PI_DAEMON_MANIFEST[target].sha256,
+        file: `${machine.home}/.infinichat/server/bin/pi-env-${target}/pi-env` };
+    });
+    const present = (path: string, hash: string) =>
+      `[ -f ${quotePosix(path)} ] && [ ! -L ${quotePosix(path)} ] && [ "$(hash ${quotePosix(path)})" = ${hash} ]`;
+    // The bundle's state, then each daemon that is missing.
+    const [state, ...missing] = await run([HASH, PRINT_MARKER,
       'if [ "$(hash /dev/null)" = none ]; then echo nohash',
-      `elif [ -f "$f" ] && [ ! -L "$f" ] && [ "$(hash "$f")" = ${sha256} ]; then echo present`,
-      'else echo missing; fi'], { failure: message.check });
+      `elif ${present(file, sha256)}; then echo present`,
+      'else echo missing; fi',
+      ...daemons.map((daemon) => `${present(daemon.file, daemon.sha256)} || echo ${daemon.target}`)],
+    { failure: message.check });
     if (state === 'nohash') throw new Error(`${name} needs sha256sum, shasum or openssl to verify InfiniChat.`);
     if (state !== 'present' && state !== 'missing') throw new Error(message.check);
+    // Uploaded aside, verified, and renamed into place, as provisioning.ts uploads the Pi daemon.
+    const upload = (path: string, hash: string, input: Uint8Array) => run([HASH, `f=${quotePosix(path)}`,
+      'd=$(dirname "$f")', 'umask 077', 'mkdir -p "$d"', 't=$(mktemp "$d/.upload.XXXXXX")', `trap 'rm -f "$t"' 0`,
+      `trap 'exit 1' HUP INT TERM`,
+      // mv treats a directory, or a symlink to one, as a container; never publish into it.
+      'if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then exit 1; fi',
+      'cat > "$t"', `[ "$(hash "$t")" = ${hash} ]`, 'mv -f "$t" "$f"', PRINT_MARKER],
+    { failure: message.files, input, timeoutMs: UPLOAD_TIMEOUT_MS });
     if (state === 'missing') {
       options.onProgress?.('uploading');
-      await run([HASH, `f=${quotePosix(file)}`, 'd=$(dirname "$f")', 'umask 077', 'mkdir -p "$d"',
-        't=$(mktemp "$d/.server.XXXXXX")', `trap 'rm -f "$t"' 0`, `trap 'exit 1' HUP INT TERM`,
-        // mv treats a directory, or a symlink to one, as a container; never publish into it.
-        'if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then exit 1; fi',
-        'cat > "$t"', `[ "$(hash "$t")" = ${sha256} ]`, 'mv -f "$t" "$f"', PRINT_MARKER],
-      { failure: message.files, input: await loadServerBundle(signal), timeoutMs: UPLOAD_TIMEOUT_MS });
+      await upload(file, sha256, await loadServerBundle(signal));
+    }
+    for (const { daemon, target, file: path } of daemons) {
+      if (!missing.includes(target)) continue;
+      options.onProgress?.('uploading');
+      const { bytes, sha256: hash } = await loadPackagedDaemon(daemon, signal);
+      await upload(path, hash, bytes);
     }
     options.onProgress?.('starting');
     // On stdin, never on a command line other accounts can read. The server reads it when it starts, so a changed
