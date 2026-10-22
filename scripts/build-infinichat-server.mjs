@@ -25,7 +25,6 @@ const pi = {
   durable: await version('@earendil-works/pi-durable'),
   ai: await version('@earendil-works/pi-ai'),
   chord: await version('@earendil-works/chord'),
-  env: await version('@earendil-works/pi-env'),
 };
 
 const { outputFiles } = await build({

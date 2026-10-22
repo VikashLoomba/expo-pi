@@ -465,20 +465,23 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   /**
    * Tells a connected server the other configured machines, each with the host key this phone pinned for it, never
-   * their credentials. One that fails changes nothing: the next connect sends them again.
+   * their credentials. A send that fails changes nothing: the next connect sends them again.
    */
   private sendMachines(): void {
     this.machinesSent = this.machinesSent.then(async () => {
       const ref = this.ref;
       if (this.closed || ref === undefined || !this.session?.live) return;
       const others = this.hosts.getSnapshot().hosts.filter((host) => host.id !== this.machineId);
-      const machines = await Promise.all(others.map(async (host): Promise<Machine> => {
+      const machines = await Promise.all(others.map(async (host): Promise<Machine[]> => {
         const { id, name, hostname, port, username } = host;
-        const { trustedHostKey } = await this.hosts.admit(id);
-        return { id, name, hostname, port, username, ...(trustedHostKey === undefined ? {}
-          : { hostKey: { algorithm: trustedHostKey.algorithm, fingerprint: trustedHostKey.fingerprint } }) };
+        // A pin that can't be read is left out, so that machine's key waits for this phone; one removed meanwhile
+        // is left out entirely.
+        const pinned = await this.hosts.admit(id).then(({ trustedHostKey }) => trustedHostKey, () => null);
+        if (pinned === null && this.hosts.get(id) === undefined) return [];
+        return [{ id, name, hostname, port, username,
+          ...(pinned ? { hostKey: { algorithm: pinned.algorithm, fingerprint: pinned.fingerprint } } : {}) }];
       }));
-      await ref.setMachines({ machines });
+      await ref.setMachines({ machines: machines.flat() });
     }).catch(() => {});
   }
 

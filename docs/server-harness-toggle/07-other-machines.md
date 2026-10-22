@@ -30,8 +30,8 @@ scan, accept and connect flow this piece follows.
   This happens with `setMachines` on every connect and whenever Remote machines change. The server keeps the list in
   `~/.infinichat/machines.json`, so its tools work while the phone is away.
 - **Devices on the server.** This machine (piece 1), plus each listed machine as a `RemoteExecutionEnv`:
-  - One `sshConnection` per machine, with `knownHostsFile: ~/.infinichat/known_hosts` and `hostKeyAlias:
-    <machine id>`.
+  - One pi-env connection per machine, from `connectSsh` (as built, below; the plan said `sshConnection`), with
+    `knownHostsFile: ~/.infinichat/known_hosts` and `hostKeyAlias: <machine id>`.
   - The work directory is `~/.infinichat/work/<who>`, as on the phone.
   - Device names and descriptions match the phone's, so the model sees the same list after a move, minus "phone".
 - **Host keys.**
@@ -60,8 +60,10 @@ scan, accept and connect flow this piece follows.
   - with every machine but the one InfiniChat runs on;
   - with each machine's pinned key, read through `hosts.admit`, so nothing but the key's algorithm and fingerprint
     leaves the phone.
+  - A machine whose pin can't be read (an unreadable Keychain item) goes without it, so its key waits for the phone,
+    the unpinned path. A machine removed between the snapshot and `admit` is left out. The rest always go.
 
-  Sends wait for each other, so a slower build of an older list never lands last. One that fails changes nothing,
+  Sends wait for each other, so a slower build of an older list never lands last. A send that fails changes nothing,
   and the next connect sends the list again.
 - The server writes `machines.json` aside, mode `0600`, and renames it into place. A file that doesn't parse reads as
   no machines, which the phone's next list replaces, as `credentials.json` does.
@@ -82,6 +84,11 @@ scan, accept and connect flow this piece follows.
   `sshConnection` makes (`sshConnectionFor`).
 - A connection whose start fails holds nothing. It is closed and forgotten, so the next use opens it again with
   `connectSsh`, as pi-env's own `Connection` forgets a failed start (`src/connection.ts:232`).
+- A connection that had answered once and then fails to restart gets one fresh `connectSsh` within the same use. Its
+  lazy restart reports a changed key as pi-env's own advice, "The host key of … changed; remove the old key to
+  continue" (`src/ssh.ts:163`, wrapped as a `spawn_error` at `src/connection.ts:273-275`), which a model with a
+  shell on A could follow. `connectSsh` names it, so the first call after a key change already pends the key for the
+  phone (measured). An offline machine whose connection had worked waits for both attempts in that call.
 - A machine the phone removes or moves (another hostname, port or account) has its connection closed at once. A
   rename or a new pinned key keeps it.
 
@@ -109,9 +116,16 @@ scan, accept and connect flow this piece follows.
 **Reach.**
 - `reach`, `{ [machine id]: { reachable: true } | { reachable: false, error } }`, is what the latest attempt on each
   machine found: a use, or a check.
-- Each `setMachines` checks every listed machine in the background: the same open-and-start a use does, then
-  `connection.info()`, which a live connection answers without SSH. While the conversation is closed (piece 5), the
-  checks still run, so a move there finds its machines ready.
+- A `setMachines` checks, in the background, only the machines it adds or changes (another endpoint or another
+  pinned key), and `acceptHostKey` checks the machine it trusted. A check is the same open-and-start a use does, then
+  `connection.info()`. Every other machine keeps what was found of it, and uses keep that current:
+  - the list comes at every connect and with every `RemoteHostRepository` publish;
+  - checking an unauthorized machine each time would cost it failed logins, for which OpenSSH 9.8+ refuses A's
+    connections for a while, tool calls included (Notes).
+
+  While the conversation is closed (piece 5), the checks still run, so a move there finds its machines ready.
+- Accepting a key clears the machine's row ("Checking…") and lets go of a check still in flight, which would
+  otherwise end with that key pending again.
 - `error` is pi-env's own message, or the host-key message above. A use's failure is also the tool call's result:
   - "ssh 127.0.0.1 failed with exit code 255: vikashloomba@127.0.0.1: Permission denied (publickey)."
   - "ssh 127.0.0.1 failed with exit code 255: ssh: connect to host 127.0.0.1 port 52203: Connection refused"
@@ -137,8 +151,6 @@ scan, accept and connect flow this piece follows.
   on <machine>" ("Accept verified replacement key on <machine>"). Not accepting leaves the machine blocked.
 - Nothing shows while InfiniChat runs on This iPhone.
 
-**The handshake** gains `pi.env` (`ServerSchema`, `INFINICHAT_PI`, the build script and the manifest).
-
 ## Ownership and lifetime
 
 | Resource | Created by | Closed by |
@@ -162,6 +174,7 @@ As built:
 | `~/.infinichat/machines.json` | `setMachines` | — | persists |
 | `~/.infinichat/server/bin/` daemons | `install.ts` | — | persist across bundles |
 | The phone's list on its way | `RemoteInfiniChat` | — | settles; it unsubscribes from Remote machines at `close()` |
+| A `connectSsh` still running at shutdown | a use or a check | — (upstream: `connectSsh` takes no signal; each of its `ssh` runs ends within pi-env's 60 s, `src/ssh.ts:123`) | its connection is closed once it resolves; the process waits for those `ssh` runs to end |
 
 A use that is cancelled while its machine connects waits for that connect to end, as the phone's `owner.ts` waits for
 `connection.info()`; the connect then serves the next use.
@@ -181,17 +194,12 @@ Found while implementing, against pi-env 1.4.0:
 - **`connectSsh` on first use, instead of `sshConnection`,** for its typed host-key errors, and a failed start is let
   go (Builds).
 - **The daemons in `bin/` beside the bundle folders,** not passed as `binary` (Builds). This is the spec's fallback.
-- **`reach` and the checks on each `setMachines`,** for Remote machines' per-machine status (Builds). Checking means
-  trying: an unreachable or untrusted machine costs an SSH attempt from A at each phone connect.
+- **`reach`, and a check of each added or changed machine,** for Remote machines' per-machine status (Builds).
+- **One fresh `connectSsh` when a connection that worked fails to restart** (Builds), so a changed key pends at once.
 - **`acceptHostKey` takes the fingerprints shown,** so the accept is of the key the owner compared.
-- **`pi.env` in the handshake.**
 
 ## Notes for the owner
 
-- **A key that changes under a live connection.** The first call after it gets pi-env's own message from the lazy
-  restart: "The host key of 127.0.0.1 changed; remove the old key to continue." That advice is not this app's, and
-  the reach shows the same text. The next call, or the next phone connect, goes through `connectSsh` and shows the
-  key in `pendingHostKeys` (measured). Retrying at once would double the wait for an offline machine, so it doesn't.
 - **sshd's penalties for an unauthorized A.** pi-env's detection runs a POSIX probe, then a PowerShell probe after any
   other failure (`src/ssh.ts:329-339`). So A fails to authenticate two or three times per attempt, counting the scan
   of an untrusted key.
@@ -199,7 +207,8 @@ Found while implementing, against pi-env 1.4.0:
     "activating ipv4 penalty of 15.843 seconds".
   - In that window pi-env's error reads "Connection closed by <B> port <p>" instead of "Permission denied", and
     every account's connections from A to B are refused.
-  - Each phone connect checks again.
+  - A machine is checked when it is added or changed, so a phone connect no longer adds failed logins. A tool call
+    naming that machine still does.
 - **Auto-accept depends on the key type.** A's `ssh` scans with its own default host-key order (Ed25519 first). A
   machine whose phone pin is another type (react-native-ssh's negotiation) shows as pending once, and the owner
   accepts it from the phone. Only one-key machines were tested.
@@ -217,17 +226,18 @@ Found while implementing, against pi-env 1.4.0:
 
 About 240 lines: machines list and devices ~120, host-key flow ~80, daemon upload ~40.
 
-As built, +447 −29 lines outside the asset, its manifest and the lockfile:
-- `server/machines.ts` 229, about 70 of them comments;
+As built, after the review, +461 −29 lines outside the docs, the asset, its manifest and the lockfile:
+- `server/machines.ts` 240, about 50 of them comments;
 - `install.ts` +41 −10;
-- `client.ts` +47 −5;
+- `client.ts` +50 −5;
 - Remote machines +50;
-- the contract +31;
+- the contract +30;
 - `serve.ts`, `main.ts` and `devices.ts` +31 −11;
-- the provider's hook +15.
+- the provider's hook +15;
+- `isRecord` and `noop` exported from `state.ts` and `conversation.ts` for reuse.
 
 The growth over the estimate is `reach` and its checks, which the estimate didn't price, the changed-key paths, and
-the Remote machines rows. The asset grew from 8,256,566 to 8,332,200 bytes with pi-env's client.
+the Remote machines rows. The asset grew from 8,256,566 to 8,332,532 bytes with pi-env's client.
 
 ## Checks
 

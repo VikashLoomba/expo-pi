@@ -7,4 +7,4 @@ declare module '*.wasm' {
 }
 
 /** The pi versions the bundle was built with, defined at build time from the installed packages. */
-declare const INFINICHAT_PI: { durable: string; ai: string; chord: string; env: string };
+declare const INFINICHAT_PI: { durable: string; ai: string; chord: string };

@@ -28,7 +28,7 @@ export const ScheduledSchema = Type.ReadonlyObject(Type.Array(ScheduledTaskSchem
  */
 export const ServerSchema = Type.Object({
   bundle: Type.String(),
-  pi: Type.Object({ durable: Type.String(), ai: Type.String(), chord: Type.String(), env: Type.String() }),
+  pi: Type.Object({ durable: Type.String(), ai: Type.String(), chord: Type.String() }),
   device: Type.String(),
   /** The device's description, the text the phone's device list gives the machine. */
   description: Type.String(),

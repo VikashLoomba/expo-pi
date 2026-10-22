@@ -164,7 +164,7 @@ A subagent's assessment of branch `replication` at `2cf6cd898`, 2026-10-21. It i
 | Piece 4's asset, with pi-ai's OAuth flows registered statically | 8,246,243 bytes, 1,907,540 gzipped (bundle `9711b916…`); after the review 8,247,840 bytes (bundle `f296c97f…`) |
 | The server's `catalog` state (six providers, 490 models) | 115,466 bytes of JSON; identical to the phone's own `buildModelCatalog` |
 | Piece 5's asset | 8,256,566 bytes (bundle `96acc658…`) |
-| Piece 7's asset, with pi-env's client | 8,332,200 bytes (bundle `371e7043…`) |
+| Piece 7's asset, with pi-env's client | 8,332,200 bytes (bundle `371e7043…`); after the review 8,332,532 bytes (bundle `20ea01fb…`) |
 | The four pi-env daemons uploaded beside the bundle (piece 7) | 8,560,960 bytes, once per pi-env version |
 | Moving the realistic copy over loopback (piece 5) | 43,520,560 bytes there in 943 ms, adopted in 57 ms; 39,211,008 bytes back in 156 ms |
 
@@ -381,12 +381,13 @@ was used, and nothing in `~/.ssh` was read beyond the client's own configuration
   - lab-c didn't authorize it; the phone pinned its key.
   - lab-d was a closed port.
   - lab-e authorized it, but the phone pinned another key (lab-c's).
+  - After the review, lab-f: lab-b's sshd under another record, whose Keychain item the stand-in refused to read.
 - **Phase 2:** the same `server/main.ts` built with a scripted faux model beside the real ones. "RUN <device>
   <command>" made it call `bash` on that device, and the harness read each tool result from the model's next request.
 - **Afterwards:** the scratch HOMEs, keys, agent and sshd instances were removed, and no server, daemon, `ssh` or
   lock socket was left.
 
-The final run passed 27 of 27 checks.
+The final run passed 27 of 27 checks; after the review's fixes, 30 of 30.
 
 | Check | Result |
 | --- | --- |
@@ -397,9 +398,11 @@ The final run passed 27 of 27 checks.
 | lab-c, key matches, A not authorized | Key accepted; reach "ssh 127.0.0.1 failed with exit code 255: vikashloomba@127.0.0.1: Permission denied (publickey)." |
 | lab-d, closed port | Reach "ssh 127.0.0.1 failed with exit code 255: ssh: connect to host 127.0.0.1 port 52203: Connection refused" |
 | lab-e, pinned key differs | `pendingHostKeys`: its ED25519 fingerprint, `changed: false`; nothing in `known_hosts`; reach "studio doesn’t trust the SSH host key lab-e presents yet. Compare its fingerprint in Remote machines on the phone, then accept it there." |
-| `machines.json` | The four other machines, mode `0600`: `id`, `name`, `hostname`, `port`, `username`, `hostKey: { algorithm, fingerprint }`; no credential or public key, and not A |
+| `machines.json` | The other machines (four; five after the review), mode `0600`: `id`, `name`, `hostname`, `port`, `username`, `hostKey: { algorithm, fingerprint }`; no credential or public key, and not A |
 | Accept with another fingerprint | Refused: "…changed again. Compare it again." |
-| Accept lab-e from the phone | Trusted; reachable 0.35 s later; nothing pending |
+| lab-f's pin unreadable on the phone (after the review) | Sent without `hostKey`, the others unaffected; its key pending for the phone. Before the fix, one failed `admit` dropped the whole list |
+| A reconnect, which sends the list again (after the review) | `machines.json` rewritten; no new login lines in lab-c's sshd log (4 → 4): machines already checked aren't probed |
+| Accept lab-e from the phone | Trusted; reachable 0.35 s later; nothing pending. After the review its row went `null` ("Checking…") at the accept, then reachable |
 | Install again | No upload (connecting → checking → starting); the daemons' mtimes unchanged |
 | One daemon deleted, install again | Only it uploaded, with the right hash |
 | `SIGTERM` | The server exited and no daemon was left on lab-b or lab-e |
@@ -409,11 +412,11 @@ The final run passed 27 of 27 checks.
 | `bash` on lab-c | The call's result was pi-env's error. In the final run: "ssh 127.0.0.1 failed with exit code 255: Connection closed by 127.0.0.1 port 52202". lab-c's sshd had penalised the address after the earlier failed logins (`PerSourcePenalties`, 15.8 s); in an earlier run it read "…Permission denied (publickey)." |
 | `bash` on lab-d | "ssh 127.0.0.1 failed with exit code 255: ssh: connect to host 127.0.0.1 port 52203: Connection refused" |
 | `bash` on lab-e after a server restart | Ran: the accepted key persisted in `known_hosts` |
-| lab-b's host key replaced, its daemon killed | The first call got pi-env's own lazy-restart message, "The host key of 127.0.0.1 changed; remove the old key to continue". The next: "The SSH host key lab-b presents to studio changed. Compare its fingerprint in Remote machines on the phone, and accept it there only if you know why it changed.", with `pendingHostKeys` `changed: true` and the new fingerprint |
+| lab-b's host key replaced, its daemon killed | Before the review, the first call got pi-env's own lazy-restart message, "The host key of 127.0.0.1 changed; remove the old key to continue". After it, the first call (172 ms) already got "The SSH host key lab-b presents to studio changed. Compare its fingerprint in Remote machines on the phone, and accept it there only if you know why it changed.", with `pendingHostKeys` `changed: true` and the new fingerprint, and the reach showing the same |
 | Not accepted | The call after was refused the same way: blocked |
 | Accepted from the phone | The old key forgotten, one line for lab-b with the new key; the next call ran |
-| Replaced again, and the phone re-pinned the new key (Remote machines' accept) | The phone sent the list again. After the daemon was killed, the first call got pi-env's message again; the next replaced the key without asking and ran |
-| lab-e removed on the phone | The list followed (`machines.json` three machines); lab-e's daemon ended at once; a call naming it: "Unknown device \"lab-e\". The devices are \"studio\", \"lab-b\", \"lab-c\", \"lab-d\"." |
+| Replaced again, and the phone re-pinned the new key (Remote machines' accept) | The phone sent the list again. After the daemon was killed, the first call replaced the key without asking and ran (before the review, only the second) |
+| lab-e removed on the phone | The list followed (`machines.json` one fewer); lab-e's daemon ended at once; a call naming it: "Unknown device \"lab-e\". The devices are \"studio\", \"lab-b\", \"lab-c\", \"lab-d\", \"lab-f\"." |
 | Shutdown | Exit 0; no daemon left on lab-b |
 | Found by these checks | The harness's faux model first read the oldest `RUN` in OptChat's message; fixed in the harness. A server left by a crashed run held the scratch lock, so the next install's readiness timed out ("InfiniChat did not start on studio."), as designed |
 

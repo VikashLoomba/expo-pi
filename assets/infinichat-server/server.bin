@@ -52,7 +52,7 @@ var __toBinaryNode = Uint8Array.fromBase64 || ((base64) => new Uint8Array(Buffer
 var define_INFINICHAT_PI_default;
 var init_define_INFINICHAT_PI = __esm({
   "<define:INFINICHAT_PI>"() {
-    define_INFINICHAT_PI_default = { durable: "1.4.0", ai: "1.4.0", chord: "1.4.0", env: "1.4.0" };
+    define_INFINICHAT_PI_default = { durable: "1.4.0", ai: "1.4.0", chord: "1.4.0" };
   }
 });
 
@@ -7384,11 +7384,11 @@ var init_base64 = __esm({
 });
 
 // node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@3.25.76/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs
-function noop6() {
+function noop5() {
 }
 function makeLogFn(fnLevel, logger, logLevel) {
   if (!logger || levelNumbers[fnLevel] > levelNumbers[logLevel]) {
-    return noop6;
+    return noop5;
   } else {
     return logger[fnLevel].bind(logger);
   }
@@ -7424,7 +7424,7 @@ function defaultLogger() {
   return cachedDefaultLogger;
 }
 function debugLogRequestDetails(logger, message, details) {
-  if (logger.debug === noop6) {
+  if (logger.debug === noop5) {
     return;
   }
   logger.debug(message, formatRequestDetails(details));
@@ -7454,10 +7454,10 @@ var init_log = __esm({
       return void 0;
     };
     noopLogger = {
-      error: noop6,
-      warn: noop6,
-      info: noop6,
-      debug: noop6
+      error: noop5,
+      warn: noop5,
+      info: noop5,
+      debug: noop5
     };
     cachedLoggers = /* @__PURE__ */ new WeakMap();
     formatRequestDetails = (details) => {
@@ -25861,11 +25861,11 @@ var init_line2 = __esm({
 });
 
 // node_modules/.pnpm/openai@7.19.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signature-v4@5.7.3_undici@7.29.0_ws@8.22.0_zod@3.25.76/node_modules/openai/internal/utils/log.mjs
-function noop7() {
+function noop6() {
 }
 function makeLogFn2(fnLevel, logger, logLevel) {
   if (!logger || levelNumbers2[fnLevel] > levelNumbers2[logLevel]) {
-    return noop7;
+    return noop6;
   } else {
     return logger[fnLevel].bind(logger);
   }
@@ -25931,10 +25931,10 @@ var init_log2 = __esm({
       return void 0;
     };
     noopLogger2 = {
-      error: noop7,
-      warn: noop7,
-      info: noop7,
-      debug: noop7
+      error: noop6,
+      warn: noop6,
+      info: noop6,
+      debug: noop6
     };
     cachedLoggers2 = /* @__PURE__ */ new WeakMap();
     sensitiveQueryNames = /* @__PURE__ */ new Set([
@@ -27774,10 +27774,10 @@ var init_workload_identity_auth = __esm({
           redirect: "manual"
         });
         if (!response.ok) {
-          const errorText3 = await response.text();
+          const errorText2 = await response.text();
           let body2 = void 0;
           try {
-            body2 = JSON.parse(errorText3);
+            body2 = JSON.parse(errorText2);
           } catch {
           }
           if (response.status === 400 || response.status === 401 || response.status === 403) {
@@ -48971,13 +48971,13 @@ var require_ponyfill_es2018 = __commonJS({
       typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global2 = typeof globalThis !== "undefined" ? globalThis : global2 || self, factory(global2.WebStreamsPolyfill = {}));
     })(exports, (function(exports2) {
       "use strict";
-      function noop9() {
+      function noop8() {
         return void 0;
       }
       function typeIsObject(x2) {
         return typeof x2 === "object" && x2 !== null || typeof x2 === "function";
       }
-      const rethrowAssertionErrorRejection = noop9;
+      const rethrowAssertionErrorRejection = noop8;
       function setFunctionName(fn, name) {
         try {
           Object.defineProperty(fn, "name", {
@@ -51606,7 +51606,7 @@ var require_ponyfill_es2018 = __commonJS({
               return newPromise((resolveRead, rejectRead) => {
                 ReadableStreamDefaultReaderRead(reader, {
                   _chunkSteps: (chunk) => {
-                    currentWrite = PerformPromiseThen(WritableStreamDefaultWriterWrite(writer, chunk), void 0, noop9);
+                    currentWrite = PerformPromiseThen(WritableStreamDefaultWriterWrite(writer, chunk), void 0, noop8);
                     resolveRead(false);
                   },
                   _closeSteps: () => resolveRead(true),
@@ -52287,7 +52287,7 @@ var require_ponyfill_es2018 = __commonJS({
       function ReadableStreamFromIterable(asyncIterable) {
         let stream6;
         const iteratorRecord = GetIterator(asyncIterable, "async");
-        const startAlgorithm = noop9;
+        const startAlgorithm = noop8;
         function pullAlgorithm() {
           let nextResult;
           try {
@@ -52339,7 +52339,7 @@ var require_ponyfill_es2018 = __commonJS({
       }
       function ReadableStreamFromDefaultReader(reader) {
         let stream6;
-        const startAlgorithm = noop9;
+        const startAlgorithm = noop8;
         function pullAlgorithm() {
           let readPromise;
           try {
@@ -52658,7 +52658,7 @@ var require_ponyfill_es2018 = __commonJS({
           });
         }
         const sourceCancelPromise = stream6._readableStreamController[CancelSteps](reason);
-        return transformPromiseWith(sourceCancelPromise, noop9);
+        return transformPromiseWith(sourceCancelPromise, noop8);
       }
       function ReadableStreamClose(stream6) {
         stream6._state = "closed";
@@ -53879,7 +53879,7 @@ async function toFormData(Body2, ct) {
   parser.end();
   return formData;
 }
-var s, S, f2, F, LF, CR, SPACE, HYPHEN, COLON, A, Z, lower, noop8, MultipartParser;
+var s, S, f2, F, LF, CR, SPACE, HYPHEN, COLON, A, Z, lower, noop7, MultipartParser;
 var init_multipart_parser = __esm({
   "node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/multipart-parser.js"() {
     init_define_INFINICHAT_PI();
@@ -53911,7 +53911,7 @@ var init_multipart_parser = __esm({
     A = 97;
     Z = 122;
     lower = (c) => c | 32;
-    noop8 = () => {
+    noop7 = () => {
     };
     MultipartParser = class {
       /**
@@ -53920,13 +53920,13 @@ var init_multipart_parser = __esm({
       constructor(boundary) {
         this.index = 0;
         this.flags = 0;
-        this.onHeaderEnd = noop8;
-        this.onHeaderField = noop8;
-        this.onHeadersEnd = noop8;
-        this.onHeaderValue = noop8;
-        this.onPartBegin = noop8;
-        this.onPartData = noop8;
-        this.onPartEnd = noop8;
+        this.onHeaderEnd = noop7;
+        this.onHeaderField = noop7;
+        this.onHeadersEnd = noop7;
+        this.onHeaderValue = noop7;
+        this.onPartBegin = noop7;
+        this.onPartData = noop7;
+        this.onPartEnd = noop7;
         this.boundaryChars = {};
         boundary = "\r\n--" + boundary;
         const ui8a = new Uint8Array(boundary.length);
@@ -74399,10 +74399,10 @@ function raiseUndiciTimeouts(timeout) {
   }
 }
 function createAttemptSignal(timeout, callerSignal) {
-  const noop9 = () => {
+  const noop8 = () => {
   };
   if (!(timeout && timeout > 0) && !callerSignal) {
-    return { signal: void 0, dispose: noop9 };
+    return { signal: void 0, dispose: noop8 };
   }
   const controller = new AbortController();
   let timeoutHandle;
@@ -88522,7 +88522,7 @@ function timeoutError(timeoutMs) {
   error.body = "";
   return error;
 }
-function isRecord5(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function requiredNumber(label, value, field) {
@@ -88574,7 +88574,7 @@ function tokenCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 function parseClassifierUsage(value, model2) {
-  if (!isRecord5(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
+  if (!isRecord4(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
     return void 0;
   const input = tokenCount(value.input_tokens);
   const output = tokenCount(value.output_tokens);
@@ -88657,7 +88657,7 @@ function choiceProbabilities(value, id) {
   if (!Array.isArray(value))
     throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
   return Object.fromEntries(value.map((entry2) => {
-    if (!isRecord5(entry2) || typeof entry2.value !== "string") {
+    if (!isRecord4(entry2) || typeof entry2.value !== "string") {
       throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
     }
     return [entry2.value, requiredNumber(LABEL, entry2.probability, `probability for ${id}.${entry2.value}`)];
@@ -88695,7 +88695,7 @@ function parseAnswers(value, context3) {
     throw new Error(`${LABEL} returned an unexpected response`);
   const byName = /* @__PURE__ */ new Map();
   for (const answer2 of value) {
-    if (isRecord5(answer2) && typeof answer2.name === "string")
+    if (isRecord4(answer2) && typeof answer2.name === "string")
       byName.set(answer2.name, answer2);
   }
   return Object.fromEntries(Object.entries(context3.questions).map(([id, question]) => {
@@ -88737,7 +88737,7 @@ var init_openai_decisions = __esm({
           input: wireInput(context3),
           questions: Object.entries(context3.questions).map(([id, question]) => wireQuestion(id, question))
         }, options, NO_RETRY_STATUSES);
-        if (!isRecord5(body))
+        if (!isRecord4(body))
           throw new Error(`${LABEL} returned an unexpected response`);
         const usage = parseClassifierUsage(body.usage, model2);
         if (usage)
@@ -89900,7 +89900,7 @@ var init_openrouter_images = __esm({
 
 // node_modules/.pnpm/@earendil-works+pi-ai@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatur_650820bfd44a3c6cefd0e1345c0a96b9/node_modules/@earendil-works/pi-ai/dist/api/system-one-shared.js
 function probabilities(label, value, id) {
-  if (!isRecord5(value))
+  if (!isRecord4(value))
     throw new Error(`${label} returned invalid probabilities for ${id}`);
   return Object.fromEntries(Object.entries(value).map(([key2, probability]) => [
     key2,
@@ -89908,12 +89908,12 @@ function probabilities(label, value, id) {
   ]));
 }
 function parseAnswers2(label, value, context3) {
-  if (!isRecord5(value))
+  if (!isRecord4(value))
     throw new Error(`${label} returned an unexpected response`);
   const answers = [];
   for (const [id, question] of Object.entries(context3.questions)) {
     const answer2 = value[id];
-    if (!isRecord5(answer2))
+    if (!isRecord4(answer2))
       throw new Error(`${label} did not return an answer for ${id}`);
     if (question.type === "choice") {
       if (answer2.type !== "choice" || typeof answer2.choice !== "string") {
@@ -90063,7 +90063,7 @@ var init_typesafe_system_one = __esm({
       url: (model2) => new URL("systemone", `${model2.baseUrl.replace(/\/+$/u, "")}/`),
       payload: (model2, request2) => ({ model: model2.id, ...request2 }),
       output: (body) => {
-        if (!isRecord5(body))
+        if (!isRecord4(body))
           throw new Error("System One API returned an unexpected response");
         return body;
       }
@@ -93549,9 +93549,9 @@ function ExtendsPropertiesComparer(inferred, left, right) {
   for (const rightKey of guard_exports.Keys(right)) {
     properties[rightKey] = rightKey in left ? ExtendsProperty({}, left[rightKey], right[rightKey]) : IsOptional(right[rightKey]) ? IsInfer(right[rightKey]) ? ExtendsTrue(memory_exports.Assign(inferred, { [right[rightKey].name]: right[rightKey].extends })) : ExtendsTrue(inferred) : ExtendsFalse();
   }
-  const checked = guard_exports.Values(properties).every((result) => IsExtendsTrueLike(result));
-  const extracted = checked ? ExtractInferredProperties(guard_exports.Keys(properties), properties) : {};
-  return checked ? ExtendsTrue(extracted) : ExtendsFalse();
+  const checked2 = guard_exports.Values(properties).every((result) => IsExtendsTrueLike(result));
+  const extracted = checked2 ? ExtractInferredProperties(guard_exports.Keys(properties), properties) : {};
+  return checked2 ? ExtendsTrue(extracted) : ExtendsFalse();
 }
 function ExtendsProperties(inferred, left, right) {
   const compared = ExtendsPropertiesComparer(inferred, left, right);
@@ -100235,8 +100235,8 @@ function Parse(...args) {
     3: (context4, type2, value2) => [context4, type2, value2],
     2: (type2, value2) => [{}, type2, value2]
   });
-  const checked = Check2(context3, type, value);
-  if (checked)
+  const checked2 = Check2(context3, type, value);
+  if (checked2)
     return value;
   if (settings_exports.Get().correctiveParse)
     return Parser(context3, type, value);
@@ -113246,8 +113246,8 @@ var Validator = class {
   }
   /** Validates a value and returns it. Will throw if invalid. */
   Parse(value) {
-    const checked = this.Check(value);
-    if (checked)
+    const checked2 = this.Check(value);
+    if (checked2)
       return value;
     if (settings_exports.Get().correctiveParse)
       return Parser(this.Context(), this.Type(), value);
@@ -116887,10 +116887,10 @@ var ToolTask = defineTask({
         return settle2(runtime, task.input, call, COMPLETED, () => error, context3);
       }
       const prepared = prepare(tool, call.arguments);
-      const checked = "error" in prepared ? prepared : validate(tool, call, prepared.args);
-      if ("error" in checked)
-        return settle2(runtime, task.input, call, COMPLETED, () => invalid2(checked.error), context3);
-      let args = checked.args;
+      const checked2 = "error" in prepared ? prepared : validate(tool, call, prepared.args);
+      if ("error" in checked2)
+        return settle2(runtime, task.input, call, COMPLETED, () => invalid2(checked2.error), context3);
+      let args = checked2.args;
       let block;
       await runtime.hooks.each("beforeTool", async (hook2) => {
         if (block !== void 0)
@@ -132251,18 +132251,10 @@ async function connectSsh(options) {
 }
 
 // server/machines.ts
-var noop5 = () => {
-};
-var isRecord4 = (value) => typeof value === "object" && value !== null;
-var errorText2 = (error) => error instanceof Error ? error.message : String(error);
 var endpoint = ({ id, hostname, port, username }) => JSON.stringify([id, hostname, port, username]);
-function machineOf(value) {
-  if (!isRecord4(value)) return [];
-  const { id, name, hostname, port, username, hostKey } = value;
-  if (typeof id !== "string" || typeof name !== "string" || typeof hostname !== "string" || typeof port !== "number" || typeof username !== "string") return [];
-  const pinned = isRecord4(hostKey) && typeof hostKey.algorithm === "string" && typeof hostKey.fingerprint === "string" ? { algorithm: hostKey.algorithm, fingerprint: hostKey.fingerprint } : void 0;
-  return [{ id, name, hostname, port, username, ...pinned === void 0 ? {} : { hostKey: pinned } }];
-}
+var checked = (machine) => JSON.stringify([endpoint(machine), machine.hostKey?.fingerprint ?? null]);
+var without = (record2, id) => Object.fromEntries(Object.entries(record2).filter(([key2]) => key2 !== id));
+var isMachine = (value) => isRecord3(value) && typeof value.id === "string" && typeof value.name === "string" && typeof value.hostname === "string" && typeof value.port === "number" && typeof value.username === "string" && (value.hostKey === void 0 || isRecord3(value.hostKey) && typeof value.hostKey.algorithm === "string" && typeof value.hostKey.fingerprint === "string");
 function readMachines(file) {
   let text;
   try {
@@ -132271,12 +132263,8 @@ function readMachines(file) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
     throw error;
   }
-  try {
-    const machines = JSON.parse(text);
-    return Array.isArray(machines) ? machines.flatMap((machine) => machineOf(machine)) : [];
-  } catch {
-    return [];
-  }
+  const machines = JSON.parse(text);
+  return Array.isArray(machines) ? machines.filter(isMachine) : [];
 }
 function scanned(name, { lines: lines2, fingerprints }) {
   if (lines2.length !== fingerprints.length) throw new Error(`The SSH host key of ${name} could not be read.`);
@@ -132297,7 +132285,9 @@ var ServerMachines = class {
   self;
   machines;
   connections = /* @__PURE__ */ new Map();
-  /** The scans waiting for the phone, with the lines it would accept. */
+  /** Connections that answered once: a later failed start may be a changed host key, which only `connectSsh` names. */
+  answered = /* @__PURE__ */ new WeakSet();
+  /** The scans waiting for the phone, whose lines its accept trusts. */
   waiting = /* @__PURE__ */ new Map();
   reach = {};
   pending = {};
@@ -132328,28 +132318,28 @@ var ServerMachines = class {
       }
     }));
   }
-  /** Keeps the phone's list, lets go of the connections to machines it removed or moved, and tries each machine. */
+  /** Keeps the phone's list, lets go of the connections to machines it removed or moved, and checks new ones. */
   set(machines) {
     const temporary = `${this.file}.${process.pid}`;
     writeFileSync2(temporary, JSON.stringify(machines), { mode: 384 });
     renameSync2(temporary, this.file);
-    const before = new Map(this.machines.map((machine) => [machine.id, endpoint(machine)]));
+    const before = new Map(this.machines.map((machine) => [machine.id, checked(machine)]));
     this.machines = machines;
     const kept2 = new Set(machines.map(endpoint));
-    for (const [key2, opening] of this.connections) {
-      if (kept2.has(key2)) continue;
-      this.connections.delete(key2);
-      void opening.then((connection) => connection.close(), noop5);
+    for (const key2 of [...this.connections.keys()]) {
+      if (!kept2.has(key2)) this.drop(key2);
     }
-    const same2 = (id) => machines.some((machine) => machine.id === id && before.get(id) === endpoint(machine));
+    const same2 = (id) => machines.some((machine) => machine.id === id && before.get(id) === checked(machine));
     this.reach = Object.fromEntries(Object.entries(this.reach).filter(([id]) => same2(id)));
-    for (const id of this.waiting.keys()) {
-      if (!same2(id)) this.waiting.delete(id);
+    for (const id of [...this.waiting.keys()]) {
+      if (!same2(id)) this.pend(id, void 0);
     }
     this.publish();
-    for (const machine of machines) void this.started(machine).catch(noop5);
+    for (const machine of machines) {
+      if (this.reach[machine.id] === void 0) void this.started(machine).catch(noop4);
+    }
   }
-  /** Trusts the keys waiting for machine `id` once the phone accepted these fingerprints, then tries it again. */
+  /** Trusts the keys waiting for machine `id` once the phone accepted these fingerprints, then checks it again. */
   async acceptHostKey(id, fingerprints) {
     const machine = this.machines.find((candidate) => candidate.id === id);
     const waiting = this.waiting.get(id);
@@ -132361,16 +132351,17 @@ var ServerMachines = class {
     }
     const target = this.target(machine);
     if (waiting.changed) await forgetHostKey(target);
-    await acceptHostKey(target, waiting.lines);
-    this.waiting.delete(id);
+    await acceptHostKey(target, waiting.keys.map(({ line }) => line));
+    this.pend(id, void 0);
+    this.drop(endpoint(machine));
+    this.reach = without(this.reach, id);
     this.publish();
-    void this.started(machine).catch(noop5);
+    void this.started(machine).catch(noop4);
   }
   /** At shutdown, once the conversation's tools stopped: stops each machine's daemon, also one still connecting. */
   close() {
     this.closed = true;
-    for (const opening of this.connections.values()) void opening.then((connection) => connection.close(), noop5);
-    this.connections.clear();
+    for (const key2 of [...this.connections.keys()]) this.drop(key2);
   }
   /** How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its ID. */
   target(machine) {
@@ -132382,22 +132373,27 @@ var ServerMachines = class {
       hostKeyAlias: machine.id
     };
   }
+  drop(key2) {
+    const opening = this.connections.get(key2);
+    this.connections.delete(key2);
+    void opening?.then((connection) => connection.close(), noop4);
+  }
   /** Its connection, started, and what its daemon reported: what each use needs, and what `reach` shows of it. */
-  async started(machine) {
+  async started(machine, again = false) {
     if (this.closed) throw new Error(`InfiniChat is stopping on ${this.self}.`);
     const key2 = endpoint(machine);
     const opening = this.connections.get(key2) ?? this.open(machine);
     this.connections.set(key2, opening);
+    let connection;
     try {
-      const connection = await opening;
+      connection = await opening;
       const info = await connection.info();
+      this.answered.add(connection);
       this.record(machine, void 0);
       return { connection, info };
     } catch (error) {
-      if (this.connections.get(key2) === opening) {
-        this.connections.delete(key2);
-        void opening.then((connection) => connection.close(), noop5);
-      }
+      if (this.connections.get(key2) === opening) this.drop(key2);
+      if (!again && connection !== void 0 && this.answered.has(connection)) return this.started(machine, true);
       this.record(machine, error);
       throw error;
     }
@@ -132413,7 +132409,7 @@ var ServerMachines = class {
       const keys = scanned(machine.name, await scanHostKey(target));
       const pinned = keys.filter(({ fingerprint }) => fingerprint === machine.hostKey?.fingerprint);
       if (pinned.length === 0) {
-        if (this.listed(machine)) this.waiting.set(machine.id, { lines: keys.map(({ line }) => line), keys, changed });
+        if (this.listed(machine)) this.pend(machine.id, { keys, changed });
         throw new Error(changed ? `The SSH host key ${machine.name} presents to ${this.self} changed. Compare its fingerprint in Remote machines on the phone, and accept it there only if you know why it changed.` : `${this.self} doesn\u2019t trust the SSH host key ${machine.name} presents yet. Compare its fingerprint in Remote machines on the phone, then accept it there.`);
       }
       if (changed) await forgetHostKey(target);
@@ -132427,15 +132423,23 @@ var ServerMachines = class {
   /** What the latest attempt found of a machine that is still listed as it was tried. */
   record(machine, error) {
     if (!this.listed(machine)) return;
-    this.reach = {
-      ...this.reach,
-      [machine.id]: error === void 0 ? { reachable: true } : { reachable: false, error: errorText2(error) }
-    };
-    if (error === void 0) this.waiting.delete(machine.id);
+    this.reach = { ...this.reach, [machine.id]: error === void 0 ? { reachable: true } : { reachable: false, error: error instanceof Error ? error.message : String(error) } };
+    if (error === void 0) this.pend(machine.id, void 0);
     this.publish();
   }
+  /** Keeps a scan for the phone, or lets it go, with what `pendingHostKeys` shows of it. */
+  pend(id, scan) {
+    if (scan === void 0) {
+      if (this.waiting.delete(id)) this.pending = without(this.pending, id);
+      return;
+    }
+    this.waiting.set(id, scan);
+    this.pending = { ...this.pending, [id]: {
+      changed: scan.changed,
+      keys: scan.keys.map(({ algorithm, fingerprint }) => ({ algorithm, fingerprint }))
+    } };
+  }
   publish() {
-    this.pending = Object.fromEntries([...this.waiting].map(([id, { keys, changed }]) => [id, { keys: keys.map(({ algorithm, fingerprint }) => ({ algorithm, fingerprint })), changed }]));
     for (const listener of [...this.listeners]) listener();
   }
 };
@@ -132809,7 +132813,7 @@ var MessagesSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(ChatMe
 var ScheduledSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(ScheduledTaskSchema));
 var ServerSchema = typebox_exports.Object({
   bundle: typebox_exports.String(),
-  pi: typebox_exports.Object({ durable: typebox_exports.String(), ai: typebox_exports.String(), chord: typebox_exports.String(), env: typebox_exports.String() }),
+  pi: typebox_exports.Object({ durable: typebox_exports.String(), ai: typebox_exports.String(), chord: typebox_exports.String() }),
   device: typebox_exports.String(),
   /** The device's description, the text the phone's device list gives the machine. */
   description: typebox_exports.String()

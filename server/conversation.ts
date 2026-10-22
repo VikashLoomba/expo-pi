@@ -10,7 +10,7 @@ import type { ConversationFiles, ConversationState } from '../src/pi/infinichat-
 import type { InfiniChatService } from '../src/pi/infinichat-service';
 import { readState, updateState } from './state';
 
-const noop = () => {};
+export const noop = () => {};
 const DATABASE = 'infinichat.db';
 type ConversationFile = ConversationFiles['db'];
 
