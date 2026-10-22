@@ -1,7 +1,7 @@
 import { Type, type Static } from '@earendil-works/pi-ai';
 
 /** Presentation-only metadata. Native response items and encrypted state stay out of the UI. */
-export const WebSearchCallSchema = Type.Object({
+const WebSearchCallSchema = Type.Object({
   id: Type.String(),
   status: Type.Enum(['running', 'completed', 'failed', 'interrupted']),
   action: Type.Enum(['search', 'open_page', 'find_in_page']),
@@ -12,7 +12,7 @@ export const WebSearchCallSchema = Type.Object({
 });
 export type WebSearchCall = Static<typeof WebSearchCallSchema>;
 
-export const WebSearchSourceSchema = Type.Object({
+const WebSearchSourceSchema = Type.Object({
   url: Type.String(),
   title: Type.Optional(Type.String()),
   /** The answer's Markdown links cite this page. */

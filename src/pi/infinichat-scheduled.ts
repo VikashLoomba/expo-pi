@@ -3,11 +3,10 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { Type, type Static } from '@earendil-works/pi-ai';
 import type { Harness, TaskGraph } from '@earendil-works/pi-durable';
 
-import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
+import { SCHEDULED_TASK, ScheduledInputSchema, type ScheduledInput } from './infinichat/schedule';
 
 const context = BACKGROUND_CONTEXT;
 
-export const ScheduledInputSchema = Type.Object({ task: Type.String(), until: Type.Number() });
 /** A scheduled task still waiting, by the number of pi-durable's own task ID. */
 export const ScheduledTaskSchema = Type.Object({ id: Type.Number(), ...ScheduledInputSchema.properties });
 export type ScheduledTask = Static<typeof ScheduledTaskSchema>;

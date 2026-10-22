@@ -26,7 +26,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
  * Owns InfiniChat's Harness, on its own database: OptChat's sequential tools, steer-all queueing and disabled
  * compaction are Harness-wide settings that must not reach ordinary chats. It runs wherever its host opens it, the
  * phone or a machine, with the devices that host gives its tools. Operations take the caller's context for their own
- * waits; cancelling one never cancels the work.
+ * waits and for a single commit that has not started; cancelling one never leaves work half done.
  */
 export class InfiniChatService {
   private readonly listeners = new Set<() => void>();
@@ -118,10 +118,11 @@ export class InfiniChatService {
     await requireModelAuth(this.models, settingsOf(agent), this.authError);
     this.assertOpen();
     await this.chat.accept({ requestId, content });
-    // OptChat's acceptance commit is its own, so the view's record of the request follows in the next one.
+    // OptChat's acceptance commit is its own, so the view's record of the request follows in the next one. Once the
+    // input is admitted that record is part of the work, so a caller that goes away cannot cancel it.
     await root.commit(async (tx) => {
       (await tx.doc(ChatMetadataDoc, root.id)).lastRequest = requestId;
-    }, context);
+    }, BACKGROUND_CONTEXT);
   }
 
   /** Cancels accepted inputs not yet sent and aborts the running turn; summaries and agents keep running. */

@@ -29,8 +29,13 @@ bundle. The machine must already have Node ≥ 22.19 (owner decision); nothing i
 
   Like the daemon script, it gets a `--check` mode, so a stale asset fails the build checks.
 - `server-assets.ts` loads and verifies the asset exactly as `daemon-assets.ts` loads the daemon. The bundle is one
-  file of about 1–3 MB; the probe's server, with pi-durable, pi-ai, Chord and `ws`, bundled to 1.2 MB (225 KB
-  gzipped).
+  file of about 7.7 MB (1.8 MB gzipped), measured with piece 1. Most of it is:
+  - Photon's WebAssembly, embedded as base64: ~2.5 MB;
+  - the provider SDKs `createChatModels` pulls in: `@google/genai` ~0.9 MB, `openai` ~0.8 MB,
+    `@anthropic-ai/sdk` ~0.65 MB, and `google-auth-library` with its helpers ~0.4 MB;
+  - pi-ai, pi-durable, TypeBox and Chord, together ~1.9 MB.
+
+  The probe's server, with a faux model and no Photon, was 1.2 MB.
 
 ### Provisioning: `src/pi/infinichat-remote/install.ts`
 

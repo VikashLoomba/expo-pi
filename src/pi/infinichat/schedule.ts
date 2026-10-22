@@ -1,4 +1,4 @@
-import { Type } from '@earendil-works/pi-ai';
+import { Type, type Static } from '@earendil-works/pi-ai';
 import { defineTask, defineTool, type ConversationId, type Tx } from '@earendil-works/pi-durable';
 
 import { AgentCallDoc } from './agents';
@@ -7,7 +7,8 @@ import { AgentCallDoc } from './agents';
 export const SCHEDULED_TASK = 'optchat.scheduled-task';
 
 /** What the main agent is sent, and when, as a Harness clock time. */
-export type ScheduledInput = { task: string; until: number };
+export const ScheduledInputSchema = Type.Object({ task: Type.String(), until: Type.Number() });
+export type ScheduledInput = Static<typeof ScheduledInputSchema>;
 
 /** Admits a work message to the main agent in the caller's commit, as OptChat admits an agent's report. */
 type AdmitWork = (tx: Tx, root: ConversationId, input: { requestId: string; content: string; date: string }) =>

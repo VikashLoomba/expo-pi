@@ -54,8 +54,14 @@ becomes an `InfiniChatHost`. The screens don't change.
    - One client host per `RemoteInfiniChat`: `createHost({ name: "phone", self: …, kind: "client" })`.
    - Connect it with `host.connect(link, { principal })`.
    - Take one reference with `host.hold(InfiniChatRemote, {})`.
-   - The `ChatViewSource` adapter and the stores read the reference's `status`, `controls`, `messages` and
-     `scheduled`, typed by the contract's schemas.
+   - The `ChatViewSource` adapter and the stores read the reference's `snapshot` (`{ view, report? }`: the view's
+     `ChatViewSnapshot` and the Harness's latest report), `controls`, `messages` and `scheduled`, typed by the
+     contract's schemas. The member is not `status`: that name is the reference's own (Chord reserves it).
+   - A method that rejects on the server arrives wrapped. The server's error crosses as
+     `{ code: "unavailable", message }` (Chord `src/wire.ts:171-178`). The client rebuilds a `ChordError`, whose
+     `message` carries the code again (`src/errors.ts:36`), so `accept` rejects with
+     `unavailable: Sign in or connect OpenAI in Account to send a message.` Show the text after that prefix, as
+     the error notice shows a local error today.
 4. **Reconnect.** Done on demand, the way the app's daemon `Connection` restarts:
    - when the socket or the SSH session closes;
    - when the app becomes active;

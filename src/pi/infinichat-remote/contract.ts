@@ -3,8 +3,9 @@ import { Type } from '@earendil-works/pi-ai';
 
 import { ChatMessageSchema } from '../../chat/types';
 import { ChatViewSnapshotSchema } from '../chat-view';
-import { ScheduledInputSchema, ScheduledTaskSchema } from '../infinichat-scheduled';
+import { ScheduledTaskSchema } from '../infinichat-scheduled';
 import { InfiniChatControlsSchema } from '../infinichat-view';
+import { ScheduledInputSchema } from '../infinichat/schedule';
 import { ChatModelSettingsSchema } from '../model-catalog';
 import { UserInputSchema } from '../user-input';
 

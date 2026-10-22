@@ -30,6 +30,12 @@ Checked on 2026-10-21. Versions:
 | Credentials stay with the Durable worker | pi-env `README.md:4` |
 | `connectSsh`, `sshConnection`, `scanHostKey`, `acceptHostKey`, `binary` | pi-env `src/ssh.ts:355-359`, `:464-472`, `:519-532` |
 | Node ≥ 22.19 and built-in `node:sqlite` | pi-durable and chord `package.json` `engines`; chord `src/sqlite/node.ts:3-4` |
+| Member names a contract may not use (`status`, `error`, `variant`, …), at v1.4.0 | chord `src/contract.ts:178-189` |
+| No `undefined` anywhere in state; it is not dropped as `JSON.stringify` drops it, at v1.4.0 | chord `src/delta/README.md:115-119` |
+| A link close aborts the calls that came over it, at v1.4.0 | chord `src/connection.ts:1230-1240` |
+| A method's error crosses as `{ code: "unavailable", message }`, prefixed again on the client, at v1.4.0 | chord `src/wire.ts:171-181`, `src/errors.ts:36` |
+| A single-file bundle reads its own copy of Photon's WebAssembly for `createPhotonImages`, at v1.4.0 | pi-durable `src/images/node.ts:24-25` (`dist/images/node.d.ts:17-19`) |
+| Closing the Harness closes its storage, at v1.4.0 | pi-durable `src/types.ts:1075` |
 | Local port forwarding for WebSocket clients | react-native-ssh `README.md:16-20`, `:87-93`; `src/index.ts:146-156` |
 | `exec` output is capped at 16 MiB; `exec` has no stdin | react-native-ssh `src/errors.ts:20`, README "Planned" |
 | `WebSocket(url, protocols, { headers })` | react-native `Libraries/WebSocket/WebSocket.js:100` |
@@ -93,6 +99,8 @@ A subagent's assessment of branch `replication` at `2cf6cd898`, 2026-10-21. It i
 | What | Value |
 | --- | --- |
 | Probe server bundled into one ESM file (pi-durable, pi-ai, Chord, `ws`) | 1.2 MB, 225 KB gzipped; runs on Node |
+| Piece 1's server bundle (`dist/infinichat-server/server.js`, esbuild 0.28.2, pi 1.4.0) | 7.7 MB, 1.8 MB gzipped. Photon's WebAssembly as base64 ~2.5 MB; `@google/genai` ~0.9 MB, `openai` ~0.8 MB, `@anthropic-ai/sdk` ~0.65 MB, `google-auth-library` and helpers ~0.4 MB; pi-ai, pi-durable, TypeBox and Chord ~1.9 MB |
+| Piece 1's server on macOS, Node 25.6.1 | `SIGTERM` with a client connected: exits 0 in 0.03 s |
 | Same, as a Bun-compiled executable (darwin-arm64) | 62 MB (not used: Node is required instead) |
 | Official Node 22 tarballs (darwin-arm64, linux-x64) | 26 MB, 31 MB (not used) |
 | The phone's InfiniChat database, 2026-10-21 backup | 32 MB, plus a 4.1 MB WAL |
@@ -103,5 +111,7 @@ A subagent's assessment of branch `replication` at `2cf6cd898`, 2026-10-21. It i
 - Linux user services without lingering (piece 2).
 - The ChatGPT receiver answering a server's `manual_code` prompt (piece 4).
 - Move timings on the real database (piece 5).
-- Whether the native web-search wrapper in `createChatModels` reaches InfiniChat requests at all. Check
-  `src/pi/native-web-search/bindings.ts` when building piece 1's `server/models.ts`.
+
+Checked in piece 1: the native web-search wrapper in `createChatModels` never reaches InfiniChat requests. It acts
+only on a request whose signal the chat service's `openai-native-web-search` extension bound
+(`src/pi/native-web-search/durable.ts`), and InfiniChat's Harness doesn't install that extension.

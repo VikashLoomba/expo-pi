@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,10 @@ export async function listen(host: Host<InfiniChatPrincipal>, home: string): Pro
   if (address === null || typeof address === 'string') throw new Error(`Unexpected listening address ${address}.`);
   // The bundle's directory is named after its hash, so the phone can tell which bundle answers.
   const bundle = basename(dirname(fileURLToPath(import.meta.url)));
-  await writeFile(join(home, 'server.json'), JSON.stringify({ pid: process.pid, port: address.port, bundle }));
+  // Written aside and renamed into place, so the phone polling it never reads half a file.
+  const temporary = join(home, `server.json.${process.pid}`);
+  await writeFile(temporary, JSON.stringify({ pid: process.pid, port: address.port, bundle }));
+  await rename(temporary, join(home, 'server.json'));
   console.log(`InfiniChat listening on 127.0.0.1:${address.port}`);
   return server;
 }
