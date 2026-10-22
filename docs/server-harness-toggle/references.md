@@ -45,6 +45,18 @@ Checked on 2026-10-21. Versions:
 | Starting the daemon and its `hello` may take 60 s (`START_TIMEOUT_MS`), at v1.4.0 | pi-env `src/connection.ts:16-17` |
 | `processLock` is a socket file under `os.tmpdir()` on macOS, an abstract socket on Linux, at v1.4.0 | chord `src/manager.ts:82-91`, `:133-134` |
 | Node ≥ 22.19 | pi-durable `package.json` `engines` (installed 1.4.0, line 150) |
+| `hold` before any upstream: the binding ends with `unavailable: no route to …`, at v1.4.0 | chord `src/host.ts:1112-1127` (`:1126`) |
+| `connect` closes a still-open upstream link (`replaced`) and re-holds every binding without a hold, at v1.4.0 | chord `src/host.ts:953-967` |
+| An upstream link's close detaches its bindings (`loading`, values kept) and rejects its calls in flight with `unavailable: link to … closed`, at v1.4.0 | chord `src/connection.ts:1236-1258`, `src/remote.ts:305-315` |
+| A call on a `loading` reference waits for `live`, cancelled only by its `ctx` signal (`aborted`, with the signal's reason as `cause`), at v1.4.0 | chord `src/remote.ts:335-340`, `src/object.ts:544-556` |
+| A reference method called without a `ctx` starts its own root; with `{ signal }` a root's calls end with it, at v1.4.0 | chord `src/remote.ts:640-646` |
+| `host.close()` disposes objects and closes links, but leaves a held remote reference `loading`, at v1.4.0 | chord `src/host.ts:1231-1241` |
+| Links ping every 15 s and close after 45 s without a frame, at v1.4.0 | chord `src/connection.ts:439-448` |
+| `webSocketLink`'s `compress` defaults to false; the link closes its socket with 1000 when it ends, at v1.4.0 | chord `src/link.ts:356`, `:369`, `:398`, `:410` |
+| `forwardLocal` closes itself when the connection drops, `onClosed` with a reason; SSH keepalive 15 s × 3 | react-native-ssh `src/index.ts:353-369`, `:400-401` |
+| Expo's tsconfig loads the DOM lib, whose `WebSocket` constructor has two parameters; React Native declares three | expo `tsconfig.base.json:9`; react-native `src/types/globals.d.ts:569-578` |
+| `AbortController.abort(reason)` and `signal.reason` | react-native 0.88 `src/private/webapis/dom/abort-api/AbortController.js:63`, `AbortSignal.js:158` |
+| `Stack.Toolbar.MenuAction isOn` is the menu item's `on` state; a root menu's `title` is also the button's label | expo-router 58.0.25 `build/layouts/stack-utils/toolbar/StackToolbarMenu/index.js:186-193`, `:57-64` |
 
 ## Chord over WebSocket in Hermes
 
@@ -150,9 +162,57 @@ itself was not available non-interactively.
 | Linux script with logging `systemctl`/`loginctl` stand-ins | Another bundle in `server.json`: `daemon-reload`, `enable`, `restart`. This bundle running: `enable`. New secret: `daemon-reload`, `enable`, `restart`. Linger `no` read |
 | systemd unit for the name `Lab "A" \ 100% $HOME` | `ExecStart=… "--device" "Lab \"A\" \\ 100%% $$HOME"` (text only) |
 
+## Piece 3 on macOS
+
+**Checks, 2026-10-22**, on the implementer's Mac (arm64, Node 24.5.0 from Homebrew on the login shell's `PATH`),
+with pi 1.4.0 (tag `4a080252f`), React Native 0.88.0, react-native-ssh 0.3.0 and expo-router 58.0.25 installed. No
+device or simulator was used.
+- **What ran:** the app's real `RemoteInfiniChat`, `install.ts`, contract, `RemoteHostRepository` and Chord, bundled
+  for Node with esbuild, against the real server asset (bundle `c8b959ca…`).
+- **Stand-ins, not committed:**
+  - react-native-ssh: each command ran as sshd runs it (`$SHELL -c`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`), and
+    `forwardLocal` piped a loopback listener to the server's port. It could drop the tunnelled sockets, or the whole
+    connection with `onDisconnected` and the forward's `onClosed`, and refuse new connections.
+  - The Keychain, expo-crypto, expo-asset and expo-file-system.
+  - React Native's `WebSocket(url, protocols, { headers })` mapped onto Node's `WebSocket(url, { protocols,
+    headers })`.
+- **The phone's zone** was `TZ=Asia/Kolkata`.
+- **Servers:** first a server started by hand (`TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)`, a temporary secret), then
+  the LaunchAgent that install created.
+- **Afterwards:** `~/.infinichat`, the LaunchAgent and its plist were removed, and no server process or Chord lock
+  socket was left.
+
+| Check | Result |
+| --- | --- |
+| Before connecting | View `loading`, no controls, no messages, scheduled `undefined` |
+| Connect to a running server of this bundle | Connected in 61–63 ms. One SSH connection, no install scripts. The server's view said `loading`, then `ready` |
+| Hydrate | `snapshot.view` `ready`, controls, messages (a new conversation: 0), scheduled `[]` |
+| `setTimeZone` | `state.json` `{"timeZone":"Asia/Calcutta"}`, the phone's resolved zone |
+| `accept` before models are chosen | "Choose InfiniChat’s models in its settings to send a message." |
+| `updateSettings` with an unknown model | "The model no-such-model is unavailable from OpenAI. Choose a model in chat settings." (no code prefix) |
+| `updateSettings` | Resolved; the new instructions were in `controls` 3–8 ms later |
+| `accept` with models chosen and no credential | "Sign in or connect OpenAI in Account to send a message.", with the `unavailable: ` prefix stripped |
+| `stop`, `dismissError`, `cancelScheduled` of an unknown task | Resolved; `false` for the unknown task |
+| Socket drop (the tunnelled TCP connections destroyed) | `connecting` with the last messages and controls kept, then connected again by itself in 17–21 ms over one new SSH connection |
+| SSH loss (`onDisconnected`, the forward closing with a reason) | Connected again by itself in 18–20 ms, over a new connection |
+| Machine unreachable after a drop | The attempt failed with "The SSH server could not be reached through Tailscale. Check the VPN, address, and SSH port." Values were kept, and nothing retried in the next 500 ms |
+| A call while that attempt failed | Rejected with the same message |
+| A call while failed, machine reachable again | It started the reconnect, waited for it, went through (44–50 ms), and showed the change another client made meanwhile (catch-up) |
+| `close()` | Resolved at once. The sockets reported their close 22 ms later; then no SSH connection, forward, shell or socket was left. The Node process exited on its own |
+| Stale `server.json` (the hand-started server stopped by `SIGTERM`, the file naming its dead pid) | Install ran (stages connecting, checking, starting), bootstrapped the LaunchAgent, waited for the new `server.json`, connected: 1.34–1.37 s, two SSH connections. The same conversation |
+| Wrong secret (the Keychain held another one than `~/.infinichat/secret`) | The socket was closed with 1008. Install wrote this phone's secret, `kickstart -k` restarted the server, and the client connected: 10.4 s, launchd's respawn throttle (piece 2). The replaced secret was refused with 1008 afterwards |
+| Renamed machine (the server answered as the old `--device`) | Install rewrote the LaunchAgent with the new name, booted it out and in, and connected: 2.4 s |
+| `close()` during an install, at the checking stage | Cancelled in 22–23 ms; no SSH connection or shell left |
+| `npx expo export --platform ios` | Bundled (Hermes bytecode, 13 MB) |
+
 ## Unverified until a piece checks it
 
 - App Transport Security for `ws://127.0.0.1` through `forwardLocal` on a Release build (piece 3).
+- Piece 3 in Hermes and on the phone: the header menu and its checkmark, `Intl` time zone names, React Native's
+  WebSocket with the `Authorization` header through a real `forwardLocal`, reconnects after a locked or suspended app
+  and after Tailscale goes off and on, a killed app, and a send admitted once after a reconnect (the server has no
+  credentials until piece 4).
+- Piece 3 against Linux: the systemd and detached branches of install-when-needed.
 - Linux user services, with and without lingering, and the detached start (piece 2: checked on macOS with stand-ins
   only).
 - `launchctl bootstrap gui/<uid>` from a real SSH session, and an SSH session's `TMPDIR` on macOS (piece 2: run from a

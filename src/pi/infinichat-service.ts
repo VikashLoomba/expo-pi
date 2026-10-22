@@ -5,8 +5,9 @@ import { AgentDoc, configure, type Harness, type SessionEnd, type Storage } from
 
 import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
-import { ScheduledTasks } from './infinichat-scheduled';
-import { InfiniChatView } from './infinichat-view';
+import type { ChatViewSource } from './chat-view';
+import { ScheduledTasks, type ScheduledTask } from './infinichat-scheduled';
+import { InfiniChatView, type InfiniChatControls } from './infinichat-view';
 import { openOptChat, type OptChat } from './infinichat/app';
 import type { InfiniChatDevices } from './infinichat/device-tools';
 import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
@@ -19,6 +20,27 @@ import { WorkspaceDoc } from './workspace/document';
 /** `error` is the Harness's latest report; operations reject to their callers instead. */
 export interface InfiniChatSnapshot { error?: string }
 
+/** A value the screens follow with `useSyncExternalStore`. */
+interface Store<T> {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly getSnapshot: () => T;
+}
+
+/**
+ * InfiniChat as its screens use it, wherever its Harness runs: this core on the phone, or `RemoteInfiniChat` showing
+ * a machine's. The store itself is the Harness's latest report.
+ */
+export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
+  view(): ChatViewSource<InfiniChatControls>;
+  accept(input: UserMessage['content'], requestId: string): Promise<void>;
+  stop(): Promise<void>;
+  updateSettings(main: ChatModelSettings, summary: ChatModelSettings, instructions: string): Promise<void>;
+  cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean>;
+  dismissError(): void;
+  /** The scheduled tasks still waiting, soonest first; undefined until they are first read. */
+  readonly scheduled: Store<readonly ScheduledTask[] | undefined>;
+}
+
 const TITLE = 'InfiniChat';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -28,7 +50,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
  * phone or a machine, with the devices that host gives its tools. Operations take the caller's context for their own
  * waits and for a single commit that has not started; cancelling one never leaves work half done.
  */
-export class InfiniChatService {
+export class InfiniChatService implements InfiniChatHost {
   private readonly listeners = new Set<() => void>();
   private snapshot: InfiniChatSnapshot = {};
   private closed = false;

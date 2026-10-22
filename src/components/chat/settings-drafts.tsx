@@ -2,9 +2,9 @@ import type { ConversationId } from '@earendil-works/pi-durable';
 import { useNativeState } from '@expo/ui/swift-ui';
 import { createContext, use, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 
-import type { ChatView } from '@/pi/chat-view';
+import type { ChatView, ChatViewSource } from '@/pi/chat-view';
 import type { ChatExecutionSettings } from '@/pi/execution/document';
-import type { InfiniChatView } from '@/pi/infinichat-view';
+import type { InfiniChatControls } from '@/pi/infinichat-view';
 import type { ChatModelSettings } from '@/pi/model-catalog';
 
 type ChatSettings = { settings: ChatModelSettings; execution: ChatExecutionSettings };
@@ -51,7 +51,7 @@ export type InfiniChatRole = 'main' | 'summary';
 export type InfiniChatSettings = Record<InfiniChatRole, ChatModelSettings> & { instructions: string };
 
 type InfiniChatSettingsDraft = {
-  view: InfiniChatView | undefined;
+  view: ChatViewSource<InfiniChatControls> | undefined;
   initial: InfiniChatSettings;
   draft: InfiniChatSettings;
   setDraft: Dispatch<SetStateAction<InfiniChatSettings>>;
@@ -61,7 +61,7 @@ const InfiniChatSettingsDraftContext = createContext<InfiniChatSettingsDraft | u
 
 /** InfiniChat's unsaved settings, shared by its settings sheet's screens until the user saves or cancels. */
 export function InfiniChatSettingsDraftProvider({ view, initial, children }: {
-  view: InfiniChatView | undefined; initial: InfiniChatSettings; children: ReactNode;
+  view: ChatViewSource<InfiniChatControls> | undefined; initial: InfiniChatSettings; children: ReactNode;
 }) {
   const [draft, setDraft] = useState(initial);
   return <InfiniChatSettingsDraftContext value={{ view, initial, draft, setDraft }}>

@@ -1,9 +1,11 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
 import { router, Stack } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
 
-import { useChatApp, useChatControls, useInfiniChatError, useInfiniChatView } from '@/chat/chat-provider';
+import {
+  useChatApp, useChatControls, useInfiniChatConnection, useInfiniChatError, useInfiniChatView,
+} from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { Composer } from '@/components/chat/composer';
 import { ChatIcon } from '@/components/chat/icon';
@@ -11,11 +13,17 @@ import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { ChatTranscript } from '@/components/chat/transcript';
 import { useChatColors } from '@/hooks/use-chat-colors';
+import type { InstallStage } from '@/pi/infinichat-remote/install';
 import { findCatalogModel, getModelSettingsError } from '@/pi/model-catalog';
 import { userInput } from '@/pi/user-input';
 
 const TITLE = 'InfiniChat';
 const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its settings to send a message.';
+const PHONE = 'This iPhone';
+
+const connecting = (machine: string, stage: InstallStage | undefined) => stage === 'uploading'
+  ? `Installing InfiniChat on ${machine}…`
+  : stage === 'starting' ? `Starting InfiniChat on ${machine}…` : `Connecting to ${machine}…`;
 
 /** A draft keeps one request ID for every attempt to send it, so a resend after a failure is admitted once. */
 type Draft = { text: string; images: readonly PhotoAttachment[]; requestId: string };
@@ -24,11 +32,18 @@ const emptyDraft = (): Draft => ({ text: '', images: [], requestId: uuidv7() });
 /** InfiniChat's one conversation, as the chat screen shows a chat, sent through OptChat's acceptance. */
 export default function InfiniChatScreen() {
   const colors = useChatColors();
-  const { infiniChat: service, catalog, providerAccess, error: appError, dismissError } = useChatApp();
+  const {
+    infiniChat: service, catalog, providerAccess, error: appError, dismissError, remoteHosts, infiniChatMachine,
+    chooseInfiniChatMachine,
+  } = useChatApp();
   const ready = service !== undefined;
   const view = useInfiniChatView();
   const conversation = useChatControls(view);
   const serviceError = useInfiniChatError();
+  const connection = useInfiniChatConnection();
+  const { hosts } = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  const machine = infiniChatMachine === null ? undefined
+    : hosts.find((host) => host.id === infiniChatMachine)?.name ?? 'Remote machine';
   const [draft, setDraft] = useState(emptyDraft);
   const changeDraft = useCallback((text: string) => {
     setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
@@ -108,11 +123,20 @@ export default function InfiniChatScreen() {
       setStopping(false);
     }
   };
-  const messageError = localError || conversation?.error || serviceError || appError || access.error;
+  // A machine that can't be reached is tried again when the user asks, and when the app becomes active.
+  const connectionError = connection?.status === 'failed' ? connection.error : undefined;
+  const messageError = localError || connectionError || conversation?.error || serviceError || appError
+    || access.error;
+  const retry = !localError && connectionError ? connection?.retry : undefined;
   const dismiss = localError ? () => setLocalError(undefined)
-    : conversation?.error ? undefined
+    : connectionError || conversation?.error ? undefined
       : serviceError ? () => service?.dismissError()
         : appError ? dismissError : undefined;
+  const working = busy ? `Working… · ${settingsLabel}` : settingsLabel;
+  const subtitle = machine === undefined ? working
+    : connection?.status === 'failed' ? `${machine} is unreachable`
+      : connection?.status === 'connecting' ? connecting(machine, connection.stage)
+        : `${machine} · ${working}`;
   const accountStatus = !access.ready ? 'Restoring your connection…'
     : access.error ? `Reconnect ${provider?.name || providerId} in Account`
       : `Connect ${provider?.name || providerId || 'your provider'} to send a message`;
@@ -128,13 +152,25 @@ export default function InfiniChatScreen() {
         <Text numberOfLines={1} style={[styles.headerName, { color: PlatformColor('label') }]}>{TITLE}</Text>
         <View style={styles.headerSettings}>
           <Text numberOfLines={1} style={[styles.headerSubtitle, { color: PlatformColor('secondaryLabel') }]}>
-            {busy ? `Working… · ${settingsLabel}` : settingsLabel}
+            {subtitle}
           </Text>
           <ChatIcon name="down" color={PlatformColor('secondaryLabel')} size={9} />
         </View>
       </Pressable>,
     }} />
     <Stack.Toolbar placement="right">
+      <Stack.Toolbar.Menu icon={machine === undefined ? 'iphone' : 'server.rack'}
+        accessibilityLabel={`InfiniChat runs on ${machine ?? PHONE}`}
+        accessibilityHint="Choose this iPhone or one of your remote machines.">
+        <Stack.Toolbar.MenuAction icon="iphone" isOn={infiniChatMachine === null}
+          onPress={() => chooseInfiniChatMachine(null)}>
+          {PHONE}
+        </Stack.Toolbar.MenuAction>
+        {hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
+          isOn={host.id === infiniChatMachine} onPress={() => chooseInfiniChatMachine(host.id)}>
+          {host.name}
+        </Stack.Toolbar.MenuAction>)}
+      </Stack.Toolbar.Menu>
       <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks" disabled={!ready}
         onPress={() => router.push('/infinichat-schedule')} />
     </Stack.Toolbar>
@@ -149,8 +185,12 @@ export default function InfiniChatScreen() {
       </View>}
       {messageError && messageError !== settingsError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-error" message={messageError}
-          action={dismiss ? 'Dismiss' : access.error ? 'Account' : undefined}
-          onAction={dismiss ?? (access.error ? openAccount : undefined)} />
+          action={retry ? 'Try Again' : dismiss ? 'Dismiss' : access.error ? 'Account' : undefined}
+          onAction={retry ?? dismiss ?? (access.error ? openAccount : undefined)} />
+      </View>}
+      {connection?.notice && !messageError && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-machine-notice" tone="neutral" message={connection.notice}
+          action="Dismiss" onAction={connection.dismissNotice} />
       </View>}
       <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
         onStop={() => { void stop(); }}

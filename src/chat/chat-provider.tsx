@@ -13,9 +13,11 @@ import type { ChatView, ChatViewSnapshot, ChatViewSource } from '../pi/chat-view
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
 import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
+import { RemoteInfiniChat, type RemoteConnection } from '../pi/infinichat-remote/client';
+import { createInfiniChatMachineChoice } from '../pi/infinichat-remote/machine-choice';
 import type { ScheduledTask } from '../pi/infinichat-scheduled';
-import type { InfiniChatService } from '../pi/infinichat-service';
-import type { InfiniChatView } from '../pi/infinichat-view';
+import type { InfiniChatHost } from '../pi/infinichat-service';
+import type { InfiniChatControls } from '../pi/infinichat-view';
 import { buildModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
@@ -48,12 +50,14 @@ function useChatRuntime() {
     credentials.registerProviders(session.getProviders().map((provider) => provider.id));
     return session;
   });
+  const [machineChoice] = useState(createInfiniChatMachineChoice);
   const [service, setService] = useState<DurableChatService>();
-  const [infiniChat, setInfiniChat] = useState<InfiniChatService>();
+  const [infiniChat, setInfiniChat] = useState<InfiniChatHost>();
   const [openError, setOpenError] = useState<string>();
   // Opening and closing storage apply in order, also across a remount, so two connections never coexist.
-  const lifecycle = useRef<{ queue: Promise<void>; service?: DurableChatService; infiniChat?: PhoneInfiniChat }>(
-    { queue: Promise.resolve() });
+  const lifecycle = useRef<{
+    queue: Promise<void>; service?: DurableChatService; infiniChat?: PhoneInfiniChat | RemoteInfiniChat;
+  }>({ queue: Promise.resolve() });
   useEffect(() => {
     const state = lifecycle.current;
     const serialize = (step: () => Promise<void>) => {
@@ -84,7 +88,8 @@ function useChatRuntime() {
       }
     };
     // Returning to the app retries a failed open; an open service ignores the call. InfiniChat has its own database
-    // and Harness, opened in the same step.
+    // and Harness, opened in the same step, unless it runs on a machine: then it connects there, and returning to the
+    // app reconnects a lost connection.
     const open = () => serialize(async () => {
       const failures: string[] = [];
       if (!state.service) {
@@ -109,7 +114,16 @@ function useChatRuntime() {
           failures.push(errorText(error));
         }
       }
-      if (!state.infiniChat) {
+      const machineId = machineChoice.getSnapshot();
+      if (state.infiniChat instanceof RemoteInfiniChat) {
+        state.infiniChat.reconnect();
+      } else if (!state.infiniChat && machineId !== null) {
+        // The machine's own service runs the Harness there, so the keep-alive observes nothing for InfiniChat.
+        const opened = new RemoteInfiniChat(remoteHosts, machineId);
+        state.infiniChat = opened;
+        setInfiniChat(opened);
+        opened.reconnect();
+      } else if (!state.infiniChat) {
         try {
           const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
             storage, models, workspaces, remote, remoteHosts, keepAlive, authError,
@@ -134,8 +148,19 @@ function useChatRuntime() {
     });
     open();
     const subscription = AppState.addEventListener('change', (appState) => { if (appState === 'active') open(); });
+    // Choosing where InfiniChat runs closes it where it ran, then opens it on the chosen side.
+    const unsubscribeChoice = machineChoice.subscribe(() => {
+      serialize(async () => {
+        const closing = state.infiniChat;
+        state.infiniChat = undefined;
+        setInfiniChat(undefined);
+        await closing?.close();
+      });
+      open();
+    });
     return () => {
       subscription.remove();
+      unsubscribeChoice();
       serialize(async () => {
         const closing = state.service;
         const closingInfiniChat = state.infiniChat;
@@ -153,8 +178,9 @@ function useChatRuntime() {
         if (failure !== undefined) throw failure;
       });
     };
-  }, [credentials, keepAliveSettings, models, remote, remoteHosts, workspaces]);
-  return { remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, openError, setOpenError };
+  }, [credentials, keepAliveSettings, machineChoice, models, remote, remoteHosts, workspaces]);
+  return { remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, machineChoice, openError,
+    setOpenError };
 }
 
 /** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
@@ -257,10 +283,13 @@ function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: 
 
 function useChatController() {
   const {
-    remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, openError, setOpenError,
+    remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, machineChoice, openError,
+    setOpenError,
   } = useChatRuntime();
   const serviceState = useSyncExternalStore(service?.subscribe ?? subscribeNothing,
     service?.getSnapshot ?? getClosedService, service?.getSnapshot ?? getClosedService);
+  const infiniChatMachine = useSyncExternalStore(machineChoice.subscribe, machineChoice.getSnapshot,
+    machineChoice.getSnapshot);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
   const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
@@ -323,7 +352,8 @@ function useChatController() {
 
   // Only a failed open and the Harness's own reports reach every screen; operations return their errors to the
   // screen that started them.
-  return { service, infiniChat, ready: service !== undefined, chats: serviceState.chats,
+  return { service, infiniChat, infiniChatMachine, chooseInfiniChatMachine: machineChoice.choose,
+    ready: service !== undefined, chats: serviceState.chats,
     error: openError ?? serviceState.error,
     dismissError, signOutPending, disconnectingProvider,
     ...signIn, remoteHosts, remote, catalog, refreshCatalog, providerAccess, keepAliveSettings,
@@ -383,9 +413,20 @@ export function useChatError(view: ChatViewSource | undefined): string | undefin
 }
 
 /** InfiniChat's conversation for the calling screen, once its service is open; the hooks above read it. */
-export function useInfiniChatView(): InfiniChatView | undefined {
+export function useInfiniChatView(): ChatViewSource<InfiniChatControls> | undefined {
   const { infiniChat } = useChatApp();
   return useMemo(() => infiniChat?.view(), [infiniChat]);
+}
+
+/** The connection to the machine InfiniChat runs on, and its actions; undefined while it runs on this iPhone. */
+export function useInfiniChatConnection(): (RemoteConnection & { retry(): void; dismissNotice(): void }) | undefined {
+  const { infiniChat } = useChatApp();
+  const remote = infiniChat instanceof RemoteInfiniChat ? infiniChat : undefined;
+  const getConnection = () => remote?.getConnection();
+  const connection = useSyncExternalStore(remote?.subscribe ?? subscribeNothing, getConnection, getConnection);
+  return remote && connection && {
+    ...connection, retry: () => remote.reconnect(), dismissNotice: () => remote.dismissNotice(),
+  };
 }
 
 /** InfiniChat's scheduled tasks still waiting, soonest first; undefined until they are read. */

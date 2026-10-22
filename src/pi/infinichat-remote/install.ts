@@ -5,13 +5,16 @@ import { getRandomBytesAsync } from 'expo-crypto';
 import { BootstrapError } from '../execution/remote/bootstrap-errors';
 import { connectionFailure } from '../execution/remote/channel';
 import { runSshCommand } from '../execution/remote/command-channel';
-import { matchesHostKey, type RemoteHostRepository } from '../execution/remote/hosts';
+import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
 import { HASH, quotePosix, script } from '../execution/remote/provisioning';
 import { createCredentialBackend } from '../secure-storage';
 import { loadServerBundle } from './server-assets';
 import { INFINICHAT_SERVER_MANIFEST } from './server-manifest';
 
 export type InstallStage = 'connecting' | 'checking' | 'uploading' | 'starting';
+
+/** The name of this app's bundle on a machine, its directory there: the first 32 hex digits of its SHA-256. */
+export const SERVER_BUNDLE = INFINICHAT_SERVER_MANIFEST.sha256.slice(0, 32);
 
 export interface InstalledServer {
   /** The server's port on the machine's loopback, where the phone's tunnel goes. */
@@ -75,18 +78,28 @@ async function runScript(connection: SshConnection, signal: AbortSignal, name: s
   return output.slice(start + 1);
 }
 
+const SECRET_UNAVAILABLE = 'Could not prepare InfiniChat’s key for this machine. Unlock this device and try again.';
+const secretKey = (machineId: string) => `pi.infinichat.secret.v1.${machineId}`;
+
+/** The secret this phone keeps for a machine, if it has one; only an install makes one. */
+export async function savedSecret(machineId: string): Promise<string | undefined> {
+  try {
+    return await createCredentialBackend().getItemAsync(secretKey(machineId)) ?? undefined;
+  } catch {
+    throw new Error(SECRET_UNAVAILABLE);
+  }
+}
+
 /** The phone keeps one secret per machine; a phone without one, new or reinstalled, makes a new one. */
 async function machineSecret(machineId: string): Promise<string> {
-  const backend = createCredentialBackend();
-  const key = `pi.infinichat.secret.v1.${machineId}`;
+  const saved = await savedSecret(machineId);
+  if (saved !== undefined) return saved;
   try {
-    const saved = await backend.getItemAsync(key);
-    if (saved !== null) return saved;
     const secret = Buffer.from(await getRandomBytesAsync(32)).toString('hex');
-    await backend.setItemAsync(key, secret);
+    await createCredentialBackend().setItemAsync(secretKey(machineId), secret);
     return secret;
   } catch {
-    throw new Error('Could not prepare InfiniChat’s key for this machine. Unlock this device and try again.');
+    throw new Error(SECRET_UNAVAILABLE);
   }
 }
 
@@ -230,6 +243,27 @@ function readyScript(bundle: string): string[] {
     PRINT_MARKER, 'cat "$s"'];
 }
 
+/**
+ * An SSH connection with the machine's admission: its credentials, and its pinned host key checked and offered first,
+ * as owner.ts admits its daemon channels. The caller owns the connection and disconnects it.
+ */
+export function connectAdmitted({ host, auth, trustedHostKey }: RemoteHostAdmission, options: {
+  signal: AbortSignal;
+  onDisconnected?: () => void;
+}): Promise<SshConnection> {
+  if (!trustedHostKey) {
+    throw new Error(`Test ${host.name} in Remote machines and verify its SSH host key before using InfiniChat there.`);
+  }
+  return connect({
+    host: host.hostname, port: host.port, username: host.username, auth, signal: options.signal,
+    hostKeyAlgorithms: [trustedHostKey.algorithm],
+    verifyHostKey: (observed) => matchesHostKey(trustedHostKey, observed),
+    onDisconnected: options.onDisconnected,
+  }).catch((error: unknown) => {
+    throw connectionFailure(error);
+  });
+}
+
 function readyPort(line: string | undefined, bundle: string): number | undefined {
   let info: unknown;
   try {
@@ -253,28 +287,19 @@ export async function installServer(hosts: RemoteHostRepository, machineId: stri
   onProgress?: (stage: InstallStage) => void;
 }): Promise<InstalledServer> {
   const { signal } = options;
-  const { host, auth, trustedHostKey } = await hosts.admit(machineId);
+  const admission = await hosts.admit(machineId);
+  const { host } = admission;
   const name = host.name;
-  if (!trustedHostKey) {
-    throw new Error(`Test ${name} in Remote machines and verify its SSH host key before using InfiniChat there.`);
-  }
   const secret = await machineSecret(machineId);
   options.onProgress?.('connecting');
-  const connection = await connect({
-    host: host.hostname, port: host.port, username: host.username, auth, signal,
-    hostKeyAlgorithms: [trustedHostKey.algorithm],
-    verifyHostKey: (observed) => matchesHostKey(trustedHostKey, observed),
-  }).catch((error: unknown) => {
-    throw connectionFailure(error);
-  });
+  const connection = await connectAdmitted(admission, { signal });
   try {
     const run: Run = (lines, step) => runScript(connection, signal, name, lines, step);
     const message = messages(name);
     options.onProgress?.('checking');
     const machine = await detect(run, name);
     const { sha256 } = INFINICHAT_SERVER_MANIFEST;
-    const bundle = sha256.slice(0, 32);
-    const file = `${machine.home}/.infinichat/server/${bundle}/server.js`;
+    const file = `${machine.home}/.infinichat/server/${SERVER_BUNDLE}/server.js`;
     const [state] = await run([HASH, `f=${quotePosix(file)}`, PRINT_MARKER,
       'if [ "$(hash /dev/null)" = none ]; then echo nohash',
       `elif [ -f "$f" ] && [ ! -L "$f" ] && [ "$(hash "$f")" = ${sha256} ]; then echo present`,
@@ -301,15 +326,15 @@ export async function installServer(hosts: RemoteHostRepository, machineId: stri
     const restart = secretFile === 'changed';
     const args = [machine.node, file, 'serve', '--device', name];
     const [manager, linger] = machine.platform === 'darwin'
-      ? await run(launchdScript(restart, bundle),
+      ? await run(launchdScript(restart, SERVER_BUNDLE),
         { failure: message.service, timedOut: message.service, input: Buffer.from(launchAgent(args)) })
-      : await run(systemdScript(restart, args, bundle),
+      : await run(systemdScript(restart, args, SERVER_BUNDLE),
         { failure: message.service, timedOut: message.service, input: Buffer.from(systemdUnit(args)) });
     if (manager === 'nologin') {
       throw new Error(`InfiniChat starts at login on ${name}, and no one is logged in there. Log in, then try again.`);
     }
-    const [line] = await run(readyScript(bundle), { failure: message.service, timedOut: message.ready });
-    const port = readyPort(line, bundle);
+    const [line] = await run(readyScript(SERVER_BUNDLE), { failure: message.service, timedOut: message.ready });
+    const port = readyPort(line, SERVER_BUNDLE);
     if (port === undefined) throw new Error(message.ready);
     const notice = manager === 'detached'
       ? `${name} has no user service manager, so InfiniChat won’t start again by itself after a restart.`
@@ -321,4 +346,18 @@ export async function installServer(hosts: RemoteHostRepository, machineId: stri
   } finally {
     await connection.disconnect().catch(() => undefined);
   }
+}
+
+/**
+ * The port of this bundle's server when `server.json` names it and a live process, read over the caller's connection;
+ * undefined when it must be installed or started first. The file can name a process that exited or a reused pid, so
+ * the caller installs when the server refuses its socket anyway.
+ */
+export async function runningServer(connection: SshConnection, name: string, signal: AbortSignal,
+): Promise<number | undefined> {
+  const [line] = await runScript(connection, signal, name, ['s="$HOME/.infinichat/server.json"', PRINT_MARKER,
+    `if [ -f "$s" ] && grep -q '"bundle":"${SERVER_BUNDLE}"' "$s"; then`,
+    `  pid=$(${PID}); if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then cat "$s"; fi`,
+    'fi'], { failure: messages(name).check });
+  return readyPort(line, SERVER_BUNDLE);
 }
