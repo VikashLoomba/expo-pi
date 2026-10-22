@@ -36,5 +36,6 @@ export type SearchPresentationsState = {
  */
 export const SearchPresentationsDoc = defineDoc<SearchPresentationsState>({
   kind: 'app.openai.search', version: 1, scope: 'conversation', history: 'latest', fork: 'current',
+  checkpointWhen: () => false,
   initial: () => ({ responses: {} }),
 });

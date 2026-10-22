@@ -14,9 +14,9 @@ type AdmitWork = (tx: Tx, root: ConversationId, input: { requestId: string; cont
   Promise<void>;
 
 /**
- * A future message to the main agent. As pi-durable's own compaction retries, the time is in the durable record and
- * the phase sleeps on the Harness clock, so a reopened Harness sleeps again, or sends it at once when the time has
- * passed while the app was closed. The commit that ends the task admits the message, so it is sent once.
+ * A future message to the main agent. As pi-durable's own compaction retries, the task sleeps durably on the Harness
+ * clock, holding no invocation, so a reopened Harness resumes it at the time, or at once when the time has passed while
+ * the app was closed. The commit that ends the task admits the message, so it is sent once.
  */
 export const scheduledTask = (admit: AdmitWork) => defineTask<ScheduledInput, { phase: 'wait' }, null>({
   name: SCHEDULED_TASK,
@@ -24,7 +24,8 @@ export const scheduledTask = (admit: AdmitWork) => defineTask<ScheduledInput, { 
   initial: () => ({ phase: 'wait' }),
   phases: {
     async wait(task, runtime, context) {
-      await runtime.sleep(task.input.until, context);
+      // A run before the time (the first one, or an early wake) sleeps until it.
+      if (task.input.until > runtime.now()) return runtime.sleepUntil(task.input.until, task.state.checkpoint, context);
       await runtime.commit(async (tx) => {
         await admit(tx, runtime.conversationId, {
           requestId: `optchat:scheduled:${task.id}`,

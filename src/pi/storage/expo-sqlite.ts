@@ -1,4 +1,4 @@
-import type { SqliteDatabase, SqliteExecutor, SqliteValue } from '@earendil-works/pi-durable/storage/sqlite';
+import type { SqliteDatabase, SqliteExecutor, SqliteValue } from '@earendil-works/chord/sqlite';
 
 /** Native surface used by the driver; also permits a real SQLite connection in Node tests. */
 export interface ExpoSqliteConnection {

@@ -20,6 +20,7 @@ export const ConfigDoc = defineDoc<{ summary: SummarySelection | null }>({
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
+  checkpointWhen: () => true,
   initial: () => ({ summary: null }),
 });
 
@@ -36,6 +37,7 @@ const BuildScratchDoc = defineDoc<BuildScratch>({
   kind: 'optchat.build-scratch',
   version: 2,
   scope: 'task',
+  checkpointWhen: () => true,
   // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
   migrate: (value) => {
     const { replies, ...scratch } = value as Omit<BuildScratch, 'last'> & { replies: { text: string }[] };
@@ -276,7 +278,7 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
           // outage or a missing credential, past pi-durable's bounded policy, at pi-ai's backoff, which caps at a
           // minute. With the Harness's retries off, it is tried again at the next message.
           if (retry.enabled) {
-            return { status: 'running', checkpoint: { phase: 'retry', attempt, retries: retries + 1, until } };
+            return { status: 'sleeping', checkpoint: { phase: 'retry', attempt, retries: retries + 1, until }, until };
           }
           await release(tx, r.conversationId, task.input.ref, task.id);
           const message = failure ?? answer?.errorMessage ?? 'Summary model returned no reply';
@@ -291,9 +293,10 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
         };
       }, ctx);
     },
+    // After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
     retry: async (task, r, ctx) => {
       const { attempt, retries, until } = task.state.checkpoint;
-      await r.sleep(until, ctx);
+      if (until > r.now()) return r.sleepUntil(until, task.state.checkpoint, ctx);
       await r.commit(() => ({ status: 'running', checkpoint: { phase: 'request', attempt, retries } }), ctx);
     },
     publish: async (task, r, ctx) => {

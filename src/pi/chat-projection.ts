@@ -2,7 +2,7 @@ import type { AssistantMessage, ToolResultMessage, UserMessage } from '@earendil
 import {
   AgentDoc, CompactionEntry, InboxDoc, LiveDoc, ResetEntry,
   type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord,
-  type InboxState, type LiveState, type SubmissionRecord,
+  type InboxState, type LiveState, type SubmissionRecord, type TaskId,
 } from '@earendil-works/pi-durable';
 
 import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-presentation';
@@ -26,6 +26,7 @@ export type ChatState = {
   readonly inbox?: Readonly<InboxState>;
   readonly search?: Readonly<SearchPresentationsState>;
   readonly submission?: SubmissionRecord;
+  readonly parked?: readonly TaskId[];
 };
 
 const SUMMARIZED_NOTICE = 'Earlier messages summarized';
@@ -89,6 +90,7 @@ export function projectControls(state: ChatState, entries: readonly EntryRecord[
     // pi-durable waits before retrying a failed request; the failed attempt is not an answer.
     retrying: state.live?.generation?.retry !== undefined,
     ...(error ? { error } : {}),
+    ...(state.parked?.length ? { parked: state.parked } : {}),
   };
 }
 

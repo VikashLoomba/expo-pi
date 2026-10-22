@@ -11,7 +11,7 @@ export type ChatExecutionSettings = { target: ExecutionTarget; cwd: string | nul
  */
 export const ExecutionTargetDoc = defineDoc<ExecutionTargetState>({
   kind: 'app.execution-target', version: 2, scope: 'conversation',
-  history: 'latest', fork: 'initial', initial: () => ({ target: { kind: 'local' } }),
+  history: 'latest', fork: 'initial', checkpointWhen: () => true, initial: () => ({ target: { kind: 'local' } }),
 });
 
 export function executionSettings(state?: Readonly<ExecutionTargetState> | null,

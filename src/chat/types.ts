@@ -1,4 +1,4 @@
-import type { ConversationId, SubmissionId } from '@earendil-works/pi-durable';
+import type { ConversationId, SubmissionId, TaskId } from '@earendil-works/pi-durable';
 
 import type { ChatExecutionSettings } from '../pi/execution/document';
 import type { FileToolPresentation } from './file-tool-presentation';
@@ -45,4 +45,6 @@ export interface ChatControls {
   /** A request failed and is waiting to be tried again. */
   retrying: boolean;
   error?: string;
+  /** This chat's tasks that pi-durable parked after the app quit during them too many times in a row. */
+  parked?: readonly TaskId[];
 }

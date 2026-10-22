@@ -4,23 +4,23 @@ This module implements Pi's public `OAuthAuth` contract for **`openai` / Sign in
 
 On iOS, the [Swift callback module](../../../modules/pi-oauth-callback/README.md) receives the SDK's HTTP loopback redirect through Apple Network. The Expo authentication browser closes when the callback arrives. If the receiver cannot start (for example, because the port is busy) or the browser fails, the same-request manual fallback remains.
 
-**Modern device-code authorization is not available through Pi's SDK.** Installed `pi-ai` **1.3.0**, reviewed at
-`v1.3.0` (`71023ae`), implements browser authorization code + PKCE with a manual full-callback-URL fallback.
+**Modern device-code authorization is not available through Pi's SDK.** Installed `pi-ai` **1.4.0**, reviewed at
+`v1.4.0` (`4a08025`), implements browser authorization code + PKCE with a manual full-callback-URL fallback.
 The OAuth protocol and public types are unchanged from our previous `ea448f4` build. `LoginOptions.getDeviceId`
 supplies an installation UUID, not a device-code grant. The shared `device_code` event type does not add that
 capability to this provider. The SDK's device-code implementation belongs to its legacy **`openai-codex`**
 provider, which this app does not register.
-[Modern login implementation](https://github.com/earendil-works/pi/blob/v1.3.0/packages/ai/src/auth/oauth/openai-chatgpt.ts),
-[login options](https://github.com/earendil-works/pi/blob/v1.3.0/packages/ai/src/auth/types.ts),
-[legacy device flow](https://github.com/earendil-works/pi/blob/v1.3.0/packages/ai/src/auth/oauth/openai-codex.ts).
+[Modern login implementation](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/auth/oauth/openai-chatgpt.ts),
+[login options](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/auth/types.ts),
+[legacy device flow](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/auth/oauth/openai-codex.ts).
 
 ## Public SDK integration
 
 [`../models.ts`](../models.ts) registers `openaiProvider()` and replaces only `provider.auth.oauth` with
 `createNativeOpenAIOAuth()`. The desktop SDK flow imports Node HTTP/crypto modules; the app uses the supported
 provider extension interface rather than importing or patching those internals.
-[SDK provider](https://github.com/earendil-works/pi/blob/v1.3.0/packages/ai/src/providers/openai.ts),
-[public `OAuthAuth` contract](https://github.com/earendil-works/pi/blob/v1.3.0/packages/ai/src/auth/types.ts).
+[SDK provider](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/providers/openai.ts),
+[public `OAuthAuth` contract](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/auth/types.ts).
 
 The account screen's sign-in hook in [`src/chat/chat-provider.tsx`](../../chat/chat-provider.tsx) calls `models.login('openai', 'oauth', interaction, options)` with options from `getOpenAILoginOptions()`, and is the only place that keeps sign-in to one attempt at a time. The installation UUID is durably saved before login and remains separate from the account credential. `interaction.notify()` drives status; `interaction.prompt()` bridges Pi's awaited prompts to the React UI.
 

@@ -5,8 +5,8 @@ import {
   AgentDoc as NativeAgentDoc, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID, ResetEntry,
   configure, createRegistry, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask, section,
   type Conversation, type ConversationId, type ConversationInit, type EntryId, type EnvTarget, type Extension,
-  type HarnessOptions, type Storage, type Submission, type TaskId, type ToolHookCall, type ToolRegistration, type Tx,
-  type UserInput,
+  type HarnessOptions, type Storage, type Submission, type SubmissionRecord, type TaskId, type ToolHookCall,
+  type ToolRegistration, type Tx, type UserInput,
 } from '@earendil-works/pi-durable';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
@@ -28,7 +28,7 @@ export type Admission = {
   fresh: boolean;
   phase: 'pending' | 'prepared' | 'submitted' | 'cancelled';
   envelope: JsonRepresentation<UserInput> | null;
-  /** Its native submissions so far, less one: a failed run's queued input is withdrawn and submitted anew. */
+  /** Its native submissions so far, less one: an input withdrawn after a failed or faulted run is submitted anew. */
   attempt: number;
 };
 type AdmissionV2 = Omit<Admission, 'attempt'>;
@@ -39,6 +39,7 @@ export const InputDoc = defineDocFamily<{ value: Admission | null }, Admission |
   history: 'latest',
   fork: 'current',
   family: true,
+  checkpointWhen: () => true,
   migrate: (value) => {
     // Version 1 kept the turn state each input was accepted with; a turn now reads it as it starts. Versions 1 and 2
     // submitted each input once.
@@ -89,6 +90,7 @@ export const AppDoc = defineDoc<AppState>({
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
+  checkpointWhen: () => true,
   migrate: (value, fromVersion) => {
     let stored: AppStateV3;
     if (fromVersion < 3) {
@@ -138,6 +140,10 @@ async function storedInput(tx: Tx, root: ConversationId, requestId: string): Pro
   return stored;
 }
 
+/** pi-durable withdrew it: it was queued behind a run that failed (`afterFailedRun: 'withdraw'`). */
+const withdrawn = (receipt: SubmissionRecord): boolean =>
+  receipt.status === 'unanswered' && receipt.reason === 'run_failed';
+
 /**
  * The native run and its real receipts decide whether an epoch is still open. A run that failed leaves UniiChat's
  * note for the turn, once its last entries are logged.
@@ -150,8 +156,9 @@ async function closeSettledEpoch(tx: Tx, root: ConversationId): Promise<void> {
   let failed: string | undefined;
   for (const id of app.requests) {
     const receipt = await tx.submissionByRequest(root, nativeRequest(await storedInput(tx, root, id)));
-    // A prepared effect with a lost acknowledgement is not pending if its receipt settled.
-    if (!receipt || receipt.status === 'queued' || receipt.status === 'placed') return;
+    // A prepared effect with a lost acknowledgement is not pending if its receipt settled. A withdrawn one is, until
+    // it is submitted anew.
+    if (!receipt || receipt.status === 'queued' || receipt.status === 'placed' || withdrawn(receipt)) return;
     if (receipt.status === 'unanswered' && receipt.reason !== 'aborted') {
       failed ??= typeof receipt.detail === 'string' ? receipt.detail : receipt.reason;
     }
@@ -188,8 +195,36 @@ async function carryOver(tx: Tx, root: ConversationId, moved: string[]): Promise
 }
 
 /**
- * Only a failed run leaves inputs queued, and pi-durable would place them in its context, so each is withdrawn and
- * submitted anew. Its attempt is counted before the withdrawal settles the old submission, so a wait for it goes on.
+ * pi-durable withdraws the inputs queued behind a failed run, which it would otherwise place in the next run's
+ * context. Each is submitted anew as its next attempt, and with the inputs the turn had not taken yet they start a
+ * fresh turn. False when nothing was withdrawn.
+ */
+async function requeueWithdrawn(tx: Tx, root: ConversationId): Promise<boolean> {
+  const app = await tx.doc(AppDoc, root);
+  let requeued = false;
+  for (const id of app.requests) {
+    const input = await storedInput(tx, root, id);
+    const receipt = await tx.submissionByRequest(root, nativeRequest(input));
+    if (!receipt || !withdrawn(receipt)) continue;
+    input.attempt++;
+    input.phase = 'pending';
+    input.envelope = null;
+    requeued = true;
+  }
+  if (!requeued) return false;
+  const moved: string[] = [];
+  for (const id of app.requests) {
+    if (!(await tx.submissionByRequest(root, nativeRequest(await storedInput(tx, root, id))))) moved.push(id);
+  }
+  app.pending = [...moved, ...app.pending.filter((id) => !moved.includes(id))];
+  await carryOver(tx, root, moved);
+  return true;
+}
+
+/**
+ * A run whose task faulted keeps its inbox (pi-durable spec "afterFailedRun"), and pi-durable would place it in the
+ * next run's context, so each input still queued is withdrawn here and submitted anew, as a failed run's is. Its
+ * attempt is counted before the withdrawal settles the old submission, so a wait for it goes on.
  */
 async function countRequeued(tx: Tx, root: ConversationId): Promise<void> {
   const app = await tx.doc(AppDoc, root);
@@ -203,8 +238,8 @@ async function countRequeued(tx: Tx, root: ConversationId): Promise<void> {
   app.revision++;
 }
 
-/** After the withdrawal: the inputs with no submission for their attempt start a fresh turn. */
-async function requeueWithdrawn(tx: Tx, root: ConversationId): Promise<void> {
+/** After the coordinator's withdrawal: the inputs with no submission for their attempt start a fresh turn. */
+async function requeueAborted(tx: Tx, root: ConversationId): Promise<void> {
   const app = await tx.doc(AppDoc, root);
   const moved: string[] = [];
   for (const id of app.requests) {
@@ -454,8 +489,10 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
             progressed = true;
           }
           const next = app.pending[0];
-          if (ended && (await tx.doc(InboxDoc, root)).items.some((item) => item.mode !== 'write')) {
-            // Only a failed run leaves an input queued: an answer places what waits and runs on.
+          if (ended && (await requeueWithdrawn(tx, root))) {
+            progressed = true;
+          } else if (ended && (await tx.doc(InboxDoc, root)).items.some((item) => item.mode !== 'write')) {
+            // pi-durable withdrew a failed run's queue above; one still queued is behind a run whose task faulted.
             await countRequeued(tx, root);
             withdraw = true;
           } else if (app.stop > app.stopped) {
@@ -527,7 +564,7 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
           // With no run, an abort only withdraws the queued inputs.
           await conversation.abort(context);
           await runtime.commit(async (tx) => {
-            await requeueWithdrawn(tx, root);
+            await requeueAborted(tx, root);
             return { status: 'running', checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 2 } };
           }, context);
         } else if (stop) {
@@ -669,6 +706,11 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       steeringMode: 'all',
       followUpMode: 'all',
       compaction: { enabled: false },
+      // An input queued behind a failed run starts a fresh turn, as UniiChat's next call takes it, never the failed
+      // turn's context.
+      afterFailedRun: 'withdraw',
+      // The coordinator is stored running while idle, so every iOS kill of the app would count toward parking it.
+      restartLimit: Infinity,
     },
   }, context);
   harness = opened;
@@ -696,8 +738,8 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     await configure(tx, root.id, { ...(app.promptVersion < 2 ? { instructions: null } : {}), modelTools: null });
     app.promptVersion = PROMPT_VERSION;
   }, context);
-  /** The admission once its current attempt is submitted, or once a stop cancelled it. */
-  async function submitted(requestId: string, waitContext: Context): Promise<Admission> {
+  /** The admission once an attempt from `attempt` on is submitted, or once a stop cancelled it. */
+  async function submitted(requestId: string, attempt: number, waitContext: Context): Promise<Admission> {
     const watch = await opened.watchDoc(InputDoc, root.id, requestId, waitContext);
     if (!watch) throw new Error('Accept the request before waiting for its answer');
     const accepted = watch.value?.value;
@@ -713,7 +755,8 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     const waiting = withAbortSignal(cancellation.signal, waitContext);
     const settled = new Promise<void>((resolve) => {
       const inspect = (value: Readonly<{ value: Admission | null }> | null) => {
-        if (value?.value?.phase === 'submitted' || value?.value?.phase === 'cancelled') resolve();
+        const phase = value?.value?.phase;
+        if ((phase === 'submitted' && (value?.value?.attempt ?? 0) >= attempt) || phase === 'cancelled') resolve();
       };
       watch.start(async (value) => {
         inspect(value);
@@ -750,8 +793,9 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       await configure(tx, root.id, { instructions: text || null });
     },
     async waitForAnswer(requestId, waitContext = context) {
+      let attempt = 0;
       for (;;) {
-        const admission = await submitted(requestId, waitContext);
+        const admission = await submitted(requestId, attempt, waitContext);
         if (admission.phase === 'cancelled') throw new Error('Input was cancelled before native submission');
         const record = await opened.commit((tx) => tx.submissionByRequest(root.id, nativeRequest(admission)),
           waitContext);
@@ -759,9 +803,13 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
         const submission = await opened.submission(record.id, waitContext);
         if (!submission) throw new Error('Submitted admission is missing its native submission');
         const settled = await submission.wait(waitContext);
-        // A failed run's queued input is withdrawn and submitted anew, its attempt counted first.
+        // Withdrawn, by pi-durable after a failed run or by the coordinator after a faulted one, it is submitted anew
+        // as its next attempt; the coordinator counts that attempt before its withdrawal settles this one.
         const now = (await opened.snapshot(InputDoc, root.id, requestId, waitContext))?.value;
-        if (settled.status === 'unanswered' && settled.reason === 'aborted' && now && now.attempt > admission.attempt) {
+        const aborted = settled.status === 'unanswered' && settled.reason === 'aborted'
+          && now !== undefined && now !== null && now.attempt > admission.attempt;
+        if (withdrawn(settled) || aborted) {
+          attempt = admission.attempt + 1;
           continue;
         }
         return settled;

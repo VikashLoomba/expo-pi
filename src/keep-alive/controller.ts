@@ -109,18 +109,16 @@ export class KeepAliveController {
   };
 
   /** Chats with live work across the observed Harnesses. */
-  private async busyChats(): Promise<number> {
+  private busyChats(): number {
     let busy = 0;
     for (const source of [...this.sources]) {
       const graph = source.graph?.value;
       if (!graph) continue;
-      // Tasks blocked by a missing definition never run again; keeping the phone alive for them would never stop.
-      const inspection = await source.harness.inspect(context);
-      const blocked = new Set(inspection.tasks.flatMap((task) =>
-        task.state.kind === 'blocked' ? [String(task.record.id)] : []));
       const chats = new Set<string>();
       for (const task of Object.values(graph.tasks)) {
-        if (blocked.has(String(task.id))) continue;
+        // A blocked task (a missing definition, or parked by the restart limit) does not run until something changes;
+        // keeping the phone alive for it would never stop.
+        if (task.blocked !== undefined) continue;
         const chat = source.chatOf(task);
         if (chat !== undefined) chats.add(chat);
       }
@@ -131,8 +129,7 @@ export class KeepAliveController {
 
   private async sync() {
     if (this.closed) return;
-    const busy = await this.busyChats();
-    if (this.closed) return;
+    const busy = this.busyChats();
     if (busy > 0 && this.settings.getSnapshot()) await this.engage(busy);
     else await this.disengage(busy);
   }

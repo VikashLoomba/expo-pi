@@ -115,6 +115,13 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
       setSteering(false);
     }
   };
+  const resume = async () => {
+    const parked = conversation?.parked;
+    if (!service || !parked) return;
+    setLocalError(undefined);
+    try { await service.retryParked(parked); }
+    catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'The work could not resume. Try again.'); }
+  };
   const stop = async () => {
     if (id === undefined || !service || stopping) return;
     // Shown until the abort settles; it resolves once the chat is idle.
@@ -161,6 +168,11 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
         {settingsError && <View style={styles.banner}>
           <InlineNotice testID="conversation-settings-error" message={settingsError}
             action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} />
+        </View>}
+        {conversation?.parked && <View style={styles.banner}>
+          <InlineNotice testID="conversation-parked"
+            message="Pi paused this chat's work because the app quit while it was running several times in a row."
+            action="Resume" onAction={() => { void resume(); }} />
         </View>}
         {messageError && messageError !== settingsError && <View style={styles.banner}>
           <InlineNotice testID="conversation-error" message={messageError}

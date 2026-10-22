@@ -18,5 +18,6 @@ export type ChatMetadata = {
 
 export const ChatMetadataDoc = defineDoc<ChatMetadata>({
   kind: 'app.chat', version: 1, scope: 'conversation', history: 'latest', fork: 'initial',
+  checkpointWhen: () => true,
   initial: () => ({ title: '', createdAt: 0, deleted: false }),
 });

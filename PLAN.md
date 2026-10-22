@@ -23,43 +23,60 @@ the app plugs an Expo implementation into it. "Upstream" means those libraries a
 | Tools | pi-durable `CodingTools` | none | `chat-service.ts` |
 | Prompt | pi-durable extensions and sections; README "System Prompt" | none | the `assistant` section |
 | Local execution | pi-durable `ExecutionEnv`, reference `NodeExecutionEnv`; the `env` resolver, example 29 | expo-file-system, just-bash, the cache directory for `/tmp` | `src/pi/workspace/` |
-| Remote execution | pi-env 1.3.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
+| Remote execution | pi-env 1.4.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
 | Web search | pi-ai provider decorator: the built provider spread with `stream`/`streamSimple` overridden (plain object from `createProvider`); pi-durable write entries | none | `src/pi/native-web-search/` |
 | Images | pi-ai `UserMessage.content` image parts, submitted as pi-durable input `content`; `createCodingTools({ images })` takes any `ImageProcessor` (`prepare(bytes, mimeType, limits)`), of which Photon is upstream's own implementation (README "Images") | expo-image-manipulator as the processor, expo-image-picker, expo-image | `src/pi/images.ts`, `src/chat/photo-attachments.ts`, `src/pi/user-input.ts`, `message-images.tsx` |
 | Keep-alive (Later) | pi-durable `resume()`, `taskGraph()` | expo-widgets, expo-location, expo-task-manager | none |
 
 ## Upstream revision
 
-The app uses registry pi-ai, pi-durable and chord **1.3.0**, with transitive pi-telemetry and pi-codemode **1.3.0**.
-Source assessment uses tag `v1.3.0`, commit `71023aec1546d6d677a65669c5665c0927ce0dd0` (2026-10-15), and the
+The app uses registry pi-ai, pi-durable and chord **1.4.0**, with transitive pi-telemetry and pi-codemode **1.4.0**.
+Source assessment uses tag `v1.4.0`, commit `4a080252f06caf63a525d7873c5d94d3c23887e0` (2026-10-21), and the
 published npm declarations.
 
-pi-env is not an app dependency. Its **1.3.0** daemon binaries come from the npm artifact pinned by version and
+pi-env is not an app dependency. Its **1.4.0** daemon binaries come from the npm artifact pinned by version and
 SHA-512 in `scripts/sync-pi-daemon-assets.mjs`; that script generates the per-platform SHA-256/size manifest.
-Run it to reproduce the assets, or pass `--check` to verify them. The wire protocol is still **v1**. The mobile
-client's existing file, exec and watch methods remain compatible. pi-env 1.3.0's `listFiles` is ported
+Run it to reproduce the assets, or pass `--check` to verify them. The wire protocol is still **v1**; pi-env's
+`src/`, `daemon/` and `docs/` are unchanged from 1.3.0, so the client needed no port. The mobile
+client's existing file, exec and watch methods remain compatible. pi-env 1.4.0's `listFiles` is ported
 (`remote/list-files.ts`, `MobileRemoteExecutionEnv.listFiles`) as part of the environment contract; the folder
 picker lists one folder at a time instead, because the recursive listing has no paging. The PTY APIs have no
 production caller and are not ported.
 
-Contracts reviewed at this release (1.2.0 to 1.3.0):
+Contracts reviewed at this release (1.3.0 to 1.4.0):
 
-- The portable SQLite driver contract (`SqliteDatabase`) is unchanged. `SqliteStorage.open(database, { prefix })`
-  adds an optional table prefix for shared databases; the app owns its database files and passes none, and the
-  default table names and schema version 1 are unchanged, so existing databases open as before. `Harness`,
-  conversation views, submissions and examples 20, 21 and 29 are unchanged.
-- pi-durable's compaction or reset baseline now leads the model context when the kept history has assistant messages
-  (#10904); the app had no workaround. Prompt section rendering is unchanged, so InfiniChat's summary requests still
-  render sections as turns do. `toBase64` uses `btoa`, which Hermes provides. The output buffer helpers moved to
-  `@earendil-works/chord/output`; the app imports none of them.
-- pi-ai's provider-publication and OAuth contracts are unchanged (`auth/`, `providers/openai.ts` and `models.ts`).
-  The web-search decorator retains generation's invocation-signal correlation, `streamSimple` dispatch, provider
-  callbacks and `responseId`. The removed `AssistantMessageFrame` helpers were unused. Switching models now drops
-  thinking blocks an earlier model wrote (#10995); malformed tool arguments now fail validation with
-  `argumentsError`.
-- Chord 1.3.0 renames and reworks its host, serve and link runtime, which the app does not use. `Context`,
-  `chord/context` and the replicated-state types are unchanged; `json.ts` is unchanged, so its array descriptor call
-  still matches the Babel plugin's string-key rewrite. No native configuration change.
+- SQLite: `SqliteDatabase`, `SqliteExecutor` and `SqliteValue` moved unchanged to `@earendil-works/chord/sqlite`,
+  where the adapter now imports them; pi-durable re-exports them. Opening a database migrates it from schema version
+  1 to 2 (the `tasks` table is rebuilt for the `sleeping` status; `durable_schema.version` records it). The migration
+  is one way: 1.3.0 cannot open a migrated database.
+- Documents: `checkpointWhen` is required. Snapshot documents written whole checkpoint every change (`() => true`):
+  `app.chat`, `app.bash.workspace`, `app.execution-target`, and InfiniChat's app, input, config, memory, build
+  scratch, agent directory, private agent, agent report and agent launch documents. Append-only ones never do
+  (`() => false`): `optchat.message`, `optchat.node`, and `app.openai.search`.
+- Tasks: `TaskRuntime.sleep()` is gone. InfiniChat's summary retry and scheduled task sleep durably as pi-durable's
+  compaction retry does (`{ status: 'sleeping', until, checkpoint }`, then `sleepUntil` when run early), so a sleeping
+  task holds no invocation. Generation backoffs and deferred polls sleep too. Tasks have a `sleeping` status.
+- Crash-loop guard: a task cut off by 5 consecutive crashes, evictions or resets without committing is parked.
+  Ordinary chats keep that default, show their parked tasks (`TaskGraphNode.blocked: 'restart_limit'`) above the
+  composer and offer `retryTask` (README "Crash loops"); the parked report itself is not shown again as the app
+  error. InfiniChat sets `restartLimit: Infinity`, because its coordinator is stored running while idle and every
+  iOS kill would count. The keep-alive skips blocked tasks from the task graph instead of `inspect()`.
+- InfiniChat sets `afterFailedRun: 'withdraw'`: pi-durable settles inputs queued behind a failed run `unanswered`
+  with `run_failed`, and the coordinator submits them anew in a fresh turn; the hand-made `abort()` withdrawals of
+  the coordinator and of the agent call are deleted. A run whose task faults or is aborted still keeps its inbox, so
+  the agent call waits until its conversation has no run and no queued input, instead of looping on a kept queue.
+- `onReport(error, info)` also reports faulted tasks (`task_faulted`). Background timers that only free idle memory
+  are declined on Hermes, whose `setTimeout` has no `unref()`, so idle documents and contexts are freed at later
+  commits; timers that pace or resume work use `setTimeout`.
+- pi-ai: every request through the Harness carries pi's identity: `User-Agent: pi/1.4.0 (browser)` on Hermes, and
+  attribution headers only for OpenRouter, NVIDIA NIM and OpenCode, which the app does not register. OpenAI Responses
+  models that take `additional_tools` declare every function tool there; the top-level `tools` holds only the
+  web-search decorator's hosted tool. `telemetryContext`, `getPiUserAgent` and `resolveTranscriptTools` are unused.
+  The web-search decorator's signal correlation holds: the phase context's `abortSignal` and `runtime.signal` are
+  the invocation controller's signal, and `withTelemetry` keeps it.
+- Chord: `Context.telemetry` is required; the app builds no `Context` by hand.
+- Not adopted, left at their defaults: `HarnessOptions.identity`, telemetry, `setTimer`, `onWake`/`wake()`,
+  `compaction.modelOverrides`, `models`/`settings` as functions, IndexedDB storage.
 - pi-durable's README "Compaction", example 25 and `LiveState` define running `compactions` and persistent
   `compactionFailure`. A failed blocking compaction settles inputs `unanswered` / `model_error` without an assistant
   error entry. The transcript footer projects running compactions, and the error banner projects persistent
@@ -175,7 +192,7 @@ with.**
 
 ### Remote environment
 
-`MobileRemoteExecutionEnv` is pi-env 1.3.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
+`MobileRemoteExecutionEnv` is pi-env 1.4.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
 `Connection` spawns `ssh`. It matches upstream's `remote-env.ts`, `list-files.ts` and `watch.ts` method by method,
 and differs only in the SSH transport and Hermes replacements for Node modules.
 
@@ -340,7 +357,7 @@ with.**
 
 ### Remote environment
 
-`MobileRemoteExecutionEnv` is pi-env 1.3.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
+`MobileRemoteExecutionEnv` is pi-env 1.4.0's `RemoteExecutionEnv` running over react-native-ssh, because upstream's
 `Connection` spawns `ssh`. It matches upstream's `remote-env.ts`, `list-files.ts` and `watch.ts` method by method,
 and differs only in the SSH transport and Hermes replacements for Node modules.
 
@@ -538,7 +555,7 @@ On-device data: old chats' web-search records live in documents WS-1 replaces; c
 - [x] New-chat default: the most recently active chat's model and effort when its provider is connected, else the first
   connected provider's entry in `models.ts`.
 - [x] Remote folder picker: **Choose a folder** in chat settings browses an SSH machine one folder at a time
-  (`listDir`) with a `find`-based search; the pi-env 1.3.0 `listFiles` port stays in the remote environment as part
+  (`listDir`) with a `find`-based search; the pi-env 1.4.0 `listFiles` port stays in the remote environment as part
   of the env contract.
 - [x] Images (device checks pending):
   - Transcript: the image parts of a user message and of a tool result (`read` on a PNG, JPEG, GIF or WebP file

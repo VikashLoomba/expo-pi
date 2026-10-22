@@ -2,7 +2,7 @@ import type { AttachedReplicatedState } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
 import type {
   Conversation, ConversationId, ConversationView, Cursor, DocumentState, EntryId, EntryRecord, Harness,
-  SubmissionId, SubmissionRecord,
+  SubmissionId, SubmissionRecord, TaskGraph,
 } from '@earendil-works/pi-durable';
 
 import type { ChatControls, ChatMessage } from '../chat/types';
@@ -28,9 +28,9 @@ export interface ChatViewSource<C extends ChatControls = ChatControls> {
 }
 
 /**
- * A chat while something shows it. The first subscriber attaches pi-durable's conversation view and the chat's
- * app document states — every one of them exists from the creating commit, so nothing attaches late — and the
- * last one to leave disposes them. With `transcript`, it also reads the chat's whole history once, so messages
+ * A chat while something shows it. The first subscriber attaches pi-durable's conversation view, the chat's
+ * app document states — every one of them exists from the creating commit, so nothing attaches late — and the task
+ * graph, for the chat's parked tasks; the last one to leave disposes them. With `transcript`, it also reads the chat's whole history once, so messages
  * from before a compaction stay visible.
  */
 export class ChatView implements ChatViewSource {
@@ -43,6 +43,7 @@ export class ChatView implements ChatViewSource {
   private metadata?: DocumentState<ChatMetadata>;
   private target?: DocumentState<ExecutionTargetState>;
   private search?: DocumentState<SearchPresentationsState>;
+  private tasks?: AttachedReplicatedState<TaskGraph>;
   private loaded = false;
   private scheduled = false;
   private readonly entries = new Map<EntryId, EntryRecord>();
@@ -88,20 +89,23 @@ export class ChatView implements ChatViewSource {
       }
       this.view = view;
       this.unsubscribeView = view.subscribe(this.schedule);
-      const [metadata, target, search] = await Promise.all([
+      const [metadata, target, search, tasks] = await Promise.all([
         this.harness.documentState(ChatMetadataDoc, this.id, context),
         this.harness.documentState(ExecutionTargetDoc, this.id, context),
         this.harness.documentState(SearchPresentationsDoc, this.id, context),
+        this.harness.taskGraph(context),
       ]);
       if (!current()) {
-        for (const state of [metadata, target, search]) state?.dispose();
+        for (const state of [metadata, target, search, tasks]) state?.dispose();
         return;
       }
       this.metadata = metadata;
       this.target = target;
       this.search = search;
+      this.tasks = tasks;
       this.unsubscribeDocs = [metadata?.subscribe(this.schedule) ?? noop,
-        target?.subscribe(this.schedule) ?? noop, search?.subscribe(this.schedule) ?? noop];
+        target?.subscribe(this.schedule) ?? noop, search?.subscribe(this.schedule) ?? noop,
+        tasks.subscribe(this.schedule)];
       const chat = metadata?.value;
       if (!chat || chat.deleted) {
         this.publish({ status: 'missing' });
@@ -138,6 +142,8 @@ export class ChatView implements ChatViewSource {
     this.target = undefined;
     this.search?.dispose();
     this.search = undefined;
+    this.tasks?.dispose();
+    this.tasks = undefined;
   }
 
   /**
@@ -217,9 +223,13 @@ export class ChatView implements ChatViewSource {
         if (current()) this.fail(error);
       });
     }
+    // pi-durable's crash-loop guard parks a task the app quit during too many times; README "Crash loops" says to
+    // show it and offer `retryTask`.
+    const parked = Object.values(this.tasks?.value.tasks ?? {}).flatMap((task) =>
+      task.conversationId === this.id && task.blocked === 'restart_limit' ? [task.id] : []);
     const state: ChatState = { id: this.id, ...readConversationView(view), metadata: metadata ?? undefined,
       execution: this.target?.value ?? undefined, search: this.search?.value ?? undefined,
-      submission: this.submission };
+      submission: this.submission, parked };
     if (this.transcript) {
       for (const entry of view.entries) this.entries.set(entry.id, entry);
     }

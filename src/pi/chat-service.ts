@@ -3,6 +3,7 @@ import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
   type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
+  type TaskId,
 } from '@earendil-works/pi-durable';
 import { createCodingTools } from '@earendil-works/pi-durable/tools';
 
@@ -112,7 +113,10 @@ export class DurableChatService {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
         metadata.createdAt = now();
       },
-      onReport: (error) => service?.report(error),
+      // A parked task shows in its own chat, which offers to resume it (pi-durable README "Crash loops").
+      onReport: (error, info) => {
+        if (info.type !== 'task_parked') service?.report(error);
+      },
     }, context);
     nativeSearch.attach(harness);
     service = new DurableChatService(harness, options.storage, options.models, workspaces, {
@@ -360,6 +364,12 @@ export class DurableChatService {
       chat.lastInput = submission.id;
       chat.updatedAt = this.options.now();
     }, context);
+  }
+
+  /** Runs a chat's parked tasks again, the ones its view's controls list. */
+  async retryParked(tasks: readonly TaskId[]): Promise<void> {
+    this.assertOpen();
+    for (const task of tasks) await this.harness.retryTask(task, context);
   }
 
   /** Withdraws queued input and aborts the running work; resolves once the chat is idle. */
