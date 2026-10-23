@@ -114,10 +114,15 @@ async function main(args: string[]): Promise<number> {
     return serve(values.device, values.description);
   }
   const [first, second, third] = paths;
-  if (command === 'pages' && paths.length === 2) await writePages(first, second);
-  else if (command === 'diff' && paths.length === 3) await writeDiff(first, second, third, values.live === true);
-  else if (command === 'patch' && paths.length === 3) await writePatch(first, second, third);
-  else throw new Error(USAGE);
+  if (command === 'pages' && paths.length === 2) {
+    await writePages(first, second);
+  } else if (command === 'diff' && paths.length === 3) {
+    await writeDiff(first, second, third, values.live === true);
+  } else if (command === 'patch' && paths.length === 3) {
+    await writePatch(first, second, third);
+  } else {
+    throw new Error(USAGE);
+  }
   return 0;
 }
 

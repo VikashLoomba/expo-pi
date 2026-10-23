@@ -39,6 +39,8 @@ const CONTROL = /[\x00-\x1f\x7f]/;
 // ignored.
 const TICK = `tick() { printf '\\n'; sleep 1; }`;
 const PID = `sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$s"`;
+/** The Node that runs the server, from `server.json` at `$s`, which move.ts runs the bundle's page commands with. */
+export const NODE = `sed -n 's/.*"node":"\\([^"]*\\)".*/\\1/p' "$s"`;
 /**
  * The pi-env daemons the app ships, which the server deploys to the other machines its tools use. pi-env takes the one
  * for each system it detects from `bin/` beside its package (`packagedDaemon`, `src/ssh.ts:356-360` at v1.4.0); in the

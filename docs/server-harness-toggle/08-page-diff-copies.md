@@ -26,8 +26,9 @@ way, so the next move has little left to send. Nothing the user sees changes, ex
   - phone: expo-sqlite `backupDatabaseAsync({ sourceDatabase, destDatabase })`
     (`node_modules/expo-sqlite/build/SQLiteDatabase.d.ts:416`, SDK 58);
   - machine: `node:sqlite` `backup(sourceDb, path)` (Node ≥ 22.16; the server requires 22.19).
-- When the last connection to a database closes, SQLite checkpoints and deletes its WAL. Opening and closing a
-  database once folds a leftover WAL into it.
+- When the last connection to a database closes, SQLite checkpoints and deletes its WAL. ~~Opening and closing a
+  database once folds a leftover WAL into it.~~ Superseded: a probe showed the WAL stays unless a statement reads it,
+  so folding runs `PRAGMA wal_checkpoint(TRUNCATE)` (see [As built](#as-built)).
 - gzip on the phone: `deflateAsync(data, 'gzip', level)` / `inflateAsync(data, 'gzip')` from the nitro-zlib package,
   off the JS thread. On the machine: `node:zlib`. Probe (2026-10-22, simulator dev build against vikash-system's
   Node 24.15.0): gzip written on each side is read byte for byte by the other; 10.8 MB deflated in 0.36 s and
@@ -50,10 +51,10 @@ never opened by a Harness:
 
 - `archive` (after a move back) moves the released database to `copy/infinichat.db`, replacing the old copy, instead
   of renaming `data/` into `released/`. `released/` stays only for the upload's set-aside of a stray database.
-- The files a move copies are always one WAL-free database: the phone folds a WAL its close left (open, close) before
-  it describes its files, and the server does the same in `relinquish`. `ConversationFiles` loses `wal`, and with it
-  the WAL branches of `upload`, `download`, `parts`, `rename` and `describe` callers. The machine's `state.json` from
-  piece 5 already parses without it.
+- The files a move copies are always one WAL-free database: the phone folds a WAL its close left before it describes
+  its files (as built, with `wal_checkpoint(TRUNCATE)`, not by opening and closing), and the server does the same in
+  `relinquish`. `ConversationFiles` loses `wal`, and with it the WAL branches of `upload`, `download`, `parts`,
+  `rename` and `describe` callers. The machine's `state.json` from piece 5 already parses without it.
 - The phone's home record remembers the machine whose copy it keeps fresh: `{ version: 1, home: 'phone', copyOn?:
   machineId }`, set when a move back finishes. An existing record without it parses as before. Removing that machine
   from Remote machines clears it.
@@ -98,8 +99,9 @@ still works.
 
 ### When refreshes run
 
-- On launch and each time the app becomes active, after `moves.resume()`, unless a move is running or the home record
-  is mid-move.
+- On launch and each time the app returns from the background, after `moves.resume()`, unless a move is running or
+  the home record is mid-move. Returning from inactive (Control Center, the notification pull-down) doesn't refresh
+  (owner, 2026-10-22), by the rule that already decides when the machine's link is replaced.
 - A move that starts aborts a refresh in progress. A refresh writes only the receiver's copy, aside and renamed into
   place, so an abort leaves the old copy.
 - A refresh to a machine needs that machine's current server bundle installed; it doesn't install one, and skips the
@@ -109,9 +111,11 @@ still works.
 
 | Resource | Created by | Closed by |
 | --- | --- | --- |
-| A move's SSH connection | `InfiniChatMoves` (piece 5) | the move, in `finally` |
+| A move's SSH connection | `InfiniChatMoves` (piece 5); as built, `upload` and `download`, with a second one for the whole file when the patch's failure dropped the first | the same function, in `finally` |
 | A refresh's SSH connection and `AbortController` | the refresh | the refresh, in `finally`; aborted by a move, the app going to the background, or the provider unmounting |
 | The phone's second database connection for a backup | the phone-holds refresh | the same refresh, after the backup |
+| The phone's backup file, `infinichat-backup.db` | the phone-holds refresh | the same refresh, in `finally` |
+| A patched copy's file aside, `<name>.partial` on the phone, `<name>.<pid>` on the machine | `apply`'s write | the same write, which renames it into place |
 | The machine's temporary backup for `diff --live` | the `diff` command | the same command |
 | Patch and page-list files on either side | the step that writes them | the step that reads them, which removes them |
 
@@ -130,9 +134,10 @@ Estimated at about 370 lines net: `pages.ts` ~80, the machine commands ~90 plus 
 ~30 of WAL handling removed. Upstream's sync module is 895 lines on the `replication` branch, before its storage
 changes.
 
-As built, +484 −111 outside the docs, the asset and its manifest, 373 net: `pages.ts` 108, `server/pages.ts` 56 and
-`main.ts` +9, `conversation.ts` +24 (fold, `archive`), `move.ts` +167 (diff path, refreshes, less the WAL branches),
-and 12 in the home record, the contract, the provider, `listen.ts`, `state.ts` and Remote machines.
+As built, after the review, +522 −124 outside the docs, the asset and its manifest, 398 net: `pages.ts` 108,
+`server/pages.ts` 56 and `main.ts` +14, `conversation.ts` +24 (fold, `archive`), `move.ts` +183 (diff path,
+refreshes, the fallback's own connections, less the WAL branches), and 13 elsewhere: the provider +7, the home
+record +4, `install.ts` +2, `listen.ts` +1, Remote machines +1, `state.ts` −2, the contract 0.
 
 ## As built
 
@@ -150,11 +155,15 @@ Where this piece was silent:
   patch waits there for the download, the one step after it. Every page script runs `server.js` of this app's bundle
   with the `node` from `server.json`, and fails when either is missing, so a move falls back and a refresh stops.
 - **Fallback:** any failure on the patch path, unless the move was cancelled, sends the whole file as before. A move
-  back's patched result is checked against `relinquish`'s files too, and a mismatch falls back.
+  back's patched result is checked against `relinquish`'s files too, and a mismatch falls back. `upload` and
+  `download` own their SSH connection, made by the move's `connect`. When the patch's failure took it down (a
+  dropped link makes `runSshCommand`'s `fail` disconnect it), they let it go and make a new one for the whole file;
+  react-native-ssh's `isConnected` says which. A missing copy keeps the live connection, with no second handshake.
 - **Progress:** "Copying to/from <machine>" without bytes until the patch's size is known, then the patch's bytes.
 - **gzip level:** each library's default (nitro-zlib 9, Node 6).
-- **A refresh is a method of `InfiniChatMoves`.** `run` stops one and waits for it before a move starts.
-  `stopRefresh` runs on `background`, and `forget(machineId)` is called by Remote machines after a removal.
+- **A refresh is a method of `InfiniChatMoves`.** The provider's `open(refresh)` calls it at launch and on a return
+  from the background. `run` stops one and waits for it before a move starts. `stopRefresh` runs on `background`, and
+  `forget(machineId)` is called by Remote machines after a removal.
 - **A cancelled move there** sets the record back to plain `phone`, so `copyOn` waits for the next move back.
 
 Departures, each found while building:
@@ -168,7 +177,16 @@ Departures, each found while building:
   being created.
 - **The page scripts trap PIPE.** sshd leaves a script running after its channel closes, and its next write kills it
   with SIGPIPE. POSIX runs the exit trap on an exit, not on such a death: macOS's `sh` ran it anyway in a probe, but
-  a shell that doesn't would leave the page list or patch behind.
+  a shell that doesn't would leave the page list or patch behind. The whole-file upload traps it too.
+
+Known limitations, left as they are:
+- expo-sqlite's iOS `backupDatabaseAsync` ignores `sqlite3_backup_step`'s result
+  (`expo-sqlite/ios/SQLiteModule.swift:304-305`, 58.0.13), so a backup that meets BUSY can resolve with an empty
+  destination. The phone-holds refresh then fails in `pageSize` and is skipped.
+- `moveSync` with `overwrite` removes the destination, then moves the file aside into place. A kill in between
+  leaves no copy, and the next move sends the whole file.
+- `node` in `server.json` is written only when the server starts. A Node upgrade that removes the old binary makes
+  moves fall back to the whole file, and refreshes skip, until the server restarts.
 
 ## Checks
 
@@ -181,10 +199,13 @@ Done on the implementer's Mac (Node 25.6.1), on copies of the owner's data: the 
   database it was made from.", exit 1. `<out>` was left as it was, with no file set aside.
 - `diff --live` took 0.45–0.5 s, on a closed copy and on a copy that another process committed to every 20 ms. Its
   patch verified, and the result passed `integrity_check` with the rows committed before the backup. A missing
-  database failed without being created.
+  database failed without being created. On vikash-system's Node 24.15.0, `diff --live` with `rate: -1` took 0.56 s
+  and gave a 3,143,101-byte patch whose result passed `integrity_check`.
 - The real `upload`, `download`, `receivePatch`, `refreshCopy` and `phoneFiles` of `move.ts`, bundled for Node with
   Expo stubbed over Node, ran over a fake SSH connection that runs each command in a local `sh`. Both moves sent a
   3.1 MB patch. With no copy, or no server bundle, they sent the whole 42.3 MB. Placing was refused while active.
+  A link dropped during the patch (the page list's download, the patch's upload, or the move back's diff) fell back
+  to the whole file over a second connection, and both were closed. A missing copy kept the one connection.
   Both refreshes, against a database another process was committing to, gave copies that passed `integrity_check`.
   A refresh stopped mid-diff, by a hangup or by a silent channel close, left the old copy and no files on either side.
   A 0.8 MB leftover WAL was folded.

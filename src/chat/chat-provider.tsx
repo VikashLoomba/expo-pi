@@ -170,8 +170,9 @@ function useChatRuntime() {
     setMoves(moves);
     // Returning to the app retries a failed open; an open service ignores the call. While InfiniChat lives on a
     // machine, it connects there instead, and returning to the app reconnects a failed connection; a move the app
-    // left goes on.
-    const open = () => serialize(async () => {
+    // left goes on. `refresh`, at launch and on a return from the background, also brings the other side's copy up to
+    // date unless a move runs, so the next move has little to send.
+    const open = (refresh = false) => serialize(async () => {
       const failures: string[] = [];
       if (!state.service) {
         try {
@@ -209,20 +210,21 @@ function useChatRuntime() {
       } else {
         moves.resume();
       }
-      // Unless a move runs, the other side's copy catches up, so the next move has little to send.
-      moves.refresh();
+      if (refresh) moves.refresh();
       setOpenError(failures.length ? failures.join('\n') : undefined);
     });
-    open();
+    open(true);
     // iOS suspends the app only in the background, Chord's pinger and the SSH keepalive with it, so only a return from
-    // there replaces InfiniChat's remote link; returning from inactive (Control Center, a system prompt) doesn't.
+    // there replaces InfiniChat's remote link and refreshes the copy; returning from inactive (Control Center, a system
+    // prompt) doesn't.
     let previousState = AppState.currentState;
     const subscription = AppState.addEventListener('change', (appState) => {
       if (appState === 'active') {
-        if (previousState === 'background') state.remote?.resume();
-        open();
+        const returned = previousState === 'background';
+        if (returned) state.remote?.resume();
+        open(returned);
       } else if (appState === 'background') {
-        // A refresh stopped here leaves the old copy, and the next activation runs it again.
+        // A refresh stopped here leaves the old copy, and the return from the background runs it again.
         moves.stopRefresh();
       }
       previousState = appState;
