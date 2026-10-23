@@ -209,6 +209,8 @@ function useChatRuntime() {
       } else {
         moves.resume();
       }
+      // Unless a move runs, the other side's copy catches up, so the next move has little to send.
+      moves.refresh();
       setOpenError(failures.length ? failures.join('\n') : undefined);
     });
     open();
@@ -219,6 +221,9 @@ function useChatRuntime() {
       if (appState === 'active') {
         if (previousState === 'background') state.remote?.resume();
         open();
+      } else if (appState === 'background') {
+        // A refresh stopped here leaves the old copy, and the next activation runs it again.
+        moves.stopRefresh();
       }
       previousState = appState;
     });

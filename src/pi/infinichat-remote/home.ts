@@ -7,9 +7,10 @@ const KEY = 'pi.infinichat.home.v1';
  * between them. It is the authority on who may open the conversation's database, since pi-durable has no
  * cross-process locking: the phone opens it only at `phone`, and the machine only between its `adopt` and its
  * `relinquish`. A move writes each phase before the step that needs it, so a relaunch carries it on from there.
+ * `copyOn` is the machine the phone last moved it back from, whose copy the phone keeps fresh.
  */
 export type InfiniChatHome =
-  | { version: 1; home: 'phone' }
+  | { version: 1; home: 'phone'; copyOn?: string }
   | { version: 1; home: 'machine'; machineId: string; phase: 'moving-there' | 'there' | 'moving-back' };
 
 export const PHONE_HOME: InfiniChatHome = { version: 1, home: 'phone' };
@@ -18,7 +19,10 @@ function parse(text: string | null): InfiniChatHome {
   if (text === null) return PHONE_HOME;
   const value: unknown = JSON.parse(text);
   if (typeof value === 'object' && value !== null && 'version' in value && value.version === 1 && 'home' in value) {
-    if (value.home === 'phone') return PHONE_HOME;
+    if (value.home === 'phone') {
+      return 'copyOn' in value && typeof value.copyOn === 'string'
+        ? { version: 1, home: 'phone', copyOn: value.copyOn } : PHONE_HOME;
+    }
     if (value.home === 'machine' && 'machineId' in value && typeof value.machineId === 'string'
       && 'phase' in value
       && (value.phase === 'moving-there' || value.phase === 'there' || value.phase === 'moving-back')) {

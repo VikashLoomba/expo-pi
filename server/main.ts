@@ -20,11 +20,15 @@ import { serverDevices } from './devices';
 import { listen } from './listen';
 import { ServerMachines } from './machines';
 import { createServerModels } from './models';
+import { writeDiff, writePages, writePatch } from './pages';
 import { serveInfiniChat } from './serve';
 import { ServerSignIn } from './sign-in';
 import { restoreTimeZone, setTimeZone } from './state';
 
-const USAGE = 'Usage: node server.js serve --device <name> --description <text>';
+const USAGE = ['Usage: node server.js serve --device <name> --description <text>',
+  '       node server.js pages <db> <out>',
+  '       node server.js diff <db> <pages> <out> [--live]',
+  '       node server.js patch <base> <patch> <out>'].join('\n');
 
 // pi-ai loads its sign-in flows through an import bundlers cannot follow, which this single-file bundle cannot resolve
 // at run time, so it registers them statically at startup, as pi's own standalone binary does (coding-agent
@@ -103,13 +107,18 @@ async function serve(device: string, description: string): Promise<number> {
   }
 }
 
-function main(args: string[]): Promise<number> {
-  const { positionals, values } = parseArgs({ args, allowPositionals: true,
-    options: { device: { type: 'string' }, description: { type: 'string' } } });
-  if (positionals.length !== 1 || positionals[0] !== 'serve' || !values.device || !values.description) {
-    throw new Error(USAGE);
+async function main(args: string[]): Promise<number> {
+  const { positionals: [command, ...paths], values } = parseArgs({ args, allowPositionals: true,
+    options: { device: { type: 'string' }, description: { type: 'string' }, live: { type: 'boolean' } } });
+  if (command === 'serve' && paths.length === 0 && values.device && values.description) {
+    return serve(values.device, values.description);
   }
-  return serve(values.device, values.description);
+  const [first, second, third] = paths;
+  if (command === 'pages' && paths.length === 2) await writePages(first, second);
+  else if (command === 'diff' && paths.length === 3) await writeDiff(first, second, third, values.live === true);
+  else if (command === 'patch' && paths.length === 3) await writePatch(first, second, third);
+  else throw new Error(USAGE);
+  return 0;
 }
 
 try {

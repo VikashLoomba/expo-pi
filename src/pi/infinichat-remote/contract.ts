@@ -40,8 +40,8 @@ export const ServerSchema = Type.Object({
 export type InfiniChatServer = Static<typeof ServerSchema>;
 
 const FileSchema = Type.Object({ sha256: Type.String(), size: Type.Number() });
-/** The conversation's database file and the WAL beside it, if one remains, by SHA-256 and size. */
-export const ConversationFilesSchema = Type.Object({ db: FileSchema, wal: Type.Optional(FileSchema) });
+/** The conversation's database file, its WAL folded into it, by SHA-256 and size. */
+export const ConversationFilesSchema = Type.Object({ db: FileSchema });
 export type ConversationFiles = Static<typeof ConversationFilesSchema>;
 /**
  * Whether this machine holds the conversation open, and the files it adopted then. Only the side that holds it opens
@@ -145,8 +145,8 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         // Moving the conversation, as upstream's session sync hands a session over: one side closes its Harness, the
         // files are copied, the other side opens them. `adopt` opens the files in `data/` when they match, and is
         // refused while active. `relinquish` (Chord reserves `release`) stops input, closes the Harness and its
-        // storage, and names the files it left; called again, it names them again. `archive` moves released files
-        // where nothing opens them, and is refused while active.
+        // storage, and names the files it left; called again, it names them again. `archive` keeps the released
+        // database as the machine's copy, which nothing opens, and is refused while active.
         adopt: method(ConversationFilesSchema),
         relinquish: method(undefined, ConversationFilesSchema),
         archive: method(),

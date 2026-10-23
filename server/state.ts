@@ -16,10 +16,8 @@ const fileOf = (value: unknown) => isRecord(value) && typeof value.sha256 === 's
   && typeof value.size === 'number' ? { sha256: value.sha256, size: value.size } : undefined;
 
 function filesOf(value: unknown): ConversationFiles | undefined {
-  if (!isRecord(value)) return undefined;
-  const db = fileOf(value.db);
-  const wal = fileOf(value.wal);
-  return db && { db, ...(wal === undefined ? {} : { wal }) };
+  const db = isRecord(value) ? fileOf(value.db) : undefined;
+  return db && { db };
 }
 
 /** The kept state; nothing is kept before the phone's first connect. */

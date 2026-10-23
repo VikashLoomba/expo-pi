@@ -130,9 +130,66 @@ Estimated at about 370 lines net: `pages.ts` ~80, the machine commands ~90 plus 
 ~30 of WAL handling removed. Upstream's sync module is 895 lines on the `replication` branch, before its storage
 changes.
 
+As built, +484 −111 outside the docs, the asset and its manifest, 373 net: `pages.ts` 108, `server/pages.ts` 56 and
+`main.ts` +9, `conversation.ts` +24 (fold, `archive`), `move.ts` +167 (diff path, refreshes, less the WAL branches),
+and 12 in the home record, the contract, the provider, `listen.ts`, `state.ts` and Remote machines.
+
+## As built
+
+Against pi-durable, chord and pi-ai 1.4.0, Expo 58.0.17 (expo-sqlite 58.0.13, expo-file-system 58.0.10, expo-crypto
+58.0.7) and nitro-zlib 0.3.1.
+
+Where this piece was silent:
+- **Formats.** Both start with the page size (32 bits) and a file size (float64). A patch then has the new file's
+  SHA-256 (32 bytes), the count, the page numbers (32 bits each) and the pages, all gzipped. A page list of another
+  page size shares no page.
+- **`pages.ts` takes paths for databases and bytes for what travels:** `pages(platform, db)`, `diff(platform, db,
+  list)`, `apply(platform, base, patch, out)`. The phone keeps the list or patch it sends in memory. What it receives
+  goes through one `infinichat-transfer` file, removed once read.
+- **Machine files** are `mktemp` files in `~/.infinichat`, removed by the script that reads them. The move back's
+  patch waits there for the download, the one step after it. Every page script runs `server.js` of this app's bundle
+  with the `node` from `server.json`, and fails when either is missing, so a move falls back and a refresh stops.
+- **Fallback:** any failure on the patch path, unless the move was cancelled, sends the whole file as before. A move
+  back's patched result is checked against `relinquish`'s files too, and a mismatch falls back.
+- **Progress:** "Copying to/from <machine>" without bytes until the patch's size is known, then the patch's bytes.
+- **gzip level:** each library's default (nitro-zlib 9, Node 6).
+- **A refresh is a method of `InfiniChatMoves`.** `run` stops one and waits for it before a move starts.
+  `stopRefresh` runs on `background`, and `forget(machineId)` is called by Remote machines after a removal.
+- **A cancelled move there** sets the record back to plain `phone`, so `copyOn` waits for the next move back.
+
+Departures, each found while building:
+- **Folding uses `PRAGMA wal_checkpoint(TRUNCATE)`, not open and close alone.** Opening and closing with no statement
+  left a 4 MB WAL in place (Node probe). SQLite opens the WAL at the first read. The server's fold also checks
+  `busy` with chord's 5 s busy timeout. Chord's close already checkpoints, but a `diff --live` reading at that moment
+  makes the checkpoint fail, and that close doesn't report it.
+- **`diff --live` copies in one step** (`backup(source, path, { rate: -1 })`, as expo-sqlite's `backup_step(-1)`), from
+  a read-only connection. A backup in steps starts over whenever another connection commits between steps, which the
+  server's Harness does every 100 ms while it streams. Read-only also means a missing database fails instead of
+  being created.
+- **The page scripts trap PIPE.** sshd leaves a script running after its channel closes, and its next write kills it
+  with SIGPIPE. POSIX runs the exit trap on an exit, not on such a death: macOS's `sh` ran it anyway in a probe, but
+  a shell that doesn't would leave the page list or patch behind.
+
 ## Checks
 
-On the owner's iPhone Release install, with the conversation on vikash-system:
+Done on the implementer's Mac (Node 25.6.1), on copies of the owner's data: the phone's copy from the 11:04 move
+(39.2 MB) and vikash-system's database ten hours later (42.3 MB).
+- The built `server.js`: `pages` of the base, then `diff` of the newer file, gave a 3,142,655-byte patch of 2,642 of
+  10,337 pages (10.8 MB raw). `patch` produced the newer file's SHA-256 (`13d49c01…`), byte for byte. Each command
+  took 190–370 ms, about 150 ms of it Node loading the bundle.
+- A base with one byte changed in a page the patch doesn't carry failed with "The patched copy doesn’t match the
+  database it was made from.", exit 1. `<out>` was left as it was, with no file set aside.
+- `diff --live` took 0.45–0.5 s, on a closed copy and on a copy that another process committed to every 20 ms. Its
+  patch verified, and the result passed `integrity_check` with the rows committed before the backup. A missing
+  database failed without being created.
+- The real `upload`, `download`, `receivePatch`, `refreshCopy` and `phoneFiles` of `move.ts`, bundled for Node with
+  Expo stubbed over Node, ran over a fake SSH connection that runs each command in a local `sh`. Both moves sent a
+  3.1 MB patch. With no copy, or no server bundle, they sent the whole 42.3 MB. Placing was refused while active.
+  Both refreshes, against a database another process was committing to, gave copies that passed `integrity_check`.
+  A refresh stopped mid-diff, by a hangup or by a silent channel close, left the old copy and no files on either side.
+  A 0.8 MB leftover WAL was folded.
+
+Still unverified, on the owner's iPhone Release install, with the conversation on vikash-system:
 
 - After the install, the app's first activation refreshes `infinichat-moved.db`. Its SHA-256 matches a backup of
   the machine's database taken by the same `diff --live` (read the phone's file back with `devicectl`).

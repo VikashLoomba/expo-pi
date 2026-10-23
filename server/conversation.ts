@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Storage } from '@earendil-works/pi-durable';
@@ -27,6 +29,24 @@ async function describe(path: string): Promise<ConversationFile | undefined> {
 
 const same = (left: ConversationFile | undefined, right: ConversationFile | undefined) =>
   left?.sha256 === right?.sha256 && left?.size === right?.size;
+
+/**
+ * Folds the WAL beside a closed database into it, so the database file alone is the conversation. Chord's close
+ * checkpoints already, but a reader such as a `diff --live` still copying keeps it from finishing then, which that
+ * close doesn't report, so this checkpoint waits for readers (chord's 5 s busy timeout) and fails when it can't.
+ */
+function fold(path: string) {
+  // Opening would create a database that isn't there.
+  if (!existsSync(path)) return;
+  const database = new DatabaseSync(path, { timeout: 5_000 });
+  try {
+    if (database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()?.busy !== 0) {
+      throw new Error('InfiniChat’s database on this machine is still in use. Try again.');
+    }
+  } finally {
+    database.close();
+  }
+}
 
 /**
  * InfiniChat's conversation on this machine. One process owns a storage at a time (pi-durable README), so this
@@ -84,7 +104,7 @@ export class ServerConversation {
     return this.run(async () => {
       if (this.state.active) throw new Error('InfiniChat is already open on this machine.');
       const found = await this.files();
-      if (!same(found?.db, files.db) || !same(found?.wal, files.wal)) {
+      if (!same(found?.db, files.db)) {
         throw new Error('The copied conversation does not match the one this iPhone sent. Try again.');
       }
       this.setState({ active: true, adopted: files });
@@ -99,7 +119,8 @@ export class ServerConversation {
 
   /**
    * Stops input at once, closes the core (its Harness waits for running task code and writes the tasks it stopped back
-   * as pending) and its storage, and names the files it left in `data/`. Called again, it names them again.
+   * as pending) and its storage, folds its WAL, and names the database it left in `data/`. Called again, it names it
+   * again.
    */
   relinquish(): Promise<ConversationFiles> {
     return this.run(async () => {
@@ -110,19 +131,23 @@ export class ServerConversation {
         await core.close();
       }
       if (this.state.active) this.setState({ active: false });
+      fold(join(this.data, DATABASE));
       const files = await this.files();
       if (!files) throw new Error('This machine holds no InfiniChat conversation.');
       return files;
     });
   }
 
-  /** Moves the released files to `released/<time>/`, where nothing opens them again. Refused while holding them. */
+  /**
+   * Moves the released database to `copy/`, replacing the copy there, where nothing opens it: the phone's next move
+   * here patches it, and the phone keeps it fresh meanwhile. Refused while holding it.
+   */
   archive(): Promise<void> {
     return this.run(async () => {
       if (this.state.active) throw new Error('InfiniChat is open on this machine.');
-      await mkdir(join(this.home, 'released'), { recursive: true, mode: 0o700 });
+      await mkdir(join(this.home, 'copy'), { recursive: true, mode: 0o700 });
       try {
-        await rename(this.data, join(this.home, 'released', new Date().toISOString().replace(/[:.]/g, '-')));
+        await rename(join(this.data, DATABASE), join(this.home, 'copy', DATABASE));
       } catch (error) {
         // Archived already.
         if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
@@ -148,8 +173,7 @@ export class ServerConversation {
 
   private async files(): Promise<ConversationFiles | undefined> {
     const db = await describe(join(this.data, DATABASE));
-    const wal = await describe(join(this.data, `${DATABASE}-wal`));
-    return db && { db, ...(wal === undefined ? {} : { wal }) };
+    return db && { db };
   }
 
   private async open() {

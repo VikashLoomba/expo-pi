@@ -1,27 +1,36 @@
 import type { SshConnection, SshShell } from '@osuki-dev/react-native-ssh';
+import { deflateAsync, inflateAsync } from '@strawberrytech/react-native-nitro-zlib';
 import { Buffer } from 'buffer';
+import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
 import { File } from 'expo-file-system';
-import { defaultDatabaseDirectory } from 'expo-sqlite';
+import { backupDatabaseAsync, defaultDatabaseDirectory, openDatabaseAsync } from 'expo-sqlite';
 
 import { connectionFailure } from '../execution/remote/channel';
 import type { RemoteHostRepository } from '../execution/remote/hosts';
-import { HASH, script } from '../execution/remote/provisioning';
+import { HASH, quotePosix, script } from '../execution/remote/provisioning';
 import type { RemoteInfiniChat } from './client';
 import type { ConversationFiles, ConversationState } from './contract';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
-import { connectAdmitted, PRINT_MARKER, runScript } from './install';
+import { connectAdmitted, PRINT_MARKER, runScript, SERVER_BUNDLE } from './install';
+import { apply, diff, pages, type Bytes, type PagePlatform } from './pages';
 
 /** The phone's InfiniChat database, which expo-sqlite opens by name. */
 export const INFINICHAT_DATABASE = 'infinichat.db';
-/** The phone's files after a move there: never opened, kept until the next move back has placed its own. */
+/** The phone's copy after a move there: never opened, kept fresh, and patched by the next move back. */
 const MOVED = 'infinichat-moved.db';
-/** Where a move back downloads the machine's files before they are placed. */
+/** Where a move back puts the machine's database before it is placed. */
 const INCOMING = 'infinichat-incoming.db';
+/** A backup of the phone's open conversation, which a refresh patches the machine's copy with. */
+const BACKUP = 'infinichat-backup.db';
+/** A page list or patch from the machine, until it is read. */
+const TRANSFER = 'infinichat-transfer';
 /** The machine's conversation folder, in its account's home. */
 const DATA = '.infinichat/data';
-const WAL = '-wal';
+/** The machine's copy while this phone holds the conversation, which `archive` leaves there. */
+const COPY = '.infinichat/copy/infinichat.db';
 
 type ConversationFile = ConversationFiles['db'];
+type Copied = { bytes: number; total: number };
 
 export type MoveStep = 'connecting' | 'closing' | 'copying' | 'opening';
 /** A move between this iPhone and a machine, while it runs and after a failure stopped it. */
@@ -29,7 +38,7 @@ export interface MoveStatus {
   machineId: string;
   to: 'machine' | 'phone';
   step: MoveStep;
-  copied?: { bytes: number; total: number };
+  copied?: Copied;
   running: boolean;
   /** Why it stopped; the home record keeps its phase until it is tried again or cancelled. */
   error?: string;
@@ -66,87 +75,86 @@ async function describe(file: File): Promise<ConversationFile | undefined> {
 
 const same = (left: ConversationFile | undefined, right: ConversationFile | undefined) =>
   left?.sha256 === right?.sha256 && left?.size === right?.size;
-const parts = (files: ConversationFiles): [string, ConversationFile][] =>
-  files.wal === undefined ? [['', files.db]] : [['', files.db], [WAL, files.wal]];
-const total = (files: ConversationFiles) => files.db.size + (files.wal?.size ?? 0);
 /** The machine holds these files open: it adopted them, and the move there happened. */
 const adopted = (held: ConversationState | undefined, files: ConversationFiles) => held?.active === true
-  && same(held.adopted?.db, files.db) && same(held.adopted?.wal, files.wal);
+  && same(held.adopted?.db, files.db);
 
 /**
- * The closed database and the WAL its close left, if any. The `-shm` index never moves: SQLite rebuilds it, and a
- * copy of one can disagree with the WAL beside it.
+ * Folds the WAL a close left beside the phone's closed database into it, so the database file alone is the
+ * conversation. Opening and closing alone leave it: SQLite opens the WAL at the first read.
  */
+async function fold(name: string) {
+  const database = await openDatabaseAsync(name, { useNewConnection: true });
+  try {
+    const result = await database.getFirstAsync<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)');
+    if (result?.busy !== 0) throw new Error('InfiniChat’s database on this iPhone is still in use. Try again.');
+  } finally {
+    await database.closeAsync();
+  }
+}
+
+/** The closed database, with its WAL folded in. The `-shm` index never moves: SQLite rebuilds it. */
 async function phoneFiles(): Promise<ConversationFiles> {
-  const db = await describe(phoneFile(INFINICHAT_DATABASE));
-  if (!db) throw new Error('This iPhone has no InfiniChat conversation to move.');
-  const wal = await describe(phoneFile(`${INFINICHAT_DATABASE}${WAL}`));
-  return { db, ...(wal === undefined ? {} : { wal }) };
+  if (!phoneFile(INFINICHAT_DATABASE).exists) throw new Error('This iPhone has no InfiniChat conversation to move.');
+  await fold(INFINICHAT_DATABASE);
+  const file = phoneFile(INFINICHAT_DATABASE);
+  return { db: { sha256: await file.digest('SHA-256'), size: file.size } };
 }
 
 function remove(name: string) {
-  for (const suffix of ['', WAL, '-shm']) {
+  for (const suffix of ['', '-wal', '-shm']) {
     const file = phoneFile(`${name}${suffix}`);
     if (file.exists) file.delete();
   }
 }
 
-/** Renames a closed database and its WAL over `to`'s; nothing is left of `to` that SQLite could pair with them. */
+/** Renames a closed database over `to`'s; nothing is left of `to` that SQLite could pair with it. */
 function rename(from: string, to: string) {
   remove(to);
-  // The WAL first: a database placed without its WAL would lose the commits in it.
-  for (const suffix of [WAL, '']) {
-    const file = phoneFile(`${from}${suffix}`);
-    if (file.exists) file.moveSync(phoneFile(`${to}${suffix}`));
-  }
+  phoneFile(from).moveSync(phoneFile(to));
   remove(from);
 }
 
+/** The page diffs on the phone: expo-crypto, nitro-zlib off the JS thread, and the database folder. */
+const PHONE: PagePlatform = {
+  sha256: async (bytes) => new Uint8Array(await digest(CryptoDigestAlgorithm.SHA256, bytes)),
+  // nitro-zlib takes a whole ArrayBuffer, so a view is copied into one of its own.
+  gzip: async (bytes) => new Uint8Array(await deflateAsync(bytes.slice().buffer, 'gzip')),
+  gunzip: async (bytes) => new Uint8Array(await inflateAsync(bytes.slice().buffer, 'gzip')),
+  read: (name) => phoneFile(name).bytes(),
+  async write(name, bytes) {
+    const aside = phoneFile(`${name}.partial`);
+    await aside.write(bytes);
+    aside.moveSync(phoneFile(name), { overwrite: true });
+  },
+};
+
 /**
- * Uploads the phone's files to the machine's `data/incoming/`, each verified by SHA-256 and renamed into place there,
- * as provisioning.ts uploads the daemon, then moves them into `data/`. The upload goes through `openShell` with input,
- * since react-native-ssh's `exec` has no stdin. It has no timeout of its own: it ends with the copy, the user's Cancel,
- * or the SSH connection, whose keepalive notices a dead machine. Placing is refused while the machine holds a
- * conversation open; a database an earlier one left there is kept in `released/`, as `archive` keeps one.
+ * Finds this app's server bundle on the machine and the Node that `server.json` says runs it (listen.ts), for the
+ * page commands, and fails the script when either is missing: nothing here installs one.
  */
-async function upload(connection: SshConnection, signal: AbortSignal, name: string, files: ConversationFiles,
-  onCopied: (bytes: number) => void) {
-  const failure = `Check the account’s home folder permissions and disk space on ${name}.`;
-  let copied = 0;
-  for (const [suffix, file] of parts(files)) {
-    const bytes = await phoneFile(`${INFINICHAT_DATABASE}${suffix}`).bytes();
-    const before = copied;
-    await runScript(connection, signal, name, [HASH, `d="$HOME/${DATA}/incoming"`, 'umask 077', 'mkdir -p "$d"',
-      't=$(mktemp "$d/.upload.XXXXXX")', `trap 'rm -f "$t"' 0`, `trap 'exit 1' HUP INT TERM`, 'cat > "$t"',
-      `[ "$(hash "$t")" = ${file.sha256} ]`, `mv -f "$t" "$d/${INFINICHAT_DATABASE}${suffix}"`, PRINT_MARKER],
-    { failure, input: bytes, timeoutMs: null, onWritten: (written) => onCopied(before + written) });
-    copied += bytes.byteLength;
-  }
-  const db = `"$d/${INFINICHAT_DATABASE}"`;
-  const [placed] = await runScript(connection, signal, name, ['umask 077', `d="$HOME/${DATA}"`,
-    's="$HOME/.infinichat/state.json"', PRINT_MARKER,
-    `if [ -f "$s" ] && grep -q '"active":true' "$s"; then echo active; exit 0; fi`,
-    `if [ -e ${db} ]; then r="$HOME/.infinichat/released/$(date -u +%Y-%m-%dT%H-%M-%SZ)-$$"`,
-    `  mkdir -p "$r"; mv ${db}* "$r/"; fi`,
-    `rm -f ${db}-wal ${db}-shm`,
-    files.wal === undefined ? `rm -f "$d/incoming/${INFINICHAT_DATABASE}-wal"`
-      : `mv -f "$d/incoming/${INFINICHAT_DATABASE}-wal" ${db}-wal`,
-    `mv -f "$d/incoming/${INFINICHAT_DATABASE}" ${db}`, 'echo placed'], { failure });
-  if (placed === 'active') throw new Error(`InfiniChat is already open on ${name}.`);
-  if (placed !== 'placed') throw new Error(failure);
-}
+const SERVER = [`js="$HOME/.infinichat/server/${SERVER_BUNDLE}/server.js"`, '[ -f "$js" ]',
+  `node=$(sed -n 's/.*"node":"\\([^"]*\\)".*/\\1/p' "$HOME/.infinichat/server.json")`, '[ -n "$node" ]'];
+/**
+ * sshd doesn't stop a script whose channel closed, and the script's next write ends it with SIGPIPE, which skips its
+ * exit trap; trapping it too removes the page list or patch it made.
+ */
+const ON_SIGNAL = `trap 'exit 1' HUP INT PIPE TERM`;
+/** Never shown: a move that can't patch copies the whole file, and a refresh changes nothing. */
+const PATCH_FAILED = 'The patch failed.';
 
 /** Printed on its own line before the file's bytes; whatever the account's shell startup files print comes first. */
 const COPY_MARKER = 'INFINICHAT-COPY';
 const COPY_LINE = Buffer.from(`${COPY_MARKER}\n`);
+const PRINT_COPY = `printf '%s\\n' ${COPY_MARKER}`;
 
 /**
- * Streams one of the machine's files into `file` with `cat` over `openShell`: `exec` caps its output at 16 MiB
- * (react-native-ssh `src/errors.ts:20`). The bytes start after a marker line, as install.ts's answers do, since sshd
- * runs the command through the account's shell, whose startup files may print (zsh's `~/.zshenv`, or `~/.bashrc` where
- * bash sources it for SSH). Like the upload, it has no timeout of its own.
+ * Streams what a script on the machine prints after the copy marker into `file`, over `openShell`: `exec` caps its
+ * output at 16 MiB (react-native-ssh `src/errors.ts:20`). The bytes start after a marker line, as install.ts's answers
+ * do, since sshd runs the command through the account's shell, whose startup files may print (zsh's `~/.zshenv`, or
+ * `~/.bashrc` where bash sources it for SSH). Like the upload, it has no timeout of its own.
  */
-async function downloadFile(connection: SshConnection, signal: AbortSignal, path: string, file: File,
+async function downloadFile(connection: SshConnection, signal: AbortSignal, lines: string[], file: File,
   onRead: (bytes: number) => void) {
   file.create({ overwrite: true });
   const writer = file.writableStream().getWriter();
@@ -170,8 +178,7 @@ async function downloadFile(connection: SshConnection, signal: AbortSignal, path
   };
   signal.addEventListener('abort', abort, { once: true });
   try {
-    shell = await connection.openShell({ term: '', command: script(
-      `printf '%s\\n' ${COPY_MARKER}; exec cat "$HOME/${path}"`) }, {
+    shell = await connection.openShell({ term: '', command: script(['set -eu', ...lines].join('\n')) }, {
       onData: (bytes) => {
         // Data still on its way after an abort goes nowhere.
         if (ended) return;
@@ -214,20 +221,133 @@ async function downloadFile(connection: SshConnection, signal: AbortSignal, path
   }
 }
 
-/** Downloads the files the machine named to the phone's incoming copy and verifies each. */
+/** What a script on the machine prints after the copy marker, through the transfer file, which it then removes. */
+async function fetchBytes(connection: SshConnection, signal: AbortSignal, lines: string[],
+  onRead: (bytes: number) => void): Promise<Bytes> {
+  const file = phoneFile(TRANSFER);
+  try {
+    await downloadFile(connection, signal, lines, file, onRead);
+    return await file.bytes();
+  } finally {
+    if (file.exists) file.delete();
+  }
+}
+
+/**
+ * Sends the phone's database `from` as a patch against the machine's copy at `base`, which the machine applies,
+ * verifies and renames to `out`: the copy's page list comes down, and the patch goes up as the whole file would. It
+ * fails when the machine has no copy or no server of this bundle.
+ */
+async function sendPatch(connection: SshConnection, signal: AbortSignal, name: string, from: string, base: string,
+  out: string, onCopied: (copied: Copied) => void) {
+  const list = await fetchBytes(connection, signal, [...SERVER, 'umask 077',
+    't=$(mktemp "$HOME/.infinichat/.pages.XXXXXX")', `trap 'rm -f "$t"' 0`, ON_SIGNAL,
+    `"$node" "$js" pages "$HOME/${base}" "$t"`, PRINT_COPY, 'cat "$t"'], () => {});
+  const patch = await diff(PHONE, from, list);
+  await runScript(connection, signal, name, [...SERVER, 'umask 077', `mkdir -p "$(dirname "$HOME/${out}")"`,
+    't=$(mktemp "$HOME/.infinichat/.patch.XXXXXX")', `trap 'rm -f "$t"' 0`, ON_SIGNAL,
+    'cat > "$t"', `"$node" "$js" patch "$HOME/${base}" "$t" "$HOME/${out}"`, PRINT_MARKER],
+  { failure: PATCH_FAILED, input: patch, timeoutMs: null,
+    onWritten: (bytes) => onCopied({ bytes, total: patch.byteLength }) });
+}
+
+/**
+ * Brings the phone's copy `base` up to the machine's database with a patch, applied, verified and renamed to `out`:
+ * the page list goes up, the machine diffs (with `live`, a backup of the database it holds open), and the patch comes
+ * down. The patch waits on the machine for the download, which removes it. It fails when the machine has no server of
+ * this bundle.
+ */
+async function receivePatch(connection: SshConnection, signal: AbortSignal, name: string, live: boolean, base: string,
+  out: string, onCopied: (copied: Copied) => void) {
+  const [path, size] = await runScript(connection, signal, name, [...SERVER, 'umask 077',
+    'p=$(mktemp "$HOME/.infinichat/.pages.XXXXXX")', 'o=$(mktemp "$HOME/.infinichat/.patch.XXXXXX")',
+    `trap 'rm -f "$p" "$o"' 0`, ON_SIGNAL, 'cat > "$p"',
+    `"$node" "$js" diff "$HOME/${DATA}/${INFINICHAT_DATABASE}" "$p" "$o"${live ? ' --live' : ''}`,
+    PRINT_MARKER, `printf '%s\\n' "$o"`, 'wc -c < "$o"', `trap 'rm -f "$p"' 0`],
+  { failure: PATCH_FAILED, input: await pages(PHONE, base), timeoutMs: null });
+  const total = Number(size);
+  if (!path?.startsWith('/') || !Number.isSafeInteger(total)) throw new Error(PATCH_FAILED);
+  const patch = await fetchBytes(connection, signal, [`o=${quotePosix(path)}`, `trap 'rm -f "$o"' 0`, ON_SIGNAL,
+    PRINT_COPY, 'cat "$o"'], (bytes) => onCopied({ bytes, total }));
+  await apply(PHONE, base, patch, out);
+}
+
+/**
+ * Puts the phone's closed database into the machine's `data/incoming/`: as a patch against the machine's copy, or as
+ * the whole file when there is no copy or the patch fails, uploaded aside, verified by SHA-256 and renamed into place
+ * as provisioning.ts uploads the daemon. Uploads go through `openShell` with input, since react-native-ssh's `exec` has
+ * no stdin, and have no timeout of their own: they end with the copy, the user's Cancel, or the SSH connection, whose
+ * keepalive notices a dead machine. Moving it into `data/` is refused while the machine holds a conversation open; a
+ * database an earlier one left there is kept in `released/`.
+ */
+async function upload(connection: SshConnection, signal: AbortSignal, name: string, files: ConversationFiles,
+  onCopied: (copied: Copied) => void) {
+  const failure = `Check the account’s home folder permissions and disk space on ${name}.`;
+  try {
+    await sendPatch(connection, signal, name, INFINICHAT_DATABASE, COPY, `${DATA}/incoming/${INFINICHAT_DATABASE}`,
+      onCopied);
+  } catch {
+    signal.throwIfAborted();
+    await runScript(connection, signal, name, [HASH, `d="$HOME/${DATA}/incoming"`, 'umask 077', 'mkdir -p "$d"',
+      't=$(mktemp "$d/.upload.XXXXXX")', `trap 'rm -f "$t"' 0`, `trap 'exit 1' HUP INT TERM`, 'cat > "$t"',
+      `[ "$(hash "$t")" = ${files.db.sha256} ]`, `mv -f "$t" "$d/${INFINICHAT_DATABASE}"`, PRINT_MARKER],
+    { failure, input: await phoneFile(INFINICHAT_DATABASE).bytes(), timeoutMs: null,
+      onWritten: (bytes) => onCopied({ bytes, total: files.db.size }) });
+  }
+  const db = `"$d/${INFINICHAT_DATABASE}"`;
+  const [placed] = await runScript(connection, signal, name, ['umask 077', `d="$HOME/${DATA}"`,
+    's="$HOME/.infinichat/state.json"', PRINT_MARKER,
+    `if [ -f "$s" ] && grep -q '"active":true' "$s"; then echo active; exit 0; fi`,
+    `if [ -e ${db} ]; then r="$HOME/.infinichat/released/$(date -u +%Y-%m-%dT%H-%M-%SZ)-$$"`,
+    `  mkdir -p "$r"; mv ${db}* "$r/"; fi`,
+    `rm -f ${db}-wal ${db}-shm`,
+    `mv -f "$d/incoming/${INFINICHAT_DATABASE}" ${db}`, 'echo placed'], { failure });
+  if (placed === 'active') throw new Error(`InfiniChat is already open on ${name}.`);
+  if (placed !== 'placed') throw new Error(failure);
+}
+
+/**
+ * Brings the database the machine named to the phone's incoming copy: as a patch against the phone's moved copy, or
+ * as the whole file when there is no copy or the patch fails. Either is checked against what the machine named.
+ */
 async function download(connection: SshConnection, signal: AbortSignal, name: string, files: ConversationFiles,
-  onCopied: (bytes: number) => void) {
+  onCopied: (copied: Copied) => void) {
   remove(INCOMING);
-  let copied = 0;
-  for (const [suffix, expected] of parts(files)) {
-    const file = phoneFile(`${INCOMING}${suffix}`);
-    const before = copied;
-    await downloadFile(connection, signal, `${DATA}/${INFINICHAT_DATABASE}${suffix}`, file,
-      (bytes) => onCopied(before + bytes));
-    if (!same(await describe(file), expected)) {
-      throw new Error(`The copy from ${name} doesn’t match what InfiniChat left there. Try again.`);
+  const incoming = phoneFile(INCOMING);
+  try {
+    await receivePatch(connection, signal, name, false, MOVED, INCOMING, onCopied);
+    if (same(await describe(incoming), files.db)) return;
+  } catch {
+    signal.throwIfAborted();
+  }
+  await downloadFile(connection, signal, [PRINT_COPY, `exec cat "$HOME/${DATA}/${INFINICHAT_DATABASE}"`], incoming,
+    (bytes) => onCopied({ bytes, total: files.db.size }));
+  if (!same(await describe(incoming), files.db)) {
+    throw new Error(`The copy from ${name} doesn’t match what InfiniChat left there. Try again.`);
+  }
+}
+
+/**
+ * Patches the machine's copy with a backup of the phone's open conversation, taken over a second connection with
+ * SQLite's backup API, which copies a consistent state at the same page numbers while the Harness goes on writing.
+ */
+async function refreshCopy(connection: SshConnection, signal: AbortSignal, name: string) {
+  remove(BACKUP);
+  try {
+    const source = await openDatabaseAsync(INFINICHAT_DATABASE, { useNewConnection: true });
+    try {
+      const backup = await openDatabaseAsync(BACKUP, { useNewConnection: true });
+      try {
+        await backupDatabaseAsync({ sourceDatabase: source, destDatabase: backup });
+      } finally {
+        await backup.closeAsync();
+      }
+    } finally {
+      await source.closeAsync();
     }
-    copied += expected.size;
+    await sendPatch(connection, signal, name, BACKUP, COPY, COPY, () => {});
+  } finally {
+    remove(BACKUP);
   }
 }
 
@@ -237,7 +357,8 @@ async function download(connection: SshConnection, signal: AbortSignal, name: st
  * closes its Harness, the files are copied, and the other side opens them, where pi-durable's recovery resumes the work
  * the close interrupted. Nothing drains or waits. The home record names each phase before the step that needs it, so
  * `resume` carries a move on after a relaunch or a failure. The copy is the one seam upstream's replication could
- * replace: `upload` and `download`.
+ * replace: `upload` and `download`, which send the pages that changed since the other side's copy, and `refresh`,
+ * which keeps that copy fresh.
  */
 export class InfiniChatMoves {
   private readonly listeners = new Set<() => void>();
@@ -246,6 +367,9 @@ export class InfiniChatMoves {
   private notice?: string;
   private attempt?: { controller: AbortController; cancelled: boolean };
   private running: Promise<void> = Promise.resolve();
+  /** The refresh under way, which a move, the background and `close` stop. */
+  private refreshing?: AbortController;
+  private refreshed: Promise<void> = Promise.resolve();
   /** This attempt saw the machine without the conversation open, and has not asked it to adopt since. */
   private machineClosed = false;
   private closed = false;
@@ -280,6 +404,45 @@ export class InfiniChatMoves {
     this.run(home.machineId, home.phase === 'moving-there' ? 'machine' : 'phone');
   }
 
+  /**
+   * Brings the copy the other side keeps up to date, at launch and when the app becomes active, so the next move has
+   * little to send: the phone's moved copy while the machine holds the conversation, the copy on `copyOn` while the
+   * phone does, each from a backup of the open database. It writes only that copy, aside and renamed into place, so
+   * stopping it anywhere leaves the old one, and one that fails changes nothing and runs again next time.
+   */
+  refresh() {
+    const home = this.home.getSnapshot();
+    const machineId = home.home === 'phone' ? home.copyOn : home.phase === 'there' ? home.machineId : undefined;
+    if (this.closed || this.attempt || this.refreshing || machineId === undefined) return;
+    const controller = new AbortController();
+    this.refreshing = controller;
+    this.refreshed = (async () => {
+      let connection: SshConnection | undefined;
+      try {
+        connection = await this.connect(machineId, controller.signal);
+        const name = this.name(machineId);
+        if (home.home === 'phone') await refreshCopy(connection, controller.signal, name);
+        else await receivePatch(connection, controller.signal, name, true, MOVED, MOVED, () => {});
+      } catch {
+        // The next move works without it.
+      } finally {
+        await connection?.disconnect().catch(() => {});
+        this.refreshing = undefined;
+      }
+    })();
+  }
+
+  /** Stops a refresh where it is, as the app going to the background does. */
+  stopRefresh() {
+    this.refreshing?.abort();
+  }
+
+  /** A machine removed from Remote machines keeps no copy for this phone to refresh. */
+  forget(machineId: string) {
+    const home = this.home.getSnapshot();
+    if (home.home === 'phone' && home.copyOn === machineId) this.home.set(PHONE_HOME);
+  }
+
   /** Runs a move a failure stopped again, forward, also when the failure was a Cancel's. */
   retry() {
     const status = this.status;
@@ -311,10 +474,14 @@ export class InfiniChatMoves {
   close(): Promise<void> {
     this.closed = true;
     this.attempt?.controller.abort();
-    return this.running;
+    this.stopRefresh();
+    return Promise.all([this.running, this.refreshed]).then(() => {});
   }
 
   private run(machineId: string, to: MoveStatus['to'], cancelling = false) {
+    // A move replaces the copies a refresh writes, so it waits until a refresh it stops has let go of them.
+    this.stopRefresh();
+    const refreshed = this.refreshed;
     const attempt = { controller: new AbortController(), cancelled: cancelling };
     this.attempt = attempt;
     this.machineClosed = false;
@@ -323,6 +490,7 @@ export class InfiniChatMoves {
       cancellable: !cancelling };
     this.notify();
     this.running = (async () => {
+      await refreshed;
       if (!cancelling) {
         try {
           // A move that got this far finished: a Cancel too late to stop it changes nothing.
@@ -380,11 +548,10 @@ export class InfiniChatMoves {
     if (!adopted(held, files)) {
       if (held?.active) throw new Error(`InfiniChat on ${name} already has another conversation open.`);
       this.machineClosed = true;
-      this.step({ step: 'copying', copied: { bytes: 0, total: total(files) } });
+      this.step({ step: 'copying' });
       const connection = await this.connect(machineId, signal);
       try {
-        await upload(connection, signal, name, files,
-          (bytes) => this.step({ step: 'copying', copied: { bytes, total: total(files) } }));
+        await upload(connection, signal, name, files, (copied) => this.step({ step: 'copying', copied }));
       } finally {
         await connection.disconnect().catch(() => {});
       }
@@ -425,11 +592,10 @@ export class InfiniChatMoves {
     this.sides.hold();
     const files = await remote.relinquish();
     signal.throwIfAborted();
-    this.step({ step: 'copying', copied: { bytes: 0, total: total(files) } });
+    this.step({ step: 'copying' });
     const connection = await this.connect(machineId, signal);
     try {
-      await download(connection, signal, name, files,
-        (bytes) => this.step({ step: 'copying', copied: { bytes, total: total(files) } }));
+      await download(connection, signal, name, files, (copied) => this.step({ step: 'copying', copied }));
     } finally {
       await connection.disconnect().catch(() => {});
     }
@@ -438,10 +604,11 @@ export class InfiniChatMoves {
     rename(INCOMING, INFINICHAT_DATABASE);
     remove(MOVED);
     // The placed files are the conversation now, and nothing has opened them, so the record names the phone before it
-    // opens them: a relaunch never downloads over work the phone has done.
-    this.home.set(PHONE_HOME);
+    // opens them: a relaunch never downloads over work the phone has done. The machine's copy is kept fresh from now.
+    this.home.set({ version: 1, home: 'phone', copyOn: machineId });
     await this.sides.openPhone();
-    // A machine never opens released files, and the next move there sets them aside, so this may fail.
+    // A machine never opens released files, and the next move there sets them aside, so this may fail; the machine
+    // then has no copy to refresh, and the next move there sends the whole file.
     await remote.archive().catch(() => {});
     await this.sides.closeMachine();
   }

@@ -21,7 +21,7 @@ const progressLabels = {
 
 export default function RemoteHostsScreen() {
   const colors = useChatColors();
-  const { remoteHosts } = useChatApp();
+  const { remoteHosts, moves } = useChatApp();
   const snapshot = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   // While InfiniChat runs on a machine, its tools reach the others with that machine's own SSH.
   const infiniChat = useInfiniChatMachines();
@@ -95,6 +95,7 @@ export default function RemoteHostsScreen() {
     setNotice(undefined);
     try {
       await remoteHosts.remove(host.id, host);
+      moves?.forget(host.id);
       setNotice({ message: 'Machine removed. Chats that selected it keep their selection until you choose another '
         + 'environment.' });
     } catch (error) {
