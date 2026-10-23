@@ -1,81 +1,41 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useMemo } from 'react';
+import { EnrichedMarkdownText, type MarkdownStyle } from 'react-native-enriched-markdown';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
-import { CodeBlock } from './markdown/code-block';
-import { InlineContent } from './markdown/inline-content';
-import { parseMessageMarkdown } from './markdown/streaming-parser';
-import { TableBlock } from './markdown/table-block';
-import { assertNever, type MarkdownBlock } from './markdown/types';
+import { openExternalLink } from './source-link';
 
-function listMarker(checked: boolean | null, ordered: boolean, number: number): string {
-  if (checked !== null) return checked ? '☑' : '☐';
-  return ordered ? `${number}.` : '•';
+type ChatColors = ReturnType<typeof useChatColors>;
+
+/** The library ships light-mode colors only, so every element with a color of its own follows the chat's palette. */
+function markdownStyleFor(colors: ChatColors): MarkdownStyle {
+  const heading = { color: colors.text };
+  return {
+    paragraph: { fontSize: 16, lineHeight: 25, color: colors.text },
+    h1: heading, h2: heading, h3: heading, h4: heading, h5: heading, h6: heading,
+    list: { color: colors.text, bulletColor: colors.secondary, markerColor: colors.secondary },
+    blockquote: { color: colors.text, borderColor: colors.border, backgroundColor: colors.subtle },
+    codeBlock: { color: colors.text, backgroundColor: colors.subtle, borderColor: colors.border },
+    code: { color: colors.text, backgroundColor: colors.subtle, borderColor: colors.border },
+    link: { color: colors.accent },
+    table: {
+      color: colors.text, headerTextColor: colors.text, borderColor: colors.border,
+      headerBackgroundColor: colors.subtle, rowEvenBackgroundColor: colors.surface,
+      rowOddBackgroundColor: colors.surface,
+    },
+    taskList: { checkedColor: colors.accent, borderColor: colors.border, checkedTextColor: colors.secondary },
+    thematicBreak: { color: colors.border },
+  };
 }
 
-function BlockList({ blocks, compact = false }: { blocks: readonly MarkdownBlock[]; compact?: boolean }) {
-  return <View style={compact ? styles.compactBlocks : styles.blocks}>
-    {blocks.map((block) => <ContentBlock key={block.key} block={block} />)}
-  </View>;
-}
-
-function ContentBlock({ block }: { block: MarkdownBlock }) {
-  const colors = useChatColors();
-
-  switch (block.kind) {
-    case 'paragraph':
-      return <Text selectable style={[styles.body, { color: colors.text }]}>
-        <InlineContent fragment={block.content} />
-      </Text>;
-    case 'heading':
-      return <Text selectable accessibilityRole="header" style={[
-        styles.heading, { color: colors.text, fontSize: block.level === 1 ? 23 : block.level === 2 ? 21 : 19 },
-      ]}>
-        <InlineContent fragment={block.content} />
-      </Text>;
-    case 'code':
-      return <CodeBlock language={block.language} code={block.text} />;
-    case 'list':
-      return <View role="list" style={styles.list}>
-        {block.items.map((item, index) => <View key={item.key} role="listitem" style={styles.listRow}>
-          <Text style={[styles.listMarker, { color: colors.secondary }]}
-            accessibilityLabel={item.checked === null ? undefined : item.checked ? 'Completed task' : 'Incomplete task'}>
-            {listMarker(item.checked, block.ordered, block.start + index)}
-          </Text>
-          <View style={styles.listContent}><BlockList blocks={item.blocks} compact /></View>
-        </View>)}
-      </View>;
-    case 'quote':
-      return <View style={[styles.quote, { borderLeftColor: colors.border }]}>
-        <BlockList blocks={block.blocks} />
-      </View>;
-    case 'rule':
-      return <View style={[styles.rule, { backgroundColor: colors.border }]} />;
-    case 'table':
-      return <TableBlock block={block} />;
-    default:
-      return assertNever(block);
-  }
-}
-
-/** Blocks are keyed by source offset, so completed blocks stay mounted as later content streams. */
+/** A reply still streaming uses the library's streaming animation and its handling of unfinished tables and code. */
 export function MessageContent({ text, streaming = false }: {
   text: string;
   streaming?: boolean;
 }) {
-  const blocks = parseMessageMarkdown(text, streaming);
-  return <View style={styles.content}><BlockList blocks={blocks} /></View>;
+  const colors = useChatColors();
+  const markdownStyle = useMemo(() => markdownStyleFor(colors), [colors]);
+  // Model replies are read-only: a task list item shows its state but can't be toggled.
+  return <EnrichedMarkdownText markdown={text} flavor="github" markdownStyle={markdownStyle}
+    streamingAnimation={streaming} enableTaskListItemToggle={false}
+    onLinkPress={({ url }) => { void openExternalLink(url); }} />;
 }
-
-const styles = StyleSheet.create({
-  content: { minHeight: 25 },
-  blocks: { gap: 12, minWidth: 0 },
-  compactBlocks: { gap: 7, minWidth: 0 },
-  body: { fontSize: 16, lineHeight: 25 },
-  heading: { fontWeight: '600', lineHeight: 28, marginTop: 4 },
-  list: { gap: 7 },
-  listRow: { flexDirection: 'row', gap: 9 },
-  listMarker: { minWidth: 20, fontSize: 16, lineHeight: 25 },
-  listContent: { flex: 1, minWidth: 0 },
-  quote: { borderLeftWidth: 3, paddingLeft: 13 },
-  rule: { height: StyleSheet.hairlineWidth, marginVertical: 6 },
-});
