@@ -210,10 +210,16 @@ Done on the implementer's Mac (Node 25.6.1), on copies of the owner's data: the 
   A refresh stopped mid-diff, by a hangup or by a silent channel close, left the old copy and no files on either side.
   A 0.8 MB leftover WAL was folded.
 
+Done on the owner's iPhone Release install of 4d85f59 (2026-10-23), with the conversation on vikash-system:
+
+- The phone reinstalled the server (bundle `4e8017543a887ac7…`). Its user unit starts `/bin/bash -lc 'exec "$0"
+  "$@"' <node> server.js serve …`, its process's `PATH` has nvm's Node 24.15.0, `server.json` names that `node`,
+  and `~/.infinichat` has no `.pages` or `.patch` file left.
+- The launch refreshed `infinichat-moved.db` (05:56). Read back with `devicectl`, its SHA-256 (`045226c3…`) equals
+  that of a backup of the machine's database taken afterwards with `rate: -1`, and it passes `integrity_check`.
+
 Still unverified, on the owner's iPhone Release install, with the conversation on vikash-system:
 
-- After the install, the app's first activation refreshes `infinichat-moved.db`. Its SHA-256 matches a backup of
-  the machine's database taken by the same `diff --live` (read the phone's file back with `devicectl`).
 - A move back sends a patch, not the whole file. Its progress total is the patch size, and the conversation opens
   on the phone as before.
 - A move there sends a patch against `copy/infinichat.db`.
