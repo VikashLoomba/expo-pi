@@ -170,10 +170,10 @@ simulator, on a development build of this commit. The results are in
 
 ## For the owner
 
-- **`schedule_task`'s description.** It tells the agent "If the app is closed at that time, the user gets a
-  notification and the task reaches you when the app is next opened" (`src/pi/infinichat/schedule.ts:51-53`). While
-  InfiniChat runs on a machine, the task reaches the agent at its time instead. Changing the text changes the agent's
-  tools for the existing conversation. The Scheduled tasks sheet's footer is right on both sides.
+- **`schedule_task`'s description (decided 2026-10-22).** It told the agent "If the app is closed at that time, the
+  user gets a notification and the task reaches you when the app is next opened", which is false on a machine. The
+  owner chose one generic text for both sides: "At run_after, or as soon as you run again if you aren't running then,
+  the task reaches you …" (`src/pi/infinichat/schedule.ts`). The Scheduled tasks sheet's footer is right on both sides.
 
 ## Not in this piece
 

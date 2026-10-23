@@ -178,14 +178,14 @@ Found while implementing, against the installed sources and this Mac:
 - **No log file.** The LaunchAgent's output goes nowhere and the detached server's to `/dev/null`; systemd keeps its
   own journal. Nothing requires a log yet, and no message points at one.
 
-## Open question for the owner
+## Login shell (decided 2026-10-22)
 
-The service runs with its manager's environment, not the login shell's. Measured on this Mac, the LaunchAgent's
-`PATH` is `/usr/bin:/bin:/usr/sbin:/sbin`, so the agent's bash tool on the machine doesn't find Homebrew's, nvm's or
-fnm's programs, `node` included. Today's phone tools reach machines through the pi-env daemon, which also starts
-without a login shell, so this matches them. Upstream's way to give a remote daemon the login environment is
-`loginShell` (`exec "$SHELL" -lc 'exec "$0" "$@"' …`, `src/ssh.ts:482`), and the service's command line could start
-the server the same way. It is not done: it changes what the tools see, which is the owner's call.
+The service manager's environment lacks the login shell's `PATH` (the LaunchAgent's is `/usr/bin:/bin:/usr/sbin:/sbin`;
+vikash-system's systemd unit had no nvm), so the agent's bash tool didn't find Homebrew's, nvm's or fnm's programs.
+The owner chose pi-env's `loginShell: true` everywhere a machine starts something for InfiniChat or the chats: the
+service runs `<login shell> -lc 'exec "$0" "$@"' <node> server.js …` (the shell is the `$SHELL` the install found over
+SSH), the server's `connectSsh` to other machines passes `loginShell: true`, and the phone's own daemon channel starts
+its daemon as pi-env's `launchCommand` does with that option.
 
 ## Size
 

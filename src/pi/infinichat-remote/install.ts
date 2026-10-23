@@ -116,21 +116,23 @@ async function machineSecret(machineId: string): Promise<string> {
 }
 
 /**
- * The system, the home folder, and the Node that runs the server. `ssh` runs commands without a login shell, and Node
- * from Homebrew, nvm or fnm is often only on the login shell's PATH, so Node is found the way pi-env's `loginShell`
- * starts its daemon. `$0` is a second marker, printed after whatever the login shell's profile prints. Android is
- * told apart from Linux as provisioning.ts does.
+ * The system, the home folder, the login shell, and the Node that runs the server. `ssh` runs commands without a login
+ * shell, and Node from Homebrew, nvm or fnm is often only on the login shell's PATH, so Node is found the way pi-env's
+ * `loginShell` starts its daemon. `$0` is a second marker, printed after whatever the login shell's profile prints.
+ * Android is told apart from Linux as provisioning.ts does.
  */
 async function detect(run: Run, name: string) {
   const failure = messages(name).check;
-  const [system, home, ...rest] = await run([PRINT_MARKER,
+  const [system, home, shell, ...rest] = await run([PRINT_MARKER,
     `if [ "$(uname -o 2>/dev/null || true)" = Android ]; then printf '%s\\n' Android; else uname -s; fi`,
     `printf '%s\\n' "$HOME"`,
+    `printf '%s\\n' "$SHELL"`,
     `"$SHELL" -lc 'printf "%s\\n" "$0"; command -v node && node -p process.versions.node' "$M-NODE" || true`,
   ], { failure });
   const platform = system === 'Darwin' ? 'darwin' : system === 'Linux' ? 'linux' : undefined;
   if (!platform) throw new Error(`InfiniChat runs on macOS and Linux machines, and ${name} is neither.`);
   if (!home?.startsWith('/') || CONTROL.test(home)) throw new Error(failure);
+  if (!shell?.startsWith('/') || CONTROL.test(shell)) throw new Error(failure);
   const found = rest.lastIndexOf(`${MARKER}-NODE`);
   const [node, version] = found < 0 ? [] : rest.slice(found + 1);
   // pi-durable's `engines`: Node 22.19 has the built-in `node:sqlite` its storage opens.
@@ -140,7 +142,7 @@ async function detect(run: Run, name: string) {
     throw new Error(`InfiniChat needs Node 22.19 or newer on ${name}, on its login shell’s PATH (set in ~/.zprofile `
       + 'or ~/.profile, not only ~/.zshrc). Install it there and try again.');
   }
-  return { platform, home: home.replace(/\/+$/, ''), node } as const;
+  return { platform, home: home.replace(/\/+$/, ''), shell, node } as const;
 }
 
 const xml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -358,8 +360,11 @@ export async function installServer(hosts: RemoteHostRepository, machineId: stri
       'if [ -f "$d/secret" ] && cmp -s "$t" "$d/secret"; then r=same; else mv -f "$t" "$d/secret"; r=changed; fi',
       'chmod 600 "$d/secret"', PRINT_MARKER, 'echo "$r"'], { failure: message.files, input: Buffer.from(secret) });
     const restart = secretFile === 'changed';
-    // The device list's own text for the machine, so the model's memory of it stays true once the conversation moves.
-    const args = [machine.node, file, 'serve', '--device', name, '--description', machineDescription(host)];
+    // Started through the login shell, as pi-env's `loginShell` starts its daemon, so the agent's tools see the PATH
+    // the account's profile sets up rather than the service manager's. The device list's own text for the machine,
+    // so the model's memory of it stays true once the conversation moves.
+    const args = [machine.shell, '-lc', 'exec "$0" "$@"', machine.node, file, 'serve', '--device', name,
+      '--description', machineDescription(host)];
     const [manager, linger] = machine.platform === 'darwin'
       ? await run(launchdScript(restart, SERVER_BUNDLE),
         { failure: message.service, timedOut: message.service, input: Buffer.from(launchAgent(args)) })

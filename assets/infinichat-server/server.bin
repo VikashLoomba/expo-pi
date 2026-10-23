@@ -122887,7 +122887,7 @@ var localTime = (time) => new Date(time).toLocaleString("sv-SE");
 function scheduleTool(rootId, scheduled) {
   return defineTool({
     name: "schedule_task",
-    description: 'Schedule a task for yourself at a later time. At run_after the task reaches you as a message "[Scheduled task]" followed by the task, as a new turn or between your tool calls. If the app is closed at that time, the user gets a notification and the task reaches you when the app is next opened.',
+    description: `Schedule a task for yourself at a later time. At run_after, or as soon as you run again if you aren't running then, the task reaches you as a message "[Scheduled task]" followed by the task, as a new turn or between your tool calls.`,
     replay: "safe",
     parameters: typebox_exports.Object({
       task: typebox_exports.String({ description: "What to do then; it reaches you as written." }),
@@ -132373,6 +132373,10 @@ var ServerMachines = class {
       hostKeyAlias: machine.id
     };
   }
+  /** Its daemon starts through the login shell, so the tools see the PATH the account's profile sets up there. */
+  connect(machine) {
+    return connectSsh({ ...this.target(machine), loginShell: true });
+  }
   drop(key2) {
     const opening = this.connections.get(key2);
     this.connections.delete(key2);
@@ -132402,7 +132406,7 @@ var ServerMachines = class {
   async open(machine) {
     const target = this.target(machine);
     try {
-      return (await connectSsh(target)).connection;
+      return (await this.connect(machine)).connection;
     } catch (error) {
       if (!(error instanceof HostKeyUnknownError) && !(error instanceof HostKeyChangedError)) throw error;
       const changed = error instanceof HostKeyChangedError;
@@ -132414,7 +132418,7 @@ var ServerMachines = class {
       }
       if (changed) await forgetHostKey(target);
       await acceptHostKey(target, pinned.map(({ line }) => line));
-      return (await connectSsh(target)).connection;
+      return (await this.connect(machine)).connection;
     }
   }
   listed(machine) {

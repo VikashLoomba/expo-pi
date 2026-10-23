@@ -107,7 +107,9 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
         signal, token, platform, onProgress: snapshot.onProgress,
       });
       if (signal.aborted || closingRequested || notified) throw aborted();
-      const command = `${quotePosix(daemonPath)} serve --token ${token}`;
+      // Through the login shell, as pi-env's `loginShell` starts its daemon (`launchCommand`, `dist/ssh.js:392-403` at
+      // v1.4.0), so commands see the PATH the account's profile sets up. The decoder skips what the profile prints.
+      const command = `exec "$SHELL" -lc 'exec "$0" "$@"' ${quotePosix(daemonPath)} serve --token ${token}`;
       const daemon = await connection.openShell({ term: '', command }, {
         // Native owns callback buffers. Copy immediately, before the callback returns.
         onData: (bytes) => onData(new Uint8Array(bytes).slice()),

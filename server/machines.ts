@@ -157,6 +157,11 @@ export class ServerMachines {
       hostKeyAlias: machine.id };
   }
 
+  /** Its daemon starts through the login shell, so the tools see the PATH the account's profile sets up there. */
+  private connect(machine: Machine) {
+    return connectSsh({ ...this.target(machine), loginShell: true });
+  }
+
   private drop(key: string) {
     const opening = this.connections.get(key);
     this.connections.delete(key);
@@ -190,7 +195,7 @@ export class ServerMachines {
   private async open(machine: Machine): Promise<Connection> {
     const target = this.target(machine);
     try {
-      return (await connectSsh(target)).connection;
+      return (await this.connect(machine)).connection;
     } catch (error) {
       if (!(error instanceof HostKeyUnknownError) && !(error instanceof HostKeyChangedError)) throw error;
       const changed = error instanceof HostKeyChangedError;
@@ -206,7 +211,7 @@ export class ServerMachines {
       }
       if (changed) await forgetHostKey(target);
       await acceptHostKey(target, pinned.map(({ line }) => line));
-      return (await connectSsh(target)).connection;
+      return (await this.connect(machine)).connection;
     }
   }
 

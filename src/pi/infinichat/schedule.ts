@@ -48,9 +48,9 @@ const localTime = (time: number): string => new Date(time).toLocaleString('sv-SE
 export function scheduleTool(rootId: ConversationId, scheduled: ReturnType<typeof scheduledTask>) {
   return defineTool({
     name: 'schedule_task',
-    description: 'Schedule a task for yourself at a later time. At run_after the task reaches you as a message '
-      + '"[Scheduled task]" followed by the task, as a new turn or between your tool calls. If the app is closed at '
-      + 'that time, the user gets a notification and the task reaches you when the app is next opened.',
+    description: 'Schedule a task for yourself at a later time. At run_after, or as soon as you run again if you '
+      + 'aren\'t running then, the task reaches you as a message "[Scheduled task]" followed by the task, as a new '
+      + 'turn or between your tool calls.',
     replay: 'safe',
     parameters: Type.Object({
       task: Type.String({ description: 'What to do then; it reaches you as written.' }),
