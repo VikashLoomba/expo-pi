@@ -11,6 +11,7 @@ import {
 
 import type { PhotoAttachment, PhotoSource } from '@/chat/photo-attachments';
 import { useChatColors } from '@/hooks/use-chat-colors';
+import { useChatAgentName } from './agent';
 import { ChatIcon } from './icon';
 
 /** The message field and its controls, floating as Liquid Glass over the transcript. */
@@ -28,6 +29,7 @@ export function Composer({ value, onChange, onSend, onStop, onConnect, busy, adm
   imagesSupported: boolean;
 }) {
   const colors = useChatColors();
+  const agentName = useChatAgentName();
   const canSend = connected && !disabled && !admitting && !attaching && (!!value.trim() || attachments.length > 0);
   const canAttach = imagesSupported && !disabled && !admitting && !attaching;
   return <View style={styles.container}>
@@ -66,8 +68,8 @@ export function Composer({ value, onChange, onSend, onStop, onConnect, busy, adm
           </Menu>
         </Host>}
       <GlassView style={styles.field}>
-        <TextInput ref={inputRef} testID="composer-input" accessibilityLabel="Message Pi" value={value}
-          onChangeText={onChange} placeholder={busy ? 'Write a follow-up…' : 'Message Pi…'}
+        <TextInput ref={inputRef} testID="composer-input" accessibilityLabel={`Message ${agentName}`} value={value}
+          onChangeText={onChange} placeholder={busy ? 'Write a follow-up…' : `Message ${agentName}…`}
           placeholderTextColor={PlatformColor('placeholderText')} multiline maxLength={30000} editable={!admitting}
           style={[styles.input, { color: PlatformColor('label') }]} selectionColor={colors.accent} />
         <Pressable testID="send-message" accessibilityRole="button" accessibilityLabel="Send message"

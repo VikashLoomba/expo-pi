@@ -2,10 +2,9 @@ import type { UserMessage } from '@earendil-works/pi-ai';
 
 import type { ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
 import type { ScheduledTask } from '../pi/infinichat-scheduled';
-import type { InfiniChatHost, InfiniChatSnapshot } from '../pi/infinichat-service';
+import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../pi/infinichat-service';
 import type { InfiniChatControls } from '../pi/infinichat-view';
 import type { ScheduledInput } from '../pi/infinichat/schedule';
-import type { ChatModelSettings } from '../pi/model-catalog';
 import type { ChatMessage } from './types';
 
 const noop = () => {};
@@ -89,8 +88,8 @@ export class ShownInfiniChat implements InfiniChatHost {
     return this.current().stop();
   }
 
-  updateSettings(main: ChatModelSettings, summary: ChatModelSettings, instructions: string): Promise<void> {
-    return this.current().updateSettings(main, summary, instructions);
+  updateSettings(settings: InfiniChatSettings): Promise<void> {
+    return this.current().updateSettings(settings);
   }
 
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean> {

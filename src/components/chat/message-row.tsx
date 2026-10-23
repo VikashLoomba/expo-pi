@@ -6,10 +6,10 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import type { ChatMessage } from '@/chat/types';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { userInput } from '@/pi/user-input';
+import { AgentMark, useChatAgentName } from './agent';
 import { ChatIcon } from './icon';
 import { MessageContent } from './message-content';
 import { MessageImages } from './message-images';
-import { PiMark } from './primitives';
 import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
 import { collectSearchSources } from './web-search-presentation';
@@ -19,6 +19,7 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
   onSteerQueued?: (submissionId: number, content: UserMessage['content']) => void;
 }) {
   const colors = useChatColors();
+  const agentName = useChatAgentName();
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [steering, setSteering] = useState(false);
@@ -65,11 +66,11 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
   const report = message.role === 'work'
     ? /^\[([^\]\r\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\r\n]*"\))?\s*$/.exec(message.text)
     : null;
-  const author = report?.[1] ?? 'Pi';
+  const author = report?.[1] ?? agentName;
   const body = report?.[2] ?? message.text;
   return <View testID={`message-${message.id}`} style={styles.assistant}>
     <View style={styles.assistantIdentity}>
-      <PiMark size={25} />
+      <AgentMark size={25} />
       <Text style={[styles.assistantName, { color: colors.secondary }]}>{author}</Text>
       <Text numberOfLines={1} style={[styles.streamingLabel, { color: colors.muted }]}>
         {message.streaming ? stopping ? 'Stopping…' : 'Responding' : message.interrupted ? 'Interrupted' : ' '}

@@ -20,7 +20,8 @@ import { useChatColors } from '@/hooks/use-chat-colors';
 import { useTranscriptScroll } from '@/hooks/use-transcript-scroll';
 import { ChatIcon, type ChatIconName } from './icon';
 import { MessageRow } from './message-row';
-import { ActionButton, PiMark } from './primitives';
+import { AgentMark, useChatAgentName } from './agent';
+import { ActionButton } from './primitives';
 
 const suggestions: { icon: ChatIconName; title: string; detail: string; prompt: string }[] = [
   { icon: 'idea', title: 'Make something of an idea', detail: 'Find a starting point, together.', prompt: 'Help me think through an idea. Ask me a few questions to get started.' },
@@ -31,8 +32,9 @@ const suggestions: { icon: ChatIconName; title: string; detail: string; prompt: 
 
 function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
   const colors = useChatColors();
+  const agentName = useChatAgentName();
   return <View style={styles.empty}>
-    <PiMark size={56} />
+    <AgentMark size={56} />
     <Text style={[styles.emptyTitle, { color: colors.text }]}>Where shall we start?</Text>
     <Text style={[styles.emptyCaption, { color: colors.secondary }]}>Bring your questions. We’ll take it from here.</Text>
     <View style={styles.suggestions}>{suggestions.map((item, index) => <Pressable key={item.title} testID={`suggestion-${index}`} accessibilityRole="button" onPress={() => onChoose(item.prompt)}
@@ -41,7 +43,9 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
       <View style={styles.suggestionCopy}><Text style={[styles.suggestionTitle, { color: colors.text }]}>{item.title}</Text><Text style={[styles.suggestionDetail, { color: colors.muted }]}>{item.detail}</Text></View>
       <ChatIcon name="chevron" color={colors.muted} size={11} />
     </Pressable>)}</View>
-    <Text style={[styles.disclaimer, { color: colors.muted }]}>Pi can make mistakes. Check important details.</Text>
+    <Text style={[styles.disclaimer, { color: colors.muted }]}>
+      {agentName} can make mistakes. Check important details.
+    </Text>
   </View>;
 }
 
@@ -86,6 +90,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   composer: ReactNode;
 }) {
   const colors = useChatColors();
+  const agentName = useChatAgentName();
   const messages = useChatMessages(view);
   const controls = useChatControls(view);
   const busy = !!controls?.busy;
@@ -94,7 +99,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   const renderMessage = ({ item }: { item: ChatMessage }) =>
     <MessageRow message={item} stopping={stopping && !!item.streaming} onSteerQueued={onSteerQueued} />;
   const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
-    : controls?.retrying ? 'Retrying…' : 'Pi is thinking…';
+    : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
   const { listRef, onEndVisible, scrollToLatest, showScrollDown } = useTranscriptScroll();
   const composerHeight = useSharedValue(0);
   const { bottom } = useSafeAreaInsets();

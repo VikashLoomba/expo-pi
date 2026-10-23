@@ -122618,11 +122618,12 @@ ${saved.turnState}
           });
           const created = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
           const instructions = (await tx.doc(AgentDoc, root)).instructions;
+          const prompt = await setup.prompt(tx, root);
           await configure(tx, created.id, {
             extensions: { remove: [setup.master()] },
-            instructions: instructions ? `${setup.prompt}
+            instructions: instructions ? `${prompt}
 
-${instructions}` : setup.prompt,
+${instructions}` : prompt,
             cwd: name,
             ...agent.effort ? { thinkingLevel: agent.effort } : {}
           });
@@ -124935,7 +124936,7 @@ on the one their \`device\` field names, and computer tasks on one marked
 "computer use". A computer is listed only while the user runs unii on
 it, and leaves the list when they close it: a task that needs one not
 listed can't be done now, so tell the user it isn't available.`;
-var renamed = (prompt, agentName2) => prompt.replaceAll("Unii", agentName2).replaceAll("have unii open", `have ${agentName2} open`).replaceAll("runs unii on", `runs ${agentName2} on`);
+var renamed = (prompt, agentName2) => prompt.replaceAll("Unii", () => agentName2).replaceAll("have unii open", () => `have ${agentName2} open`).replaceAll("runs unii on", () => `runs ${agentName2} on`);
 function sharedPrompt(agentName2, hasDeviceTools) {
   let prompt = originalPrompt;
   if (!hasDeviceTools) {
@@ -124954,12 +124955,14 @@ function subagentPrompt(agentName2, hasDeviceTools) {
 init_define_INFINICHAT_PI();
 var ConfigDoc = defineDoc({
   kind: "optchat.config",
-  version: 1,
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "current",
   checkpointWhen: () => true,
-  initial: () => ({ summary: null })
+  // Version 1 had no name, so the conversation went by the host's.
+  migrate: (value) => ({ ...value, name: null }),
+  initial: () => ({ summary: null, name: null })
 });
 var BuildScratchDoc = defineDoc({
   kind: "optchat.build-scratch",
@@ -125854,12 +125857,19 @@ async function openOptChat(storage, options, context3) {
   const turnState = async () => await options.turnState?.() ?? "";
   const coordinator = coordinatorTask(turnState);
   const tools = [...memoryTools(ROOT_CONVERSATION_ID), ...options.tools ?? []];
-  const agents = agentTask({ master: () => master, prompt: subagentPrompt(name, hasDeviceTools), turnState });
+  const agents = agentTask({
+    master: () => master,
+    prompt: async (tx, root2) => subagentPrompt((await tx.doc(ConfigDoc, root2)).name ?? name, hasDeviceTools),
+    turnState
+  });
   const scheduled = scheduledTask((tx, id, input) => admitInput(tx, id, { ...input, kind: "work" }));
   const agentCalls = [...agentTools(ROOT_CONVERSATION_ID, agents), scheduleTool(ROOT_CONVERSATION_ID, scheduled)];
   const master = defineExtension({
     name: "optchat.master",
-    sections: [section("optchat", () => sharedPrompt(name, hasDeviceTools), { tag: false })],
+    sections: [section("optchat", async ({ read: read2, conversationId }, sectionContext) => sharedPrompt(
+      (await read2.snapshot(ConfigDoc, conversationId, sectionContext))?.name ?? name,
+      hasDeviceTools
+    ), { tag: false })],
     tools: agentCalls
   });
   registry2.install(defineExtension({
@@ -126068,6 +126078,8 @@ var InfiniChatControlsSchema = typebox_exports.Object({
   summary: typebox_exports.Union([ChatModelSettingsSchema, typebox_exports.Null()]),
   /** The user's own instructions that follow the prompt; empty until written. */
   instructions: typebox_exports.String(),
+  /** The name the user gave the agent; empty for InfiniChat. */
+  name: typebox_exports.String(),
   /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
   configured: typebox_exports.Boolean()
 });
@@ -126341,6 +126353,7 @@ var InfiniChatView = class {
       busy: controls.busy || pending.length > 0 || Object.values(this.tasks?.value.tasks ?? {}).some((task) => task.kind === AGENT_TASK),
       summary,
       instructions: docs.agent?.instructions ?? "",
+      name: this.config?.value?.name ?? "",
       configured: docs.agent?.model !== void 0 && summary !== null,
       ...error ? { error } : {}
     };
@@ -126720,10 +126733,10 @@ var InfiniChatService = class _InfiniChatService {
     return this.chat.abort();
   }
   /**
-   * The main model and effort with pi-durable's `configure`, the summary model and effort, and the user's own
-   * instructions, in one commit.
+   * The main model and effort with pi-durable's `configure`, the summary model and effort, the user's own
+   * instructions and the agent's name, in one commit.
    */
-  async updateSettings(main2, summary, instructions, context3 = BACKGROUND_CONTEXT) {
+  async updateSettings({ main: main2, summary, instructions, name }, context3 = BACKGROUND_CONTEXT) {
     const catalog = buildModelCatalog(this.models);
     const selectedMain = { model: { ...main2.model }, thinkingLevel: main2.thinkingLevel };
     const selectedSummary = { model: { ...summary.model }, thinkingLevel: summary.thinkingLevel };
@@ -126733,7 +126746,9 @@ var InfiniChatService = class _InfiniChatService {
     const root = this.chat.root;
     await root.commit(async (tx) => {
       await configure(tx, root.id, selectedMain);
-      (await tx.doc(ConfigDoc, root.id)).summary = selectedSummary;
+      const config = await tx.doc(ConfigDoc, root.id);
+      config.summary = selectedSummary;
+      config.name = name.trim() || null;
       await this.chat.setInstructions(tx, instructions);
     }, context3);
   }
@@ -133024,7 +133039,8 @@ var InfiniChatRemote = remote("infinichat.remote", {
         updateSettings: method(typebox_exports.Object({
           main: ChatModelSettingsSchema,
           summary: ChatModelSettingsSchema,
-          instructions: typebox_exports.String()
+          instructions: typebox_exports.String(),
+          name: typebox_exports.String()
         })),
         cancelScheduled: method(
           typebox_exports.Object({ id: typebox_exports.Number(), replacement: typebox_exports.Optional(ScheduledInputSchema) }),
@@ -133116,7 +133132,7 @@ function serveInfiniChat(host, conversation, options) {
       pendingHostKeys,
       accept: ({ content, requestId }, ctx2) => core().accept(content, requestId, callContext(ctx2)),
       stop: () => core().stop(),
-      updateSettings: ({ main: main2, summary, instructions }, ctx2) => core().updateSettings(main2, summary, instructions, callContext(ctx2)),
+      updateSettings: (settings2, ctx2) => core().updateSettings(settings2, callContext(ctx2)),
       cancelScheduled: ({ id, replacement }, ctx2) => core().cancelScheduled(id, replacement, callContext(ctx2)),
       dismissError: () => core().dismissError(),
       setTimeZone: ({ zone }) => options.setTimeZone(zone),

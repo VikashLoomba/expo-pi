@@ -20,6 +20,16 @@ import { WorkspaceDoc } from './workspace/document';
 /** `error` is the Harness's latest report; operations reject to their callers instead. */
 export interface InfiniChatSnapshot { error?: string }
 
+/** What InfiniChat's settings save, in one commit. */
+export type InfiniChatSettings = {
+  main: ChatModelSettings;
+  summary: ChatModelSettings;
+  /** The user's own instructions that follow the prompt; empty for none. */
+  instructions: string;
+  /** The agent's name; empty for InfiniChat. */
+  name: string;
+};
+
 /** A value the screens follow with `useSyncExternalStore`. */
 interface Store<T> {
   readonly subscribe: (listener: () => void) => () => void;
@@ -34,7 +44,7 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   view(): ChatViewSource<InfiniChatControls>;
   accept(input: UserMessage['content'], requestId: string): Promise<void>;
   stop(): Promise<void>;
-  updateSettings(main: ChatModelSettings, summary: ChatModelSettings, instructions: string): Promise<void>;
+  updateSettings(settings: InfiniChatSettings): Promise<void>;
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean>;
   dismissError(): void;
   /** The scheduled tasks still waiting, soonest first; undefined until they are first read. */
@@ -157,10 +167,10 @@ export class InfiniChatService implements InfiniChatHost {
   }
 
   /**
-   * The main model and effort with pi-durable's `configure`, the summary model and effort, and the user's own
-   * instructions, in one commit.
+   * The main model and effort with pi-durable's `configure`, the summary model and effort, the user's own
+   * instructions and the agent's name, in one commit.
    */
-  async updateSettings(main: ChatModelSettings, summary: ChatModelSettings, instructions: string,
+  async updateSettings({ main, summary, instructions, name }: InfiniChatSettings,
     context = BACKGROUND_CONTEXT): Promise<void> {
     const catalog = buildModelCatalog(this.models);
     const selectedMain = { model: { ...main.model }, thinkingLevel: main.thinkingLevel };
@@ -171,7 +181,9 @@ export class InfiniChatService implements InfiniChatHost {
     const root = this.chat.root;
     await root.commit(async (tx) => {
       await configure(tx, root.id, selectedMain);
-      (await tx.doc(ConfigDoc, root.id)).summary = selectedSummary;
+      const config = await tx.doc(ConfigDoc, root.id);
+      config.summary = selectedSummary;
+      config.name = name.trim() || null;
       await this.chat.setInstructions(tx, instructions);
     }, context);
   }

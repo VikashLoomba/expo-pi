@@ -1,12 +1,14 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
 import { router, Stack } from 'expo-router';
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
 
 import {
-  useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatConnection, useInfiniChatError, useInfiniChatView,
+  useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatAvatar, useInfiniChatConnection, useInfiniChatError,
+  useInfiniChatView,
 } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
+import { ChatAgentContext } from '@/components/chat/agent';
 import { Composer } from '@/components/chat/composer';
 import { ChatIcon } from '@/components/chat/icon';
 import { InlineNotice } from '@/components/chat/primitives';
@@ -61,6 +63,9 @@ export default function InfiniChatScreen() {
   const { catalog, providerAccess, machine: shown } = useInfiniChatAccount();
   const view = useInfiniChatView();
   const conversation = useChatControls(view);
+  const avatar = useInfiniChatAvatar();
+  const agentName = conversation?.name || TITLE;
+  const agent = useMemo(() => ({ name: agentName, avatar }), [agentName, avatar]);
   const serviceError = useInfiniChatError();
   const connection = useInfiniChatConnection();
   const machines = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
@@ -189,13 +194,13 @@ export default function InfiniChatScreen() {
   // With no model chosen there is no provider to connect; the models notice says what to do instead.
   const connected = !configured || access.connected;
   return <View testID="infinichat-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
-    <Stack.Screen options={{ title: TITLE,
+    <Stack.Screen options={{ title: agentName,
       headerTitle: () => <Pressable testID="open-infinichat-settings" accessibilityRole="button"
-        accessibilityLabel={`InfiniChat settings. ${subtitle}`}
-        accessibilityHint="Choose the main and summary models and their reasoning effort."
+        accessibilityLabel={`${agentName} settings. ${subtitle}`}
+        accessibilityHint="Choose its name, avatar, models and their reasoning effort."
         accessibilityState={{ disabled: settingsDisabled }} disabled={settingsDisabled} onPress={openSettings}
         style={styles.headerTitle}>
-        <Text numberOfLines={1} style={[styles.headerName, { color: PlatformColor('label') }]}>{TITLE}</Text>
+        <Text numberOfLines={1} style={[styles.headerName, { color: PlatformColor('label') }]}>{agentName}</Text>
         <View style={styles.headerSettings}>
           <Text numberOfLines={1} style={[styles.headerSubtitle, { color: PlatformColor('secondaryLabel') }]}>
             {subtitle}
@@ -225,7 +230,8 @@ export default function InfiniChatScreen() {
       <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks"
         onPress={() => router.push('/infinichat-schedule')} />
     </Stack.Toolbar>
-    <ChatTranscript view={view} ready stopping={stopping} onChoose={choosePrompt} composer={<>
+    <ChatAgentContext value={agent}><ChatTranscript view={view} ready stopping={stopping} onChoose={choosePrompt}
+      composer={<>
       {conversation && !configured && <View style={styles.banner}>
         <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
           action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
@@ -255,7 +261,7 @@ export default function InfiniChatScreen() {
         accountStatus={accountStatus} inputRef={input}
         attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
         attaching={attaching} imagesSupported={!!model?.images} />
-    </>} />
+    </>} /></ChatAgentContext>
   </View>;
 }
 

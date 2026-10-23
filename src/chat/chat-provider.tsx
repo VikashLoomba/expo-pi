@@ -27,6 +27,7 @@ import type { ProviderAccess, ProviderCredentialStore } from '../pi/provider-cre
 import { openExpoSqliteStorage } from '../pi/storage';
 import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
 import { AuthPromptController } from './auth-prompt-controller';
+import { createInfiniChatAvatar } from './infinichat-avatar';
 import type { ProviderAccount } from './provider-account';
 import { ShownInfiniChat } from './shown-infinichat';
 import type { ChatControls, ChatMessage } from './types';
@@ -362,6 +363,7 @@ function useChatController() {
     remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, infiniChatHome, moves,
     infiniChatClient, openError, setOpenError,
   } = useChatRuntime();
+  const [infiniChatAvatar] = useState(createInfiniChatAvatar);
   const serviceState = useSyncExternalStore(service?.subscribe ?? subscribeNothing,
     service?.getSnapshot ?? getClosedService, service?.getSnapshot ?? getClosedService);
   const infiniChatHomeRecord = useSyncExternalStore(infiniChatHome.subscribe, infiniChatHome.getSnapshot,
@@ -433,7 +435,7 @@ function useChatController() {
   // Only a failed open and the Harness's own reports reach every screen; operations return their errors to the
   // screen that started them.
   return { service, infiniChat, infiniChatHome: infiniChatHomeRecord, infiniChatMove: infiniChatMoveStatus, moves,
-    infiniChatMoveNotice, infiniChatClient,
+    infiniChatMoveNotice, infiniChatClient, infiniChatAvatar,
     ready: service !== undefined, chats: serviceState.chats,
     error: openError ?? serviceState.error,
     dismissError, signOutPending, disconnectingProvider,
@@ -683,4 +685,11 @@ export function useInfiniChatError(): string | undefined {
   const { infiniChat } = useChatApp();
   const getError = () => infiniChat.getSnapshot().error;
   return useSyncExternalStore(infiniChat.subscribe, getError, getError);
+}
+
+/** InfiniChat's avatar file on this phone; undefined for its own mark. */
+export function useInfiniChatAvatar(): string | undefined {
+  const { infiniChatAvatar } = useChatApp();
+  return useSyncExternalStore(infiniChatAvatar.subscribe, infiniChatAvatar.getSnapshot,
+    infiniChatAvatar.getSnapshot);
 }

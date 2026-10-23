@@ -59,7 +59,7 @@ One `remote("infinichat.remote", …)` contract, imported by the server and, in 
 - **Methods:**
   - `accept({ content, requestId })`
   - `stop()`
-  - `updateSettings({ main, summary, instructions })`
+  - `updateSettings({ main, summary, instructions, name })`
   - `cancelScheduled({ id, replacement? })`, returning a boolean
   - `dismissError()`
 

@@ -624,6 +624,7 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
 
 export type OptChatOptions = {
   models: Models;
+  /** The agent's name until the user names it in `ConfigDoc`. */
   name?: string;
   hasDeviceTools?: boolean;
   tools?: readonly ToolRegistration[];
@@ -674,15 +675,21 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
   const turnState = async () => (await options.turnState?.()) ?? '';
   const coordinator = coordinatorTask(turnState);
   const tools: ToolRegistration[] = [...memoryTools(ROOT_CONVERSATION_ID), ...(options.tools ?? [])];
-  const agents = agentTask({ master: () => master, prompt: subagentPrompt(name, hasDeviceTools), turnState });
+  const agents = agentTask({
+    master: () => master,
+    prompt: async (tx, root) => subagentPrompt((await tx.doc(ConfigDoc, root)).name ?? name, hasDeviceTools),
+    turnState,
+  });
   const scheduled = scheduledTask((tx, id, input) => admitInput(tx, id, { ...input, kind: 'work' }));
   const agentCalls = [...agentTools(ROOT_CONVERSATION_ID, agents), scheduleTool(ROOT_CONVERSATION_ID, scheduled)];
   // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
   // reaches an existing conversation as pi-durable's system entry instead of staying as created. The master's prompt
-  // and agent tools are an extension of their own, which a subagent's conversation goes without.
+  // and agent tools are an extension of their own, which a subagent's conversation goes without. The section reads the
+  // agent's name from the conversation, so a rename reaches it the same way.
   const master: Extension = defineExtension({
     name: 'optchat.master',
-    sections: [section('optchat', () => sharedPrompt(name, hasDeviceTools), { tag: false })],
+    sections: [section('optchat', async ({ read, conversationId }, sectionContext) => sharedPrompt(
+      (await read.snapshot(ConfigDoc, conversationId, sectionContext))?.name ?? name, hasDeviceTools), { tag: false })],
     tools: agentCalls,
   });
   registry.install(defineExtension({

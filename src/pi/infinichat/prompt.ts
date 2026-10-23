@@ -150,10 +150,11 @@ listed can't be done now, so tell the user it isn't available.`;
  * "Unii" is the agent and the program a device runs is "unii"; here both are the agent. The kind "unii" of the agent's
  * replies stays, as memory logs it.
  */
+// The name is the user's text, so it replaces through functions: a replacement string would read its `$` patterns.
 const renamed = (prompt: string, agentName: string): string => prompt
-  .replaceAll('Unii', agentName)
-  .replaceAll('have unii open', `have ${agentName} open`)
-  .replaceAll('runs unii on', `runs ${agentName} on`);
+  .replaceAll('Unii', () => agentName)
+  .replaceAll('have unii open', () => `have ${agentName} open`)
+  .replaceAll('runs unii on', () => `runs ${agentName} on`);
 
 /** Renames the agent and drops the device paragraph without device tools; the user's instructions follow it. */
 export function sharedPrompt(agentName: string, hasDeviceTools: boolean): string {

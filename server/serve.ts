@@ -98,8 +98,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       pendingHostKeys,
       accept: ({ content, requestId }, ctx) => core().accept(content, requestId, callContext(ctx)),
       stop: () => core().stop(),
-      updateSettings: ({ main, summary, instructions }, ctx) =>
-        core().updateSettings(main, summary, instructions, callContext(ctx)),
+      updateSettings: (settings, ctx) => core().updateSettings(settings, callContext(ctx)),
       cancelScheduled: ({ id, replacement }, ctx) => core().cancelScheduled(id, replacement, callContext(ctx)),
       dismissError: () => core().dismissError(),
       setTimeZone: ({ zone }) => options.setTimeZone(zone),

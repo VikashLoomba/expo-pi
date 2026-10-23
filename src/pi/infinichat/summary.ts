@@ -14,14 +14,21 @@ import {
 
 /** The summary model and effort the host selected. Builds wait while it is `null`. */
 export type SummarySelection = { model: ModelRef; thinkingLevel: ModelThinkingLevel };
-export const ConfigDoc = defineDoc<{ summary: SummarySelection | null }>({
+export type OptChatConfig = {
+  summary: SummarySelection | null;
+  /** The agent's name the user chose, or `null` for the host's. */
+  name: string | null;
+};
+export const ConfigDoc = defineDoc<OptChatConfig>({
   kind: 'optchat.config',
-  version: 1,
+  version: 2,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   checkpointWhen: () => true,
-  initial: () => ({ summary: null }),
+  // Version 1 had no name, so the conversation went by the host's.
+  migrate: (value) => ({ ...(value as Omit<OptChatConfig, 'name'>), name: null }),
+  initial: () => ({ summary: null, name: null }),
 });
 
 type BuildScratch = {

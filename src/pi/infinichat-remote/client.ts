@@ -7,11 +7,11 @@ import type { ChatViewSnapshot, ChatViewSource } from '../chat-view';
 import { connectionFailure } from '../execution/remote/channel';
 import type { RemoteHostRepository } from '../execution/remote/hosts';
 import type { ScheduledTask } from '../infinichat-scheduled';
-import type { InfiniChatHost, InfiniChatSnapshot } from '../infinichat-service';
+import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
 import type { InfiniChatControls } from '../infinichat-view';
 import { machineDescription } from '../infinichat/device-tools';
 import type { ScheduledInput } from '../infinichat/schedule';
-import type { ChatModelSettings, ModelCatalog } from '../model-catalog';
+import type { ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
 import {
   InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type Machine,
@@ -248,8 +248,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.stop(ctx));
   }
 
-  updateSettings(main: ChatModelSettings, summary: ChatModelSettings, instructions: string): Promise<void> {
-    return this.call((ref, ctx) => ref.updateSettings({ main, summary, instructions }, ctx));
+  updateSettings(settings: InfiniChatSettings): Promise<void> {
+    return this.call((ref, ctx) => ref.updateSettings(settings, ctx));
   }
 
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean> {

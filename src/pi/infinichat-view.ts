@@ -15,7 +15,7 @@ import {
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
 import { AGENT_TASK } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, type Admission, type AppState } from './infinichat/app';
-import { ConfigDoc, type SummarySelection } from './infinichat/summary';
+import { ConfigDoc, type OptChatConfig } from './infinichat/summary';
 import { ChatModelSettingsSchema } from './model-catalog';
 
 const context = BACKGROUND_CONTEXT;
@@ -28,6 +28,8 @@ export const InfiniChatControlsSchema = Type.Object({
   summary: Type.Union([ChatModelSettingsSchema, Type.Null()]),
   /** The user's own instructions that follow the prompt; empty until written. */
   instructions: Type.String(),
+  /** The name the user gave the agent; empty for InfiniChat. */
+  name: Type.String(),
   /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
   configured: Type.Boolean(),
 });
@@ -93,7 +95,7 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   private unsubscribeDocs: (() => void)[] = [];
   private metadata?: DocumentState<ChatMetadata>;
   private app?: DocumentState<AppState>;
-  private config?: DocumentState<{ summary: SummarySelection | null }>;
+  private config?: DocumentState<OptChatConfig>;
   /** pi-durable's live tasks, for the agents at work, as the keep-alive counts them. */
   private tasks?: AttachedReplicatedState<TaskGraph>;
   private loaded = false;
@@ -326,6 +328,7 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
         || Object.values(this.tasks?.value.tasks ?? {}).some((task) => task.kind === AGENT_TASK),
       summary,
       instructions: docs.agent?.instructions ?? '',
+      name: this.config?.value?.name ?? '',
       configured: docs.agent?.model !== undefined && summary !== null,
       ...(error ? { error } : {}),
     };

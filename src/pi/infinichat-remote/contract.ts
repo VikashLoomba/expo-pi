@@ -129,6 +129,7 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         stop: method(),
         updateSettings: method(Type.Object({
           main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema, instructions: Type.String(),
+          name: Type.String(),
         })),
         cancelScheduled: method(Type.Object({ id: Type.Number(), replacement: Type.Optional(ScheduledInputSchema) }),
           Type.Boolean()),

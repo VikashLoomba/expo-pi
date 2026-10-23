@@ -4,6 +4,7 @@ import { createContext, use, useState, type Dispatch, type ReactNode, type SetSt
 
 import type { ChatView, ChatViewSource } from '@/pi/chat-view';
 import type { ChatExecutionSettings } from '@/pi/execution/document';
+import type { InfiniChatSettings } from '@/pi/infinichat-service';
 import type { InfiniChatControls } from '@/pi/infinichat-view';
 import type { ChatModelSettings } from '@/pi/model-catalog';
 
@@ -48,20 +49,21 @@ export function useChatSettingsDraft(): ChatSettingsDraft {
 
 /** The main model answers and works; the summary model writes the memory's summaries in the background. */
 export type InfiniChatRole = 'main' | 'summary';
-export type InfiniChatSettings = Record<InfiniChatRole, ChatModelSettings> & { instructions: string };
+/** The settings the conversation keeps, and the avatar, which stays on this phone. */
+export type InfiniChatSettingsDraftValues = InfiniChatSettings & { avatar: string | undefined };
 
 type InfiniChatSettingsDraft = {
   view: ChatViewSource<InfiniChatControls> | undefined;
-  initial: InfiniChatSettings;
-  draft: InfiniChatSettings;
-  setDraft: Dispatch<SetStateAction<InfiniChatSettings>>;
+  initial: InfiniChatSettingsDraftValues;
+  draft: InfiniChatSettingsDraftValues;
+  setDraft: Dispatch<SetStateAction<InfiniChatSettingsDraftValues>>;
 };
 
 const InfiniChatSettingsDraftContext = createContext<InfiniChatSettingsDraft | undefined>(undefined);
 
 /** InfiniChat's unsaved settings, shared by its settings sheet's screens until the user saves or cancels. */
 export function InfiniChatSettingsDraftProvider({ view, initial, children }: {
-  view: ChatViewSource<InfiniChatControls> | undefined; initial: InfiniChatSettings; children: ReactNode;
+  view: ChatViewSource<InfiniChatControls> | undefined; initial: InfiniChatSettingsDraftValues; children: ReactNode;
 }) {
   const [draft, setDraft] = useState(initial);
   return <InfiniChatSettingsDraftContext value={{ view, initial, draft, setDraft }}>

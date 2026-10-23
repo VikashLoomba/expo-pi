@@ -14,8 +14,8 @@ import { agentName } from './names';
 export type SubagentSetup = {
   /** The extension of the master's prompt and of the agent tools, which a subagent goes without. */
   master: () => Extension;
-  /** The subagents' prompt; the user's instructions follow it. */
-  prompt: string;
+  /** The subagents' prompt, with the agent's name as `root` has it then; the user's instructions follow it. */
+  prompt: (tx: Tx, root: ConversationId) => Promise<string>;
   /** The host's device list, read as a message to an agent is sent. */
   turnState: () => Promise<string>;
 };
@@ -270,9 +270,10 @@ export const agentTask = (setup: SubagentSetup) => defineTask<AgentInput, Checkp
           });
           const created = await tx.createConversation({ ownership: { kind: 'task', taskId: anchor } });
           const instructions = (await tx.doc(AgentDoc, root)).instructions;
+          const prompt = await setup.prompt(tx, root);
           await configure(tx, created.id, {
             extensions: { remove: [setup.master()] },
-            instructions: instructions ? `${setup.prompt}\n\n${instructions}` : setup.prompt,
+            instructions: instructions ? `${prompt}\n\n${instructions}` : prompt,
             cwd: name,
             ...(agent.effort ? { thinkingLevel: agent.effort } : {}),
           });
