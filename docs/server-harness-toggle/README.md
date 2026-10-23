@@ -32,7 +32,7 @@ Owner decisions of 2026-10-21; implement them as stated.
 | Machines its tools use | The machine running InfiniChat, plus the other configured machines that machine reaches with its own SSH keys (pi-env `connectSsh`). The others come last ([piece 7](07-other-machines.md)). |
 | Model credentials | The idiomatic pi way: the process that runs the Harness owns a pi-ai `CredentialStore`. You sign in through `models.login(provider, type, interaction)`, with its prompts relayed to the phone. Nothing is copied from the phone ([piece 4](04-credentials-and-sign-in.md)). |
 | The toggle | A pull-down menu in InfiniChat's header, beside Scheduled tasks: *This iPhone* and the configured machines, with a checkmark on the current one. The conversation UI doesn't change when it is used. |
-| Moving the conversation | Each toggle hands the storage over: close the Harness on one side, copy the database file over SSH, open it on the other. Nothing is kept in continuous sync. This does not depend on `pi-durable/sync`. The copy sits behind one seam, so upstream's replication can replace it once it is released ([piece 5](05-moving-the-conversation.md)). |
+| Moving the conversation | Each toggle hands the storage over: close the Harness on one side, copy the database over SSH, open it on the other. This does not depend on `pi-durable/sync`. The copy sits behind one seam, so upstream's replication can replace it once it is released ([piece 5](05-moving-the-conversation.md)). Since 2026-10-22 the copy sends only changed pages, and each side's copy is refreshed when the app becomes active ([piece 8](08-page-diff-copies.md)). |
 | In-flight work | Nothing waits or drains. The side that opens the database resumes interrupted work with pi-durable's own recovery, exactly as upstream's sync test hands a running generation over ([piece 5](05-moving-the-conversation.md#what-the-agent-sees)). |
 | Scheduled-task notifications | The phone notifies at each task's time wherever InfiniChat runs. While InfiniChat runs on a machine, the task starts there on its own; opening the notification shows the agent already working ([piece 6](06-scheduled-tasks-and-background.md)). |
 | Restart limit (pi 1.4.0) | InfiniChat's Harness: `restartLimit: Infinity`. Ordinary chats: upstream's default, showing parked tasks with a retry. Part of the 1.4.0 upgrade. |
@@ -85,6 +85,7 @@ own, new conversation; the phone's conversation stays untouched on the phone.
 | 5 | [Moving the conversation](05-moving-the-conversation.md) | Phone → machine and back, home record, recovery | ~340 lines |
 | 6 | [Scheduled tasks and the background](06-scheduled-tasks-and-background.md) | Notifications from the machine's waiting tasks, keep-alive off when remote | ~80 lines |
 | 7 | [Other machines](07-other-machines.md) | pi-env `connectSsh` from the server, host keys accepted from the phone | ~240 lines |
+| 8 | [Page-diff copies](08-page-diff-copies.md) | Moves send changed pages only; copies refreshed on app activation | ~370 lines |
 
 Sizes are rough estimates before any code exists, about 1,900 lines in all. The app's nearest existing analogues:
 the pi-env daemon provisioning (`src/pi/execution/remote/provisioning.ts`, 95 lines) for piece 2, and the remote
