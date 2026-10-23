@@ -12,8 +12,9 @@ way, so the next move has little left to send. Nothing the user sees changes, ex
   0.3.1). pi-durable/sync replaces it once upstream releases it.
 - Sync on app open, both ways: from the machine that holds the conversation to the phone, and from the phone to the
   machine it last moved back from.
-- Still open, not in this piece: what happens when a machine is removed while it holds the conversation (piece 5,
-  "Open question for the owner"). The fresher phone copy this piece keeps is an input to that decision.
+- Not in this piece: what happens when a machine is removed while it holds the conversation. Decided 2026-10-23:
+  the removal moves it back first, with this piece's patch (piece 5,
+  [Removing the machine that holds it](05-moving-the-conversation.md#removing-the-machine-that-holds-it-decided-2026-10-23)).
 
 ## Starts from
 

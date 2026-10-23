@@ -467,6 +467,28 @@ export class InfiniChatMoves {
     if (home.home === 'phone' && home.copyOn === machineId) this.home.set(PHONE_HOME);
   }
 
+  /**
+   * Brings the conversation back to this iPhone from `machineId` before that machine is removed, since a move needs
+   * its credentials: from `there` or a stopped move back, the move back runs; a move there is undone as Cancel undoes
+   * it, then moved back if the machine had already adopted it. Resolves once the conversation isn't on that machine,
+   * and rejects with the failure that stopped a move, which keeps its status as any failed move does.
+   */
+  async bringBack(machineId: string): Promise<void> {
+    for (;;) {
+      await this.running;
+      const home = this.home.getSnapshot();
+      if (home.home === 'phone' || home.machineId !== machineId) return;
+      if (this.closed) throw new Error('InfiniChat closed.');
+      // A move started meanwhile, from the header or a resume, finishes first.
+      if (this.attempt) continue;
+      const undo = home.phase === 'moving-there';
+      this.run(machineId, undo ? 'machine' : 'phone', undo);
+      await this.running;
+      const error = this.status?.error;
+      if (error !== undefined) throw new Error(error);
+    }
+  }
+
   /** Runs a move a failure stopped again, forward, also when the failure was a Cancel's. */
   retry() {
     const status = this.status;

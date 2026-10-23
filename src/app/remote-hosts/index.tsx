@@ -11,6 +11,8 @@ import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteHost } from '@/pi/execution/remote/hosts';
 import { testRemoteHost, type HostKeyChallenge } from '@/pi/execution/remote/test-host';
+import { forgetSecret } from '@/pi/infinichat-remote/install';
+import type { MoveStatus } from '@/pi/infinichat-remote/move';
 
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 const progressLabels = {
@@ -18,10 +20,19 @@ const progressLabels = {
   checking: 'Verifying remote setup…',
   uploading: 'Preparing remote execution…',
 };
+const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
+
+/** The move back a removal runs first, worded as the InfiniChat header words its steps. */
+function movingBack(move: MoveStatus, name: string): string {
+  if (move.undoing) return `Cancelling the move to ${name}…`;
+  const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
+  return move.step === 'copying' ? `Copying InfiniChat from ${name}${copied}`
+    : move.step === 'opening' ? 'Opening InfiniChat on this iPhone…' : `Closing InfiniChat on ${name}…`;
+}
 
 export default function RemoteHostsScreen() {
   const colors = useChatColors();
-  const { remoteHosts, moves } = useChatApp();
+  const { remoteHosts, moves, infiniChatHome: home, infiniChatMove: move } = useChatApp();
   const snapshot = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   // While InfiniChat runs on a machine, its tools reach the others with that machine's own SSH.
   const infiniChat = useInfiniChatMachines();
@@ -32,6 +43,7 @@ export default function RemoteHostsScreen() {
   const [notice, setNotice] = useState<{ message: string; error?: boolean }>();
   const [challenge, setChallenge] = useState<HostKeyChallenge>();
   const [removing, setRemoving] = useState<RemoteHost>();
+  const [releasing, setReleasing] = useState<RemoteHost>();
   const active = useRef<AbortController | undefined>(undefined);
   const trustReply = useRef<((accepted: boolean) => void) | undefined>(undefined);
   const mounted = useRef(true);
@@ -93,15 +105,26 @@ export default function RemoteHostsScreen() {
   const remove = async (host: RemoteHost) => {
     setBusy(host.id);
     setNotice(undefined);
+    setReleasing(host);
     try {
+      if (!moves) throw new Error('InfiniChat is still starting. Try again.');
+      // Moving InfiniChat back needs this machine's credentials, which removing it deletes, so the move runs first;
+      // its failure removes nothing.
+      await moves.bringBack(host.id).catch((error: unknown) => {
+        throw new Error(`InfiniChat couldn’t move back to this iPhone, so ${host.name} wasn’t removed. `
+          + (error instanceof Error ? error.message : String(error)));
+      });
       await remoteHosts.remove(host.id, host);
-      moves?.forget(host.id);
+      moves.forget(host.id);
+      // Left behind, it would only clutter the Keychain.
+      await forgetSecret(host.id).catch(() => {});
       setNotice({ message: 'Machine removed. Chats that selected it keep their selection until you choose another '
         + 'environment.' });
     } catch (error) {
       setNotice({ message: error instanceof Error ? error.message : 'Could not remove this machine.', error: true });
     } finally {
       setBusy(undefined);
+      setReleasing(undefined);
     }
   };
   const forget = async (host: RemoteHost) => {
@@ -178,6 +201,12 @@ export default function RemoteHostsScreen() {
           </HStack>
           <Button label="Cancel connection test" onPress={() => active.current?.abort()} />
         </Section>}
+        {releasing && move?.running && <Section title={`Removing ${releasing.name}`}>
+          <HStack spacing={10}>
+            <ProgressView />
+            <Text modifiers={[secondary]}>{movingBack(move, releasing.name)}</Text>
+          </HStack>
+        </Section>}
         {challenge && <Section title={challenge.trusted ? 'SSH host key changed' : 'Verify this SSH server'}
           footer={<Text>
             Compare this fingerprint with the SSH server’s host key using a trusted source before accepting it.
@@ -227,7 +256,9 @@ export default function RemoteHostsScreen() {
                 onPress={() => { void remove(host); }} />
             </ConfirmationDialog.Actions>
             <ConfirmationDialog.Message>
-              <Text>Existing chats keep their selection and need another environment.</Text>
+              <Text>{(home.home === 'machine' && home.machineId === host.id
+                ? 'InfiniChat’s conversation moves back to this iPhone first. ' : '')
+                + 'Existing chats keep their selection and need another environment.'}</Text>
             </ConfirmationDialog.Message>
           </ConfirmationDialog>
         </Section>)}

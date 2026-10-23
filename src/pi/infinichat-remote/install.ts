@@ -104,6 +104,11 @@ export async function savedSecret(machineId: string): Promise<string | undefined
   }
 }
 
+/** A removed machine's secret, never read again: added back, it gets a new ID, and its install a new secret. */
+export async function forgetSecret(machineId: string): Promise<void> {
+  await createCredentialBackend().deleteItemAsync(secretKey(machineId));
+}
+
 /** The phone keeps one secret per machine; a phone without one, new or reinstalled, makes a new one. */
 async function machineSecret(machineId: string): Promise<string> {
   const saved = await savedSecret(machineId);

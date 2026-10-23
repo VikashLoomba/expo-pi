@@ -205,7 +205,8 @@ As built (`moveBack` is `InfiniChatMoves.back`):
     back to This iPhone first. Nothing asks for a direct move.
   - A machine removed from Remote machines while the conversation is on it now says "This machine was removed from
     Remote machines while InfiniChat’s conversation is on it." Piece 3's "Choose This iPhone or another machine" no
-    longer applies: both need the machine. See the open question below.
+    longer applies: both need the machine. Since 2026-10-23, removing that machine moves the conversation back first
+    (see Removing the machine that holds it, below), so this shows only for a record from before then.
 
 ### What the agent sees
 
@@ -264,13 +265,37 @@ expo-file-system 58.0.10, react-native-ssh 0.3.0):
 - **The device's description is the phone's text** (Builds).
 - **No reading of piece 3's stored choice** (Builds).
 
-## Open question for the owner
+## Removing the machine that holds it (decided 2026-10-23)
 
-A machine removed from Remote machines while the conversation is on it can't hand it back: the move needs the
-machine's admission, and adding the machine again makes a new record with a new ID. The conversation stays on the
-machine (released or not), and the phone keeps its pre-move copy as `infinichat-moved.db`. Options: block removing
-that machine in Remote machines, or offer to reopen the phone's moved copy (losing what happened on the machine).
-Nothing is built for either.
+Before, removing the machine the home record named deleted its credentials while the conversation was there, so no
+move could reach it again, and adding the machine back made a new record with a new ID. The owner chose: **removing
+that machine moves the conversation back to This iPhone first, with the ordinary move, then removes the machine.**
+Nothing on the machine is cleaned up, so the machine added back finds its copy and the next move there patches it.
+
+As built:
+- `InfiniChatMoves.bringBack(machineId)` (`src/pi/infinichat-remote/move.ts`) waits for a running move, then runs the
+  move back from `there` or a stopped move back, and undoes a move there as Cancel does, moving back afterwards if the
+  machine had already adopted the files. It resolves once the conversation isn't on that machine, at once when it
+  never was, and rejects with the error that stopped the move, which keeps its status in the header as any failure.
+- Remote machines (`src/app/remote-hosts/index.tsx`) awaits it before `remoteHosts.remove` and `forget`. Meanwhile a
+  "Removing <machine>" section shows the move's step and the MB copied. A failure removes nothing and says
+  "InfiniChat couldn’t move back to this iPhone, so <machine> wasn’t removed." followed by the move's own error,
+  for example the connection failure when the machine can't be reached. The confirmation says that the conversation
+  moves back first.
+- A move the background stops halfway fails like any other; nothing resumes the removal (owner, 2026-10-23: page
+  diffs are fast and copies refresh at app open). The move itself carries on at the next activation, and Remove then
+  only removes.
+- Removal deletes the phone's `pi.infinichat.secret.v1.<id>` (`forgetSecret` in `install.ts`). Nothing reads it again:
+  the machine added back has a new ID.
+- Adding the machine back, checked in the code: the new record has a new ID and credential reference
+  (`hosts.ts:204`, `hosts.ts:254`), and its host key is verified by Test, as for any new machine
+  (`connectAdmitted`, `install.ts`). With no saved secret for that ID the client installs (`client.ts:384-385`).
+  The bundle is already there, the new secret replaces `~/.infinichat/secret`, and that change restarts the service
+  (`installServer`, `install.ts`). The restarted server reads `state.json`, which says `active: false` since the
+  move back relinquished (`server/conversation.ts`, `relinquish`), so it opens nothing. A move there then patches
+  against `copy/infinichat.db`, which the move back's `archive` left (`sendPatch` with `COPY`, `move.ts`). The place
+  step finds `data/` empty and not active, so it places the file. `copyOn` was cleared by `forget`, so nothing
+  refreshes that copy until the next move back. The first patch carries everything since the removal.
 
 ## Size
 
