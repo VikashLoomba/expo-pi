@@ -68,5 +68,10 @@
     "ios": "expo run:ios",
     "lint": "expo lint"
   },
-  "private": true
+  "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "react-native-enriched-markdown"
+    ]
+  }
 }
