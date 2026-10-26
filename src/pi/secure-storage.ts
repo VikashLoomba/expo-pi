@@ -1,11 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 
-/** Asynchronous string storage for secrets. Production uses the device Keychain/Keystore. */
-export interface CredentialBackend {
-  getItemAsync(key: string): Promise<string | null>;
-  setItemAsync(key: string, value: string): Promise<void>;
-  deleteItemAsync(key: string): Promise<void>;
-}
+import type { CredentialBackend } from './provider-credentials';
 
 export function createCredentialBackend(): CredentialBackend {
   // This one service holds saved API keys, OAuth grants and the OpenAI installation ID. Readable while

@@ -1,6 +1,6 @@
 import type { SshHostKey } from '@osuki-dev/react-native-ssh';
 
-import type { CredentialBackend } from '../../secure-storage';
+import type { CredentialBackend } from '../../provider-credentials';
 
 export type RemoteCredential = Readonly<{ type: 'password'; password: string } |
   { type: 'privateKey'; privateKey: string; passphrase?: string }>;

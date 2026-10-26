@@ -2,7 +2,12 @@ import {
   Type, type AuthOperationOptions, type Credential, type CredentialInfo, type CredentialStore, type Static,
 } from '@earendil-works/pi-ai';
 
-import type { CredentialBackend } from './secure-storage';
+/** Asynchronous string storage for secrets. The phone's is its Keychain; a machine's server keeps a file. */
+export interface CredentialBackend {
+  getItemAsync(key: string): Promise<string | null>;
+  setItemAsync(key: string, value: string): Promise<void>;
+  deleteItemAsync(key: string): Promise<void>;
+}
 
 /** A provider's sign-in as the account screen shows it. A machine that runs InfiniChat sends its own as Chord state. */
 export const ProviderAccessSchema = Type.Object({
