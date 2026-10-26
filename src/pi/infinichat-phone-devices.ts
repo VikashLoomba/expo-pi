@@ -1,11 +1,11 @@
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
 
-import { PHONE_DEVICE, type RemoteHostRepository } from '../execution/remote/hosts';
-import type { RemoteExecution } from '../execution/remote/owner';
-import { WorkspaceDoc } from '../workspace/document';
-import { WorkspaceExecutionEnv } from '../workspace/execution-env';
-import type { Workspaces } from '../workspace/storage';
-import { MACHINE_WORK, machineDescription, type Device } from './device-tools';
+import { PHONE_DEVICE, type RemoteHostRepository } from './execution/remote/hosts';
+import type { RemoteExecution } from './execution/remote/owner';
+import { MACHINE_WORK, machineDescription, type Device } from './infinichat/device-tools';
+import { WorkspaceDoc } from './workspace/document';
+import { WorkspaceExecutionEnv } from './workspace/execution-env';
+import type { Workspaces } from './workspace/storage';
 
 /** The phone's work dir is its workspace. */
 const PHONE_WORK = '/workspace';

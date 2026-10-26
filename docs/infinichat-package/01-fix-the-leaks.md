@@ -71,3 +71,44 @@ About 10 lines changed, plus one file renamed.
 ## Not in this piece
 
 Moving files into a package (piece 2) and any new seam (pieces 3 and 4).
+
+## As built
+
+Built at `c796849` and the commit after it, from `c0bc61b`, with pi 1.4.0 (pi-durable, pi-ai, chord and pi-env; the
+latest on npm on 2026-10-26), Expo 58.0.17 and React Native 0.88.0. Both steps went as planned: 9 lines added and 9
+removed to move `CredentialBackend`, and 7 import lines rewritten for the rename, which `git` records as a rename.
+
+What differs from the plan:
+
+- **The interface's comment.** "Production uses the device Keychain/Keystore" no longer described every backend once
+  the interface sat in a file the server bundles, so it now names both that exist: the phone's Keychain and the
+  server's file.
+- **Piece 2 rewrites 51 importers, not 48.** The three files that imported `CredentialBackend` from
+  `secure-storage.ts` (`secure-storage.ts` itself, `server/credentials.ts` and `src/pi/execution/remote/hosts.ts`) now
+  import it from `provider-credentials.ts`, which is in the shared set, so they join the
+  [importers](references.md#the-48-importers); `src/pi/infinichat/devices.ts` is now
+  `src/pi/infinichat-phone-devices.ts`. A scan following relative and `@/` imports, like the one in
+  [references](references.md#the-shared-set), finds 51.
+- **The shared set is 5,343 lines.** The same 35 files; `provider-credentials.ts` gained the interface's 5 lines net.
+  None of the 35 imports anything but pi packages and each other, and the 9 files left in `src/pi/infinichat/` are
+  exactly the OptChat core in the shared set, so the folder moves as a unit.
+
+Choices:
+
+- `secure-storage.ts` doesn't re-export the interface: every importer was updated, so a re-export would have no
+  caller.
+- The interface sits at the top of `provider-credentials.ts`, where its import was.
+- Imports in `infinichat-phone.ts` and the moved file stay in the order the rest of the app uses.
+
+Checks, run before each step's commit:
+
+- `npx @expo/agent-cli lint`: no problems.
+- `npx @expo/agent-cli typecheck`: no type errors.
+- `pnpm exec tsc -p server`: no errors.
+- `node scripts/build-infinichat-server.mjs --check`: passes on both steps. Before the second step's commit the asset
+  was also rebuilt in the main checkout, then checked: the same bytes as before (8,339,531 bytes, SHA-256
+  `2866fb2e…62df27`), so nothing to commit and no reinstall on any machine.
+- The package's lint: not yet, since piece 2 creates the package.
+
+Unverified: no Metro bundle was built and nothing ran on a device. As planned, piece 1 has no device check of its own;
+piece 2's covers it.

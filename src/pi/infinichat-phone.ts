@@ -6,9 +6,9 @@ import type { RemoteHostRepository } from './execution/remote/hosts';
 import type { RemoteExecution } from './execution/remote/owner';
 import { createExpoImages } from './images';
 import type { ScheduledTaskNotifications } from './infinichat-notifications';
+import { createDevices } from './infinichat-phone-devices';
 import { InfiniChatService } from './infinichat-service';
 import { infiniChatDevices } from './infinichat/device-tools';
-import { createDevices } from './infinichat/devices';
 import type { Workspaces } from './workspace/storage';
 
 /** InfiniChat on this phone, and what closes it. */
