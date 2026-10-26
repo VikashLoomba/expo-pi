@@ -83,9 +83,9 @@ What differs from the plan:
 - **The interface's comment.** "Production uses the device Keychain/Keystore" no longer described every backend once
   the interface sat in a file the server bundles, so it now names both that exist: the phone's Keychain and the
   server's file.
-- **Piece 2 rewrites 51 importers, not 48.** The three files that imported `CredentialBackend` from
-  `secure-storage.ts` (`secure-storage.ts` itself, `server/credentials.ts` and `src/pi/execution/remote/hosts.ts`) now
-  import it from `provider-credentials.ts`, which is in the shared set, so they join the
+- **Piece 2 rewrites 51 importers, not 48.** Three files now import `CredentialBackend` from
+  `provider-credentials.ts`, which is in the shared set: `secure-storage.ts`, which declared it, and its two other
+  type-only importers, `server/credentials.ts` and `src/pi/execution/remote/hosts.ts`. So they join the
   [importers](references.md#the-48-importers); `src/pi/infinichat/devices.ts` is now
   `src/pi/infinichat-phone-devices.ts`. A scan following relative and `@/` imports, like the one in
   [references](references.md#the-shared-set), finds 51.
