@@ -33,7 +33,7 @@ Watching and using InfiniChat from two clients at once already works, and stays 
 
 ## Builds
 
-A design to approve before implementing. It lands after piece 4, in the package's code.
+It lands after piece 4, in the package's code.
 
 ### Each client authenticates as itself
 
@@ -90,8 +90,10 @@ installs the matching server bundle before it moves anything, as it already does
 
 ## Deviations (need approval)
 
-- The app keeps a client ID; nothing like it exists today.
-- The holder claim is the app's analogue of upstream's sync slot, because upstream sync is unreleased.
+None. Two notes:
+- Each app keeps a client ID, which Chord's model needs: every connection authenticates as its own client.
+- The holder claim follows upstream sync's slot, built on today's transport because sync is unreleased, as AGENTS.md
+  asks ("build it in the simplest way consistent with upstream's mechanics"). Sync replaces it once released.
 
 ## Size
 

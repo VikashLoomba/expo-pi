@@ -129,8 +129,8 @@ today.
 
 ## Deviations (need approval)
 
-- RemoteInfiniChat stops taking `RemoteHostRepository` and takes a `MachineDirectory` instead, because
-  `execution/remote/hosts.ts` imports react-native-ssh types and SSH admission is the dialer's job.
+None. RemoteInfiniChat takes a `MachineDirectory` instead of `RemoteHostRepository`, because `hosts.ts` imports
+react-native-ssh types and SSH admission is the dialer's job; that is internal, and nothing users see changes.
 
 ## Size
 

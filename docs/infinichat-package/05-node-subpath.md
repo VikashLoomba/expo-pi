@@ -39,10 +39,10 @@ Nothing moves for the Mac app's dialers or settings yet. They get no caller unti
 
 ### Imports and the lint guard
 
-- Extend piece 2's lint block: `packages/infinichat/src/node/**` may import `node:*`, pi-env and Photon's
+- Extend the package's lint guard (piece 2): files under `src/node/` may import `node:*`, pi-env and Photon's
   WebAssembly. The rest of the package may import neither `node:*` nor anything under `node/`.
-- `machines.ts` imports `@earendil-works/pi-env`, which today is a development dependency of the app, since the server
-  is bundled from the root. Declare it in the package as an optional peer dependency
+- `machines.ts` imports `@earendil-works/pi-env`, which today is a development dependency of the app, since the app
+  bundles the server. Declare it in the package as an optional peer dependency
   (`peerDependenciesMeta: { "@earendil-works/pi-env": { "optional": true } }`), so the iOS app needs nothing new.
 - `devices.ts` imports Photon's WebAssembly as bytes. The server build maps it with an esbuild alias and the `binary`
   loader (`scripts/build-infinichat-server.mjs`), and that still works from the package. The Mac app's bundler will

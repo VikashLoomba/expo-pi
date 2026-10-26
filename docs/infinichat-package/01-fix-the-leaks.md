@@ -29,7 +29,7 @@ named. Piece 2 is then a pure move. Nothing changes at run time.
 
 ### The phone's devices leave the OptChat folder
 
-Move `src/pi/infinichat/devices.ts` beside its user, for example to `src/pi/infinichat-phone-devices.ts`, and update
+Move `src/pi/infinichat/devices.ts` beside its user, to `src/pi/infinichat-phone-devices.ts`, and update
 `infinichat-phone.ts:11`. Every file left in `src/pi/infinichat/` then moves in piece 2, so the folder moves as a unit.
 
 ### What stays in the app

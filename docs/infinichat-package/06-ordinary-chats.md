@@ -61,8 +61,9 @@ into the package next to the services they describe; the keep-alive controller i
 ### Also moving
 
 - `native-web-search/provider.ts` (`withNativeWebSearch`).
-- Optionally, one `registerChatProviders(models)` for the provider list both model factories repeat today. The phone
-  and the Node side keep their own credential stores and sign-in flows.
+- One `registerChatProviders(models)` for the provider list that `src/pi/models.ts` and `server/models.ts` both repeat
+  today, so a provider added for the phone also reaches the server's and the Mac's catalogs. The phone and the Node
+  side keep their own credential stores and sign-in flows.
 
 ### What stays in the iOS app
 
@@ -76,7 +77,8 @@ closes them in today's order. The service borrows `machines` and `local`, and ca
 
 ## Deviations (need approval)
 
-- `DurableChatService.open` takes builders instead of `Workspaces`, `RemoteExecution` and `KeepAliveController`.
+None. Taking environment builders follows upstream's `29-sandbox-per-conversation.ts`, and nothing users see
+changes.
 
 ## Size
 

@@ -155,8 +155,8 @@ The constructor takes the home store, a `MachineDirectory` (piece 3), a function
 `ExecutionEnv`, `DatabaseFiles`, `MoveSides`, and the local device's name for messages. Its user-visible copy names the
 device ("this iPhone" today), so that name comes from the app.
 
-`MoveSides` (`move.ts:52`) is already the seam to the provider and moves unchanged. Renaming `closePhone` and
-`openPhone` to local-sounding names is optional.
+`MoveSides` (`move.ts:52`) is already the seam to the provider. It moves with `closePhone` and `openPhone` renamed to
+`closeLocal` and `openLocal`, since on the Mac the local side is no phone. They are code names, not stored data.
 
 ### What stays in the iOS app
 

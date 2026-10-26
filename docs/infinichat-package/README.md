@@ -20,13 +20,6 @@ nothing a user sees changes.
 | The server's single-client code | Not a product choice: it gets fixed to follow Chord's and pi-durable's model, so several clients can use one server ([piece 7](07-several-clients.md)). |
 | These docs | Guidance first. The extraction is a later task, one piece at a time. |
 
-## Open decisions
-
-| # | Question | Recommendation |
-| --- | --- | --- |
-| 1 | The package's name | `@pi-agent/infinichat` |
-| 2 | Repository layout | Keep the iOS app at the root for now; move it into `apps/` when the Mac app starts ([piece 2](02-workspace-and-core.md#layout)) |
-
 ## What is shared
 
 The server already bundles InfiniChat from `src/`, so the files it imports are, by construction, the ones that run
@@ -74,7 +67,7 @@ comes after them. Each piece leaves the iOS app and the server working.
 | # | Piece | Builds | Rough size |
 | --- | --- | --- | --- |
 | 1 | [Fix the leaks](01-fix-the-leaks.md) | `CredentialBackend` moves next to its user; the boundary files are named | ~10 lines |
-| 2 | [Workspace and core](02-workspace-and-core.md) | pnpm workspace, `packages/infinichat`, the 35 files moved, 48 importers updated, a lint guard | moves only, plus 3 small files |
+| 2 | [Workspace and core](02-workspace-and-core.md) | Expo's monorepo layout: the app in `apps/mobile`, `packages/infinichat` with the 35 files, 48 importers updated, a lint guard | moves only, plus a few small files |
 | 3 | [The `Link` seam](03-link-seam.md) | RemoteInfiniChat's Chord half in the package; the phone's dialer in the app | `client.ts` (527 lines) split; ~150 lines become the dialer |
 | 4 | [Install and move](04-install-and-move.md) | The move logic, the home record's logic and the install scripts in the package; machine work through `ExecutionEnv` | ~1,180 lines move; should shrink by ~100 |
 | 5 | [The `node` subpath](05-node-subpath.md) | The server's Node implementations in `packages/infinichat/src/node` | ~400 lines moved |
@@ -104,6 +97,12 @@ A piece that grows to several times its size means its design is wrong; stop and
   device checks and unverified behaviour separately.
 - Before calling a piece done, run `npx @expo/agent-cli lint`, `npx @expo/agent-cli typecheck`, the server's typecheck
   (`pnpm exec tsc -p server`) and `node scripts/build-infinichat-server.mjs --check`.
+
+## Paths
+
+Paths and `file:line` references in these docs are as of `348f26a`. After piece 2, the app's files, including
+`server/` and `scripts/`, are under `apps/mobile/`, and the moved files under `packages/infinichat/src/`. The
+commands in "Working on a piece" then run from `apps/mobile`.
 
 ## References
 
