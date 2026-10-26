@@ -7,20 +7,24 @@ The app uses published `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@
 [`v1.2.0`](https://github.com/earendil-works/pi/tree/v1.2.0) tag (`06a4669`). The temporary vendored tarballs and
 `pnpm.overrides` have been removed. The remote daemon ships from npm `@earendil-works/pi-env` **1.2.0**, with
 artifact integrity and binary hashes pinned by `scripts/sync-pi-daemon-assets.mjs`.
-[`babel-plugins/pi-compat.js`](babel-plugins/pi-compat.js) makes Pi's published modules bundle and run on
+[`babel-plugins/pi-compat.js`](apps/mobile/babel-plugins/pi-compat.js) makes Pi's published modules bundle and run on
 Hermes, and `src/pi/random-values.ts` installs `crypto.getRandomValues` from expo-crypto at startup.
 
 ## Run
 
+The app is in `apps/mobile`, a pnpm workspace in Expo's monorepo layout; `src/` and the other app paths in this README
+are relative to it. Install from the repository root, then run the app's commands from `apps/mobile`:
+
 ```sh
 pnpm install --frozen-lockfile
+cd apps/mobile
 npx @expo/agent-cli dev --ios --local --dev-client --detach --wait-ready --clear
 ```
 
 Use a development build for the app's OAuth integration. Rebuild an existing development client after changing native dependencies. Clear Metro's cache after upgrading Pi so the running app resolves the new packages.
 
 1. Open **Account**. In **OpenAI**, choose **Continue with ChatGPT** for the browser flow or **Use API key**. Each replaces the other authentication method for this provider.
-2. Complete browser sign-in. On iOS, a local Swift Expo module receives Pi's localhost callback and the app closes the authentication browser automatically. If the listener or browser is unavailable, the same PKCE/state attempt can finish through **Open in browser** and the full callback URL field. See the [modern OAuth adapter](src/pi/openai-auth/README.md) for the callback lifecycle and validation boundaries.
+2. Complete browser sign-in. On iOS, a local Swift Expo module receives Pi's localhost callback and the app closes the authentication browser automatically. If the listener or browser is unavailable, the same PKCE/state attempt can finish through **Open in browser** and the full callback URL field. See the [modern OAuth adapter](apps/mobile/src/pi/openai-auth/README.md) for the callback lifecycle and validation boundaries.
 3. Return to **Chats** and start a chat. It uses a connected provider; change the provider, model or effort in the chat's **Model settings**.
 4. While a response runs, **Stop** cancels it; sending another message queues it as a follow-up, shown as a queued bubble. The bubble's **Send as steer** action withdraws it and resubmits it as a steer, which joins the running work instead of waiting for it to finish.
 5. Rename or delete conversations from their chat options. Delete stops the chat's work, marks it deleted, and removes its workspace directories.
@@ -79,12 +83,12 @@ Signing in, saving an API key and signing out change only the credential store; 
 
 The app has one credential store and one OAuth adapter. `src/pi/models.ts` builds Pi's `Models` with `createModels()`, backed by `ProviderCredentialStore`, and registers:
 
-- **OpenAI** (`openai`): Sign in with ChatGPT or an API key. The provider is wrapped for native web search, and only its `auth.oauth` is replaced by the app's Expo adapter in [`src/pi/openai-auth/`](src/pi/openai-auth/README.md), because Pi's own login flows import `node:http` and cannot run on Hermes.
+- **OpenAI** (`openai`): Sign in with ChatGPT or an API key. The provider is wrapped for native web search, and only its `auth.oauth` is replaced by the app's Expo adapter in [`src/pi/openai-auth/`](apps/mobile/src/pi/openai-auth/README.md), because Pi's own login flows import `node:http` and cannot run on Hermes.
 - **Anthropic, Google, OpenRouter and xAI**: API keys.
 
 Pi-ai's README marks `openai-codex` as legacy, superseded by Sign in with ChatGPT on `openai`. The app does not register it; chats saved with an `openai-codex` model show the model as unavailable until another is chosen in chat settings.
 
-The adapter follows Pi's browser authorization-code + PKCE protocol with dynamic client registration. On iOS, a Swift-only Expo module ([`modules/pi-oauth-callback/`](modules/pi-oauth-callback/README.md)) receives the `http://127.0.0.1:1455/auth/callback` loopback redirect. If the port is busy or the browser does not return, the same attempt finishes by pasting the full callback URL; PKCE and state make a stolen callback unusable.
+The adapter follows Pi's browser authorization-code + PKCE protocol with dynamic client registration. On iOS, a Swift-only Expo module ([`modules/pi-oauth-callback/`](apps/mobile/modules/pi-oauth-callback/README.md)) receives the `http://127.0.0.1:1455/auth/callback` loopback redirect. If the port is busy or the browser does not return, the same attempt finishes by pasting the full callback URL; PKCE and state make a stolen callback unusable.
 
 `Models.login()` persists credentials. `Models.getAuth()` and request paths refresh OAuth tokens under the store's per-provider lock, with Pi's own timeout and without the caller's cancellation, so a received token rotation is always saved. `ProviderCredentialStore` keeps one versioned SecureStore record per provider, serializes each provider's operations, and retries saving a rotated token whose first write failed before the old token can be used again. The durable harness uses the same `Models` instance.
 

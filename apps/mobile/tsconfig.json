@@ -19,7 +19,6 @@
   ],
   "exclude": [
     "node_modules",
-    "docs",
     "server",
     "babel.config.js",
     "metro.config.js",

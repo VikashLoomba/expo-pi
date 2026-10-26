@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  apps/mobile:
     dependencies:
       '@earendil-works/chord':
         specifier: 1.4.0
