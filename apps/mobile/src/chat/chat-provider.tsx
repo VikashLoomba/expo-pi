@@ -148,8 +148,7 @@ function useChatRuntime() {
     };
     // A move borrows the remote owner's connection to the machine, as the chats' tools do, and never closes it.
     const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(remoteHosts, machineId),
-      (machineId) => remote.environment(machineId, undefined), remote.lost, phoneDatabaseFiles, 'this iPhone',
-      SERVER_BUNDLE, {
+      (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', SERVER_BUNDLE, {
       hold: () => infiniChat.hold(),
       closeLocal: () => queued(async () => {
         const closing = state.phone;

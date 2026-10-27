@@ -78,8 +78,8 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
       let link: Link | undefined;
       const install = async (): Promise<Target> => {
         const installing = await machineSecret(credentials, getRandomBytesAsync, machineId);
-        const server = await installServer({ machine: await machine(), lost: remote.lost, name, description,
-          username: host.username }, phoneServerAssets, installing, { signal, onProgress: onStage });
+        const server = await installServer({ machine: await machine(), name, description, username: host.username },
+          phoneServerAssets, installing, { signal, onProgress: onStage });
         onInstalled(server.notice);
         return server;
       };

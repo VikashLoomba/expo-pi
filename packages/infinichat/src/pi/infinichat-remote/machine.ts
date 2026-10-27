@@ -31,20 +31,13 @@ export const connectionFailure = (name: string) =>
   new Error(`The connection to ${name} failed while setting up InfiniChat. Check Tailscale and try again.`);
 
 /**
- * Whether a file operation failed because the connection to the machine was lost, not by the machine's answer. Only
- * the connection's owner can tell: `FileError`'s `unknown` is also every system error the environment doesn't map,
- * such as a full disk, and pi-env marks a lost connection on the error it keeps as the cause (`isConnectionLost`).
+ * The cancellation, or the message for a file operation that failed: `failure` for what the machine refused, and a
+ * connection failure for `unknown`, which a lost connection reports (as does an error the environment doesn't map,
+ * such as a full disk), or for a deadline the caller set.
  */
-export type ConnectionLost = (error: FileError) => boolean;
-
-/**
- * The cancellation, or the message for a file operation that failed: a connection failure for a lost connection, and
- * for a deadline the caller set (`aborted` once the caller's own signal is checked); `failure` for anything else.
- */
-export function fileFailure(signal: AbortSignal, error: FileError, lost: ConnectionLost, name: string,
-  failure: string): Error {
+export function fileFailure(signal: AbortSignal, error: FileError, name: string, failure: string): Error {
   signal.throwIfAborted();
-  return error.code === 'aborted' || lost(error) ? connectionFailure(name) : new Error(failure);
+  return error.code === 'unknown' || error.code === 'aborted' ? connectionFailure(name) : new Error(failure);
 }
 
 /** A unique name for one step's temporary file in `folder`, as `mktemp` names one. */
