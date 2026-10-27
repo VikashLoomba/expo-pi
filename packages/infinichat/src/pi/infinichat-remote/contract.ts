@@ -43,7 +43,10 @@ const FileSchema = Type.Object({ sha256: Type.String(), size: Type.Number() });
 /** The conversation's database file, its WAL folded into it, by SHA-256 and size. */
 export const ConversationFilesSchema = Type.Object({ db: FileSchema });
 export type ConversationFiles = Static<typeof ConversationFilesSchema>;
-/** A client that can hold the conversation, a phone: the ID it keeps and the name it gives itself. */
+/**
+ * Who can hold the conversation: a phone, by the client ID it keeps and the name it gives itself, or a machine another
+ * machine hands it to directly, by its endpoint (`machineEndpoint`) and its name.
+ */
 export const ClientSchema = Type.Object({ id: Type.String(), name: Type.String() });
 export type InfiniChatClient = Static<typeof ClientSchema>;
 /**
@@ -121,7 +124,7 @@ export type SignInAttempt = Static<typeof SignInAttemptSchema>;
  * and the operations of its screens.
  */
 export const InfiniChatRemote = remote('infinichat.remote', {
-  version: 2,
+  version: 3,
   input: Type.Object({}),
   host: hostNamed('infinichat-server'),
   variants: {
@@ -162,6 +165,10 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         adopt: method(ConversationFilesSchema),
         relinquish: method(Type.Object({ to: ClientSchema }), ConversationFilesSchema),
         archive: method(),
+        // `pull` brings the database another listed machine (`from`, by endpoint) released into `data/`, read over
+        // this machine's own SSH, once it matches `files`; refused while active, as a phone's upload is. A move between
+        // two machines is relinquish there, pull and adopt here, then archive there, with a phone orchestrating.
+        pull: method(Type.Object({ from: Type.String(), files: ConversationFilesSchema })),
         // A client's other machines, sent on every connect and whenever its Remote machines change. The server keeps
         // each client's list for its tools while the clients are away, and uses each endpoint once, so clients never
         // replace each other's machines. `acceptHostKey` trusts the pending keys with these fingerprints.

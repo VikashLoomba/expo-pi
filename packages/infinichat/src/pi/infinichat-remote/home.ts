@@ -8,9 +8,10 @@ const KEY = 'pi.infinichat.home.v1';
  * last moved it back from, whose copy it keeps fresh. `phone` is stored data, so it keeps its spelling; read it as
  * "this device".
  */
+/** `from` names the machine a move straight to `machineId` leaves, while it is `moving-there`. */
 export type InfiniChatHome =
   | { version: 1; home: 'phone'; copyOn?: string }
-  | { version: 1; home: 'machine'; machineId: string; phase: 'moving-there' | 'there' | 'moving-back' };
+  | { version: 1; home: 'machine'; machineId: string; phase: 'moving-there' | 'there' | 'moving-back'; from?: string };
 
 export const PHONE_HOME: InfiniChatHome = { version: 1, home: 'phone' };
 
@@ -31,7 +32,9 @@ function parse(text: string | null): InfiniChatHome {
     if (value.home === 'machine' && 'machineId' in value && typeof value.machineId === 'string'
       && 'phase' in value
       && (value.phase === 'moving-there' || value.phase === 'there' || value.phase === 'moving-back')) {
-      return { version: 1, home: 'machine', machineId: value.machineId, phase: value.phase };
+      const from = 'from' in value && typeof value.from === 'string' && value.phase === 'moving-there'
+        ? { from: value.from } : {};
+      return { version: 1, home: 'machine', machineId: value.machineId, phase: value.phase, ...from };
     }
   }
   // Opening either side on a guess could open the conversation twice.

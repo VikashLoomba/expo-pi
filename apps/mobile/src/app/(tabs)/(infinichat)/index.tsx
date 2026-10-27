@@ -31,15 +31,20 @@ const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
 
 /**
  * The step of a move, as the header's subtitle says it; then the machine's name, once it's done. `stage` is what the
- * machine's install is doing while the move connects.
+ * machine's install is doing while the move connects, and `from` the machine a move between machines leaves.
  */
-function moving(move: MoveStatus, machine: string, stage: InstallStage | undefined): string {
+function moving(move: MoveStatus, machine: string, stage: InstallStage | undefined, from?: string): string {
   if (move.undoing) return move.error === undefined ? 'Cancelling the move…' : 'Couldn’t cancel the move';
   if (move.error !== undefined) {
     return move.to === 'machine' ? `Can’t move to ${machine}` : `Can’t move from ${machine}`;
   }
   const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
   if (move.to === 'machine') {
+    if (from !== undefined) {
+      return move.step === 'connecting' ? connecting(machine, stage)
+        : move.step === 'closing' ? `Closing on ${from}…`
+          : move.step === 'copying' ? `Copying from ${from} to ${machine}…` : `Opening on ${machine}…`;
+    }
     return move.step === 'connecting' ? connecting(machine, stage)
       : move.step === 'closing' ? 'Closing InfiniChat…'
         : move.step === 'copying' ? `Copying to ${machine}${copied}` : `Opening on ${machine}…`;
@@ -77,7 +82,7 @@ export default function InfiniChatScreen() {
   const removed = machineId !== null && machines.ready && machine === undefined;
   // The checkmark is on where the conversation is going during a move, back where it was during a Cancel, and where
   // it lives otherwise.
-  const chosen = move ? ((move.to === 'machine') !== !!move.undoing ? move.machineId : null)
+  const chosen = move ? ((move.to === 'machine') !== !!move.undoing ? move.machineId : move.from ?? null)
     : home.home === 'machine' && home.phase !== 'moving-back' ? home.machineId : null;
   const movingNow = move !== undefined || (home.home === 'machine' && home.phase !== 'there');
   const there = home.home === 'machine' && home.phase === 'there';
@@ -179,7 +184,8 @@ export default function InfiniChatScreen() {
   const working = busy ? `Working… · ${settingsLabel}` : settingsLabel;
   const subtitle = removed ? 'Machine removed'
     : move && machine !== undefined
-      ? moving(move, machine, connection?.status === 'connecting' ? connection.stage : undefined)
+      ? moving(move, machine, connection?.status === 'connecting' ? connection.stage : undefined,
+        machines.hosts.find((host) => host.id === move.from)?.name)
       : !there || machine === undefined ? working
         : connection?.status === 'failed' ? `Can’t connect to ${machine}`
           : connection?.status === 'connecting' ? connecting(machine, connection.stage)
@@ -216,13 +222,13 @@ export default function InfiniChatScreen() {
         {/* Each inline menu is a group with its own separator: the places InfiniChat can run, the move in progress,
             then the actions that open a sheet, whose ellipsis says more input follows. */}
         <Stack.Toolbar.Menu inline>
-          {/* A move goes first; from a machine, the conversation moves back to this iPhone before it moves on. */}
+          {/* A move goes first; from a machine, the conversation moves straight to the machine chosen. */}
           <Stack.Toolbar.MenuAction icon="iphone" isOn={chosen === null} disabled={movingNow}
             onPress={() => moves?.choose(null)}>
             {PHONE}
           </Stack.Toolbar.MenuAction>
           {machines.hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
-            isOn={host.id === chosen} disabled={movingNow || home.home === 'machine'}
+            isOn={host.id === chosen} disabled={movingNow}
             onPress={() => moves?.choose(host.id)}>
             {host.name}
           </Stack.Toolbar.MenuAction>)}

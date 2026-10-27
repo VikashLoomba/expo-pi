@@ -149,6 +149,15 @@ export class ServerMachines {
     }
   }
 
+  /** A listed machine's files through this machine's own SSH, for a pull, with the account's home there. */
+  async environment(key: string): Promise<{ env: RemoteExecutionEnv; home: string; name: string }> {
+    const machine = this.machines.find((listed) => endpoint(listed) === key);
+    if (!machine) throw new Error(`${key} isn’t among the machines listed on ${this.self}.`);
+    const { connection, info } = await this.started(machine);
+    return { env: new RemoteExecutionEnv({ connection, id: `pi-env:${key}`, cwd: info.home }), home: info.home,
+      name: machine.name };
+  }
+
   /** Trusts the keys waiting for the machine at `key` once a client accepted these fingerprints, then checks it. */
   async acceptHostKey(key: string, fingerprints: readonly string[]): Promise<void> {
     const machine = this.machines.find((candidate) => endpoint(candidate) === key);

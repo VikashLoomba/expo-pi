@@ -71,8 +71,9 @@ function useChatRuntime() {
   const [openError, setOpenError] = useState<string>();
   // Opening and closing storage apply in order, also across a remount, so two connections never coexist.
   const lifecycle = useRef<{
-    queue: Promise<void>; service?: DurableChatService; phone?: PhoneInfiniChat; remote?: RemoteInfiniChat;
-  }>({ queue: Promise.resolve() });
+    queue: Promise<void>; service?: DurableChatService; phone?: PhoneInfiniChat;
+    remotes: Map<string, RemoteInfiniChat>;
+  }>({ queue: Promise.resolve(), remotes: new Map() });
   useEffect(() => {
     const state = lifecycle.current;
     let unmounted = false;
@@ -130,17 +131,18 @@ function useChatRuntime() {
       state.phone = opened;
       infiniChat.show(opened.service);
     };
-    // One client for the machine InfiniChat lives on or moves to; the machine's own service runs the Harness there, so
-    // the keep-alive observes nothing for InfiniChat.
+    // One client per machine InfiniChat lives on or moves to or from, two while it moves from one machine to another;
+    // the machine's own service runs the Harness there, so the keep-alive observes nothing for InfiniChat.
     const machine = (machineId: string) => {
       if (unmounted) throw new Error('InfiniChat closed.');
-      if (state.remote?.machineId === machineId) return state.remote;
-      const previous = state.remote;
-      if (previous) serialize(() => previous.close());
-      state.remote = new RemoteInfiniChat(phoneDialer(remoteHosts, remote, machineId),
-        phoneMachines(remoteHosts, machineId), phoneClient());
-      setInfiniChatClient(state.remote);
-      return state.remote;
+      let client = state.remotes.get(machineId);
+      if (!client) {
+        client = new RemoteInfiniChat(phoneDialer(remoteHosts, remote, machineId),
+          phoneMachines(remoteHosts, machineId), phoneClient());
+        state.remotes.set(machineId, client);
+      }
+      setInfiniChatClient(client);
+      return client;
     };
     // The machine holds the conversation open: the screens show it, and the notifications follow its tasks, which it
     // starts itself at their time.
@@ -167,11 +169,13 @@ function useChatRuntime() {
       }),
       machine,
       show: showMachine,
-      // Let go of the client at once, so a move chosen next gets a new one, and close it in order with storage.
-      closeMachine: () => {
-        const closing = state.remote;
-        state.remote = undefined;
-        setInfiniChatClient(undefined);
+      // Let go of the client at once, so a move chosen next gets a new one, and close it in order with storage. The
+      // screens' client is then the one for the machine the home record names, if any.
+      closeMachine: (machineId) => {
+        const closing = state.remotes.get(machineId);
+        state.remotes.delete(machineId);
+        const home = infiniChatHome.getSnapshot();
+        setInfiniChatClient(home.home === 'machine' ? state.remotes.get(home.machineId) : undefined);
         return queued(async () => {
           await closing?.close();
         });
@@ -238,7 +242,7 @@ function useChatRuntime() {
     const subscription = AppState.addEventListener('change', (appState) => {
       if (appState === 'active') {
         const returned = previousState === 'background';
-        if (returned) state.remote?.resume();
+        if (returned) for (const client of state.remotes.values()) client.resume();
         open(returned);
       } else if (appState === 'background') {
         // A refresh stopped here leaves the old copy, and the return from the background runs it again.
@@ -254,17 +258,18 @@ function useChatRuntime() {
       serialize(async () => {
         const closing = state.service;
         const closingPhone = state.phone;
-        const closingRemote = state.remote;
+        const closingRemotes = [...state.remotes.values()];
         state.service = undefined;
         state.phone = undefined;
-        state.remote = undefined;
+        state.remotes.clear();
         setService(undefined);
         setInfiniChatClient(undefined);
         infiniChat.hold();
         // Both Harnesses stop before the remote owner they share closes its connections. Every step runs; the
         // first failure is reported once the rest are done.
         let failure: unknown;
-        for (const step of [() => closingPhone?.close(), () => closingRemote?.close(), () => closing?.close(),
+        for (const step of [() => closingPhone?.close(),
+          () => Promise.all(closingRemotes.map((client) => client.close())), () => closing?.close(),
           () => remote.close(), () => keepAlive.close(), () => notifications.close()]) {
           try { await step(); } catch (error) { failure ??= error; }
         }

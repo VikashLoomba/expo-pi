@@ -1,7 +1,7 @@
 import { webSocketLink, type Link } from '@earendil-works/chord';
 import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import { connect, type SshConnection, type SshLocalForward } from '@osuki-dev/react-native-ssh';
-import type { Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { machineEndpoint, type Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { MachineDirectory, ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
   installServer, machineSecret, runningServer, savedSecret,
@@ -131,6 +131,11 @@ export function phoneMachines(hosts: RemoteHostRepository, machineId: string): M
   return {
     id: machineId,
     name: () => hosts.get(machineId)?.name,
+    endpoint: () => {
+      const host = hosts.get(machineId);
+      return host && machineEndpoint(host);
+    },
+    publicKey: () => hosts.get(machineId)?.publicKey,
     others: async () => {
       const others = hosts.getSnapshot().hosts.filter((host) => host.id !== machineId);
       const machines = await Promise.all(others.map(async (host): Promise<Machine[]> => {

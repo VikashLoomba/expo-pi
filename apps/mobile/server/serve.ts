@@ -112,6 +112,8 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       adopt: (files) => conversation.adopt(files),
       relinquish: ({ to }) => conversation.relinquish(to),
       archive: () => conversation.archive(),
+      pull: async ({ from, files }, ctx) =>
+        conversation.pull(await machines.environment(from), files, callContext(ctx)),
       setMachines: ({ client, machines: list }) => machines.set(client, list),
       acceptHostKey: ({ endpoint, fingerprints }) => machines.acceptHostKey(endpoint, fingerprints),
     };

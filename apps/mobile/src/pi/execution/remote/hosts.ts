@@ -1,4 +1,5 @@
 import type { SshHostKey } from '@osuki-dev/react-native-ssh';
+import { isSshKeyBlob } from '@pi-agent/infinichat/pi/infinichat-remote/keys';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 
 export type RemoteCredential = Readonly<{ type: 'password'; password: string } |
@@ -40,9 +41,6 @@ export const PHONE_DEVICE = 'phone';
 const INDEX_KEY = 'pi.remote-hosts.v1';
 const CREDENTIAL_REF = /^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/;
 
-/** An OpenSSH public key as `authorized_keys` matches it: its type and base64, with no comment. */
-export const isSshKeyBlob = (value: unknown): value is string =>
-  typeof value === 'string' && /^[a-z][a-z0-9@.-]* [A-Za-z0-9+/]+={0,2}$/.test(value);
 /** A machine's InfiniChat keys, which stay with its account on its endpoint. */
 const keysOf = ({ publicKey, authorizedKeys }: RemoteHost) => ({
   ...(publicKey === undefined ? {} : { publicKey }), ...(authorizedKeys === undefined ? {} : { authorizedKeys }),

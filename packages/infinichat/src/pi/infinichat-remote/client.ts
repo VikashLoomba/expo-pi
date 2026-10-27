@@ -162,9 +162,17 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.adopt(files, ctx));
   }
 
-  /** Closes the conversation on the machine for this app, which it records, and names the files it left there. */
-  relinquish(): Promise<ConversationFiles> {
-    return this.call((ref, ctx) => ref.relinquish({ to: this.client }, ctx));
+  /**
+   * Closes the conversation on the machine for `to`, this app unless another machine takes it directly, which it
+   * records, and names the files it left there.
+   */
+  relinquish(to: InfiniChatClient = this.client): Promise<ConversationFiles> {
+    return this.call((ref, ctx) => ref.relinquish({ to }, ctx));
+  }
+
+  /** Has the machine bring the database the machine at `from` released into its own `data/`, once it matches. */
+  pull(from: string, files: ConversationFiles): Promise<void> {
+    return this.call((ref, ctx) => ref.pull({ from, files }, ctx));
   }
 
   archive(): Promise<void> {

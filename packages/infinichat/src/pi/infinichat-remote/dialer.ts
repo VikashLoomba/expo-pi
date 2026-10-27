@@ -42,6 +42,10 @@ export interface MachineDirectory {
   readonly id: string;
   /** Its name, or undefined once it is gone from this app's list. */
   name(): string | undefined;
+  /** Its endpoint as the servers know it (`machineEndpoint`), or undefined once it is gone. */
+  endpoint(): string | undefined;
+  /** Its InfiniChat SSH public key, once this app's key exchange learned it there. */
+  publicKey(): string | undefined;
   /** As `setMachines` sends them: never credentials, with the host key this app pinned, if any. */
   others(): Promise<Machine[]>;
   subscribe(listener: () => void): () => void;

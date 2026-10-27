@@ -113,7 +113,7 @@ the client, and the claim in `conversation.ts`, `move.ts` and the contract.
 
 ## Not in this piece
 
-Moving InfiniChat directly between two machines, and the Mac app's screens.
+The Mac app's screens. Moving InfiniChat directly between two machines came later; see "As built".
 
 ## As built
 
@@ -140,6 +140,16 @@ since the doc names no steps. What differs from the plan:
   `authorizedKeys`). `MachineSchema` carries `authorizedKeys`, so a change re-checks the machine; `ServerMachines`
   passes the key as pi-env's `identityFile` (`IdentitiesOnly`), so personal keys and agents stay out of it. Passwords
   still never leave the phone; a machine running Tailscale SSH needs none of this.
+- **A move goes straight from one machine to another** (2026-10-27, the owner: "why does the process need the
+  iphone if transferring between machines?"). The phone orchestrates, as it holds the home record and installs the
+  target's server, but the bytes don't pass through it. `between` in `move.ts`: the phone's own connection to the
+  target gives it its InfiniChat key, the source authorizes that key through the environment the phone borrows there
+  (`authorize`, with the exchange script now in `keys.ts`), the target's server connects, the source `relinquish`es
+  to the target (`ClientSchema` now names a machine by its endpoint too, so `heldBy` reads "on Mac"), the target
+  `pull`s the released database over its own SSH (`ServerConversation.pull`, a new contract method; version 3) and
+  `adopt`s it, and the source archives. The home record keeps `from` while `moving-there`, so a relaunch resumes it
+  and Cancel has the source adopt its files again. The provider keeps one client per machine, two during such a
+  move. A Cancel during the pull waits for the pull to end.
 - The client ID is `pi.infinichat.client.v1` in kv-store and the name is expo-device's `deviceName` ("iPhone" on
   iOS 16 and later without the entitlement). Removal removes this phone's file only where it has a secret, so a
   machine never used for InfiniChat isn't connected to. The bundle is 8,355,444 bytes, SHA-256 `0d1897ad…3f8432`.

@@ -2,10 +2,11 @@ import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil
 import type { BinaryReader, ExecutionEnv } from '@earendil-works/pi-durable/env';
 
 import type { RemoteInfiniChat } from './client';
-import type { ConversationFiles, ConversationState } from './contract';
+import type { ConversationFiles, ConversationState, InfiniChatClient } from './contract';
 import type { MachineDirectory } from './dialer';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
 import { NODE } from './install';
+import { keyExchangeLines } from './keys';
 import { fileFailure, HASH, PRINT_MARKER, runScript, temporary } from './machine';
 import { apply, diff, pages, type PagePlatform } from './pages';
 
@@ -40,6 +41,8 @@ export interface MoveStatus {
   machineId: string;
   /** `phone` is this device, as in the home record. */
   to: 'machine' | 'phone';
+  /** The machine a move straight to `machineId` comes from; this device otherwise. */
+  from?: string;
   step: MoveStep;
   copied?: Copied;
   running: boolean;
@@ -59,10 +62,13 @@ export interface MoveSides {
   closeLocal(): Promise<void>;
   /** Opens InfiniChat on this device and shows it; it reports its own failure. */
   openLocal(): Promise<void>;
-  /** The provider's client for the machine's InfiniChat, made when there is none. */
+  /**
+   * The provider's client for the machine's InfiniChat, made when there is none; two while the conversation moves from
+   * one machine to another.
+   */
   machine(machineId: string): RemoteInfiniChat;
   show(remote: RemoteInfiniChat): void;
-  closeMachine(): Promise<void>;
+  closeMachine(machineId: string): Promise<void>;
 }
 
 /**
@@ -300,8 +306,9 @@ async function refreshCopy(copy: Copy) {
 }
 
 /**
- * Moves InfiniChat's conversation between this device and a machine, one move at a time, as upstream's session sync
- * hands a session over (pi `replication` branch, `packages/durable/test/sync-e2e.test.ts:143-171`): the giving side
+ * Moves InfiniChat's conversation between this device and a machine, or straight from one machine to another with
+ * this device orchestrating, one move at a time, as upstream's session sync hands a session over (pi `replication`
+ * branch, `packages/durable/test/sync-e2e.test.ts:143-171`): the giving side
  * closes its Harness, the files are copied, and the other side opens them, where pi-durable's recovery resumes the work
  * the close interrupted. Nothing drains or waits. The home record names each phase before the step that needs it, so
  * `resume` carries a move on after a relaunch or a failure. The copy is the one seam upstream's replication could
@@ -350,14 +357,18 @@ export class InfiniChatMoves {
     const home = this.home.getSnapshot();
     if (this.attempt || this.status) return;
     if (machineId !== null && home.home === 'phone') this.run(machineId, 'machine');
-    else if (machineId === null && home.home === 'machine' && home.phase === 'there') this.run(home.machineId, 'phone');
+    else if (home.home === 'machine' && home.phase === 'there') {
+      if (machineId === null) this.run(home.machineId, 'phone');
+      else if (machineId !== home.machineId) this.run(machineId, 'machine', false, home.machineId);
+    }
   }
 
   /** Carries a move on from the phase the home record keeps, at launch and when the app becomes active. */
   resume() {
     const home = this.home.getSnapshot();
     if (this.attempt || home.home !== 'machine' || home.phase === 'there') return;
-    this.run(home.machineId, home.phase === 'moving-there' ? 'machine' : 'phone');
+    if (home.phase === 'moving-there') this.run(home.machineId, 'machine', false, home.from);
+    else this.run(home.machineId, 'phone');
   }
 
   /**
@@ -412,7 +423,7 @@ export class InfiniChatMoves {
       // A move started meanwhile, from the header or a resume, finishes first.
       if (this.attempt) continue;
       const undo = home.phase === 'moving-there';
-      this.run(machineId, undo ? 'machine' : 'phone', undo);
+      this.run(machineId, undo ? 'machine' : 'phone', undo, undo ? home.from : undefined);
       await this.running;
       const error = this.status?.error;
       if (error !== undefined) throw new Error(error);
@@ -423,7 +434,7 @@ export class InfiniChatMoves {
   retry() {
     const status = this.status;
     if (this.attempt || status?.error === undefined) return;
-    this.run(status.machineId, status.to);
+    this.run(status.machineId, status.to, false, status.from);
   }
 
   /** Puts the conversation back where it was, before the opening step only; the only way into the undo. */
@@ -436,10 +447,10 @@ export class InfiniChatMoves {
       if (home.home === 'phone' || home.phase === 'there') {
         this.status = undefined;
         this.notify();
-        if (home.home === 'phone') void this.sides.closeMachine();
+        if (home.home === 'phone') void this.sides.closeMachine(status.machineId);
         return;
       }
-      this.run(status.machineId, status.to, true);
+      this.run(status.machineId, status.to, true, status.from);
       return;
     }
     this.attempt.cancelled = true;
@@ -454,7 +465,7 @@ export class InfiniChatMoves {
     return Promise.all([this.running, this.refreshed]).then(() => {});
   }
 
-  private run(machineId: string, to: MoveStatus['to'], cancelling = false) {
+  private run(machineId: string, to: MoveStatus['to'], cancelling = false, from?: string) {
     // A move replaces the copies a refresh writes, so it waits until a refresh it stops has let go of them.
     this.stopRefresh();
     const refreshed = this.refreshed;
@@ -462,7 +473,8 @@ export class InfiniChatMoves {
     this.attempt = attempt;
     this.machineClosed = false;
     this.notice = undefined;
-    this.status = { machineId, to, step: to === 'machine' ? 'connecting' : 'closing', running: true,
+    const origin = from === undefined ? {} : { from };
+    this.status = { machineId, to, ...origin, step: to === 'machine' ? 'connecting' : 'closing', running: true,
       cancellable: !cancelling };
     this.notify();
     this.running = (async () => {
@@ -470,14 +482,15 @@ export class InfiniChatMoves {
       if (!cancelling) {
         try {
           // A move that got this far finished: a Cancel too late to stop it changes nothing.
-          await (to === 'machine' ? this.there(machineId, attempt.controller.signal)
-            : this.back(machineId, attempt.controller.signal));
+          const signal = attempt.controller.signal;
+          await (to === 'phone' ? this.back(machineId, signal)
+            : from === undefined ? this.there(machineId, signal) : this.between(from, machineId, signal));
           this.status = undefined;
           return;
         } catch (error) {
           if (this.closed) return;
           if (!attempt.cancelled) {
-            const status = this.status ?? { machineId, to, step: 'connecting', cancellable: true };
+            const status = this.status ?? { machineId, to, ...origin, step: 'connecting', cancellable: true };
             this.status = { ...status, running: false, cancellable: true, error: this.failure(status, error) };
             return;
           }
@@ -486,15 +499,15 @@ export class InfiniChatMoves {
       // Cancelled, with a new signal, which only closing aborts.
       attempt.controller = new AbortController();
       const step = this.status?.step ?? 'closing';
-      this.status = { machineId, to, step, running: true, cancellable: false, undoing: true };
+      this.status = { machineId, to, ...origin, step, running: true, cancellable: false, undoing: true };
       this.notify();
       try {
-        await this.undo(machineId, to, attempt.controller.signal);
+        await this.undo(machineId, to, attempt.controller.signal, from);
         this.status = undefined;
       } catch (error) {
         if (this.closed) return;
         const message = error instanceof Error ? error.message : String(error);
-        this.status = { machineId, to, step, running: false, cancellable: true, undoing: true,
+        this.status = { machineId, to, ...origin, step, running: false, cancellable: true, undoing: true,
           error: `The move could not be cancelled. ${message}` };
       }
     })().finally(() => {
@@ -532,6 +545,75 @@ export class InfiniChatMoves {
       await remote.adopt(files);
     }
     await this.arrived(machineId, remote);
+  }
+
+  /**
+   * Machine → machine, this device orchestrating: the target runs this app's bundle first, the source closes the
+   * conversation and names its files, the target pulls them over its own SSH and opens them, and the source keeps its
+   * released copy. This device's own copy stays set aside, as it was under the source.
+   */
+  private async between(fromId: string, toId: string, signal: AbortSignal) {
+    const source = this.sides.machine(fromId);
+    const target = this.sides.machine(toId);
+    // This device's connection to the target gives it its key, which the source lets in before the target's server
+    // first looks for the source, so that never costs it a refused login.
+    await awaitWithContext(this.environment(toId), withAbortSignal(signal, BACKGROUND_CONTEXT));
+    await this.authorize(fromId, toId, signal);
+    await target.connected(signal);
+    this.step({ step: 'closing' });
+    // A source that can't be reached can't hand the conversation on; it stays there, shown as it was.
+    await source.connected(signal);
+    const home = this.home.getSnapshot();
+    if (home.home === 'machine' && home.phase === 'there') {
+      this.home.set({ version: 1, home: 'machine', machineId: toId, phase: 'moving-there', from: fromId });
+    }
+    this.sides.hold();
+    const files = await source.relinquish(this.holder(toId));
+    signal.throwIfAborted();
+    const held = target.getConversation();
+    if (!adopted(held, files)) {
+      if (held?.active) throw new Error(`InfiniChat on ${this.name(toId)} already has another conversation open.`);
+      this.machineClosed = true;
+      this.step({ step: 'copying' });
+      const endpoint = this.directory(fromId).endpoint();
+      if (endpoint === undefined) throw new Error(`${this.name(fromId)} is no longer in Remote machines.`);
+      await target.pull(endpoint, files);
+      signal.throwIfAborted();
+      this.machineClosed = false;
+      this.step({ step: 'opening' }, false);
+      await target.adopt(files);
+    }
+    await this.arrived(toId, target);
+    // The released database stays the source's copy for a move back there; a machine that can't keep it sends the
+    // whole file next time.
+    await source.archive().catch(() => {});
+    await this.sides.closeMachine(fromId);
+  }
+
+  /**
+   * Lets the target into the source over the target's own SSH before it pulls: the target's InfiniChat key, which this
+   * device learned when it connected there, goes into the source's `authorized_keys` as the key exchange puts it,
+   * through the environment this device borrows for the source. A later connection to the source finds it there.
+   */
+  private async authorize(fromId: string, toId: string, signal: AbortSignal) {
+    const key = this.directory(toId).publicKey();
+    const to = this.name(toId);
+    if (key === undefined) {
+      throw new Error(`Test ${to} in Remote machines first, so this device learns its InfiniChat key.`);
+    }
+    const from = this.name(fromId);
+    const source = await awaitWithContext(this.environment(fromId), withAbortSignal(signal, BACKGROUND_CONTEXT));
+    const [status] = await runScript(source, signal, from, keyExchangeLines([key], PRINT_MARKER),
+      { failure: `${from} could not authorize ${to}’s InfiniChat key. Check its ssh-keygen and home folder.` });
+    if (status !== 'ok') {
+      throw new Error(`The SSH account on ${from} can neither write nor read its ~/.ssh/authorized_keys, so ${to} `
+        + 'can’t be let in. Make that file the account’s own, then try again.');
+    }
+  }
+
+  /** The machine as `relinquish` records who takes the conversation: by its endpoint, which every client knows. */
+  private holder(machineId: string): InfiniChatClient {
+    return { id: this.directory(machineId).endpoint() ?? machineId, name: this.name(machineId) };
   }
 
   /** The machine holds the conversation: the record says so, and the screens show it there. */
@@ -573,13 +655,15 @@ export class InfiniChatMoves {
     // A machine never opens released files, and the next move there sets them aside, so this may fail; the machine
     // then has no copy to refresh, and the next move there sends the whole file.
     await remote.archive().catch(() => {});
-    await this.sides.closeMachine();
+    await this.sides.closeMachine(machineId);
   }
 
-  private async undo(machineId: string, to: MoveStatus['to'], signal: AbortSignal) {
+  private async undo(machineId: string, to: MoveStatus['to'], signal: AbortSignal, from?: string) {
     const remote = this.sides.machine(machineId);
     const home = this.home.getSnapshot();
-    if (to === 'machine') {
+    if (to === 'machine' && from !== undefined) {
+      await this.undoBetween(from, machineId, signal);
+    } else if (to === 'machine') {
       if (home.home === 'machine' && home.phase === 'moving-there') {
         // This device's files are the conversation only while the machine never opened them. A machine that did (its
         // answer to `adopt` lost with the link) holds them now and may already be working, so finishing the move is
@@ -596,7 +680,7 @@ export class InfiniChatMoves {
         this.home.set(PHONE_HOME);
         await this.sides.openLocal();
       }
-      await this.sides.closeMachine();
+      await this.sides.closeMachine(machineId);
     } else if (home.home === 'machine' && home.phase === 'moving-back') {
       // The machine's files are unchanged since it relinquished them, so it opens them again.
       await remote.connected(signal);
@@ -605,6 +689,36 @@ export class InfiniChatMoves {
       await this.files.remove(INCOMING);
       this.sides.show(remote);
     }
+  }
+
+  /**
+   * Puts a move between machines back: the source opens the files it released, unless the target already holds them,
+   * which finishes the move instead, as the undo of a move from this device does.
+   */
+  private async undoBetween(fromId: string, toId: string, signal: AbortSignal) {
+    const home = this.home.getSnapshot();
+    if (home.home === 'machine' && home.phase === 'moving-there' && home.machineId === toId) {
+      const source = this.sides.machine(fromId);
+      const target = this.sides.machine(toId);
+      await source.connected(signal);
+      // Named again, unchanged since the source released them.
+      const files = await source.relinquish(this.holder(toId));
+      if (!this.machineClosed) {
+        await target.connected(signal);
+        if (adopted(target.getConversation(), files)) {
+          await this.arrived(toId, target);
+          this.notice = `InfiniChat had already opened on ${this.name(toId)}, so the move finished and it runs `
+            + 'there now.';
+          await source.archive().catch(() => {});
+          await this.sides.closeMachine(fromId);
+          return;
+        }
+      }
+      await source.adopt(files);
+      this.home.set({ version: 1, home: 'machine', machineId: fromId, phase: 'there' });
+      this.sides.show(source);
+    }
+    await this.sides.closeMachine(toId);
   }
 
   /** The machine's files and commands for a copy, borrowed from their owner; a cancel stops waiting for them. */
@@ -620,12 +734,15 @@ export class InfiniChatMoves {
   }
 
   /** Names the step that failed, then why. */
-  private failure(status: Pick<MoveStatus, 'machineId' | 'to' | 'step'>, error: unknown): string {
+  private failure(status: Pick<MoveStatus, 'machineId' | 'to' | 'step' | 'from'>, error: unknown): string {
     const name = this.name(status.machineId);
     const there = status.to === 'machine';
+    const from = status.from === undefined ? this.device : this.name(status.from);
+    const copying = status.from === undefined ? `Copying InfiniChat ${there ? 'to' : 'from'} ${name} failed.`
+      : `Copying InfiniChat from ${from} to ${name} failed.`;
     const step = status.step === 'connecting' ? `Connecting to ${name} failed.`
-      : status.step === 'closing' ? `Closing InfiniChat on ${there ? this.device : name} failed.`
-        : status.step === 'copying' ? `Copying InfiniChat ${there ? 'to' : 'from'} ${name} failed.`
+      : status.step === 'closing' ? `Closing InfiniChat on ${there ? from : name} failed.`
+        : status.step === 'copying' ? copying
           : `Opening InfiniChat on ${there ? name : this.device} failed.`;
     return `${step} ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -633,7 +750,8 @@ export class InfiniChatMoves {
   private step(update: Pick<MoveStatus, 'step' | 'copied'>, cancellable = true) {
     const status = this.status;
     if (!status || this.closed) return;
-    this.status = { machineId: status.machineId, to: status.to, running: true, cancellable, ...update };
+    this.status = { machineId: status.machineId, to: status.to,
+      ...(status.from === undefined ? {} : { from: status.from }), running: true, cancellable, ...update };
     this.notify();
   }
 
