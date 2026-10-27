@@ -222,6 +222,14 @@ What differs from the plan:
   re-exports modules that import `node:*`; the host group adds `@earendil-works/**/cloudflare` and
   `@earendil-works/pi-durable/storage/indexeddb`. The review proposed `bun-oauth` for the host group; it is in the Node
   group because it is Node code, which a file under `src/node` may use.
+- **The guard restricts `import()` and `require()`.** ESLint 9.39.5's `no-restricted-imports` checks only import and
+  export declarations (`lib/rules/no-restricted-imports.js:817-823`), while Metro and esbuild bundle a literal
+  `import()` or `require()` too, so `import('node:fs')`, `import('@earendil-works/pi-durable/env/node')` and
+  `require('fs')` passed the package's lint and would first fail in the iOS bundle or in Hermes. eslint-config-expo's
+  `import/no-unresolved` doesn't catch them, because Node's built-ins and pi's subpaths resolve. A
+  `no-restricted-syntax` rule in the same block reports every `ImportExpression` and every call to `require`. None of
+  the 35 files uses either, and a type-only `typeof import(…)` stays allowed. Piece 5's `src/node/**` override keeps
+  the rule unless a Node file needs a dynamic import.
 - **One AGENTS.md, maintained by hand.** `@expo/agent-cli` keeps its block in `AGENTS.md` relative to the Expo project,
   and `skills:sync --dry-run` from `apps/mobile` plans `apps/mobile/.agents/skills/expo-sqlite` for Codex only. Agents
   read the root AGENTS.md, so it stays the only one, and nothing was re-synced: the `.agents/skills/expo-sqlite` link
@@ -235,7 +243,7 @@ What differs from the plan:
   `react.version: "detect"`, and the package has no React dependency, so the warning stays rather than a React setting
   the package doesn't need.
 - **The eslint config has comments** saying why the package lints itself, why the guard exists, why the Node names
-  are anchored and why pi's host subpaths are named.
+  are anchored, why pi's host subpaths are named and why dynamic imports are restricted.
 
 Choices:
 
@@ -282,6 +290,13 @@ Checks:
   `expo-crypto`, `@shopify/flash-list` and `ws`, and allows `@earendil-works/pi-durable`, its `env`, `images`,
   `storage/sqlite`, `storage/jsonl`, `storage/memory` and `tools`, `chord`, `chord/context`, `chord/sqlite`, `pi-ai`,
   `pi-ai/utils/retry`, `pi-ai/providers/model-schema` and `pi-ai/providers/anthropic`, `./events` and `../chat/util`.
+- After the third review round: the app's lint (96 files), typecheck and server typecheck and the package's lint (36
+  files), all clean; an iOS export with the same file name and size as one from the commit before
+  (`entry-034e1313…`, 12,599,539 bytes), differing only in the bundler's temporary entry path; the server asset,
+  unchanged because nothing the server imports changed, passes `--check`. The guard probe reports one
+  `no-restricted-syntax` error each for `import('node:fs')`, `import('@earendil-works/pi-durable/env/node')`,
+  `require('fs')`, `import('expo-crypto')` and `import('./events')`, still restricts a static `node:fs/promises`
+  import, and allows a static `@earendil-works/pi-durable` import and `typeof import('@earendil-works/pi-durable')`.
 - `pnpm why -r @earendil-works/pi-durable` finds one version, and the package's auto-installed peers link to the same
   store directories as the app's. With the catalog, setting chord to 1.3.0 there and running
   `pnpm install --lockfile-only` moved both importers to 1.3.0; the two files were then restored.

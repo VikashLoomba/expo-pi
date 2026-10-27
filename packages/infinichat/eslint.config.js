@@ -23,6 +23,13 @@ module.exports = defineConfig([
           '@earendil-works/**/cloudflare', '@earendil-works/pi-durable/storage/indexeddb'],
           message: 'Host APIs stay in the apps.' },
       ] }],
+      // no-restricted-imports checks only static declarations, while Metro and esbuild bundle a literal `import()` or
+      // `require()` all the same, so those would carry a host module past the guard.
+      'no-restricted-syntax': ['error',
+        { selector: 'ImportExpression', message: 'Dynamic imports bypass the host guard; import statically.' },
+        { selector: "CallExpression[callee.name='require']",
+          message: 'require() bypasses the host guard; import statically.' },
+      ],
     },
   },
 ]);
