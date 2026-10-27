@@ -5,8 +5,9 @@ import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/
 
 /**
  * What `~/.infinichat/state.json` keeps across restarts: whether this machine holds the conversation, with the files
- * it adopted, and the phone's time zone. The agent reads local times (message dates, scheduled times); the phone sends
- * its IANA zone on every connect, so those times match the phone's clock wherever the machine is.
+ * it adopted or the phone it handed them to, and the phone's time zone. The agent reads local times (message dates,
+ * scheduled times); the phone sends its IANA zone on every connect, so those times match the phone's clock wherever
+ * the machine is.
  */
 export type ServerState = ConversationState & { timeZone?: string };
 
@@ -14,6 +15,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 const fileOf = (value: unknown) => isRecord(value) && typeof value.sha256 === 'string'
   && typeof value.size === 'number' ? { sha256: value.sha256, size: value.size } : undefined;
+const clientOf = (value: unknown) => isRecord(value) && typeof value.id === 'string'
+  && typeof value.name === 'string' ? { id: value.id, name: value.name } : undefined;
 
 function filesOf(value: unknown): ConversationFiles | undefined {
   const db = isRecord(value) ? fileOf(value.db) : undefined;
@@ -32,9 +35,11 @@ export function readState(home: string): ServerState {
   const state: unknown = JSON.parse(text);
   if (!isRecord(state)) return { active: false };
   const adopted = filesOf(state.adopted);
+  const heldBy = clientOf(state.heldBy);
   return {
     active: state.active === true,
     ...(adopted === undefined ? {} : { adopted }),
+    ...(heldBy === undefined ? {} : { heldBy }),
     ...(typeof state.timeZone === 'string' ? { timeZone: state.timeZone } : {}),
   };
 }

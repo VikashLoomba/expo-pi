@@ -74,6 +74,8 @@ type Run = (lines: string[], step: Step) => Promise<string[]>;
 
 const SECRET_UNAVAILABLE = 'Could not prepare InfiniChat’s key for this machine. Unlock this device and try again.';
 const secretKey = (machineId: string) => `pi.infinichat.secret.v1.${machineId}`;
+/** Each client's secret on a machine, in a file named after its client ID; the server reads them at each connection. */
+const CLIENTS = '.infinichat/clients';
 
 /** The secret this app keeps for a machine, if it has one; only an install makes one. */
 export async function savedSecret(credentials: CredentialBackend, machineId: string): Promise<string | undefined> {
@@ -162,11 +164,10 @@ function systemdUnit(args: string[]): string {
 }
 
 /**
- * With the service file at `$t`, names `server.json` `$s`, sets `$restart` for a new secret, and `$current` when
- * `server.json` names this bundle and a live process.
+ * With the service file at `$t`, names `server.json` `$s`, and sets `$current` when it names this bundle and a live
+ * process.
  */
-const readService = (restart: boolean, bundle: string) => ['umask 077', `restart=${restart ? 1 : 0}`,
-  's="$HOME/.infinichat/server.json"', 'current=0',
+const readService = (bundle: string) => ['umask 077', 's="$HOME/.infinichat/server.json"', 'current=0',
   `if [ -f "$s" ] && grep -q '"bundle":"${bundle}"' "$s"; then`,
   `  pid=$(${PID}); if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then current=1; fi`,
   'fi'];
@@ -180,43 +181,41 @@ const publish = (path: string) => [`if [ -f ${path} ] && cmp -s "$t" ${path}; th
   'if [ "$current" = 0 ]; then changed=1; fi'];
 
 /**
- * Installs the LaunchAgent and starts it, or starts it again when it changed, isn't this bundle's, or must read a
- * new secret. `kickstart -k` restarts the definition launchd loaded before, so a changed one is booted out and
- * bootstrapped instead. The service stays listed for a moment after `bootout` returns, and a `bootstrap` then fails
- * with an I/O error, so it waits until launchd has let go; the step's timeout bounds the wait.
+ * Installs the LaunchAgent and starts it, or boots it out and bootstraps it again when it changed or isn't this
+ * bundle's. The service stays listed for a moment after `bootout` returns, and a `bootstrap` then fails with an I/O
+ * error, so it waits until launchd has let go; the step's timeout bounds the wait.
  */
-function launchdScript(restart: boolean, bundle: string): string[] {
+function launchdScript(bundle: string): string[] {
   const service = `"$domain"/${LABEL}`;
-  return [...readService(restart, bundle), 'domain="gui/$(id -u)"', `p="$HOME/Library/LaunchAgents/${LABEL}.plist"`,
+  return [...readService(bundle), 'domain="gui/$(id -u)"', `p="$HOME/Library/LaunchAgents/${LABEL}.plist"`,
     // The gui domain exists while the account is logged in; LaunchAgents start there at login.
     `if ! launchctl print "$domain" >/dev/null 2>&1; then ${PRINT_MARKER}; echo nologin; exit 0; fi`,
     ...publish('"$p"'),
     `if ! launchctl print ${service} >/dev/null 2>&1; then rm -f "$s"; launchctl bootstrap "$domain" "$p"`,
     `elif [ "$changed" = 1 ]; then rm -f "$s"; launchctl bootout ${service}`,
     `  while launchctl print ${service} >/dev/null 2>&1; do sleep 1; done`,
-    '  launchctl bootstrap "$domain" "$p"',
-    `elif [ "$restart" = 1 ]; then rm -f "$s"; launchctl kickstart -k ${service}; fi`,
+    '  launchctl bootstrap "$domain" "$p"', 'fi',
     PRINT_MARKER, 'echo launchd'];
 }
 
 /**
- * Installs the systemd user unit and starts it, or starts it again when it changed, isn't this bundle's, or must read
- * a new secret, then reports lingering. Without a user bus (a container), the server starts detached, and the next
- * install starts it again. A detached server to replace gets SIGTERM, and the new one starts only once it is gone; the
- * step's timeout bounds the wait.
+ * Installs the systemd user unit and starts it, or starts it again when it changed or isn't this bundle's, then
+ * reports lingering. Without a user bus (a container), the server starts detached, and the next install starts it
+ * again. A detached server to replace gets SIGTERM, and the new one starts only once it is gone; the step's timeout
+ * bounds the wait.
  */
-function systemdScript(restart: boolean, args: string[], bundle: string): string[] {
-  return [...readService(restart, bundle), 'u="$HOME/.config/systemd/user/infinichat.service"',
+function systemdScript(args: string[], bundle: string): string[] {
+  return [...readService(bundle), 'u="$HOME/.config/systemd/user/infinichat.service"',
     'if systemctl --user show-environment >/dev/null 2>&1; then',
     ...publish('"$u"'),
-    '  if [ "$changed" = 1 ] || [ "$restart" = 1 ]; then',
+    '  if [ "$changed" = 1 ]; then',
     '    rm -f "$s"; systemctl --user daemon-reload; systemctl --user enable infinichat.service',
     '    systemctl --user restart infinichat.service',
     '  else systemctl --user enable infinichat.service; fi',
     `  ${PRINT_MARKER}; echo systemd`,
     '  loginctl show-user "$(id -un)" --property=Linger --value 2>/dev/null || echo unknown',
     'else',
-    '  if [ "$current" = 0 ] || [ "$restart" = 1 ]; then',
+    '  if [ "$current" = 0 ]; then',
     `    old=$(${PID} 2>/dev/null || true)`,
     '    if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then kill "$old"; fi',
     '    while [ -n "$old" ] && kill -0 "$old" 2>/dev/null; do sleep 1; done',
@@ -265,10 +264,10 @@ function readyPort(line: string | undefined, bundle: string): number | undefined
  * verified before it is renamed into place, as pi-env deploys its daemon; a dropped run leaves at most a bundle folder,
  * which the next run removes once its server is ready, and, if its connection was lost while writing, that file's
  * temporary copy. The service manager owns the server; the environment's connection never does. `secret` is the app's
- * for this machine (`machineSecret`); a new one restarts the server.
+ * for this machine (`machineSecret`), written as the file of `client`, the app's client ID, beside other clients'.
  */
 export async function installServer({ machine, name, description, username }: InstallTarget, assets: ServerAssets,
-  secret: string, options: { signal: AbortSignal; onProgress?: (stage: InstallStage) => void },
+  client: string, secret: string, options: { signal: AbortSignal; onProgress?: (stage: InstallStage) => void },
 ): Promise<InstalledServer> {
   const { signal } = options;
   const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
@@ -343,13 +342,11 @@ export async function installServer({ machine, name, description, username }: In
     await upload(path, hash, bytes);
   }
   options.onProgress?.('starting');
-  // The server reads the secret when it starts, so a changed secret restarts it; another phone's secret is refused
-  // from then on.
-  const [secretFile] = await runWith('secret', secret, ['d="$HOME/.infinichat"',
-    'if [ -L "$d/secret" ] || { [ -e "$d/secret" ] && [ ! -f "$d/secret" ]; }; then exit 1; fi',
-    'if [ -f "$d/secret" ] && cmp -s "$t" "$d/secret"; then r=same; else mv -f "$t" "$d/secret"; r=changed; fi',
-    'chmod 600 "$d/secret"', PRINT_MARKER, 'echo "$r"'], { failure: message.files });
-  const restart = secretFile === 'changed';
+  // The server reads the clients' files at each connection, so a new secret needs no restart, and the other clients'
+  // files stay as they are.
+  await runWith('secret', secret, ['umask 077', `d="$HOME/${CLIENTS}"`, 'mkdir -p "$d"', `f="$d/"${quotePosix(client)}`,
+    'if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then exit 1; fi', 'mv -f "$t" "$f"', 'chmod 600 "$f"',
+    PRINT_MARKER], { failure: message.files });
   // Started through the login shell, as pi-env's `loginShell` starts its daemon, so the agent's tools see the PATH
   // the account's profile sets up rather than the service manager's. The device list's own text for the machine,
   // so the model's memory of it stays true once the conversation moves.
@@ -357,8 +354,8 @@ export async function installServer({ machine, name, description, username }: In
     '--description', description];
   const service = { failure: message.service, timedOut: message.service };
   const [manager, linger] = system.platform === 'darwin'
-    ? await runWith('service', launchAgent(args), launchdScript(restart, bundle), service)
-    : await runWith('service', systemdUnit(args), systemdScript(restart, args, bundle), service);
+    ? await runWith('service', launchAgent(args), launchdScript(bundle), service)
+    : await runWith('service', systemdUnit(args), systemdScript(args, bundle), service);
   if (manager === 'nologin') {
     throw new Error(`InfiniChat starts at login on ${name}, and no one is logged in there. Log in, then try again.`);
   }
@@ -372,6 +369,15 @@ export async function installServer({ machine, name, description, username }: In
         + `To keep it running, an administrator can run “loginctl enable-linger ${username}” on it.`
       : undefined;
   return { port, secret, ...(notice === undefined ? {} : { notice }) };
+}
+
+/**
+ * Removes the file of `client` from the machine, borrowed as for an install, so its server refuses that client's
+ * secret from then on.
+ */
+export async function removeClient(machine: ExecutionEnv, client: string): Promise<void> {
+  const removed = await machine.remove(`~/${CLIENTS}/${client}`, { force: true }, BACKGROUND_CONTEXT);
+  if (!removed.ok) throw new Error(removed.error.message);
 }
 
 /**

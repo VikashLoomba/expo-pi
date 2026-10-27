@@ -6,35 +6,43 @@ import {
   type Connection, type RemoteInfo, type SshTarget,
 } from '@earendil-works/pi-env';
 
-import type { Machine, PendingHostKeys, Reach } from '../pi/infinichat-remote/contract';
+import {
+  machineEndpoint as endpoint, type Machine, type PendingHostKeys, type Reach,
+} from '../pi/infinichat-remote/contract';
 import { MACHINE_WORK, machineDescription, type Device } from '../pi/infinichat/device-tools';
 
 const noop = () => {};
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-/** What a machine's connection depends on; a name or a pinned key may change under the same connection. */
-const endpoint = ({ id, hostname, port, username }: Machine) => JSON.stringify([id, hostname, port, username]);
-/** What a check found of a machine holds while its endpoint and the key the phone pinned stay the same. */
+/** What a check found of a machine holds while its endpoint and the key the client pinned stay the same. */
 const checked = (machine: Machine) => JSON.stringify([endpoint(machine), machine.hostKey?.fingerprint ?? null]);
 const without = <T>(record: Readonly<Record<string, T>>, id: string): Record<string, T> =>
   Object.fromEntries(Object.entries(record).filter(([key]) => key !== id));
 
-const isMachine = (value: unknown): value is Machine => isRecord(value) && typeof value.id === 'string'
+const isMachine = (value: unknown): value is Machine => isRecord(value)
   && typeof value.name === 'string' && typeof value.hostname === 'string' && typeof value.port === 'number'
   && typeof value.username === 'string' && (value.hostKey === undefined || (isRecord(value.hostKey)
     && typeof value.hostKey.algorithm === 'string' && typeof value.hostKey.fingerprint === 'string'));
 
-/** The server's own copy of the list Chord checked against `MachineSchema`; none before the phone's first. */
-function readMachines(file: string): Machine[] {
+type Lists = Readonly<Record<string, readonly Machine[]>>;
+
+/** The server's own copy of each client's list, which Chord checked against `MachineSchema`; none before the first. */
+function readLists(file: string): Lists {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return {};
     throw error;
   }
-  const machines: unknown = JSON.parse(text);
-  return Array.isArray(machines) ? machines.filter(isMachine) : [];
+  const lists: unknown = JSON.parse(text);
+  if (!isRecord(lists) || Array.isArray(lists)) return {};
+  return Object.fromEntries(Object.entries(lists).map(([client, machines]) =>
+    [client, Array.isArray(machines) ? machines.filter(isMachine) : []]));
 }
+
+/** Every client's machines, each endpoint once, as the client that sent its list last names it. */
+const merged = (lists: Lists) =>
+  [...new Map(Object.values(lists).flat().map((machine) => [endpoint(machine), machine])).values()];
 
 interface Scanned { line: string; algorithm: string; fingerprint: string }
 
@@ -51,17 +59,20 @@ function scanned(name: string, { lines, fingerprints }: { lines: string[]; finge
 
 /**
  * The other configured machines, which InfiniChat's tools reach from here with this machine's own SSH, through
- * pi-env. Connections come from `connectSsh` rather than `sshConnection`, because only its failures say when the
- * host key is why (`HostKeyUnknownError`, `HostKeyChangedError`); a lazy start reports them as a message. So a
- * connection whose start fails is let go, and the next start goes through `connectSsh`. The key the phone pinned is
- * accepted without asking, since the owner compared it out of band there; any other waits for the phone.
+ * pi-env. Each client sends its own list, and a machine is known by its endpoint, so two clients listing it share its
+ * connection, its host keys and what was found of it. Connections come from `connectSsh` rather than `sshConnection`,
+ * because only its failures say when the host key is why (`HostKeyUnknownError`, `HostKeyChangedError`); a lazy start
+ * reports them as a message. So a connection whose start fails is let go, and the next start goes through
+ * `connectSsh`. The key a client pinned is accepted without asking, since the owner compared it out of band there; any
+ * other waits for a client.
  */
 export class ServerMachines {
+  private lists: Lists;
   private machines: readonly Machine[];
   private readonly connections = new Map<string, Promise<Connection>>();
   /** Connections that answered once: a later failed start may be a changed host key, which only `connectSsh` names. */
   private readonly answered = new WeakSet<Connection>();
-  /** The scans waiting for the phone, whose lines its accept trusts. */
+  /** The scans waiting for a client, whose lines its accept trusts. */
   private readonly waiting = new Map<string, { keys: Scanned[]; changed: boolean }>();
   private reach: Reach = {};
   private pending: PendingHostKeys = {};
@@ -74,7 +85,8 @@ export class ServerMachines {
   constructor(home: string, private readonly self: string) {
     this.file = join(home, 'machines.json');
     this.knownHosts = join(home, 'known_hosts');
-    this.machines = readMachines(this.file);
+    this.lists = readLists(this.file);
+    this.machines = merged(this.lists);
   }
 
   readonly subscribe = (listener: () => void) => {
@@ -84,48 +96,54 @@ export class ServerMachines {
   readonly getReach = () => this.reach;
   readonly getPending = () => this.pending;
 
-  /** The machines as devices, under the names and descriptions the phone's device list gives them. */
+  /** The machines as devices, under the names and descriptions the clients' device lists give them. */
   devices(): Device[] {
     return this.machines.map((machine) => ({
       name: machine.name,
       description: machineDescription(machine),
       environment: async (who: string) => {
         const { connection, info } = await this.started(machine);
-        return new RemoteExecutionEnv({ connection, id: `pi-env:${machine.id}`,
+        return new RemoteExecutionEnv({ connection, id: `pi-env:${endpoint(machine)}`,
           cwd: `${info.home}/${MACHINE_WORK}/${who}` });
       },
     }));
   }
 
-  /** Keeps the phone's list, lets go of the connections to machines it removed or moved, and checks new ones. */
-  set(machines: readonly Machine[]): void {
+  /**
+   * Keeps a client's list in place of its previous one, lets go of the connections to machines no client lists any
+   * more, and checks new ones.
+   */
+  set(client: string, list: readonly Machine[]): void {
+    this.lists = { ...without(this.lists, client), [client]: list };
     const temporary = `${this.file}.${process.pid}`;
-    writeFileSync(temporary, JSON.stringify(machines), { mode: 0o600 });
+    writeFileSync(temporary, JSON.stringify(this.lists), { mode: 0o600 });
     renameSync(temporary, this.file);
-    const before = new Map(this.machines.map((machine) => [machine.id, checked(machine)]));
+    const before = new Map(this.machines.map((machine) => [endpoint(machine), checked(machine)]));
+    const machines = merged(this.lists);
     this.machines = machines;
     const kept = new Set(machines.map(endpoint));
     for (const key of [...this.connections.keys()]) {
       if (!kept.has(key)) this.drop(key);
     }
-    // A machine as it was keeps what was found of it, and its uses keep that current. The list comes at every connect,
+    // A machine as it was keeps what was found of it, and its uses keep that current. A list comes at every connect,
     // and checking an unauthorized machine each time costs it failed logins, for which OpenSSH 9.8+ refuses every
     // connection from here for a while (`PerSourcePenalties`), tool calls included.
-    const same = (id: string) => machines.some((machine) => machine.id === id && before.get(id) === checked(machine));
-    this.reach = Object.fromEntries(Object.entries(this.reach).filter(([id]) => same(id)));
-    for (const id of [...this.waiting.keys()]) {
-      if (!same(id)) this.pend(id, undefined);
+    const same = (key: string) => machines.some((machine) => endpoint(machine) === key
+      && before.get(key) === checked(machine));
+    this.reach = Object.fromEntries(Object.entries(this.reach).filter(([key]) => same(key)));
+    for (const key of [...this.waiting.keys()]) {
+      if (!same(key)) this.pend(key, undefined);
     }
     this.publish();
     for (const machine of machines) {
-      if (this.reach[machine.id] === undefined) void this.started(machine).catch(noop);
+      if (this.reach[endpoint(machine)] === undefined) void this.started(machine).catch(noop);
     }
   }
 
-  /** Trusts the keys waiting for machine `id` once the phone accepted these fingerprints, then checks it again. */
-  async acceptHostKey(id: string, fingerprints: readonly string[]): Promise<void> {
-    const machine = this.machines.find((candidate) => candidate.id === id);
-    const waiting = this.waiting.get(id);
+  /** Trusts the keys waiting for the machine at `key` once a client accepted these fingerprints, then checks it. */
+  async acceptHostKey(key: string, fingerprints: readonly string[]): Promise<void> {
+    const machine = this.machines.find((candidate) => endpoint(candidate) === key);
+    const waiting = this.waiting.get(key);
     if (machine === undefined || waiting === undefined) {
       throw new Error(`No SSH host key of that machine waits for approval on ${this.self}.`);
     }
@@ -137,10 +155,10 @@ export class ServerMachines {
     // pi-env never replaces a trusted key: the old ones go first (`acceptHostKey`, `src/ssh.ts:258-280`).
     if (waiting.changed) await forgetHostKey(target);
     await acceptHostKey(target, waiting.keys.map(({ line }) => line));
-    this.pend(id, undefined);
+    this.pend(key, undefined);
     // A check from before the accept would end with the key pending again; this one starts afresh.
-    this.drop(endpoint(machine));
-    this.reach = without(this.reach, id);
+    this.drop(key);
+    this.reach = without(this.reach, key);
     this.publish();
     void this.started(machine).catch(noop);
   }
@@ -151,10 +169,10 @@ export class ServerMachines {
     for (const key of [...this.connections.keys()]) this.drop(key);
   }
 
-  /** How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its ID. */
+  /** How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its endpoint. */
   private target(machine: Machine): SshTarget {
     return { host: machine.hostname, port: machine.port, user: machine.username, knownHostsFile: this.knownHosts,
-      hostKeyAlias: machine.id };
+      hostKeyAlias: endpoint(machine) };
   }
 
   /** Its daemon starts through the login shell, so the tools see the PATH the account's profile sets up there. */
@@ -184,14 +202,14 @@ export class ServerMachines {
     } catch (error) {
       if (this.connections.get(key) === opening) this.drop(key);
       // A restart reports a changed host key as pi-env's own advice to remove the old key, which a model with a shell
-      // here could follow; one fresh `connectSsh` names it, and the key waits for the phone instead.
+      // here could follow; one fresh `connectSsh` names it, and the key waits for a client instead.
       if (!again && connection !== undefined && this.answered.has(connection)) return this.started(machine, true);
       this.record(machine, error);
       throw error;
     }
   }
 
-  /** `connectSsh`, trusting the machine's host key first when it is the one the phone pinned. */
+  /** `connectSsh`, trusting the machine's host key first when it is the one the client pinned. */
   private async open(machine: Machine): Promise<Connection> {
     const target = this.target(machine);
     try {
@@ -202,7 +220,7 @@ export class ServerMachines {
       const keys = scanned(machine.name, await scanHostKey(target));
       const pinned = keys.filter(({ fingerprint }) => fingerprint === machine.hostKey?.fingerprint);
       if (pinned.length === 0) {
-        if (this.listed(machine)) this.pend(machine.id, { keys, changed });
+        if (this.listed(machine)) this.pend(endpoint(machine), { keys, changed });
         throw new Error(changed
           ? `The SSH host key ${machine.name} presents to ${this.self} changed. Compare its fingerprint in Remote `
             + 'machines on the phone, and accept it there only if you know why it changed.'
@@ -216,26 +234,27 @@ export class ServerMachines {
   }
 
   private listed(machine: Machine): boolean {
-    return this.machines.some((listed) => listed.id === machine.id && endpoint(listed) === endpoint(machine));
+    return this.machines.some((listed) => endpoint(listed) === endpoint(machine));
   }
 
   /** What the latest attempt found of a machine that is still listed as it was tried. */
   private record(machine: Machine, error: unknown) {
     if (!this.listed(machine)) return;
-    this.reach = { ...this.reach, [machine.id]: error === undefined ? { reachable: true }
+    const key = endpoint(machine);
+    this.reach = { ...this.reach, [key]: error === undefined ? { reachable: true }
       : { reachable: false, error: error instanceof Error ? error.message : String(error) } };
-    if (error === undefined) this.pend(machine.id, undefined);
+    if (error === undefined) this.pend(key, undefined);
     this.publish();
   }
 
-  /** Keeps a scan for the phone, or lets it go, with what `pendingHostKeys` shows of it. */
-  private pend(id: string, scan: { keys: Scanned[]; changed: boolean } | undefined) {
+  /** Keeps a scan for a client, or lets it go, with what `pendingHostKeys` shows of it. */
+  private pend(key: string, scan: { keys: Scanned[]; changed: boolean } | undefined) {
     if (scan === undefined) {
-      if (this.waiting.delete(id)) this.pending = without(this.pending, id);
+      if (this.waiting.delete(key)) this.pending = without(this.pending, key);
       return;
     }
-    this.waiting.set(id, scan);
-    this.pending = { ...this.pending, [id]: { changed: scan.changed,
+    this.waiting.set(key, scan);
+    this.pending = { ...this.pending, [key]: { changed: scan.changed,
       keys: scan.keys.map(({ algorithm, fingerprint }) => ({ algorithm, fingerprint })) } };
   }
 

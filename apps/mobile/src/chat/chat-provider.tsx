@@ -23,6 +23,7 @@ import { createRemoteExecution } from '../pi/execution/remote/owner';
 import { createExpoImages } from '../pi/images';
 import { ScheduledTaskNotifications } from '../pi/infinichat-notifications';
 import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
+import { phoneClient } from '../pi/infinichat-remote/phone-client';
 import { phoneDialer, phoneMachines } from '../pi/infinichat-remote/phone-dialer';
 import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
 import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
@@ -137,7 +138,7 @@ function useChatRuntime() {
       const previous = state.remote;
       if (previous) serialize(() => previous.close());
       state.remote = new RemoteInfiniChat(phoneDialer(remoteHosts, remote, machineId),
-        phoneMachines(remoteHosts, machineId));
+        phoneMachines(remoteHosts, machineId), phoneClient());
       setInfiniChatClient(state.remote);
       return state.remote;
     };
@@ -537,8 +538,9 @@ export function useInfiniChatConnection(): (RemoteConnection & { retry(): void; 
 }
 
 /**
- * What the machine InfiniChat runs on found of the other machines its tools reach over its own SSH, and accepting a
- * host key there; undefined while InfiniChat runs on this iPhone. `reach` is undefined until it is connected.
+ * What the machine InfiniChat runs on found of the other machines its tools reach over its own SSH, by endpoint
+ * (`machineEndpoint`), and accepting a host key there; undefined while InfiniChat runs on this iPhone. `reach` is
+ * undefined until it is connected.
  */
 export function useInfiniChatMachines() {
   const remote = useShownMachine();
@@ -548,7 +550,7 @@ export function useInfiniChatMachines() {
   const reach = useSyncExternalStore(subscribe, getReach, getReach);
   const pending = useSyncExternalStore(subscribe, getPending, getPending);
   return remote && { machineId: remote.machineId, reach, pending,
-    accept: (id: string, fingerprints: string[]) => remote.acceptHostKey(id, fingerprints) };
+    accept: (endpoint: string, fingerprints: string[]) => remote.acceptHostKey(endpoint, fingerprints) };
 }
 
 const noCatalog: ModelCatalog = [];

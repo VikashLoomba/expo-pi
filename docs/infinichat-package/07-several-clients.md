@@ -114,3 +114,24 @@ the client, and the claim in `conversation.ts`, `move.ts` and the contract.
 ## Not in this piece
 
 Moving InfiniChat directly between two machines, and the Mac app's screens.
+
+## As built
+
+From `ab19daf`, with pi 1.4.0 (the latest on npm on 2026-10-26), Expo 58.0.17 and React Native 0.88.0; one commit,
+since the doc names no steps. What differs from the plan:
+
+- **Machine lists go per client, at connect, not as `putMachine` and `removeMachine`.** A client reaches a server
+  only while InfiniChat is on that machine (the provider makes a `RemoteInfiniChat` only then), so edits made while
+  it is on the phone, the usual case, would never arrive, and a machine added or removed then would be missing or
+  stale after the next move. `setMachines({ client, machines })` replaces only that client's list; the server uses
+  each endpoint once, named by the client that sent last, so clients still never drop each other's machines.
+  `machines.json` holds the lists by client ID; the old array is ignored until the phone's next connect.
+- **The holder is one field, `heldBy`, and only a phone.** Nothing in this piece hands the conversation to a machine
+  from a machine, so `to` has no machine form yet. `RemoteInfiniChat` fills it in, so `InfiniChatMoves` is unchanged.
+- **An install no longer restarts the server for a new secret**, which it did only because the server read one file
+  at start. A machine keeps its unused `~/.infinichat/secret`.
+- **Host keys on the server are stored under the endpoint**, not the phone's machine ID, so a key the phone pinned is
+  accepted again by itself, and one accepted only on the server waits for a client once more.
+- The client ID is `pi.infinichat.client.v1` in kv-store and the name is expo-device's `deviceName` ("iPhone" on
+  iOS 16 and later without the entitlement). Removal removes this phone's file only where it has a secret, so a
+  machine never used for InfiniChat isn't connected to. The bundle is 8,355,356 bytes, SHA-256 `648bd3de…97a9ed`.

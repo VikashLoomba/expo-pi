@@ -10,8 +10,8 @@ import type { ScheduledInput } from '../infinichat/schedule';
 import type { ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
 import {
-  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type PendingHostKeys,
-  type Reach, type SignInAttempt,
+  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatClient, type InfiniChatPrincipal,
+  type PendingHostKeys, type Reach, type SignInAttempt,
 } from './contract';
 import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from './dialer';
 
@@ -45,7 +45,8 @@ function plain(error: unknown): Error {
  * app's dialer makes to the machine's server. The host holds the contract once; after a lost link `host.connect`
  * re-holds it, and the screens keep the last values meanwhile. It closes each dialed server's link and transport
  * through the dialer, and borrows the machine directory. The machine's own tools reach the other configured machines
- * with its own SSH; it hears of them on every connect and whenever the directory changes.
+ * with its own SSH; it hears of this app's on every connect and whenever the directory changes. `client` is this app
+ * as the server's client: its ID, which its machine list goes under, and the name a move back records.
  */
 export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
@@ -73,7 +74,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private machinesSent: Promise<void> = Promise.resolve();
   private readonly stopMachines: () => void;
 
-  constructor(private readonly dialer: ServerDialer, private readonly machines: MachineDirectory) {
+  constructor(private readonly dialer: ServerDialer, private readonly machines: MachineDirectory,
+    private readonly client: InfiniChatClient) {
     this.stopMachines = machines.subscribe(() => this.sendMachines());
   }
 
@@ -120,7 +122,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   readonly getConversation = () => this.values?.conversation;
   /**
    * Whether the machine reached each other machine the last time it tried, and the host keys it found there that wait
-   * for this phone; undefined until connected.
+   * for a client, by endpoint (`machineEndpoint`); undefined until connected.
    */
   readonly getReach = () => this.values?.reach;
   readonly getPendingHostKeys = () => this.values?.pendingHostKeys;
@@ -160,9 +162,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.adopt(files, ctx));
   }
 
-  /** Closes the conversation on the machine and names the files it left there. */
+  /** Closes the conversation on the machine for this app, which it records, and names the files it left there. */
   relinquish(): Promise<ConversationFiles> {
-    return this.call((ref, ctx) => ref.relinquish(ctx));
+    return this.call((ref, ctx) => ref.relinquish({ to: this.client }, ctx));
   }
 
   archive(): Promise<void> {
@@ -190,9 +192,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.signOut({ providerId }, ctx));
   }
 
-  /** Trusts the host keys with these fingerprints that machine `id` presented to this machine. */
-  acceptHostKey(id: string, fingerprints: string[]): Promise<void> {
-    return this.call((ref, ctx) => ref.acceptHostKey({ id, fingerprints }, ctx));
+  /** Trusts the host keys with these fingerprints that the machine at `endpoint` presented to this machine. */
+  acceptHostKey(endpoint: string, fingerprints: string[]): Promise<void> {
+    return this.call((ref, ctx) => ref.acceptHostKey({ endpoint, fingerprints }, ctx));
   }
 
   /**
@@ -381,7 +383,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   /**
    * Connects the client host over a dialed link, which re-holds the reference. Resolves true once the reference is
-   * live and the expected server answers; false when the link closed first, as a stale port or another phone's secret
+   * live and the expected server answers; false when the link closed first, as a stale port or a removed client file
    * makes it.
    */
   private async open(session: Session, link: Link, expected: DialedServer['expected'],
@@ -448,14 +450,14 @@ export class RemoteInfiniChat implements InfiniChatHost {
   };
 
   /**
-   * Tells a connected server the other configured machines, as the directory lists them. A send that fails changes
-   * nothing: the next connect sends them again.
+   * Tells a connected server this app's other configured machines, as the directory lists them, in place of the ones
+   * it sent before. A send that fails changes nothing: the next connect sends them again.
    */
   private sendMachines(): void {
     this.machinesSent = this.machinesSent.then(async () => {
       const ref = this.ref;
       if (this.closed || ref === undefined || !this.session?.live) return;
-      await ref.setMachines({ machines: await this.machines.others() });
+      await ref.setMachines({ client: this.client.id, machines: await this.machines.others() });
     }).catch(() => {});
   }
 

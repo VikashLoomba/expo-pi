@@ -20,12 +20,13 @@ const LOADING = { status: 'loading' } as const;
  * Serves the conversation as InfiniChat's remote object. Its cells mirror the open core's view, its latest report and
  * its scheduled tasks; the view's projection rebuilds its arrays on every update, so each write goes out as a diff.
  * While this machine doesn't hold the conversation, there is no core: the view is loading, the scheduled tasks are null
- * and the operations refuse. `conversation` says whether it holds it, and `adopt`, `relinquish` and `archive` move it.
- * `server` says which server answers, and `setTimeZone` applies the phone's zone. The account cells mirror this
- * machine's credential store and its sign-in, which outlive the object, so a phone that reconnects finds them again;
- * `catalog` is fixed, because none of the registered providers refreshes its models (pi-ai `refreshModels`). `reach`
- * and `pendingHostKeys` mirror what this machine found of the other machines its tools use, which `setMachines` lists
- * and `acceptHostKey` trusts.
+ * and the operations refuse. `conversation` says whether it holds it, or which phone it went to, and `adopt`,
+ * `relinquish` and `archive` move it. `server` says which server answers, and `setTimeZone` applies the phone's zone.
+ * The account cells mirror this machine's credential store and its sign-in, which outlive the object, so a client that
+ * reconnects finds them again; `catalog` is fixed, because none of the registered providers refreshes its models (pi-ai
+ * `refreshModels`). `reach` and `pendingHostKeys` mirror what this machine found of the other machines its tools use,
+ * which each client lists with `setMachines` and any client trusts with `acceptHostKey`. Every client acts as the
+ * owner, so all of them share this one object.
  */
 export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: ServerConversation, options: {
   server: InfiniChatServer;
@@ -109,10 +110,10 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       signOut: ({ providerId }) => signIn.signOut(providerId),
       // The move goes on when the caller goes away: a dropped link never leaves it half done.
       adopt: (files) => conversation.adopt(files),
-      relinquish: () => conversation.relinquish(),
+      relinquish: ({ to }) => conversation.relinquish(to),
       archive: () => conversation.archive(),
-      setMachines: ({ machines: list }) => machines.set(list),
-      acceptHostKey: ({ id, fingerprints }) => machines.acceptHostKey(id, fingerprints),
+      setMachines: ({ client, machines: list }) => machines.set(client, list),
+      acceptHostKey: ({ endpoint, fingerprints }) => machines.acceptHostKey(endpoint, fingerprints),
     };
   });
 }

@@ -50,7 +50,8 @@ async function serve(device: string, description: string): Promise<number> {
   try {
     // One process owns the storage; the lock follows that process, so it comes before anything opens storage.
     closes.push(await processLock('infinichat-server'));
-    // It holds the conversation and the secret that keeps other local accounts out, so only this account enters it.
+    // It holds the conversation and the clients' secrets, which keep other local accounts out, so only this account
+    // enters it.
     await mkdir(home, { recursive: true, mode: 0o700 });
     restoreTimeZone(home);
     // pi-ai's own persistence seam: this machine's store, for as long as the process; its file outlives it.

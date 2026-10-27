@@ -5,7 +5,9 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Storage } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { nodeDatabaseFiles } from '@pi-agent/infinichat/node/database-files';
-import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import type {
+  ConversationFiles, ConversationState, InfiniChatClient,
+} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
 
 import { readState, updateState } from './state';
@@ -19,10 +21,11 @@ const same = (left: ConversationFile | undefined, right: ConversationFile | unde
 
 /**
  * InfiniChat's conversation on this machine. One process owns a storage at a time (pi-durable README), so this
- * machine opens its database only while it holds the conversation: from `adopt`, which the phone calls once it has
- * copied its files here, until `relinquish`. `state.json` keeps `active` across restarts, so a reboot reopens it. The
- * operations run one at a time. While something subscribes, it follows the open core's view, report and scheduled
- * tasks, and also says when the core comes or goes.
+ * machine opens its database only while it holds the conversation: from `adopt`, which a phone calls once it has
+ * copied its files here, until `relinquish`. `state.json` keeps `active` across restarts, so a reboot reopens it, and
+ * the phone a handover goes to, which every client reads. The operations run one at a time, also when several clients
+ * call them. While something subscribes, it follows the open core's view, report and scheduled tasks, and also says
+ * when the core comes or goes.
  */
 export class ServerConversation {
   private core?: InfiniChatService;
@@ -35,8 +38,8 @@ export class ServerConversation {
   constructor(private readonly home: string,
     private readonly openCore: (storage: Storage) => Promise<InfiniChatService>) {
     this.data = join(home, 'data');
-    const { active, adopted } = readState(home);
-    this.state = { active, ...(adopted === undefined ? {} : { adopted }) };
+    const { active, adopted, heldBy } = readState(home);
+    this.state = { active, ...(adopted === undefined ? {} : { adopted }), ...(heldBy === undefined ? {} : { heldBy }) };
   }
 
   /** The core while this machine holds the conversation open. */
@@ -67,7 +70,8 @@ export class ServerConversation {
   /**
    * Opens the files the phone copied to `data/` and holds the conversation from then on; pi-durable's recovery then
    * resumes the work the phone's close interrupted. Refused while this machine holds it, and when the files differ
-   * from the ones the phone verified. `active` is kept first, so a crash while opening reopens them at the restart.
+   * from the ones the phone verified. `active` is kept first, so a crash while opening reopens them at the restart. It
+   * ends a handover this machine started, as Cancel's undo opens the files it released.
    */
   adopt(files: ConversationFiles): Promise<void> {
     return this.run(async () => {
@@ -87,19 +91,25 @@ export class ServerConversation {
   }
 
   /**
-   * Stops input at once, closes the core (its Harness waits for running task code and writes the tasks it stopped back
-   * as pending) and its storage, folds its WAL, and names the database it left in `data/`. Called again, it names it
-   * again.
+   * Hands the conversation to phone `to`: keeps it as `heldBy`, stops input at once, closes the core (its Harness waits
+   * for running task code and writes the tasks it stopped back as pending) and its storage, folds its WAL, and names
+   * the database it left in `data/`. Called again for the same phone, it names it again; for another, it is refused,
+   * so two clients never move the conversation in two directions (upstream sync's slot, created once per handover).
    */
-  relinquish(): Promise<ConversationFiles> {
+  relinquish(to: InfiniChatClient): Promise<ConversationFiles> {
     return this.run(async () => {
+      const { heldBy } = this.state;
+      if (heldBy !== undefined && heldBy.id !== to.id) {
+        throw new Error(`InfiniChat is moving or has moved to ${heldBy.name}.`);
+      }
+      // Kept before the Harness closes, so whatever happens next, every client reads where it goes.
+      if (heldBy === undefined) this.setState({ active: false, heldBy: to });
       const core = this.core;
       if (core) {
         this.core = undefined;
         this.changed();
         await core.close();
       }
-      if (this.state.active) this.setState({ active: false });
       await nodeDatabaseFiles.fold(join(this.data, DATABASE));
       const files = await this.files();
       if (!files) throw new Error('This machine holds no InfiniChat conversation.');
@@ -109,7 +119,7 @@ export class ServerConversation {
 
   /**
    * Moves the released database to `copy/`, replacing the copy there, where nothing opens it: the phone's next move
-   * here patches it, and the phone keeps it fresh meanwhile. Refused while holding it.
+   * here patches it, and the phone keeps it fresh meanwhile. `heldBy` stays. Refused while holding it.
    */
   archive(): Promise<void> {
     return this.run(async () => {

@@ -2,7 +2,8 @@ import {
   Button, ConfirmationDialog, Form, Host, HStack, LabeledContent, ProgressView, Section, Text,
 } from '@expo/ui/swift-ui';
 import { disabled as disable, font, foregroundStyle, textSelection } from '@expo/ui/swift-ui/modifiers';
-import { forgetSecret } from '@pi-agent/infinichat/pi/infinichat-remote/install';
+import { machineEndpoint } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { forgetSecret, removeClient, savedSecret } from '@pi-agent/infinichat/pi/infinichat-remote/install';
 import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -13,6 +14,7 @@ import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteHost } from '@/pi/execution/remote/hosts';
 import { testRemoteHost, type HostKeyChallenge } from '@/pi/execution/remote/test-host';
+import { phoneClient } from '@/pi/infinichat-remote/phone-client';
 import { createCredentialBackend } from '@/pi/secure-storage';
 
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
@@ -33,7 +35,7 @@ function movingBack(move: MoveStatus, name: string): string {
 
 export default function RemoteHostsScreen() {
   const colors = useChatColors();
-  const { remoteHosts, moves, infiniChatHome: home, infiniChatMove: move } = useChatApp();
+  const { remoteHosts, remote, moves, infiniChatHome: home, infiniChatMove: move } = useChatApp();
   const snapshot = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   // While InfiniChat runs on a machine, its tools reach the others with that machine's own SSH.
   const infiniChat = useInfiniChatMachines();
@@ -115,10 +117,18 @@ export default function RemoteHostsScreen() {
         throw new Error(`InfiniChat couldn’t move back to this iPhone, so ${host.name} wasn’t removed. `
           + (error instanceof Error ? error.message : String(error)));
       });
+      // This iPhone's secret has a file on the machine only if it installed InfiniChat there. Removing it, while its
+      // credentials are still here to reach the machine, makes the server refuse that secret; an unreachable machine
+      // keeps the file.
+      const credentials = createCredentialBackend();
+      if (await savedSecret(credentials, host.id).catch(() => undefined) !== undefined) {
+        await remote.environment(host.id, undefined).then((machine) => removeClient(machine, phoneClient().id))
+          .catch(() => {});
+      }
       await remoteHosts.remove(host.id, host);
       moves.forget(host.id);
       // Left behind, it would only clutter the Keychain.
-      await forgetSecret(createCredentialBackend(), host.id).catch(() => {});
+      await forgetSecret(credentials, host.id).catch(() => {});
       setNotice({ message: 'Machine removed. Chats that selected it keep their selection until you choose another '
         + 'environment.' });
     } catch (error) {
@@ -147,7 +157,7 @@ export default function RemoteHostsScreen() {
     setBusy(host.id);
     setNotice(undefined);
     try {
-      await infiniChat.accept(host.id, fingerprints);
+      await infiniChat.accept(machineEndpoint(host), fingerprints);
     } catch (error) {
       setNotice({ message: error instanceof Error ? error.message : 'Could not accept the SSH host key.',
         error: true });
@@ -160,8 +170,9 @@ export default function RemoteHostsScreen() {
     const reaches = infiniChat?.reach;
     if (!infiniChatHost || !reaches || host.id === infiniChatHost.id) return null;
     const from = infiniChatHost.name;
-    const reach = reaches[host.id];
-    const waiting = infiniChat.pending?.[host.id];
+    const endpoint = machineEndpoint(host);
+    const reach = reaches[endpoint];
+    const waiting = infiniChat.pending?.[endpoint];
     const failed = waiting !== undefined || (reach !== undefined && !reach.reachable);
     const status = waiting !== undefined ? (waiting.changed ? 'SSH host key changed' : 'SSH host key to verify')
       : reach === undefined ? 'Checking…' : reach.reachable ? 'Reachable' : 'Can’t connect';
