@@ -194,17 +194,34 @@ What differs from the plan:
   key in step 1 and 22 added lines in step 2. A later non-frozen install may make those two dedupes.
 - **`npx @expo/agent-cli install` refuses `workspace:*`** (`npm-package-arg`: `Unsupported URL Type "workspace:"`), so
   `apps/mobile/package.json` was edited and `pnpm install` run.
+- **pi's versions come from a pnpm catalog, not two exact pins.** pnpm installs a package's peer dependencies as its
+  own (`autoInstallPeers`, on by default), so `packages/infinichat/node_modules/@earendil-works/*` are links of their
+  own, and Metro and esbuild try the importing file's nearest `node_modules` first. Two pins agree only while both
+  manifests are edited together: a pi upgrade in `apps/mobile/package.json` alone would put two copies of pi-durable,
+  pi-ai and chord in the phone's bundle and the server's. `pnpm-workspace.yaml` now has a `catalog` with the three
+  versions, and the app's dependencies and the package's peer dependencies name them as `catalog:`, which pnpm
+  10.33.0 accepts in `peerDependencies` (`validatePeerDependencies`). AGENTS.md's pi-upgrade rule says to upgrade
+  there. The lockfile gains a `catalogs` section and six `catalog:` specifiers; protobufjs's resolution was kept again.
+- **The guard names Node's built-in modules.** A `node:*` group misses bare specifiers (`fs`, `fs/promises`,
+  `crypto`), which typecheck because Node's types are in the program. The Node group adds `builtinModules` from
+  `node:module`, each with a leading slash: a group is a gitignore pattern (`ignore` 5.3.2 in ESLint 9.39.5), so a bare
+  `events` would also match `./events` and `some-package/events`. The host group adds `@shopify/*` and
+  `torch-image-playground`, the app's two native dependencies it missed, and drops `buffer`, which the Node list
+  names, so a `buffer` import reports once.
 - **One AGENTS.md, maintained by hand.** `@expo/agent-cli` keeps its block in `AGENTS.md` relative to the Expo project,
   and `skills:sync --dry-run` from `apps/mobile` plans `apps/mobile/.agents/skills/expo-sqlite` for Codex only. Agents
-  read the root AGENTS.md, so it stays the only one; the root skill links still resolve into the root
-  `node_modules/.pnpm`, and nothing was re-synced. AGENTS.md now says where the app is, that app paths are relative to
-  it, and where commands run.
+  read the root AGENTS.md, so it stays the only one, and nothing was re-synced: the `.agents/skills/expo-sqlite` link
+  its Package skills table uses still resolves into the root `node_modules/.pnpm`. `.claude/skills/expo-sqlite` was
+  already dangling before this piece (its expo-sqlite 58.0.9 target was pruned on 2026-10-20) and is untouched; both
+  links are git-ignored. AGENTS.md now says where the app is, that app paths are relative to it, and where commands
+  run.
 - **README.md** says the app is in `apps/mobile`, adds `cd apps/mobile` to the run commands, and its four file links
   point there.
 - **The package's lint prints a warning** that eslint-plugin-react can't detect React. eslint-config-expo sets
   `react.version: "detect"`, and the package has no React dependency, so the warning stays rather than a React setting
   the package doesn't need.
-- **The eslint config has a comment** saying why the package lints itself and why the guard exists.
+- **The eslint config has comments** saying why the package lints itself, why the guard exists and why the Node names
+  are anchored.
 
 Choices:
 
@@ -237,8 +254,19 @@ Checks:
   `buffer` imports to `src/pi/model-auth.ts` failed the package's lint with three `no-restricted-imports` errors, and
   removing them passed it again. The server asset, rebuilt here, passes `--check`: 8,352,831 bytes, SHA-256
   `668a9eec…3cecff`, with the same lines as step 1's after the path change.
+- After the review fixes: the app's lint (96 files), typecheck and server typecheck and the package's lint, all clean;
+  an iOS export with the same file name and size as one from the commit before, differing only in the bundler's
+  temporary entry path (`/var/folders/…/expo-bundler-…/index.js`); the server asset, unchanged because nothing the
+  server imports changed, passes `--check`. The guard probe with `fs/promises`, `crypto`, `path`, `child_process`,
+  `timers/promises`, `node:fs`, `buffer`, `@shopify/flash-list`, `torch-image-playground`, `expo-crypto` and `ws`
+  failed with eleven `no-restricted-imports` errors, one each, while `./events` and `../chat/util` drew none.
 - `pnpm why -r @earendil-works/pi-durable` finds one version, and the package's auto-installed peers link to the same
-  store directories as the app's. `pnpm ignored-builds` reports none, `onlyBuiltDependencies` is read from
+  store directories as the app's. With the catalog, setting chord to 1.3.0 there and running
+  `pnpm install --lockfile-only` moved both importers to 1.3.0; the two files were then restored.
+- `pnpm ignored-builds` can't answer on this checkout: from the root and from `apps/mobile` it prints "Cannot identify
+  as no node_modules found", because pnpm 10.33.0 reads an `ignoredBuilds` key from `node_modules/.modules.yaml` and
+  this install wrote none. Other evidence shows enriched-markdown's build is allowed: it isn't in `.modules.yaml`'s
+  `skipped` list, `pnpm config get only-built-dependencies` prints it, so `onlyBuiltDependencies` is read from
   `pnpm-workspace.yaml`, and `pnpm rebuild react-native-enriched-markdown` runs its postinstall.
 - Autolinking from `apps/mobile` resolves 42 Expo modules, including `pi-oauth-callback` and
   `torch-image-playground`, and the 12 React Native packages, among them react-native-ssh, nitro-zlib and

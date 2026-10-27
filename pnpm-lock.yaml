@@ -4,6 +4,18 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@earendil-works/chord':
+      specifier: 1.4.0
+      version: 1.4.0
+    '@earendil-works/pi-ai':
+      specifier: 1.4.0
+      version: 1.4.0
+    '@earendil-works/pi-durable':
+      specifier: 1.4.0
+      version: 1.4.0
+
 importers:
 
   .: {}
@@ -11,13 +23,13 @@ importers:
   apps/mobile:
     dependencies:
       '@earendil-works/chord':
-        specifier: 1.4.0
+        specifier: 'catalog:'
         version: 1.4.0
       '@earendil-works/pi-ai':
-        specifier: 1.4.0
+        specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.29.0)(ws@8.22.0)(zod@3.25.76)
       '@earendil-works/pi-durable':
-        specifier: 1.4.0
+        specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.29.0)(ws@8.22.0)(zod@3.25.76)
       '@expo/metro-runtime':
         specifier: ~58.0.15
@@ -195,13 +207,13 @@ importers:
   packages/infinichat:
     dependencies:
       '@earendil-works/chord':
-        specifier: 1.4.0
+        specifier: 'catalog:'
         version: 1.4.0
       '@earendil-works/pi-ai':
-        specifier: 1.4.0
+        specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.29.0)(ws@8.22.0)(zod@3.25.76)
       '@earendil-works/pi-durable':
-        specifier: 1.4.0
+        specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.29.0)(ws@8.22.0)(zod@3.25.76)
     devDependencies:
       eslint:

@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
-    "@earendil-works/chord": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/chord": "catalog:",
+    "@earendil-works/pi-ai": "catalog:",
+    "@earendil-works/pi-durable": "catalog:",
     "@expo/metro-runtime": "~58.0.15",
     "@expo/ui": "~58.0.22",
     "@osuki-dev/react-native-ssh": "0.3.0",

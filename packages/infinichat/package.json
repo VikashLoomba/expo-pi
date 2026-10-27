@@ -8,9 +8,9 @@
     "lint": "eslint ."
   },
   "peerDependencies": {
-    "@earendil-works/chord": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-durable": "1.4.0"
+    "@earendil-works/chord": "catalog:",
+    "@earendil-works/pi-ai": "catalog:",
+    "@earendil-works/pi-durable": "catalog:"
   },
   "devDependencies": {
     "eslint": "^9.39.5",
