@@ -97,7 +97,10 @@ export class DurableChatService {
     registry.install(defineExtension({
       name: 'mobile-chat',
       sections: [section('assistant',
-        () => 'You are a helpful, thoughtful assistant. Use Markdown when it improves clarity.', { tag: false })],
+        () => 'You are a helpful, thoughtful assistant. Use Markdown when it improves clarity.', { tag: false }),
+      // The folder the tools resolve paths against, as pi-durable's README "System Prompt" shows; without it, models
+      // guess one, such as /mnt/data.
+      section('cwd', (input) => input.env?.cwd)],
     }));
     const now = options.now ?? Date.now;
     let service: DurableChatService | undefined;
