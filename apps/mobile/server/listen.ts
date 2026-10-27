@@ -39,8 +39,8 @@ export async function listen(host: Host<InfiniChatPrincipal>, home: string, bund
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error(`Unexpected listening address ${address}.`);
   // Written aside and renamed into place, so the phone polling it never reads half a file. The phone's readiness
-  // check (src/pi/infinichat-remote/install.ts) matches this exact JSON.stringify form. `node` is the Node the phone
-  // runs this bundle's page commands with (move.ts).
+  // check (packages/infinichat/src/pi/infinichat-remote/install.ts) matches this exact JSON.stringify form. `node` is
+  // the Node the phone runs this bundle's page commands with (move.ts).
   const temporary = join(home, `server.json.${process.pid}`);
   await writeFile(temporary, JSON.stringify({ pid: process.pid, port: address.port, bundle, node: process.execPath }));
   await rename(temporary, join(home, 'server.json'));

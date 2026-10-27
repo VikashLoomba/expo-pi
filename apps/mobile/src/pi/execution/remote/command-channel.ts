@@ -18,16 +18,11 @@ async function writable(operation: () => void, signal: AbortSignal): Promise<voi
   }
 }
 
-/**
- * A short bootstrap command with owned output, EOF, exit status, and awaited channel disposal. `timeoutMs` is 60 s by
- * default; with `null` the command has no timeout of its own, and ends with its signal or its connection.
- * `onWritten` reports the input bytes written so far.
- */
+/** A short bootstrap command with owned output, EOF, exit status, and awaited channel disposal. */
 export async function runSshCommand(connection: SshConnection, command: string, options: {
   signal: AbortSignal;
   input?: Uint8Array;
-  timeoutMs?: number | null;
-  onWritten?: (bytes: number) => void;
+  timeoutMs?: number;
 }): Promise<{ stdout: string; exitCode: number }> {
   if (options.signal.aborted) throw new BootstrapError('CANCELLED');
   const controller = new AbortController();
@@ -50,8 +45,7 @@ export async function runSshCommand(connection: SshConnection, command: string, 
     void connection.disconnect().catch(() => {});
   };
   const abort = () => fail(new BootstrapError('CANCELLED'));
-  const timer = options.timeoutMs === null ? undefined
-    : setTimeout(() => fail(new BootstrapError('TIMEOUT')), options.timeoutMs ?? 60_000);
+  const timer = setTimeout(() => fail(new BootstrapError('TIMEOUT')), options.timeoutMs ?? 60_000);
   options.signal.addEventListener('abort', abort, { once: true });
   const capture = (bytes: ArrayBuffer) => {
     if (failed || ended) return;
@@ -78,7 +72,6 @@ export async function runSshCommand(connection: SshConnection, command: string, 
         if (ended) throw new BootstrapError('DAEMON_UPLOAD');
         const bytes = new Uint8Array(input.subarray(offset, offset + WRITE_CHUNK));
         await Promise.race([writable(() => shell.write(bytes), controller.signal), failurePromise]);
-        options.onWritten?.(offset + bytes.length);
         // Give native output/closure and cancellation callbacks an opportunity
         // to run instead of filling the native input queue in one JS turn.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));

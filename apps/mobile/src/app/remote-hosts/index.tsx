@@ -2,6 +2,8 @@ import {
   Button, ConfirmationDialog, Form, Host, HStack, LabeledContent, ProgressView, Section, Text,
 } from '@expo/ui/swift-ui';
 import { disabled as disable, font, foregroundStyle, textSelection } from '@expo/ui/swift-ui/modifiers';
+import { forgetSecret } from '@pi-agent/infinichat/pi/infinichat-remote/install';
+import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, StyleSheet } from 'react-native';
@@ -11,8 +13,7 @@ import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteHost } from '@/pi/execution/remote/hosts';
 import { testRemoteHost, type HostKeyChallenge } from '@/pi/execution/remote/test-host';
-import { forgetSecret } from '@/pi/infinichat-remote/install';
-import type { MoveStatus } from '@/pi/infinichat-remote/move';
+import { createCredentialBackend } from '@/pi/secure-storage';
 
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 const progressLabels = {
@@ -117,7 +118,7 @@ export default function RemoteHostsScreen() {
       await remoteHosts.remove(host.id, host);
       moves.forget(host.id);
       // Left behind, it would only clutter the Keychain.
-      await forgetSecret(host.id).catch(() => {});
+      await forgetSecret(createCredentialBackend(), host.id).catch(() => {});
       setNotice({ message: 'Machine removed. Chats that selected it keep their selection until you choose another '
         + 'environment.' });
     } catch (error) {

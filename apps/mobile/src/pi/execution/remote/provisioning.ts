@@ -12,9 +12,9 @@ export interface RemotePlatformState { remote?: RemotePlatform }
 
 export function quotePosix(value: string): string { return `'${value.replace(/'/g, `'"'"'`)}'`; }
 
-export const HASH = `hash() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | sed 's/.*= //'; else printf 'none\\n'; fi; }`;
+const HASH = `hash() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | sed 's/.*= //'; else printf 'none\\n'; fi; }`;
 
-export function script(source: string): string { return `sh -c ${quotePosix(source)}`; }
+function script(source: string): string { return `sh -c ${quotePosix(source)}`; }
 
 function afterMarker(stdout: string, marker: string): string[] {
   const lines = stdout.split(/\r?\n/);

@@ -18,8 +18,8 @@ const node: PagePlatform = {
   },
 };
 
-// The commands the phone runs over SSH with the Node that runs the server, beside the server's process. Their
-// inputs and outputs are files the phone's script creates and removes.
+// The commands the phone runs through its ExecutionEnv with the Node that runs the server, beside the server's
+// process. Their inputs and outputs are files the phone names, writes or reads, and removes.
 
 /** `pages <db> <out>`: the page list of a closed database without a WAL, such as this machine's copy. */
 export async function writePages(db: string, out: string): Promise<void> {

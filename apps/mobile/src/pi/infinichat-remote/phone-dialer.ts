@@ -1,12 +1,19 @@
 import { webSocketLink, type Link } from '@earendil-works/chord';
-import type { SshLocalForward } from '@osuki-dev/react-native-ssh';
+import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
+import { connect, type SshConnection, type SshLocalForward } from '@osuki-dev/react-native-ssh';
 import type { Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { MachineDirectory, ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
+import {
+  installServer, machineSecret, runningServer, savedSecret,
+} from '@pi-agent/infinichat/pi/infinichat-remote/install';
 import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
+import { getRandomBytesAsync } from 'expo-crypto';
 
 import { connectionFailure } from '../execution/remote/channel';
-import type { RemoteHostRepository } from '../execution/remote/hosts';
-import { connectAdmitted, installServer, runningServer, savedSecret, SERVER_BUNDLE } from './install';
+import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
+import type { RemoteExecution } from '../execution/remote/owner';
+import { createCredentialBackend } from '../secure-storage';
+import { phoneServerAssets, SERVER_BUNDLE } from './server-assets';
 
 type Target = { port: number; secret: string };
 
@@ -21,14 +28,35 @@ type HeaderWebSocket = new (url: string, protocols: undefined, options: { header
 const NativeWebSocket: HeaderWebSocket = WebSocket;
 
 /**
+ * An SSH connection with the machine's admission: its credentials, and its pinned host key checked and offered first,
+ * as owner.ts admits its daemon channels. The caller owns the connection and disconnects it.
+ */
+function connectAdmitted({ host, auth, trustedHostKey }: RemoteHostAdmission, options: {
+  signal: AbortSignal;
+  onDisconnected?: () => void;
+}): Promise<SshConnection> {
+  if (!trustedHostKey) {
+    throw new Error(`Test ${host.name} in Remote machines and verify its SSH host key before using InfiniChat there.`);
+  }
+  return connect({
+    host: host.hostname, port: host.port, username: host.username, auth, signal: options.signal,
+    hostKeyAlgorithms: [trustedHostKey.algorithm],
+    verifyHostKey: (observed) => matchesHostKey(trustedHostKey, observed),
+    onDisconnected: options.onDisconnected,
+  }).catch((error: unknown) => {
+    throw connectionFailure(error);
+  });
+}
+
+/**
  * How this phone reaches a configured machine's InfiniChat server: one SSH connection with the machine's admission,
  * and a WebSocket tunnelled over it to the server's loopback port (`server/listen.ts`), carrying this phone's secret.
  * It installs or updates the server when this phone has no secret for the machine, and when `server.json` names no
- * live server of this bundle. It borrows the machine record and the phone's secret, and closes only the connections
- * it opened, which are its own: the tools' daemon connections in owner.ts are not used while the machine runs
- * InfiniChat.
+ * live server of this bundle. That check and the install go through the environment owner.ts keeps for the machine:
+ * one daemon connection, shared with the chats' tools, which the provider closes. It borrows that, the machine record
+ * and the phone's secret, and closes only the SSH connection and tunnel it opened.
  */
-export function phoneDialer(hosts: RemoteHostRepository, machineId: string): ServerDialer {
+export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution, machineId: string): ServerDialer {
   return {
     async dial({ signal, onStage, onInstalled, onDropped }) {
       // As owner.ts checks a chat's machine, with InfiniChat's own way out.
@@ -36,14 +64,22 @@ export function phoneDialer(hosts: RemoteHostRepository, machineId: string): Ser
       if (!hosts.get(machineId)) {
         throw new Error('This machine was removed from Remote machines while InfiniChat’s conversation is on it.');
       }
-      const secret = await savedSecret(machineId);
+      const credentials = createCredentialBackend();
+      const secret = await savedSecret(credentials, machineId);
       const admission = await hosts.admit(machineId);
-      const name = admission.host.name;
+      const { host } = admission;
+      const name = host.name;
+      const description = machineDescription(host);
       const connection = await connectAdmitted(admission, { signal, onDisconnected: onDropped });
+      // A dial that is cancelled stops waiting for it; the owner keeps the connection it opens.
+      const machine = () => awaitWithContext(remote.environment(machineId, undefined),
+        withAbortSignal(signal, BACKGROUND_CONTEXT));
       let forward: SshLocalForward | undefined;
       let link: Link | undefined;
       const install = async (): Promise<Target> => {
-        const server = await installServer(hosts, machineId, { signal, onProgress: onStage });
+        const installing = await machineSecret(credentials, getRandomBytesAsync, machineId);
+        const server = await installServer({ machine: await machine(), name, description, username: host.username },
+          phoneServerAssets, installing, { signal, onProgress: onStage });
         onInstalled(server.notice);
         return server;
       };
@@ -68,11 +104,12 @@ export function phoneDialer(hosts: RemoteHostRepository, machineId: string): Ser
         await connection.disconnect().catch(() => {});
       };
       try {
-        const port = secret === undefined ? undefined : await runningServer(connection, name, signal);
+        const port = secret === undefined ? undefined
+          : await runningServer(await machine(), name, SERVER_BUNDLE, signal);
         const target = secret !== undefined && port !== undefined ? { port, secret } : await install();
         return {
           link: await open(target),
-          expected: { bundle: SERVER_BUNDLE, device: name, description: machineDescription(admission.host) },
+          expected: { bundle: SERVER_BUNDLE, device: name, description },
           reinstall: async () => open(await install()),
           close,
         };

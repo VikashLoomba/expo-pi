@@ -201,3 +201,159 @@ code should go, about 100 lines, and the phone's adapters add about as many.
 
 The Node implementations (piece 5), the server's single-client code (piece 7), and moving InfiniChat directly between
 two machines.
+
+## As built
+
+Built in the commit that adds this section, from `68f1d9b`, with pi 1.4.0 (pi-durable, pi-ai, chord and pi-env; still
+the latest on npm on 2026-10-26), Expo 58.0.17, React Native 0.88.0, react-native-ssh 0.3.0 and pnpm 10.33.0. Read
+again at the installed versions: pi-durable `dist/env/index.d.ts` (`FileSystem`, `Shell.exec`: no stdin, an abort
+kills only that command's processes), chord `dist/context/index.d.ts` (`withAbortSignal`, `awaitWithContext`), pi-env
+`dist/connection.d.ts:69-80`, `docs/protocol.md` ("Frames", "Liveness", `exec`), `docs/semantics.md` ("Commands": a
+string runs through `bash -c`, each command in its own process group, killed with SIGKILL on abort or timeout),
+`dist/remote-env.js:13-17` (read and write chunks) and `dist/ssh.js:85-86`, `:309-322` (step timeouts, `quotePosix`,
+the hash function). The doc names no steps, so it is one commit. `git` records `home.ts` as a rename; `install.ts` and
+`move.ts` changed too much for its rename detection and show as removed and added.
+
+| File | Lines |
+| --- | --- |
+| `packages/infinichat/src/pi/infinichat-remote/move.ts`: `InfiniChatMoves`, `MoveSides`, `DatabaseFiles`, the copies | 633, from 714 |
+| `packages/infinichat/src/pi/infinichat-remote/install.ts`: `installServer`, `runningServer`, `ServerAssets`, the secrets | 389, from 409 |
+| `packages/infinichat/src/pi/infinichat-remote/home.ts`: `createInfiniChatHome(storage)` | 58, from 56 |
+| `packages/infinichat/src/pi/infinichat-remote/machine.ts`: `runScript`, `quotePosix`, `HASH`, temporary files | 82 |
+| `apps/mobile/src/pi/infinichat-remote/phone-files.ts`: the phone's `DatabaseFiles` | 80 |
+| `apps/mobile/src/pi/infinichat-remote/phone-home.ts`: the kv-store adapter | 8 |
+| `apps/mobile/src/pi/infinichat-remote/server-assets.ts`: `phoneServerAssets`, `SERVER_BUNDLE` | 38, from 25 |
+| `apps/mobile/src/pi/infinichat-remote/phone-dialer.ts`: now with `connectAdmitted`, which only it uses | 147, from 110 |
+
+Together 1,435 lines where there were 1,314, against the plan's "about as many": the marker streaming and the
+reconnects went (about 90 lines), and the seams' interfaces (about 65), the chunked copies (about 50) and the install
+upload's three steps took their place.
+
+What differs from the plan:
+
+- **The server bundle doesn't change, so nothing reinstalls.** The server imports none of the moved files, and the two
+  comments changed in `server/listen.ts` and `server/pages.ts` don't reach esbuild's output: the asset rebuilt here is
+  byte-identical (8,352,831 bytes, SHA-256 `668a9eec…3cecff`). The first device check needs an install forced by hand
+  (below).
+- **The dial's check for a running server goes through owner.ts's environment too.** The doc's table makes
+  `runningServer` host-neutral, and it ran over the dial's SSH connection, so it now takes the `ExecutionEnv`, as the
+  install does. The dial's own SSH connection carries only the tunnel. A machine used only for InfiniChat gets the
+  phone's pi-env daemon (`~/.pi/mobile/tools/`) at its first connect, as a chat's tools would deploy it there.
+- **`InfiniChatMoves` takes a function from a machine's ID to its `MachineDirectory`, and the bundle.** Piece 3 made a
+  directory one machine's (it has an `id`), and moves serve whichever machine they move to; they use only `name()`.
+  The server lines of the page commands need the bundle's folder name (`serverBundle`), which the doc's list lacks.
+  The arguments are positional, as they were, with `MoveSides` last.
+- **`installServer(target, assets, secret, options)`.** `InstallTarget` is the machine as the app knows it: its
+  `ExecutionEnv`, name, `machineDescription` and SSH account (the linger advice names it). The dialer gets the secret
+  from `machineSecret(credentials, getRandomBytesAsync, machineId)` first, where `installServer` used to.
+  `ServerAssets.manifest` carries each daemon's SHA-256 as well as the bundle's, because the install checks the
+  machine's copies before loading any asset (from `PI_DAEMON_MANIFEST` before).
+- **A step's input is a file the package names and removes.** `writeFile` puts it at a unique name (`temporary`, pi-ai's
+  `uuidv7`, where `mktemp` named one), and `discard` removes it however the step ended: a cancelled or timed-out command
+  dies with its process group by SIGKILL, so its `trap` never runs. The removal isn't awaited, so a lost connection
+  doesn't hold up the step's failure while it waits for a new one. A force-quit, or a connection that stays lost, leaves
+  that one file in `~/.infinichat` (a page list, a patch, an upload or a service file); today's scripts removed theirs
+  on SIGPIPE or SIGHUP. A move's whole-file upload is written straight to `data/incoming/infinichat.db` and verified
+  there (SHA-256, then `chmod 600`) before the place step moves it, so a cut-off upload leaves only that file, which the
+  next copy replaces; the old `.upload.XXXXXX` beside it is gone. Install uploads keep a file beside the final name,
+  renamed into place once verified.
+- **Folders exist before anything is written into them (design check 1).** `writeFile` makes missing folders with the
+  environment's default mode, so every write follows a command that made its folder under `umask 077`: an install
+  upload makes its own folder first (and so `~/.infinichat`, 0700), the secret and service files go into
+  `~/.infinichat` after the bundle is there, a move's page lists and patches are written only after a command found the
+  server's bundle (`receivePatch` got one round trip of its own for that), and the whole-file upload makes
+  `data/incoming` first. Uploaded files are `chmod 600`, as `umask 077` made them before; service files keep the
+  default mode, which launchd and systemd accept.
+- **The sshd workarounds are gone.** `ON_SIGNAL`, `TICK`'s newline each second (now `sleep 1`) and the scripts' traps
+  for their temporary files guarded against sshd leaving a script running after its channel closed; pi-env kills the
+  command's process group on abort, timeout and a lost connection. `exec` runs a string through `bash -c` (or `sh`), so
+  `script()`'s `sh -c` wrapper went too; the scripts are POSIX.
+- **The 300 s upload timeout is a deadline on the write.** `writeFile` takes no timeout, so the context aborts after
+  `UPLOAD_TIMEOUT_MS` (`AbortSignal.timeout`, which React Native 0.88 has); the verify-and-rename command keeps 60 s.
+  Copies have none, other commands 60 s, as before.
+- **The install reports `checking` after detecting the system.** `connecting` covers the first command, where a lazily
+  connected environment connects; the screen shows "Connecting to …" for both.
+- **`TRANSFER` stays**, as the local file a downloaded patch goes through (`DatabaseFiles.open`). `DatabaseFiles.fold`
+  does nothing when the database isn't there, the check `phoneFiles` made before folding, since opening would create it.
+- **Messages.** The device's name in the moves' messages comes from the app ("this iPhone"), capitalized where a
+  sentence starts with it ("This iPhone has no InfiniChat conversation to move.", "Choose This iPhone to move it
+  back."). The install's linger advice keeps "this phone", as piece 3 kept "did not accept this iPhone"; the Mac's
+  piece can reword it. A command that fails to run maps to the same fixed connection message as before; a file
+  operation's `unknown` (pi-env's lost connection) maps to it too, and other codes to the step's own message; a failed
+  read in a download keeps "The SSH connection closed before the copy was complete." Remote text never reaches one.
+- **The phone's SSH helpers shrank back.** `quotePosix` and `HASH` are the package's own in `machine.ts`, as pi-env
+  keeps its own in `ssh.ts` and the port its own in `provisioning.ts`. The exports only the install used (`HASH`,
+  `script`) are private again, and `runSshCommand`'s `onWritten` and `null` timeout, which only the moves used, are
+  gone: `command-channel.ts` is byte-identical to its version before the move feature (`f9f8f2e~1`).
+
+Choices:
+
+- The shared helpers for scripts and files are in `machine.ts`, which `install.ts` and `move.ts` both import.
+- A copy reads and writes 4 MiB per call between progress reports, so each call keeps upstream's pipeline full (512 KiB
+  writes and 256 KiB reads, eight in flight).
+- Getting a machine's environment in a move or a dial goes through chord's `awaitWithContext`, so a Cancel stops waiting
+  for owner.ts's connection, which the owner keeps.
+- The phone's adapters: `phone-files.ts` (expo-file-system, expo-sqlite, expo-crypto, nitro-zlib), `phone-home.ts`
+  (expo-sqlite kv-store's `getItemSync` and `setItemSync`), `phoneServerAssets` beside `loadServerBundle`, and the
+  secrets straight from `createCredentialBackend()` and expo-crypto's `getRandomBytesAsync`.
+- `MoveStatus.to` keeps `'phone'`, read as "this device" like the home record's; it is internal, so piece 7 or the Mac
+  piece may rename it.
+- The provider still doesn't await `moves.close()` before closing owner.ts's connections at teardown: a move can be
+  waiting on a step queued behind that teardown, so awaiting it would deadlock. Closing aborts the move first; a
+  request still in flight then fails with the closed connection, which leaves what a stopped move leaves.
+- Nothing stored is renamed, so no app data needs clearing and nothing migrates.
+
+Design checks:
+
+1. Input files and permissions: as above. The install probe below found `~/.infinichat` 0700 and the bundle and secret
+   0600.
+2. The server outlives the daemon: launchd and systemd own the server. For the detached start, pi-env's local daemon on
+   this Mac left both a background job and a new session's process running after `Connection.close()`; macOS has no
+   `setsid(1)`, so the Linux line itself wasn't run.
+3. Login shell: `detect` and the service's `<shell> -lc` stay in the scripts.
+4. Large files: the phone's port splits as upstream does (`environment.ts` writes 512 KiB, eight in flight;
+   `readers.ts` reads 256 KiB, eight in flight; pi-env `dist/remote-env.js:13-17` the same), below the 16 MiB frame.
+5. Timeouts: as above.
+6. Cancellation: every operation takes the move's or the dial's signal through a `Context`; nothing closes a connection.
+7. Ownership: moves, installs and the running-server check borrow owner.ts's connection; `phone-dialer.ts` and
+   `owner.ts` say so.
+
+Checks:
+
+- From `apps/mobile`: `npx @expo/agent-cli lint` (exit 0; `npx expo lint -- --max-warnings 0` clean, 95 files),
+  `npx @expo/agent-cli typecheck` (no type errors) and `pnpm exec tsc -p server` (no errors). From the root:
+  `pnpm --filter @pi-agent/infinichat lint`, 42 files, no problems besides the known warning that React can't be
+  detected; the guard passes, so none of the moved files imports a host module.
+- The server asset, rebuilt in this checkout: byte-identical, as above; `--check` passes.
+- An iOS export with source maps bundles the four package files and the four phone files, with one store directory
+  each for chord, pi-ai, pi-durable and pi-telemetry.
+- Probes in the session scratchpad, not committed, bundled with esbuild and run on Node 25.6.1 against pi-env 1.4.0's
+  own `RemoteExecutionEnv` over `localDaemon()` on this Mac, in a scratch `HOME` holding the rebuilt server bundle:
+  - `runScript`: the answer after the marker, a failing script's message, a timeout's message, and an abort rejecting
+    within about 300 ms.
+  - `InfiniChatMoves` with Node `DatabaseFiles` and a stand-in client: a move there with no copy (whole file, progress
+    4,194,304 then 4,571,136 of 4,571,136 bytes), a refresh while there, a move back by patch, a refresh of the copy
+    from a live backup, and a move there by patch, each leaving the two sides byte-identical; a Cancel while copying
+    leaving the conversation on this device and nothing placed; no temporary files left afterwards.
+  - `installServer` with a stand-in `launchctl` that starts a stand-in server: the first install uploads the bundle and
+    four daemons and starts the service, a second one uploads nothing and restarts nothing, a new secret kickstarts it,
+    a Cancel during the upload rejects with an `AbortError`; no temporary files left afterwards.
+
+Unverified: nothing ran on a device, nothing ran over SSH to a real machine, and the systemd and detached paths ran
+nowhere. By source assessment only: the phone's port in place of pi-env's client, the first connect after a long
+background (owner.ts's daemon connection has to notice it was lost before the dial's check uses it; its silence timer
+does that at the first tick after the app resumes), and a force-quit's leftover file. Device checks, on the iPhone
+Release install with the database backed up:
+
+- A server install: the bundle is unchanged, so force one: on vikash-system stop the service
+  (`systemctl --user stop infinichat`) and remove `~/.infinichat/server/<bundle>`, then open InfiniChat. The phone
+  uploads the bundle and starts the service, and the transcript appears.
+- The server keeps running after the phone closes its connection to the machine (background the app for a minute, or
+  force-quit it, then check `systemctl --user status infinichat`).
+- Move to vikash-system and back, with a page patch; a move that sends the whole file (the first move to a machine with
+  no copy); Cancel while copying; force-quit during a move, then relaunch; the refresh at app activation leaving the
+  phone's moved copy byte-identical to a fresh snapshot of the machine's database.
+- Return to the app after more than a minute in the background with InfiniChat on vikash-system: it reconnects without
+  showing a failure.
+- After those, `ls -a ~/.infinichat ~/.infinichat/data/incoming` on the machine shows no `.pages.*`, `.patch.*`,
+  `.secret.*` or `.service.*` files, except after a force-quit mid-copy.

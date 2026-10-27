@@ -5,6 +5,7 @@ import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-cont
 import type { ChatControls, ChatMessage } from '@pi-agent/infinichat/chat/types';
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
+import { INFINICHAT_DATABASE, InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
@@ -21,9 +22,10 @@ import { createRemoteHostRepository } from '../pi/execution/remote/host-storage'
 import { createRemoteExecution } from '../pi/execution/remote/owner';
 import { ScheduledTaskNotifications } from '../pi/infinichat-notifications';
 import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
-import { createInfiniChatHome } from '../pi/infinichat-remote/home';
-import { INFINICHAT_DATABASE, InfiniChatMoves } from '../pi/infinichat-remote/move';
 import { phoneDialer, phoneMachines } from '../pi/infinichat-remote/phone-dialer';
+import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
+import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
+import { SERVER_BUNDLE } from '../pi/infinichat-remote/server-assets';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
@@ -56,7 +58,7 @@ function useChatRuntime() {
     return session;
   });
   // Where InfiniChat's conversation lives; only that side opens it.
-  const [infiniChatHome] = useState(createInfiniChatHome);
+  const [infiniChatHome] = useState(createPhoneHome);
   // What the screens show of InfiniChat, across moves.
   const [infiniChat] = useState(() => new ShownInfiniChat(INFINICHAT_MOVING));
   const [moves, setMoves] = useState<InfiniChatMoves>();
@@ -132,7 +134,8 @@ function useChatRuntime() {
       if (state.remote?.machineId === machineId) return state.remote;
       const previous = state.remote;
       if (previous) serialize(() => previous.close());
-      state.remote = new RemoteInfiniChat(phoneDialer(remoteHosts, machineId), phoneMachines(remoteHosts, machineId));
+      state.remote = new RemoteInfiniChat(phoneDialer(remoteHosts, remote, machineId),
+        phoneMachines(remoteHosts, machineId));
       setInfiniChatClient(state.remote);
       return state.remote;
     };
@@ -143,14 +146,16 @@ function useChatRuntime() {
       notifications.follow({ tasks: opened.scheduled, runsOn: 'machine',
         report: (error) => setOpenError(`InfiniChat: ${errorText(error)}`) });
     };
-    const moves = new InfiniChatMoves(infiniChatHome, remoteHosts, {
+    // A move borrows the remote owner's connection to the machine, as the chats' tools do, and never closes it.
+    const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(remoteHosts, machineId),
+      (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', SERVER_BUNDLE, {
       hold: () => infiniChat.hold(),
-      closePhone: () => queued(async () => {
+      closeLocal: () => queued(async () => {
         const closing = state.phone;
         state.phone = undefined;
         await closing?.close();
       }),
-      openPhone: () => queued(async () => {
+      openLocal: () => queued(async () => {
         try {
           await openPhone();
         } catch (error) {
