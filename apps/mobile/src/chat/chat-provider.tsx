@@ -3,6 +3,7 @@ import type { Models } from '@earendil-works/pi-ai';
 import type { ConversationId, Storage } from '@earendil-works/pi-durable';
 import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-controller';
 import type { ChatControls, ChatMessage } from '@pi-agent/infinichat/chat/types';
+import { chatTasks, DurableChatService, type ChatServiceSnapshot } from '@pi-agent/infinichat/pi/chat-service';
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import { INFINICHAT_DATABASE, InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
@@ -17,9 +18,9 @@ import { AppState } from 'react-native';
 
 import { KeepAliveController } from '../keep-alive/controller';
 import { createKeepAliveSettings } from '../keep-alive/settings';
-import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
+import { createExpoImages } from '../pi/images';
 import { ScheduledTaskNotifications } from '../pi/infinichat-notifications';
 import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
 import { phoneDialer, phoneMachines } from '../pi/infinichat-remote/phone-dialer';
@@ -31,6 +32,7 @@ import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } fro
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
 import { openExpoSqliteStorage } from '../pi/storage';
 import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
+import { WorkspaceExecutionEnv } from '../pi/workspace/execution-env';
 import { createInfiniChatAvatar } from './infinichat-avatar';
 import type { ProviderAccount } from './provider-account';
 import { ShownInfiniChat } from './shown-infinichat';
@@ -184,7 +186,14 @@ function useChatRuntime() {
       if (!state.service) {
         try {
           const opened = await withStorage(undefined, (storage) => DurableChatService.open({
-            storage, models, remote, workspaces, newChat: NEW_CHAT_DEFAULTS, keepAlive, authError,
+            storage, models, images: createExpoImages(), machines: remote, newChat: NEW_CHAT_DEFAULTS, authError,
+            local: {
+              // Building it creates the workspace's directory and its temporary directory under the cache, which the
+              // system may have purged. It holds no handles between calls, so a fresh one per use needs no cleanup.
+              environment: (id, cwd) => new WorkspaceExecutionEnv(workspaces.workspace(id), id, cwd),
+              remove: (id) => workspaces.remove(id),
+            },
+            observe: (harness) => keepAlive.observe(harness, chatTasks),
             onClosed: (end) => {
               // pi-durable "Errors": a storage error ends the Harness; reopen to recover.
               if (end.reason !== 'failed') return;

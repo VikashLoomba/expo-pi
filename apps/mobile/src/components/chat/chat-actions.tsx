@@ -1,8 +1,8 @@
 import type { ConversationId } from '@earendil-works/pi-durable';
+import { WorkspaceRemovalError } from '@pi-agent/infinichat/pi/chat-service';
 import { Alert } from 'react-native';
 
 import { useChatApp } from '@/chat/chat-provider';
-import { WorkspaceRemovalError } from '@/pi/chat-service';
 
 type Chat = { id: ConversationId; title: string };
 

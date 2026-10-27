@@ -1,19 +1,15 @@
 import { createModels, type CredentialStore } from '@earendil-works/pi-ai';
-import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
-import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
-import { googleProvider } from '@earendil-works/pi-ai/providers/google';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
-import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
-import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
+import { registerChatProviders } from '@pi-agent/infinichat/pi/chat-providers';
 import { STORED_CREDENTIALS_ONLY } from '@pi-agent/infinichat/pi/model-auth';
 import type { NewChatDefaults } from '@pi-agent/infinichat/pi/model-catalog';
+import { withNativeWebSearch } from '@pi-agent/infinichat/pi/native-web-search/provider';
 import {
   isPermanentOpenAIAuthError, OPENAI_PROVIDER_ID, validateOpenAICredential,
 } from '@pi-agent/infinichat/pi/openai-auth/core';
 import { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
 import { createNativeOpenAIOAuth } from './openai-auth';
-import { withNativeWebSearch } from './native-web-search/provider';
 import { createCredentialBackend } from './secure-storage';
 
 /**
@@ -32,16 +28,17 @@ export const NEW_CHAT_DEFAULTS: NewChatDefaults = {
   },
 };
 
-/** Registration is the only integration point needed to expose another mobile provider. */
+/** `registerChatProviders` is the only integration point needed to expose another provider. */
 export function createChatModels(credentials: CredentialStore) {
   // Mobile apps have no process environment or desktop auth files; only stored credentials apply.
   const models = createModels({ credentials, authContext: STORED_CREDENTIALS_ONLY });
-  const openai = withNativeWebSearch(openaiProvider());
-  models.setProvider({ ...openai, auth: { ...openai.auth, oauth: createNativeOpenAIOAuth() } });
-  // Individual imports preserve Metro's lazy, mobile-safe SDK boundaries.
-  for (const provider of [anthropicProvider(), deepseekProvider(), googleProvider(), openrouterProvider(), xaiProvider()]) {
+  registerChatProviders(models);
+  // pi-ai's sign-in flows need Node, so only API keys apply, besides OpenAI's native sign-in and web search.
+  for (const provider of models.getProviders()) {
     models.setProvider({ ...provider, auth: { apiKey: provider.auth.apiKey } });
   }
+  const openai = withNativeWebSearch(openaiProvider());
+  models.setProvider({ ...openai, auth: { ...openai.auth, oauth: createNativeOpenAIOAuth() } });
   return models;
 }
 

@@ -3,29 +3,24 @@ import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
   type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
+  type TaskGraphNode,
 } from '@earendil-works/pi-durable';
-import { createCodingTools } from '@earendil-works/pi-durable/tools';
-import type { ChatSummary } from '@pi-agent/infinichat/chat/types';
-import { ChatMetadataDoc, type ChatMetadata } from '@pi-agent/infinichat/pi/chat-metadata';
-import { oneLine, settingsOf, summarizeChat } from '@pi-agent/infinichat/pi/chat-projection';
-import { ChatView } from '@pi-agent/infinichat/pi/chat-view';
-import {
-  ExecutionTargetDoc, validateExecution, type ChatExecutionSettings,
-} from '@pi-agent/infinichat/pi/execution/document';
-import { requireModelAuth } from '@pi-agent/infinichat/pi/model-auth';
+import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
+import { createCodingTools, type ImageProcessor } from '@earendil-works/pi-durable/tools';
+
+import type { ChatSummary } from '../chat/types';
+import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
+import { oneLine, settingsOf, summarizeChat } from './chat-projection';
+import { ChatView } from './chat-view';
+import { ExecutionTargetDoc, validateExecution, type ChatExecutionSettings } from './execution/document';
+import { requireModelAuth } from './model-auth';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
   type ChatModelSettings, type NewChatDefaults,
-} from '@pi-agent/infinichat/pi/model-catalog';
-import { createNativeWebSearchBridge, SearchPresentationsDoc } from '@pi-agent/infinichat/pi/native-web-search/durable';
-import { imagesOf, textOf } from '@pi-agent/infinichat/pi/user-input';
-import { WorkspaceDoc } from '@pi-agent/infinichat/pi/workspace/document';
-
-import { chatTasks, type KeepAliveController } from '../keep-alive/controller';
-import { createExpoImages } from './images';
-import { WorkspaceExecutionEnv } from './workspace/execution-env';
-import type { Workspaces } from './workspace/storage';
-import type { RemoteExecution } from './execution/remote/owner';
+} from './model-catalog';
+import { createNativeWebSearchBridge, SearchPresentationsDoc } from './native-web-search/durable';
+import { imagesOf, textOf } from './user-input';
+import { WorkspaceDoc } from './workspace/document';
 
 /** `error` is the Harness's latest report; operations reject to their callers instead. */
 export interface ChatServiceSnapshot { chats: ChatSummary[]; error?: string }
@@ -41,6 +36,10 @@ export class WorkspaceRemovalError extends Error {
   }
 }
 
+/** A chat's work is its conversation's foreground tasks; background tasks never keep it busy. */
+export const chatTasks = (task: TaskGraphNode): string | undefined =>
+  task.background ? undefined : String(task.conversationId);
+
 /**
  * Owns the app's durable session for its lifetime. The chat list reads each chat's metadata document; a chat's
  * transcript is read only while a `ChatView` of it is shown.
@@ -53,13 +52,13 @@ export class DurableChatService {
   private snapshot: ChatServiceSnapshot = { chats: [] };
   private closed = false;
   private closePromise?: Promise<void>;
-  private detachKeepAlive = () => {};
+  private detachObserver = () => {};
 
   private constructor(
     private readonly harness: Harness,
     private readonly storage: Storage,
     private readonly models: Models,
-    private readonly workspaces: Workspaces | undefined,
+    private readonly local: { remove(workspaceId: string): void } | undefined,
     private readonly options: {
       now: () => number;
       newChat: NewChatDefaults;
@@ -69,22 +68,30 @@ export class DurableChatService {
 
   static async open(options: {
     storage: Storage; models: Models; now?: () => number;
-    /** Where chats' workspace directories live; without it chats have no local execution environment. */
-    workspaces?: Workspaces;
-    /** Holds the SSH connections of chats on a remote machine; its creator closes it after both Harnesses. */
-    remote: RemoteExecution;
+    /** Prepares photos for `read` (pi-durable "Images"). */
+    images: ImageProcessor;
+    /**
+     * A chat's own environment on this device, built at each use, and removing it with the chat; without it the tools
+     * of a chat on this device fail with Pi's ordinary error result.
+     */
+    local?: {
+      environment(workspaceId: string, cwd: string | undefined): ExecutionEnv;
+      remove(workspaceId: string): void;
+    };
+    /** A chat on a configured machine. The service borrows it; its owner closes it after the service. */
+    machines: { environment(machineId: string, cwd: string | undefined): Promise<ExecutionEnv> };
     newChat?: NewChatDefaults;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */
     authError?: (providerId: string) => string | undefined;
     /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
     onClosed?: (end: SessionEnd) => void;
-    /** Counts the chats' live work while the service is open; its owner closes it. */
-    keepAlive?: KeepAliveController;
+    /** Counts the chats' live work while the service is open; returns its detach, which the service calls on close. */
+    observe?: (harness: Harness) => () => void;
   }): Promise<DurableChatService> {
-    const { workspaces, remote } = options;
+    const { local, machines } = options;
     const registry = createRegistry();
     // With a processor, `read` turns photos upright and shrinks them to the model's limits (pi-durable "Images").
-    registry.install(createCodingTools({ images: createExpoImages() }));
+    registry.install(createCodingTools({ images: options.images }));
     const nativeSearch = createNativeWebSearchBridge((error) => service?.report(error));
     registry.install(nativeSearch.extension);
     registry.install(defineExtension({
@@ -99,14 +106,11 @@ export class DurableChatService {
       // Each use reads the chat's committed selection, like pi's sandbox-per-conversation example.
       env: async ({ conversationId, cwd, read }, envContext) => {
         const target = (await read.snapshot(ExecutionTargetDoc, conversationId, envContext))?.target;
-        if (target?.kind === 'ssh') return remote.environment(target.machineId, cwd);
-        // Without workspaces there is no local environment, and the tools fail with Pi's ordinary error result.
-        if (!workspaces) return undefined;
+        if (target?.kind === 'ssh') return machines.environment(target.machineId, cwd);
+        if (!local) return undefined;
         const workspace = await read.snapshot(WorkspaceDoc, conversationId, envContext);
         if (!workspace?.id) throw new Error('This conversation has no committed workspace identity.');
-        // Building it creates the workspace's directory and its temporary directory under the cache, which the
-        // system may have purged. It holds no handles between calls, so a fresh one per use needs no cleanup.
-        return new WorkspaceExecutionEnv(workspaces.workspace(workspace.id), workspace.id, cwd);
+        return local.environment(workspace.id, cwd);
       },
       async conversationCreated(tx, conversation) {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
@@ -118,7 +122,7 @@ export class DurableChatService {
       },
     }, context);
     nativeSearch.attach(harness);
-    service = new DurableChatService(harness, options.storage, options.models, workspaces, {
+    service = new DurableChatService(harness, options.storage, options.models, local, {
       now, newChat: options.newChat ?? { models: {} }, authError: options.authError,
     });
     try { await service.loadChats(); }
@@ -128,7 +132,7 @@ export class DurableChatService {
     }
     // Continue work the last process left unfinished. A chat whose provider cannot authenticate fails on its own.
     harness.resume();
-    if (options.keepAlive) service.detachKeepAlive = options.keepAlive.observe(harness, chatTasks);
+    if (options.observe) service.detachObserver = options.observe(harness);
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void harness.closed.then((end) => {
       if (end.reason === 'failed') service.report(end.error);
@@ -313,7 +317,7 @@ export class DurableChatService {
     }, context);
     try {
       const workspace = await this.harness.snapshot(WorkspaceDoc, id, context);
-      if (workspace?.id) this.workspaces?.remove(workspace.id);
+      if (workspace?.id) this.local?.remove(workspace.id);
     } catch (cause) {
       throw new WorkspaceRemovalError(cause);
     }
@@ -388,14 +392,13 @@ export class DurableChatService {
     for (const state of this.chats.values()) state.dispose();
     this.listeners.clear();
     this.closePromise = (async () => {
-      // The Harness aborts and waits for running task code, which still uses the environments; the provider closes
-      // the shared remote owner after both Harnesses. A close after the Harness failed on its own returns the same
-      // settled close.
+      // The Harness aborts and waits for running task code, which still uses the environments; the owner of
+      // `machines` closes it after this. A close after the Harness failed on its own returns the same settled close.
       try {
         await this.harness.close(context);
       } finally {
-        // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
-        this.detachKeepAlive();
+        // The observer stops counting this Harness's work; disposing its task graph after the close is safe.
+        this.detachObserver();
       }
     })();
     return this.closePromise;

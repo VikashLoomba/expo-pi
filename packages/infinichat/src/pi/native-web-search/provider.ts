@@ -1,16 +1,13 @@
 import {
   type Api, type AssistantMessageEventStream, type Model, type Provider, type StreamOptions,
 } from '@earendil-works/pi-ai';
-import {
-  nativeWebSearchBinding, type NativeWebSearchBinding,
-} from '@pi-agent/infinichat/pi/native-web-search/bindings';
+
+import { nativeWebSearchBinding, type NativeWebSearchBinding } from './bindings';
 import {
   responseCreated, urlCitationAdded, webSearchCallAdded, webSearchCallDone, type WebSearchCall,
-} from '@pi-agent/infinichat/pi/native-web-search/decoders';
-import {
-  SearchPresentationsDoc, type SearchPresentation, type SearchSource,
-} from '@pi-agent/infinichat/pi/native-web-search/documents';
-import { SearchObservationEntry, searchObservationMessage } from '@pi-agent/infinichat/pi/native-web-search/entries';
+} from './decoders';
+import { SearchPresentationsDoc, type SearchPresentation, type SearchSource } from './documents';
+import { SearchObservationEntry, searchObservationMessage } from './entries';
 
 /** Native hosted tools belong on the Responses request, outside pi's function-tool registry. pi-ai sets
  * `include` itself for active reasoning (`reasoning.encrypted_content`); this only unions the web search parts. */

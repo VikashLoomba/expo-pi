@@ -99,3 +99,18 @@ The phone's wiring grows by about as much.
 ## Not in this piece
 
 The Mac app's chat screens. Sharing ordinary chats between devices is not planned: each device keeps its own.
+
+## As built
+
+From `af7c4a7`, with pi 1.4.0 (the latest on npm on 2026-10-26), Expo 58.0.17 and React Native 0.88.0; one commit, since
+the doc names no steps. `git` records both moves as renames. What differs from the plan:
+
+- **The server bundle changes,** because `createServerModels` now calls `registerChatProviders` (in the new
+  `pi/chat-providers.ts`): 8,353,308 bytes, SHA-256 `ae0114c2…37e862`, so the phone reinstalls the server on each
+  machine at its next connect. esbuild also keeps `infiniChatTasks`'s unused `Set` in it.
+- **The phone registers the shared list, then replaces its sign-ins** with `setProvider`, which keeps a provider's
+  place (pi-ai `MutableModels`): API keys only, and OpenAI with its native sign-in and web search. A probe found the
+  same providers, order and auth as before.
+- **The keep-alive controller imports neither predicate:** it never called them. It keeps `ChatOfTask`; the provider
+  imports `chatTasks` from `chat-service.ts`, and `infinichat-phone.ts` imports `infiniChatTasks` from
+  `infinichat-service.ts`.

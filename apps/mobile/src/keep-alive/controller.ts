@@ -1,8 +1,6 @@
 import type { AttachedReplicatedState } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Harness, TaskGraph, TaskGraphNode } from '@earendil-works/pi-durable';
-import { AGENT_TASK } from '@pi-agent/infinichat/pi/infinichat/agents';
-import { BuildNode } from '@pi-agent/infinichat/pi/infinichat/summary';
 import * as Location from 'expo-location';
 import type { LiveActivity } from 'expo-widgets';
 
@@ -16,19 +14,6 @@ const propsFor = (activeChats: number, status: string): AgentActivityProps => ({
 
 /** The chat a live task is work for, keyed within its Harness, or undefined when the task is not work. */
 export type ChatOfTask = (task: TaskGraphNode) => string | undefined;
-
-/** A chat's work is its conversation's foreground tasks; background tasks never keep it busy. */
-export const chatTasks: ChatOfTask = (task) => task.background ? undefined : String(task.conversationId);
-
-const INFINICHAT = 'infinichat';
-const infiniChatWork = new Set([BuildNode.definition.name, AGENT_TASK]);
-
-/**
- * InfiniChat is one chat. Its turns are foreground tasks, and its summary builds and private agents are work although
- * they are background tasks; its coordinator is always live, so it never is.
- */
-export const infiniChatTasks: ChatOfTask = (task) =>
-  !task.background || infiniChatWork.has(task.kind) ? INFINICHAT : undefined;
 
 type Source = {
   harness: Harness;

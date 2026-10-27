@@ -1,9 +1,9 @@
 import type { Models } from '@earendil-works/pi-ai';
 import type { SessionEnd, Storage } from '@earendil-works/pi-durable';
-import { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
+import { InfiniChatService, infiniChatTasks } from '@pi-agent/infinichat/pi/infinichat-service';
 import { infiniChatDevices } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
-import { infiniChatTasks, type KeepAliveController } from '../keep-alive/controller';
+import type { KeepAliveController } from '../keep-alive/controller';
 import type { RemoteHostRepository } from './execution/remote/hosts';
 import type { RemoteExecution } from './execution/remote/owner';
 import { createExpoImages } from './images';

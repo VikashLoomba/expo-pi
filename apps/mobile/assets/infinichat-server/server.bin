@@ -127759,6 +127759,9 @@ var ServerMachines = class {
 // ../../packages/infinichat/src/node/models.ts
 init_define_INFINICHAT_PI();
 
+// ../../packages/infinichat/src/pi/chat-providers.ts
+init_define_INFINICHAT_PI();
+
 // ../../node_modules/.pnpm/@earendil-works+pi-ai@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatur_650820bfd44a3c6cefd0e1345c0a96b9/node_modules/@earendil-works/pi-ai/dist/providers/anthropic.js
 init_define_INFINICHAT_PI();
 
@@ -128067,6 +128070,20 @@ function xaiProvider() {
     models: Object.values(XAI_MODELS),
     api: openAIResponsesApi()
   });
+}
+
+// ../../packages/infinichat/src/pi/chat-providers.ts
+function registerChatProviders(models) {
+  for (const provider2 of [
+    openaiProvider(),
+    anthropicProvider(),
+    deepseekProvider(),
+    googleProvider(),
+    openrouterProvider(),
+    xaiProvider()
+  ]) {
+    models.setProvider(provider2);
+  }
 }
 
 // ../../packages/infinichat/src/pi/model-auth.ts
@@ -128456,16 +128473,7 @@ async function requireModelAuth(models, settings2, authError, machine) {
 // ../../packages/infinichat/src/node/models.ts
 function createServerModels(credentials) {
   const models = createModels({ credentials, authContext: STORED_CREDENTIALS_ONLY });
-  for (const provider2 of [
-    openaiProvider(),
-    anthropicProvider(),
-    deepseekProvider(),
-    googleProvider(),
-    openrouterProvider(),
-    xaiProvider()
-  ]) {
-    models.setProvider(provider2);
-  }
+  registerChatProviders(models);
   return models;
 }
 
@@ -131334,6 +131342,7 @@ var WorkspaceDoc = defineDoc({
 // ../../packages/infinichat/src/pi/infinichat-service.ts
 var TITLE = "InfiniChat";
 var errorText = (error) => error instanceof Error ? error.message : String(error);
+var infiniChatWork = /* @__PURE__ */ new Set([BuildNode.definition.name, AGENT_TASK]);
 var InfiniChatService = class _InfiniChatService {
   constructor(chat, scheduled, models, authError, machine) {
     this.chat = chat;

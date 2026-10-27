@@ -1,17 +1,20 @@
 import type { Context } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
-import { AgentDoc, configure, type Harness, type SessionEnd, type Storage } from '@earendil-works/pi-durable';
+import {
+  AgentDoc, configure, type Harness, type SessionEnd, type Storage, type TaskGraphNode,
+} from '@earendil-works/pi-durable';
 
 import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
 import type { ChatViewSource } from './chat-view';
 import { ScheduledTasks, type ScheduledTask } from './infinichat-scheduled';
 import { InfiniChatView, type InfiniChatControls } from './infinichat-view';
+import { AGENT_TASK } from './infinichat/agents';
 import { openOptChat, type OptChat } from './infinichat/app';
 import type { InfiniChatDevices } from './infinichat/device-tools';
 import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
-import { ConfigDoc } from './infinichat/summary';
+import { BuildNode, ConfigDoc } from './infinichat/summary';
 import { requireModelAuth } from './model-auth';
 import { assertModelSettings, buildModelCatalog, type ChatModelSettings } from './model-catalog';
 import { imagesOf, textOf } from './user-input';
@@ -53,6 +56,16 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
 
 const TITLE = 'InfiniChat';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+const INFINICHAT = 'infinichat';
+const infiniChatWork = new Set([BuildNode.definition.name, AGENT_TASK]);
+
+/**
+ * InfiniChat is one chat. Its turns are foreground tasks, and its summary builds and private agents are work although
+ * they are background tasks; its coordinator is always live, so it never is.
+ */
+export const infiniChatTasks = (task: TaskGraphNode): string | undefined =>
+  !task.background || infiniChatWork.has(task.kind) ? INFINICHAT : undefined;
 
 /**
  * Owns InfiniChat's Harness, on its own database: OptChat's sequential tools, steer-all queueing and disabled
