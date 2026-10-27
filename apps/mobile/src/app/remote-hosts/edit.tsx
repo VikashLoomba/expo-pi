@@ -5,9 +5,9 @@ import {
   autocorrectionDisabled, disabled as disable, font, keyboardType, lineLimit, pickerStyle, tag,
   textInputAutocapitalization,
 } from '@expo/ui/swift-ui/modifiers';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams, useNavigation, usePreventRemove } from 'expo-router';
 import { useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, StyleSheet } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, StyleSheet } from 'react-native';
 
 import { useChatApp } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
@@ -15,8 +15,10 @@ import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteCredential, RemoteHost } from '@/pi/execution/remote/hosts';
 
 const plainText = [autocorrectionDisabled(), textInputAutocapitalization('never')];
+const FIELDS = ['name', 'hostname', 'port', 'username', 'password', 'privateKey', 'passphrase'] as const;
+type Field = (typeof FIELDS)[number];
 
-/** Adds a machine, or edits the one named by `id`; saving returns to the list. */
+/** Adds a machine, or edits the one named by `id`; saving returns to the list or chat that opened it. */
 export default function RemoteHostEditScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const colors = useChatColors();
@@ -44,6 +46,27 @@ function MachineForm({ host }: { host?: RemoteHost }) {
     username: host?.username ?? '', password: '', privateKey: '', passphrase: '' };
   // The fields' latest text, read when saving.
   const fields = useRef(initial);
+  // Presented alone from the InfiniChat menu, the sheet has no Back button, so Cancel on the leading edge dismisses
+  // it; pushed from the list, Back does (HIG Sheets: never Cancel, Back and Done together).
+  const navigation = useNavigation();
+  const firstInSheet = (navigation.getState()?.index ?? 0) === 0;
+  // Unsaved changes get an action sheet before the sheet closes, whether by Cancel, Back or a swipe (HIG Sheets).
+  const [dirty, setDirty] = useState(false);
+  const unsaved = (type: RemoteCredential['type']) => type !== (host?.credentialType ?? 'password')
+    || FIELDS.some((field) => fields.current[field] !== initial[field]);
+  const edit = (field: Field, value: string) => {
+    fields.current[field] = value;
+    setDirty(unsaved(credentialType));
+  };
+  const disablePrevention = usePreventRemove(dirty, ({ repeat }) => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      { options: ['Discard Changes', 'Keep Editing'], destructiveButtonIndex: 0, cancelButtonIndex: 1 },
+      (button) => {
+        if (button !== 0) return;
+        setDirty(false);
+        repeat();
+      });
+  });
   const nameText = useNativeState(initial.name);
   const hostnameText = useNativeState(initial.hostname);
   const portText = useNativeState(initial.port);
@@ -62,6 +85,7 @@ function MachineForm({ host }: { host?: RemoteHost }) {
     privateKeyText.set('');
     passphraseText.set('');
     setCredentialType(next);
+    setDirty(unsaved(next));
   };
   const save = async () => {
     const { name, hostname, port, username, password, privateKey, passphrase } = fields.current;
@@ -79,6 +103,8 @@ function MachineForm({ host }: { host?: RemoteHost }) {
       if (!/^\d+$/.test(port.trim())) throw new Error('SSH port must be a number from 1 to 65535.');
       await remoteHosts.save({ ...(host ? { id: host.id } : {}), name, hostname, port: Number(port), username },
         replacement, host);
+      setDirty(false);
+      disablePrevention();
       router.back();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save this machine.');
@@ -88,6 +114,9 @@ function MachineForm({ host }: { host?: RemoteHost }) {
   };
   return <>
     <Stack.Screen options={{ title: host ? 'Edit machine' : 'Add machine' }} />
+    {firstInSheet && <Stack.Toolbar placement="left">
+      <Stack.Toolbar.Button icon="xmark" accessibilityLabel="Cancel" onPress={() => router.back()} />
+    </Stack.Toolbar>}
     <Stack.Toolbar placement="right">
       {saving ? <Stack.Toolbar.View><ActivityIndicator /></Stack.Toolbar.View>
         : <Stack.Toolbar.Button icon="checkmark" variant="prominent" tintColor={colors.accent}
@@ -101,20 +130,20 @@ function MachineForm({ host }: { host?: RemoteHost }) {
         </Text>}>
           <LabeledContent label="Name">
             <TextField text={nameText} placeholder="My Mac" modifiers={[disable(saving)]}
-              onTextChange={(value) => { fields.current.name = value; }} />
+              onTextChange={(value) => edit('name', value)} />
           </LabeledContent>
           <LabeledContent label="Hostname">
             <TextField text={hostnameText} placeholder="machine.tailnet.ts.net"
               modifiers={[...plainText, keyboardType('url'), disable(saving)]}
-              onTextChange={(value) => { fields.current.hostname = value; }} />
+              onTextChange={(value) => edit('hostname', value)} />
           </LabeledContent>
           <LabeledContent label="Port">
             <TextField text={portText} placeholder="22" modifiers={[keyboardType('numeric'), disable(saving)]}
-              onTextChange={(value) => { fields.current.port = value; }} />
+              onTextChange={(value) => edit('port', value)} />
           </LabeledContent>
           <LabeledContent label="Username">
             <TextField text={usernameText} placeholder="Remote account" modifiers={[...plainText, disable(saving)]}
-              onTextChange={(value) => { fields.current.username = value; }} />
+              onTextChange={(value) => edit('username', value)} />
           </LabeledContent>
         </Section>
         <Section title="SSH authentication" footer={<Text>
@@ -130,15 +159,15 @@ function MachineForm({ host }: { host?: RemoteHost }) {
           {credentialType === 'password'
             ? <SecureField text={passwordText} modifiers={[disable(saving)]}
               placeholder={host ? 'Leave blank to keep the saved password' : 'SSH account password'}
-              onTextChange={(value) => { fields.current.password = value; }} />
+              onTextChange={(value) => edit('password', value)} />
             : <>
               <TextField text={privateKeyText} axis="vertical"
                 placeholder={host ? 'Leave blank to keep the saved key' : 'Paste your complete private key'}
                 modifiers={[...plainText, font({ design: 'monospaced', textStyle: 'footnote' }),
                   lineLimit({ min: 4, max: 10 }), disable(saving)]}
-                onTextChange={(value) => { fields.current.privateKey = value; }} />
+                onTextChange={(value) => edit('privateKey', value)} />
               <SecureField text={passphraseText} placeholder="Passphrase (optional)" modifiers={[disable(saving)]}
-                onTextChange={(value) => { fields.current.passphrase = value; }} />
+                onTextChange={(value) => edit('passphrase', value)} />
             </>}
         </Section>
       </Form>

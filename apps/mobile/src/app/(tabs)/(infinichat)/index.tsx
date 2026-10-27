@@ -212,20 +212,35 @@ export default function InfiniChatScreen() {
     <Stack.Toolbar placement="right">
       <Stack.Toolbar.Menu icon={chosen === null ? 'iphone' : 'server.rack'}
         accessibilityLabel={`InfiniChat runs on ${runsOn}`}
-        accessibilityHint="Move InfiniChat to this iPhone or one of your remote machines.">
-        {/* A move goes first; from a machine, the conversation moves back to this iPhone before it moves on. */}
-        <Stack.Toolbar.MenuAction icon="iphone" isOn={chosen === null} disabled={movingNow}
-          onPress={() => moves?.choose(null)}>
-          {PHONE}
-        </Stack.Toolbar.MenuAction>
-        {machines.hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
-          isOn={host.id === chosen} disabled={movingNow || home.home === 'machine'}
-          onPress={() => moves?.choose(host.id)}>
-          {host.name}
-        </Stack.Toolbar.MenuAction>)}
-        {move?.cancellable && <Stack.Toolbar.MenuAction icon="xmark" destructive onPress={() => moves?.cancel()}>
-          Cancel Move
-        </Stack.Toolbar.MenuAction>}
+        accessibilityHint="Move InfiniChat to this iPhone or one of your remote machines, or add a machine.">
+        {/* Each inline menu is a group with its own separator: the places InfiniChat can run, the move in progress,
+            then the actions that open a sheet, whose ellipsis says more input follows. */}
+        <Stack.Toolbar.Menu inline>
+          {/* A move goes first; from a machine, the conversation moves back to this iPhone before it moves on. */}
+          <Stack.Toolbar.MenuAction icon="iphone" isOn={chosen === null} disabled={movingNow}
+            onPress={() => moves?.choose(null)}>
+            {PHONE}
+          </Stack.Toolbar.MenuAction>
+          {machines.hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
+            isOn={host.id === chosen} disabled={movingNow || home.home === 'machine'}
+            onPress={() => moves?.choose(host.id)}>
+            {host.name}
+          </Stack.Toolbar.MenuAction>)}
+        </Stack.Toolbar.Menu>
+        {move?.cancellable && <Stack.Toolbar.Menu inline>
+          <Stack.Toolbar.MenuAction icon="xmark" destructive onPress={() => moves?.cancel()}>
+            Cancel Move
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>}
+        <Stack.Toolbar.Menu inline>
+          <Stack.Toolbar.MenuAction icon="plus" disabled={!machines.ready || !!machines.error}
+            onPress={() => router.push('/remote-hosts/edit')}>
+            Add Machine…
+          </Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction icon="pencil" onPress={() => router.push('/remote-hosts')}>
+            Manage Machines…
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
       </Stack.Toolbar.Menu>
       <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks"
         onPress={() => router.push('/infinichat-schedule')} />
