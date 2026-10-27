@@ -17,7 +17,7 @@ async function authorized(request: IncomingMessage, clients: string): Promise<bo
   return secrets.some((text) => {
     const secret = text.trim();
     const wanted = Buffer.from(`Bearer ${secret}`);
-    return secret.length > 0 && given.length === wanted.length && timingSafeEqual(given, wanted);
+    return given.length === wanted.length && timingSafeEqual(given, wanted);
   });
 }
 

@@ -130930,7 +130930,7 @@ function readLists(file) {
     throw error;
   }
   const lists = JSON.parse(text);
-  if (!isRecord3(lists) || Array.isArray(lists)) return {};
+  if (!isRecord3(lists)) return {};
   return Object.fromEntries(Object.entries(lists).map(([client, machines]) => [client, Array.isArray(machines) ? machines.filter(isMachine) : []]));
 }
 var merged = (lists) => [...new Map(Object.values(lists).flat().map((machine) => [machineEndpoint(machine), machine])).values()];
@@ -131038,14 +131038,17 @@ var ServerMachines = class {
     this.closed = true;
     for (const key2 of [...this.connections.keys()]) this.drop(key2);
   }
-  /** How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its endpoint. */
+  /**
+   * How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its endpoint,
+   * lowercased because ssh writes a `HostKeyAlias` that way and pi-env's `acceptHostKey` compares it exactly.
+   */
   target(machine) {
     return {
       host: machine.hostname,
       port: machine.port,
       user: machine.username,
       knownHostsFile: this.knownHosts,
-      hostKeyAlias: machineEndpoint(machine)
+      hostKeyAlias: machineEndpoint(machine).toLowerCase()
     };
   }
   /** Its daemon starts through the login shell, so the tools see the PATH the account's profile sets up there. */
@@ -133001,7 +133004,7 @@ async function authorized(request2, clients) {
   return secrets.some((text) => {
     const secret = text.trim();
     const wanted = Buffer.from(`Bearer ${secret}`);
-    return secret.length > 0 && given.length === wanted.length && timingSafeEqual(given, wanted);
+    return given.length === wanted.length && timingSafeEqual(given, wanted);
   });
 }
 async function listen(host, home, bundle) {

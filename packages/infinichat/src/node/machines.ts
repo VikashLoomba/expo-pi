@@ -35,7 +35,7 @@ function readLists(file: string): Lists {
     throw error;
   }
   const lists: unknown = JSON.parse(text);
-  if (!isRecord(lists) || Array.isArray(lists)) return {};
+  if (!isRecord(lists)) return {};
   return Object.fromEntries(Object.entries(lists).map(([client, machines]) =>
     [client, Array.isArray(machines) ? machines.filter(isMachine) : []]));
 }
@@ -169,10 +169,13 @@ export class ServerMachines {
     for (const key of [...this.connections.keys()]) this.drop(key);
   }
 
-  /** How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its endpoint. */
+  /**
+   * How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its endpoint,
+   * lowercased because ssh writes a `HostKeyAlias` that way and pi-env's `acceptHostKey` compares it exactly.
+   */
   private target(machine: Machine): SshTarget {
     return { host: machine.hostname, port: machine.port, user: machine.username, knownHostsFile: this.knownHosts,
-      hostKeyAlias: endpoint(machine) };
+      hostKeyAlias: endpoint(machine).toLowerCase() };
   }
 
   /** Its daemon starts through the login shell, so the tools see the PATH the account's profile sets up there. */

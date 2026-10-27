@@ -121,7 +121,7 @@ export default function RemoteHostsScreen() {
       // credentials are still here to reach the machine, makes the server refuse that secret; an unreachable machine
       // keeps the file.
       const credentials = createCredentialBackend();
-      if (await savedSecret(credentials, host.id).catch(() => undefined) !== undefined) {
+      if (await savedSecret(credentials, host.id) !== undefined) {
         await remote.environment(host.id, undefined).then((machine) => removeClient(machine, phoneClient().id))
           .catch(() => {});
       }
