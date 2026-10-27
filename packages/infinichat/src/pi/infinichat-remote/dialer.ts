@@ -27,8 +27,9 @@ export interface DialedServer {
   /** The server this app may use: its bundle, and the device name and description the device list gives it. */
   expected: { bundle: string; device: string; description: string };
   /**
-   * Installs or updates the server over the same transport, with the dial's options, and returns a new link to it;
-   * the previous link closes.
+   * Installs or updates the server as `dial` does, with the dial's options, then tunnels again over the dial's
+   * transport and returns a new link; the previous link and tunnel close. The install needn't use that transport:
+   * the phone's opens an SSH connection of its own.
    */
   reinstall(): Promise<Link>;
   /** Closes the link, then its transport. */

@@ -162,7 +162,7 @@ and `git` records the rename.
 | File | Lines |
 | --- | --- |
 | `packages/infinichat/src/pi/infinichat-remote/client.ts`: RemoteInfiniChat | 484, from 529 |
-| `packages/infinichat/src/pi/infinichat-remote/dialer.ts`: `InstallStage`, `DialOptions`, `ServerDialer`, `DialedServer`, `MachineDirectory` | 47 |
+| `packages/infinichat/src/pi/infinichat-remote/dialer.ts`: `InstallStage`, `DialOptions`, `ServerDialer`, `DialedServer`, `MachineDirectory` | 48 |
 | `apps/mobile/src/pi/infinichat-remote/phone-dialer.ts`: `phoneDialer` and `phoneMachines` | 110 |
 
 What differs from the plan:
@@ -179,7 +179,8 @@ What differs from the plan:
   and opens its own connection (`install.ts:319` at `86bc596`), which it disconnects when done (`:394`). Only the
   tunnel uses the attempt's connection. `reinstall` keeps that: it runs `installServer` as before, then closes the old
   link and tunnel and tunnels again over the dial's connection. The plan's intent holds: there is no second dial, so
-  no second restore, secret read, admission for the tunnel or `runningServer`.
+  no second restore, secret read, admission for the tunnel or `runningServer`. `DialedServer.reinstall`'s comment in
+  `dialer.ts` says so, so a Mac dialer may install over a connection of its own too.
 - **The dialer's `close` closes the link too.** The sketch's comment says `close` closes "the tunnel, then the
   connection". The "Starts from" table sends all of `dispose` (link, tunnel, connection) to the dialer's `close`, which
   is what it does, because the dialer makes the link. Likewise `reinstall` closes the previous link and tunnel before
