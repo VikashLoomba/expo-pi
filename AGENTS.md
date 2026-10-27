@@ -47,11 +47,10 @@ Run lint and typecheck before declaring any task done.
 - Never mint SDK-branded ids; look them up among the records the SDK returned.
 - Deletion is the default: no mechanism or API without a production caller or a stated product requirement. No production code that exists only for tests.
 - The app is unreleased: no backwards compatibility with existing on-device data. Don't preserve old chats, ids, document shapes or stored selections, and don't write compatibility or migration code. If old data breaks the app after a change, the fix is clearing app data; say so in your report.
-- Stay on the latest pi releases: check npm before starting work, and upgrade as its own step. pi-durable, pi-ai and
-  chord take their versions from the `catalog` in `pnpm-workspace.yaml`, which `packages/infinichat`'s peer
-  dependencies share, so upgrade them there, and move `@earendil-works/pi-env`'s pin in `apps/mobile/package.json`
-  with them (it depends on chord and pi-durable at exact versions); `pnpm why -r @earendil-works/pi-durable` then
-  finds one version.
+- Stay on the latest pi releases: check npm before starting work, and upgrade as its own step. pi-durable, pi-ai,
+  chord and pi-env take their versions from the `catalog` in `pnpm-workspace.yaml`, which `packages/infinichat`'s
+  peer dependencies share, so upgrade all four there together (pi-env depends on chord and pi-durable at exact
+  versions); `pnpm why -r @earendil-works/pi-durable` then finds one version.
 - Keep lines under about 120 characters, no multi-statement one-liners, and comments that explain why, not what.
 - Design before code: for non-trivial work, propose which upstream example you start from, any deviations, and the rough size compared with upstream's equivalent, and get approval before implementing. Size is a signal: a feature several times larger than upstream's equivalent means the design is wrong.
 
