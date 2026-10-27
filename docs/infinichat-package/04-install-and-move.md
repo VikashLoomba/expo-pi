@@ -216,18 +216,19 @@ the hash function). The doc names no steps, so it is one commit. `git` records `
 
 | File | Lines |
 | --- | --- |
-| `packages/infinichat/src/pi/infinichat-remote/move.ts`: `InfiniChatMoves`, `MoveSides`, `DatabaseFiles`, the copies | 633, from 714 |
-| `packages/infinichat/src/pi/infinichat-remote/install.ts`: `installServer`, `runningServer`, `ServerAssets`, the secrets | 389, from 409 |
+| `packages/infinichat/src/pi/infinichat-remote/move.ts`: `InfiniChatMoves`, `MoveSides`, `DatabaseFiles`, the copies | 646, from 714 |
+| `packages/infinichat/src/pi/infinichat-remote/install.ts`: `installServer`, `runningServer`, `ServerAssets`, the secrets | 391, from 409 |
 | `packages/infinichat/src/pi/infinichat-remote/home.ts`: `createInfiniChatHome(storage)` | 58, from 56 |
-| `packages/infinichat/src/pi/infinichat-remote/machine.ts`: `runScript`, `quotePosix`, `HASH`, temporary files | 82 |
+| `packages/infinichat/src/pi/infinichat-remote/machine.ts`: `runScript`, `quotePosix`, `HASH`, temporary files | 90 |
 | `apps/mobile/src/pi/infinichat-remote/phone-files.ts`: the phone's `DatabaseFiles` | 80 |
 | `apps/mobile/src/pi/infinichat-remote/phone-home.ts`: the kv-store adapter | 8 |
 | `apps/mobile/src/pi/infinichat-remote/server-assets.ts`: `phoneServerAssets`, `SERVER_BUNDLE` | 38, from 25 |
 | `apps/mobile/src/pi/infinichat-remote/phone-dialer.ts`: now with `connectAdmitted`, which only it uses | 147, from 110 |
 
-Together 1,435 lines where there were 1,314, against the plan's "about as many": the marker streaming and the
+Together 1,458 lines where there were 1,314, against the plan's "about as many": the marker streaming and the
 reconnects went (about 90 lines), and the seams' interfaces (about 65), the chunked copies (about 50) and the install
-upload's three steps took their place.
+upload's three steps took their place. The review's fixes added about 25 (the connection owner's `lost` test and the
+removal of the page commands' own files); the daemon channel's queue (below) adds 32 lines to `channel.ts`.
 
 What differs from the plan:
 
@@ -242,10 +243,12 @@ What differs from the plan:
 - **`InfiniChatMoves` takes a function from a machine's ID to its `MachineDirectory`, and the bundle.** Piece 3 made a
   directory one machine's (it has an `id`), and moves serve whichever machine they move to; they use only `name()`.
   The server lines of the page commands need the bundle's folder name (`serverBundle`), which the doc's list lacks.
-  The arguments are positional, as they were, with `MoveSides` last.
+  After the environment comes the owner's `lost` test (see "Messages"). The arguments are positional, as they were,
+  with `MoveSides` last.
 - **`installServer(target, assets, secret, options)`.** `InstallTarget` is the machine as the app knows it: its
-  `ExecutionEnv`, name, `machineDescription` and SSH account (the linger advice names it). The dialer gets the secret
-  from `machineSecret(credentials, getRandomBytesAsync, machineId)` first, where `installServer` used to.
+  `ExecutionEnv` and its owner's `lost` test, name, `machineDescription` and SSH account (the linger advice names it).
+  The dialer gets the secret from `machineSecret(credentials, getRandomBytesAsync, machineId)` first, where
+  `installServer` used to.
   `ServerAssets.manifest` carries each daemon's SHA-256 as well as the bundle's, because the install checks the
   machine's copies before loading any asset (from `PI_DAEMON_MANIFEST` before).
 - **A step's input is a file the package names and removes.** `writeFile` puts it at a unique name (`temporary`, pi-ai's
@@ -253,10 +256,14 @@ What differs from the plan:
   dies with its process group by SIGKILL, so its `trap` never runs. The removal isn't awaited, so a lost connection
   doesn't hold up the step's failure while it waits for a new one. A force-quit, or a connection that stays lost, leaves
   that one file in `~/.infinichat` (a page list, a patch, an upload or a service file); today's scripts removed theirs
-  on SIGPIPE or SIGHUP. A move's whole-file upload is written straight to `data/incoming/infinichat.db` and verified
-  there (SHA-256, then `chmod 600`) before the place step moves it, so a cut-off upload leaves only that file, which the
-  next copy replaces; the old `.upload.XXXXXX` beside it is gone. Install uploads keep a file beside the final name,
-  renamed into place once verified.
+  on SIGPIPE or SIGHUP. The page commands write files of their own: `node.write` puts `<file>.<pid>` beside its output
+  and renames it, and `diff --live` backs the database up to `<patch>.<pid>.db` (`server/pages.ts`). A stopped command
+  never runs its `finally`, so a patch step removes those with its own files, in one `rm -f` of the step's names and
+  their `.*` (the page list and the patch, and the aside of the output it applied), and a refresh stopped as the app
+  goes to the background leaves nothing; the server bundle doesn't change for it. A move's whole-file upload is written
+  straight to `data/incoming/infinichat.db` and verified there (SHA-256, then `chmod 600`) before the place step moves
+  it, so a cut-off upload leaves only that file, which the next copy replaces; the old `.upload.XXXXXX` beside it is
+  gone. Install uploads keep a file beside the final name, renamed into place once verified.
 - **Folders exist before anything is written into them (design check 1).** `writeFile` makes missing folders with the
   environment's default mode, so every write follows a command that made its folder under `umask 077`: an install
   upload makes its own folder first (and so `~/.infinichat`, 0700), the secret and service files go into
@@ -278,13 +285,27 @@ What differs from the plan:
 - **Messages.** The device's name in the moves' messages comes from the app ("this iPhone"), capitalized where a
   sentence starts with it ("This iPhone has no InfiniChat conversation to move.", "Choose This iPhone to move it
   back."). The install's linger advice keeps "this phone", as piece 3 kept "did not accept this iPhone"; the Mac's
-  piece can reword it. A command that fails to run maps to the same fixed connection message as before; a file
-  operation's `unknown` (pi-env's lost connection) maps to it too, and other codes to the step's own message; a failed
+  piece can reword it. A command that fails to run maps to the same fixed connection message as before. A file
+  operation maps to it when the environment's owner says the connection was lost, and on `aborted`, which, once the
+  caller's own signal is checked, is the install upload's 300 s deadline, as the old `TIMEOUT` was; every other code,
+  `unknown` included, maps to the step's own message ("… home folder permissions and disk space" for a full disk, as
+  the script-based upload reported it). The code can't tell: `unknown` is also every system error the environment
+  doesn't map (pi-env `dist/errors.js`, `toFileError`), and pi-env marks a lost connection on the `RemoteError` the
+  `FileError` keeps as its cause (`lost: true`, `isConnectionLost`). So `InstallTarget` and `InfiniChatMoves` take a
+  `lost(error)` test from the connection's owner; the phone's is `remote.lost` in `owner.ts`,
+  `isConnectionLost(error.cause)` over the port's own `isConnectionLost`, and the Mac's would be pi-env's. A failed
   read in a download keeps "The SSH connection closed before the copy was complete." Remote text never reaches one.
 - **The phone's SSH helpers shrank back.** `quotePosix` and `HASH` are the package's own in `machine.ts`, as pi-env
   keeps its own in `ssh.ts` and the port its own in `provisioning.ts`. The exports only the install used (`HASH`,
   `script`) are private again, and `runSshCommand`'s `onWritten` and `null` timeout, which only the moves used, are
   gone: `command-channel.ts` is byte-identical to its version before the move feature (`f9f8f2e~1`).
+- **The daemon channel queues what react-native-ssh refuses.** The bulk uploads now share owner.ts's daemon
+  connection with the chats' tools, and the port's write pipeline keeps eight 512 KiB chunks in flight, so a second
+  writer on that connection could fill react-native-ssh's shell write queue. It refuses a write then (`QUEUE_FULL`,
+  accepting none of the bytes), and `Connection` tore the whole session down on any throw from `write`, failing every
+  request on the machine. pi-env's client writes to its daemon's stdin, which keeps in memory what the daemon hasn't
+  read, so `createSshChannelFactory`'s `write` now does the same: a refused frame waits in order in JavaScript and is
+  offered again every 10 ms, as `command-channel.ts` retries its writes. Only a failed channel throws.
 
 Choices:
 
@@ -338,12 +359,28 @@ Checks:
   - `installServer` with a stand-in `launchctl` that starts a stand-in server: the first install uploads the bundle and
     four daemons and starts the service, a second one uploads nothing and restarts nothing, a new secret kickstarts it,
     a Cancel during the upload rejects with an `AbortError`; no temporary files left afterwards.
+- After the review's fixes, all of the above again (lint, typecheck, server typecheck, the asset still byte-identical
+  with `--check` passing, the iOS export with the same files and store directories, the install probe with its `lost`
+  test), and a probe of the fixes against a 234,651,648-byte machine database:
+  - A refresh while the machine holds the conversation, stopped while the server's `diff --live` had
+    `.patch.<uuid>.<pid>.db` and its `-journal` open: nothing left in `~/.infinichat` and the moved copy unchanged; at
+    `99682cb` the same run left both files. A refresh that completes leaves the moved copy byte-identical to a fresh
+    backup of the machine's database.
+  - A refresh of the machine's copy, stopped while the `patch` command was writing `copy/infinichat.db.<pid>`: no
+    aside left; one that completes leaves the copy byte-identical to a backup of this device's database.
+  - `fileFailure` with pi-env's `isConnectionLost(error.cause)`: removing a folder that isn't empty (`unknown`) gives
+    the step's message; a 512 MiB write cut by killing the daemon (`unknown`, the cause marked lost) and a write past
+    its deadline (`aborted`) give the connection message; a cancelled write throws the `AbortError`.
 
 Unverified: nothing ran on a device, nothing ran over SSH to a real machine, and the systemd and detached paths ran
 nowhere. By source assessment only: the phone's port in place of pi-env's client, the first connect after a long
 background (owner.ts's daemon connection has to notice it was lost before the dial's check uses it; its silence timer
-does that at the first tick after the app resumes), and a force-quit's leftover file. Device checks, on the iPhone
-Release install with the database backed up:
+does that at the first tick after the app resumes), a force-quit's leftover file, the daemon channel's queue for
+`QUEUE_FULL` (react-native-ssh doesn't run in Node), and the phone's `remote.lost` (Hermes keeping `FileError`'s
+`cause`, which `client.ts` already relies on for Chord's errors). The phone port reports a daemon that fails to start
+again by its SSH error, which isn't marked lost as pi-env marks its own, so a file operation that is the first to find
+the connection gone and can't reconnect shows the step's message; a lost connection mid-operation is marked. Device
+checks, on the iPhone Release install with the database backed up:
 
 - A server install: the bundle is unchanged, so force one: on vikash-system stop the service
   (`systemctl --user stop infinichat`) and remove `~/.infinichat/server/<bundle>`, then open InfiniChat. The phone
@@ -355,5 +392,11 @@ Release install with the database backed up:
   phone's moved copy byte-identical to a fresh snapshot of the machine's database.
 - Return to the app after more than a minute in the background with InfiniChat on vikash-system: it reconnects without
   showing a failure.
-- After those, `ls -a ~/.infinichat ~/.infinichat/data/incoming` on the machine shows no `.pages.*`, `.patch.*`,
-  `.secret.*` or `.service.*` files, except after a force-quit mid-copy.
+- With InfiniChat on vikash-system, return to the app and send it to the background again within a second or two,
+  while the refresh's `diff --live` runs, a few times.
+- During a move there that sends the whole file, have a chat whose tools run on vikash-system write a file of a few
+  MiB: both finish, and neither shows a lost connection.
+- With Tailscale off during a move's copy, the move's failure names the connection ("Check Tailscale"), not disk space.
+- After those, `ls -a ~/.infinichat ~/.infinichat/data/incoming ~/.infinichat/copy` on the machine shows no `.pages.*`,
+  `.patch.*`, `.secret.*` or `.service.*` files and no `infinichat.db.<pid>` asides, except after a force-quit
+  mid-copy.

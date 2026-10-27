@@ -29,7 +29,7 @@ export interface DialedServer {
   /**
    * Installs or updates the server as `dial` does, with the dial's options, then tunnels again over the dial's
    * transport and returns a new link; the previous link and tunnel close. The install needn't use that transport:
-   * the phone's opens an SSH connection of its own.
+   * the phone's goes through the machine's `ExecutionEnv`, borrowed from the owner of its daemon connection.
    */
   reinstall(): Promise<Link>;
   /** Closes the link, then its transport. */

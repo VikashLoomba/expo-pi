@@ -6,7 +6,7 @@ import type { ConversationFiles, ConversationState } from './contract';
 import type { MachineDirectory } from './dialer';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
 import { NODE } from './install';
-import { discard, fileFailure, HASH, PRINT_MARKER, runScript, temporary } from './machine';
+import { type ConnectionLost, fileFailure, HASH, PRINT_MARKER, runScript, temporary } from './machine';
 import { apply, diff, pages, type PagePlatform } from './pages';
 
 /** This device's InfiniChat database, which its storage opens by name. */
@@ -110,6 +110,8 @@ const COPY_INCOMPLETE = 'The SSH connection closed before the copy was complete.
 /** One copy's machine, through the environment the app borrows for it, and this device's files. */
 interface Copy {
   machine: ExecutionEnv;
+  /** The environment's owner's test for a file operation that failed with the connection. */
+  lost: ConnectionLost;
   files: DatabaseFiles;
   signal: AbortSignal;
   /** The machine's name, for messages. */
@@ -124,6 +126,18 @@ interface Copy {
 const run = (copy: Copy, lines: string[], failure: string, timeout?: null) =>
   runScript(copy.machine, copy.signal, copy.name, lines, { failure, timeout });
 
+/**
+ * Removes a patch step's `inputs` from the machine's home however the step ended, with what the server's commands left
+ * beside them and beside its `outputs`: a command writes `<file>.<pid>` and renames it into place, and `diff --live`
+ * backs the database up to `<patch>.<pid>.db` (server/pages.ts). A command stopped by an abort, a timeout or a lost
+ * connection dies by SIGKILL, so its own `finally` never removes them. Not awaited, as machine.ts's `discard`.
+ */
+function discardPatch(copy: Copy, inputs: string[], outputs: string[] = []) {
+  const files = [...inputs.map((path) => `"$HOME/${path}"`),
+    ...[...inputs, ...outputs].map((path) => `"$HOME/${path}".*`)];
+  void copy.machine.exec(`rm -f ${files.join(' ')}`, undefined, BACKGROUND_CONTEXT);
+}
+
 /** Writes `bytes` to the machine's `path` a chunk at a time, reporting the bytes written so far. */
 async function copyTo(copy: Copy, path: string, bytes: Uint8Array, failure: string,
   onWritten: (bytes: number) => void) {
@@ -132,7 +146,7 @@ async function copyTo(copy: Copy, path: string, bytes: Uint8Array, failure: stri
     const chunk = bytes.subarray(offset, offset + CHUNK);
     const written = offset === 0 ? await copy.machine.writeFile(path, chunk, context)
       : await copy.machine.appendFile(path, chunk, context);
-    if (!written.ok) throw fileFailure(copy.signal, written.error, copy.name, failure);
+    if (!written.ok) throw fileFailure(copy.signal, written.error, copy.lost, copy.name, failure);
     onWritten(offset + chunk.byteLength);
   }
 }
@@ -185,15 +199,14 @@ async function sendPatch(copy: Copy, from: string, base: string, out: string, on
     await run(copy, [...copy.server, 'umask 077', `"$node" "$js" pages "$HOME/${base}" "$HOME/${list}"`, PRINT_MARKER],
       PATCH_FAILED, null);
     const listed = await copy.machine.readBinaryFile(`~/${list}`, withAbortSignal(copy.signal, BACKGROUND_CONTEXT));
-    if (!listed.ok) throw fileFailure(copy.signal, listed.error, copy.name, PATCH_FAILED);
+    if (!listed.ok) throw fileFailure(copy.signal, listed.error, copy.lost, copy.name, PATCH_FAILED);
     const bytes = await diff(copy.files, from, new Uint8Array(listed.value));
     await copyTo(copy, `~/${patch}`, bytes, PATCH_FAILED,
       (written) => onCopied({ bytes: written, total: bytes.byteLength }));
     await run(copy, [...copy.server, 'umask 077', `mkdir -p "$(dirname "$HOME/${out}")"`,
       `"$node" "$js" patch "$HOME/${base}" "$HOME/${patch}" "$HOME/${out}"`, PRINT_MARKER], PATCH_FAILED, null);
   } finally {
-    discard(copy.machine, `~/${list}`);
-    discard(copy.machine, `~/${patch}`);
+    discardPatch(copy, [list, patch], [out]);
   }
 }
 
@@ -211,14 +224,13 @@ async function receivePatch(copy: Copy, live: boolean, base: string, out: string
     await run(copy, [...copy.server, PRINT_MARKER], PATCH_FAILED);
     const written = await copy.machine.writeFile(`~/${list}`, await pages(copy.files, base),
       withAbortSignal(copy.signal, BACKGROUND_CONTEXT));
-    if (!written.ok) throw fileFailure(copy.signal, written.error, copy.name, PATCH_FAILED);
+    if (!written.ok) throw fileFailure(copy.signal, written.error, copy.lost, copy.name, PATCH_FAILED);
     await run(copy, [...copy.server, 'umask 077', `"$node" "$js" diff "$HOME/${DATA}/${INFINICHAT_DATABASE}" `
       + `"$HOME/${list}" "$HOME/${patch}"${live ? ' --live' : ''}`, PRINT_MARKER], PATCH_FAILED, null);
     await copyFrom(copy, `~/${patch}`, TRANSFER, onCopied);
     await apply(copy.files, base, await copy.files.read(TRANSFER), out);
   } finally {
-    discard(copy.machine, `~/${list}`);
-    discard(copy.machine, `~/${patch}`);
+    discardPatch(copy, [list, patch]);
     await copy.files.remove(TRANSFER);
   }
 }
@@ -314,12 +326,13 @@ export class InfiniChatMoves {
   private closed = false;
 
   /**
-   * `directory` gives a machine as the app knows it, `environment` its files and commands, and `device` names this
-   * device in messages, such as "this iPhone". `bundle` is this app's server bundle (`serverBundle`).
+   * `directory` gives a machine as the app knows it, `environment` its files and commands, `lost` tells a file
+   * operation that failed with the environment's connection, as its owner does, and `device` names this device in
+   * messages, such as "this iPhone". `bundle` is this app's server bundle (`serverBundle`).
    */
   constructor(private readonly home: InfiniChatHomeStore,
     private readonly directory: (machineId: string) => MachineDirectory,
-    private readonly environment: (machineId: string) => Promise<ExecutionEnv>,
+    private readonly environment: (machineId: string) => Promise<ExecutionEnv>, private readonly lost: ConnectionLost,
     private readonly files: DatabaseFiles, private readonly device: string, private readonly bundle: string,
     private readonly sides: MoveSides) {}
 
@@ -602,7 +615,7 @@ export class InfiniChatMoves {
     const machine = await awaitWithContext(this.environment(machineId), withAbortSignal(signal, BACKGROUND_CONTEXT));
     const server = [`js="$HOME/${FOLDER}/server/${this.bundle}/server.js"`, '[ -f "$js" ]',
       `s="$HOME/${FOLDER}/server.json"`, `node=$(${NODE})`, '[ -n "$node" ]'];
-    return { machine, files: this.files, signal, name: this.name(machineId), server };
+    return { machine, lost: this.lost, files: this.files, signal, name: this.name(machineId), server };
   }
 
   private name(machineId: string): string {

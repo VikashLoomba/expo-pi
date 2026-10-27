@@ -1,7 +1,8 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
+import type { FileError } from '@earendil-works/pi-durable/env';
 
 import { createSshChannelFactory, type DaemonChannelFactory } from './channel';
-import { Connection } from './connection';
+import { Connection, isConnectionLost } from './connection';
 import { MobileRemoteExecutionEnv } from './environment';
 import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from './hosts';
 import type { RemotePlatformState } from './provisioning';
@@ -68,6 +69,12 @@ export function createRemoteExecution(hosts: RemoteHostRepository) {
       return new MobileRemoteExecutionEnv({ connection, id: `ssh:${host.namespaceId}`,
         cwd: cwd ?? (await connection.info()).home });
     },
+    /**
+     * Whether a file operation on one of these environments failed because its connection was lost, not by the
+     * machine's answer: `toFileError` keeps the connection's error as the cause, as pi-env's does, and only that error
+     * says so (`isConnectionLost`); the code is `unknown` either way.
+     */
+    lost: (error: FileError) => isConnectionLost(error.cause),
     /**
      * Lists one folder, the home directory for `null`, through the same shared connection the chat's tools use, as
      * the Files app lists one level at a time. `signal` cancels only this request.

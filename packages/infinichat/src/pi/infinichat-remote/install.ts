@@ -4,7 +4,7 @@ import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 import type { CredentialBackend } from '../provider-credentials';
 import type { InstallStage } from './dialer';
 import {
-  discard, fileFailure, HASH, MARKER, PRINT_MARKER, quotePosix, runScript, temporary, type Step,
+  type ConnectionLost, discard, fileFailure, HASH, MARKER, PRINT_MARKER, quotePosix, runScript, temporary, type Step,
 } from './machine';
 
 /** The name of a server bundle on a machine, its directory there: the first 32 hex digits of its SHA-256. */
@@ -37,6 +37,8 @@ export interface ServerAssets {
 export interface InstallTarget {
   /** Its files and commands, borrowed from the owner of the app's connection to it. */
   machine: ExecutionEnv;
+  /** That owner's test for a file operation that failed with the connection. */
+  lost: ConnectionLost;
   /** Its name in the app's list, for messages and as the server's device name. */
   name: string;
   /** The device list's text for it (`machineDescription`), which the server describes itself with. */
@@ -267,8 +269,8 @@ function readyPort(line: string | undefined, bundle: string): number | undefined
  * temporary copy. The service manager owns the server; the environment's connection never does. `secret` is the app's
  * for this machine (`machineSecret`); a new one restarts the server.
  */
-export async function installServer({ machine, name, description, username }: InstallTarget, assets: ServerAssets,
-  secret: string, options: { signal: AbortSignal; onProgress?: (stage: InstallStage) => void },
+export async function installServer({ machine, lost, name, description, username }: InstallTarget,
+  assets: ServerAssets, secret: string, options: { signal: AbortSignal; onProgress?: (stage: InstallStage) => void },
 ): Promise<InstalledServer> {
   const { signal } = options;
   const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
@@ -308,7 +310,7 @@ export async function installServer({ machine, name, description, username }: In
         { failure: message.files });
       const written = await machine.writeFile(aside, bytes,
         withAbortSignal(AbortSignal.timeout(UPLOAD_TIMEOUT_MS), context));
-      if (!written.ok) throw fileFailure(signal, written.error, name, message.files);
+      if (!written.ok) throw fileFailure(signal, written.error, lost, name, message.files);
       await run([HASH, `f=${quotePosix(path)}`, `t=${quotePosix(aside)}`,
         // mv treats a directory, or a symlink to one, as a container; never publish into it.
         'if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then exit 1; fi',
@@ -326,7 +328,7 @@ export async function installServer({ machine, name, description, username }: In
     const input = temporary(`${system.home}/.infinichat`, kind);
     try {
       const written = await machine.writeFile(input, content, context);
-      if (!written.ok) throw fileFailure(signal, written.error, name, step.failure);
+      if (!written.ok) throw fileFailure(signal, written.error, lost, name, step.failure);
       return await run([`t=${quotePosix(input)}`, ...lines], step);
     } finally {
       discard(machine, input);

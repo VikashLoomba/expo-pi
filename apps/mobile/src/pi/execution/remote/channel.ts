@@ -1,4 +1,6 @@
-import { connect, type SshAuth, type SshConnection, type SshHostKey, type SshShell } from '@osuki-dev/react-native-ssh';
+import {
+  connect, isSshError, type SshAuth, type SshConnection, type SshHostKey, type SshShell,
+} from '@osuki-dev/react-native-ssh';
 import { BootstrapError } from './bootstrap-errors';
 import { provisionDaemon, quotePosix, type RemotePlatformState, type SshSetupStage } from './provisioning';
 
@@ -6,6 +8,7 @@ export type { SshSetupStage } from './provisioning';
 
 /** One owned, binary, non-PTY command channel; closing it also closes its SSH connection. */
 export interface DaemonChannel {
+  /** Sends in order; what the transport can't take yet waits, so only a failed channel throws. */
   write(bytes: Uint8Array): void;
   close(): Promise<void>;
 }
@@ -77,6 +80,11 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
     let closing: Promise<void> | undefined;
     let closingRequested = false;
     let notified = false;
+    // pi-env's client writes its frames to the daemon's stdin, which keeps in memory whatever the daemon hasn't read
+    // yet. The native queue refuses a write instead once it is full (`QUEUE_FULL`, accepting none of the bytes), so
+    // refused frames wait here, in order, and are offered again every 10 ms, as `command-channel.ts` retries.
+    const waiting: Uint8Array[] = [];
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const notifyClosed = (error?: Error) => {
       if (notified) return;
       notified = true;
@@ -86,6 +94,8 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
     // requests must not prevent disposal of the transport that owns the channel.
     const dispose = (): Promise<void> => {
       closingRequested = true;
+      clearTimeout(retry);
+      waiting.length = 0;
       if (closing) return closing;
       closing = Promise.allSettled([shell?.close(), connection?.disconnect()]).then(() => undefined);
       return closing;
@@ -123,11 +133,33 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
         await Promise.allSettled([daemon.close(), connection.disconnect()]);
         throw signal.aborted ? aborted() : new Error('The Pi daemon SSH channel closed during startup.');
       }
+      /** Writes what waits, in order, until the native queue refuses it; any other failure is thrown. */
+      const flush = () => {
+        retry = undefined;
+        while (waiting.length > 0) {
+          try {
+            daemon.write(waiting[0]);
+          } catch (error) {
+            if (!isSshError(error, 'QUEUE_FULL')) throw error;
+            retry = setTimeout(() => {
+              if (closingRequested || notified || signal.aborted) return;
+              try {
+                flush();
+              } catch {
+                notifyClosed(new Error('SSH could not send the Pi request.'));
+              }
+            }, 10);
+            return;
+          }
+          waiting.shift();
+        }
+      };
       return {
         write(bytes) {
           if (closingRequested || notified || signal.aborted) throw new Error('SSH channel is closed.');
-          // Own offset views as well. Native write copies synchronously into its queue.
-          daemon.write(new Uint8Array(bytes));
+          // Own offset views as well: a refused frame waits, and native write copies synchronously into its queue.
+          waiting.push(new Uint8Array(bytes));
+          if (retry === undefined) flush();
         },
         async close() {
           signal.removeEventListener('abort', onAbort);
