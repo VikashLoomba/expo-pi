@@ -5,9 +5,9 @@ import {
   acceptHostKey, connectSsh, forgetHostKey, HostKeyChangedError, HostKeyUnknownError, RemoteExecutionEnv, scanHostKey,
   type Connection, type RemoteInfo, type SshTarget,
 } from '@earendil-works/pi-env';
+import type { Machine, PendingHostKeys, Reach } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { MACHINE_WORK, machineDescription, type Device } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
-import type { Machine, PendingHostKeys, Reach } from '../src/pi/infinichat-remote/contract';
-import { MACHINE_WORK, machineDescription, type Device } from '../src/pi/infinichat/device-tools';
 import { noop } from './conversation';
 import { isRecord } from './state';
 

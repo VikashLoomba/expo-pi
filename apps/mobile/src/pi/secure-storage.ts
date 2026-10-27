@@ -1,6 +1,5 @@
+import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 import * as SecureStore from 'expo-secure-store';
-
-import type { CredentialBackend } from './provider-credentials';
 
 export function createCredentialBackend(): CredentialBackend {
   // This one service holds saved API keys, OAuth grants and the OpenAI installation ID. Readable while

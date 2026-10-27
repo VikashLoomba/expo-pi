@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 
 import type { LoginOptions } from '@earendil-works/pi-ai';
-
-import type { CredentialBackend } from '../src/pi/provider-credentials';
+import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 
 const isStringRecord = (value: unknown): value is Record<string, string> => typeof value === 'object'
   && value !== null && !Array.isArray(value) && Object.values(value).every((item) => typeof item === 'string');

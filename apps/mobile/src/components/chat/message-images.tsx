@@ -1,8 +1,8 @@
+import type { ChatImage } from '@pi-agent/infinichat/pi/user-input';
 import { Image } from 'expo-image';
 import { StyleSheet, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { ChatImage } from '@/pi/user-input';
 
 /** The images of a saved message, as the model received them. */
 export function MessageImages({ images, messageId, size = 180 }: {

@@ -1,11 +1,11 @@
 import type { AttachedReplicatedState } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Harness, TaskGraph, TaskGraphNode } from '@earendil-works/pi-durable';
+import { AGENT_TASK } from '@pi-agent/infinichat/pi/infinichat/agents';
+import { BuildNode } from '@pi-agent/infinichat/pi/infinichat/summary';
 import * as Location from 'expo-location';
 import type { LiveActivity } from 'expo-widgets';
 
-import { AGENT_TASK } from '../pi/infinichat/agents';
-import { BuildNode } from '../pi/infinichat/summary';
 import AgentActivity, { type AgentActivityProps } from './agent-activity';
 import { KEEP_ALIVE_LOCATION_TASK } from './location-task';
 import type { KeepAliveSettings } from './settings';

@@ -2,6 +2,7 @@ import {
   Button, Form, Host, HStack, RNHostView, Section, Text, TextField, useNativeState,
 } from '@expo/ui/swift-ui';
 import { disabled as disable, lineLimit } from '@expo/ui/swift-ui/modifiers';
+import { getModelSettingsError, type ChatModelSettings } from '@pi-agent/infinichat/pi/model-catalog';
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
@@ -14,7 +15,6 @@ import {
   useInfiniChatSettingsDraft, type InfiniChatRole,
 } from '@/components/chat/settings-drafts';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import { getModelSettingsError, type ChatModelSettings } from '@/pi/model-catalog';
 
 const roles: readonly InfiniChatRole[] = ['main', 'summary'];
 const roleTitles: Record<InfiniChatRole, string> = { main: 'Main model', summary: 'Summary model' };

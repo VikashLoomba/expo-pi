@@ -5,27 +5,27 @@ import {
   type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
 } from '@earendil-works/pi-durable';
 import { createCodingTools } from '@earendil-works/pi-durable/tools';
-
-import type { ChatSummary } from '../chat/types';
-import { chatTasks, type KeepAliveController } from '../keep-alive/controller';
-import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
-import { oneLine, settingsOf, summarizeChat } from './chat-projection';
-import { ChatView } from './chat-view';
-import { createExpoImages } from './images';
-import { WorkspaceDoc } from './workspace/document';
-import { WorkspaceExecutionEnv } from './workspace/execution-env';
-import type { Workspaces } from './workspace/storage';
+import type { ChatSummary } from '@pi-agent/infinichat/chat/types';
+import { ChatMetadataDoc, type ChatMetadata } from '@pi-agent/infinichat/pi/chat-metadata';
+import { oneLine, settingsOf, summarizeChat } from '@pi-agent/infinichat/pi/chat-projection';
+import { ChatView } from '@pi-agent/infinichat/pi/chat-view';
 import {
   ExecutionTargetDoc, validateExecution, type ChatExecutionSettings,
-} from './execution/document';
-import type { RemoteExecution } from './execution/remote/owner';
-import { requireModelAuth } from './model-auth';
+} from '@pi-agent/infinichat/pi/execution/document';
+import { requireModelAuth } from '@pi-agent/infinichat/pi/model-auth';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
   type ChatModelSettings, type NewChatDefaults,
-} from './model-catalog';
-import { createNativeWebSearchBridge, SearchPresentationsDoc } from './native-web-search/durable';
-import { imagesOf, textOf } from './user-input';
+} from '@pi-agent/infinichat/pi/model-catalog';
+import { createNativeWebSearchBridge, SearchPresentationsDoc } from '@pi-agent/infinichat/pi/native-web-search/durable';
+import { imagesOf, textOf } from '@pi-agent/infinichat/pi/user-input';
+import { WorkspaceDoc } from '@pi-agent/infinichat/pi/workspace/document';
+
+import { chatTasks, type KeepAliveController } from '../keep-alive/controller';
+import { createExpoImages } from './images';
+import { WorkspaceExecutionEnv } from './workspace/execution-env';
+import type { Workspaces } from './workspace/storage';
+import type { RemoteExecution } from './execution/remote/owner';
 
 /** `error` is the Harness's latest report; operations reject to their callers instead. */
 export interface ChatServiceSnapshot { chats: ChatSummary[]; error?: string }

@@ -1,22 +1,24 @@
 import { createHost, isChordError, webSocketLink, type Ctx, type Link, type Ref } from '@earendil-works/chord';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import type { SshConnection, SshLocalForward } from '@osuki-dev/react-native-ssh';
-
-import type { ChatMessage } from '../../chat/types';
-import type { ChatViewSnapshot, ChatViewSource } from '../chat-view';
-import { connectionFailure } from '../execution/remote/channel';
-import type { RemoteHostRepository } from '../execution/remote/hosts';
-import type { ScheduledTask } from '../infinichat-scheduled';
-import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
-import type { InfiniChatControls } from '../infinichat-view';
-import { machineDescription } from '../infinichat/device-tools';
-import type { ScheduledInput } from '../infinichat/schedule';
-import type { ModelCatalog } from '../model-catalog';
-import type { ProviderAccess } from '../provider-credentials';
+import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
+import type { ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import {
   InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type Machine,
   type PendingHostKeys, type Reach, type SignInAttempt,
-} from './contract';
+} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
+import type {
+  InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot,
+} from '@pi-agent/infinichat/pi/infinichat-service';
+import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
+import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
+import type { ScheduledInput } from '@pi-agent/infinichat/pi/infinichat/schedule';
+import type { ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
+import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
+
+import { connectionFailure } from '../execution/remote/channel';
+import type { RemoteHostRepository } from '../execution/remote/hosts';
 import {
   connectAdmitted, installServer, runningServer, savedSecret, SERVER_BUNDLE, type InstallStage,
 } from './install';

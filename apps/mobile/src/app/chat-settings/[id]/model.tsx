@@ -1,10 +1,10 @@
+import { createModelSettings } from '@pi-agent/infinichat/pi/model-catalog';
 import { router, Stack } from 'expo-router';
 import { useState } from 'react';
 
 import { useChatApp } from '@/chat/chat-provider';
 import { ModelChoices } from '@/components/chat/settings-controls';
 import { useChatSettingsDraft } from '@/components/chat/settings-drafts';
-import { createModelSettings } from '@/pi/model-catalog';
 
 /** The chosen provider's models; choosing one returns to the chat settings. */
 export default function ChatModelScreen() {

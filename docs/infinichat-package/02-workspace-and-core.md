@@ -168,3 +168,85 @@ After step 2:
 ## Not in this piece
 
 The `Link` split (piece 3), install and move (piece 4), and the Node implementations (piece 5).
+
+## As built
+
+Built at `8761638` (step 1) and the commit after it (step 2), from `ea1e0b6`, with pi 1.4.0 (pi-durable, pi-ai, chord
+and pi-env; the latest on npm on 2026-10-26), Expo 58.0.17, React Native 0.88.0, pnpm 10.33.0 and
+`@expo/agent-cli` 1.0.21. Expo's monorepo guide was read again the same day (modified 2026-10-16). Step 1 moved 181
+tracked files; step 2 moved the 35 files byte for byte (`git` records 35 exact renames) and rewrote 51 importers: 40 in
+the app and 11 in `server/`, the set piece 1's "As built" predicted.
+
+What differs from the plan:
+
+- **Metro doesn't watch the workspace root, so the `docs/infinichat` exclusions are gone.** `@expo/metro-config`
+  58.0.16 (`build/getWatchFolders.js`) watches the root's `node_modules` and each workspace package; the app's config
+  prints `[<root>/node_modules, <root>/apps/mobile]`, with `packages/infinichat` added in step 2. `docs/` is never
+  crawled, so the block list entry in `metro.config.js` matched nothing, and the `docs` entries in `tsconfig.json`'s
+  `exclude` and `eslint.config.js`'s `ignores` pointed outside `apps/mobile`. All three were removed in step 1, and
+  AGENTS.md says why Metro, the typecheck and lint never reach the guide.
+- **`.gitattributes` follows the server asset.** A pattern with a slash is anchored where the file sits, so
+  `assets/infinichat-server/server.bin binary` became `apps/mobile/assets/…`.
+- **The lockfile keeps its resolutions.** A plain `pnpm install` re-resolved the moved importer: `babel-preset-expo`
+  went from 58.0.13 to 58.0.19, and in step 2 protobufjs's `@types/node` from 26.6.5 to 22.20.5. Instead the importer
+  key was renamed from `.` to `apps/mobile` by hand (step 1) and the new importer entries were kept with protobufjs's
+  old resolution (step 2), and `pnpm install --frozen-lockfile` accepted both. The lockfile diff is only the importer
+  key in step 1 and 22 added lines in step 2. A later non-frozen install may make those two dedupes.
+- **`npx @expo/agent-cli install` refuses `workspace:*`** (`npm-package-arg`: `Unsupported URL Type "workspace:"`), so
+  `apps/mobile/package.json` was edited and `pnpm install` run.
+- **One AGENTS.md, maintained by hand.** `@expo/agent-cli` keeps its block in `AGENTS.md` relative to the Expo project,
+  and `skills:sync --dry-run` from `apps/mobile` plans `apps/mobile/.agents/skills/expo-sqlite` for Codex only. Agents
+  read the root AGENTS.md, so it stays the only one; the root skill links still resolve into the root
+  `node_modules/.pnpm`, and nothing was re-synced. AGENTS.md now says where the app is, that app paths are relative to
+  it, and where commands run.
+- **README.md** says the app is in `apps/mobile`, adds `cd apps/mobile` to the run commands, and its four file links
+  point there.
+- **The package's lint prints a warning** that eslint-plugin-react can't detect React. eslint-config-expo sets
+  `react.version: "detect"`, and the package has no React dependency, so the warning stays rather than a React setting
+  the package doesn't need.
+- **The eslint config has a comment** saying why the package lints itself and why the guard exists.
+
+Choices:
+
+- The root `package.json` takes the shape of Expo's guide: `pi-agent-monorepo`, private, version 0.0.0. The app keeps
+  the name `pi-agent`.
+- Ignored, generated app state moved with the app: `.expo/` (typed routes and agent-cli state), `expo-env.d.ts` and
+  `dist/`. The root's generated `ios/` (678 MB, ignored) would have shown as untracked once `.gitignore` anchored
+  `/apps/mobile/ios`, so it was set aside, not deleted, at `~/pi-react-native/backup-2026-10-26-root-ios/ios`. Its
+  project carried the signing team `BMNS2Z2BU9`; the first Release build from `apps/mobile` prebuilds a new one.
+- A rewritten import joins the file's package group, sorted by specifier, as the files already group packages before
+  local paths; seven lines that grew past 120 characters use the repository's multi-line import form. The package's
+  modules have no top-level effects beyond definitions (chord's `remote`, document and schema definitions), so
+  evaluating them earlier in a file changes nothing. The server bundle has the same lines as before, with paths
+  `../../packages/infinichat/src/…`, and one module in a new place: the Photon WASM constant now follows
+  `device-tools`.
+- Metro's subpath pattern was confirmed before the move: a temporary `src/wildcard-probe.ts` imported from the root
+  layout as `@pi-agent/infinichat/wildcard-probe` bundled (its string was in the export), then both were removed.
+
+Checks:
+
+- Step 1, from `apps/mobile`: an iOS export (`npx expo export --platform ios`), 12,596,463 bytes of bytecode;
+  `npx @expo/agent-cli lint` (131 files, no problems); `npx @expo/agent-cli typecheck` (no type errors);
+  `pnpm exec tsc -p server` (no errors). The server asset was rebuilt here and passes `--check`: 8,351,609 bytes,
+  SHA-256 `023b75a2…bfe1c2`, identical to the last one once `../../` is dropped from its module paths.
+- Step 2: the wildcard probe above; an iOS export with source maps listing all 35 package files under
+  `/packages/infinichat/src/` and one store directory each for pi-durable, pi-ai, chord and pi-telemetry, and an export
+  without them at 12,596,469 bytes; the app's lint and typecheck and the server typecheck, all clean, with
+  `tsc --listFiles` showing the 35 files in both the app's and the server's programs;
+  `pnpm --filter @pi-agent/infinichat lint` (36 files, no errors). Adding `expo-crypto`, `node:fs/promises` and
+  `buffer` imports to `src/pi/model-auth.ts` failed the package's lint with three `no-restricted-imports` errors, and
+  removing them passed it again. The server asset, rebuilt here, passes `--check`: 8,352,831 bytes, SHA-256
+  `668a9eec…3cecff`, with the same lines as step 1's after the path change.
+- `pnpm why -r @earendil-works/pi-durable` finds one version, and the package's auto-installed peers link to the same
+  store directories as the app's. `pnpm ignored-builds` reports none, `onlyBuiltDependencies` is read from
+  `pnpm-workspace.yaml`, and `pnpm rebuild react-native-enriched-markdown` runs its postinstall.
+- Autolinking from `apps/mobile` resolves 42 Expo modules, including `pi-oauth-callback` and
+  `torch-image-playground`, and the 12 React Native packages, among them react-native-ssh, nitro-zlib and
+  enriched-markdown.
+- `npx @expo/agent-cli doctor`: 19 of 20; the failing check lists Expo patch releases newer than the installed ones,
+  unrelated to this piece.
+
+Unverified: nothing ran on a device, and `smoke --ios` wasn't run (the exports stand in for it). The first Release
+build from `apps/mobile`, which prebuilds `ios/` there and has to pick a signing team, and every device check above
+are left to the owner's iPhone. The new server bundle means the phone reinstalls the server on each machine at its
+next connect. A fresh install running enriched-markdown's postinstall from nothing wasn't tried.

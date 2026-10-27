@@ -1,11 +1,11 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
+import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
+import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { ChatMessage } from '@/chat/types';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import { userInput } from '@/pi/user-input';
 import { AgentMark, useChatAgentName } from './agent';
 import { ChatIcon } from './icon';
 import { MessageContent } from './message-content';

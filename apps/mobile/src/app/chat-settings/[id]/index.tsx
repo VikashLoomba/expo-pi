@@ -3,6 +3,10 @@ import { Button, Form, Host, LabeledContent, Picker, Section, Text, TextField } 
 import {
   autocorrectionDisabled, disabled as disable, pickerStyle, tag, textInputAutocapitalization,
 } from '@expo/ui/swift-ui/modifiers';
+import {
+  sameExecution, validateExecution, type ChatExecutionSettings,
+} from '@pi-agent/infinichat/pi/execution/document';
+import { getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
@@ -11,8 +15,6 @@ import { useChatApp, useChatControls } from '@/chat/chat-provider';
 import { ModelSection, SectionFooter, SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatSettingsDraft } from '@/components/chat/settings-drafts';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import { sameExecution, validateExecution, type ChatExecutionSettings } from '@/pi/execution/document';
-import { getModelSettingsError } from '@/pi/model-catalog';
 
 const LOCAL = 'local';
 const targetId = (execution: ChatExecutionSettings) =>

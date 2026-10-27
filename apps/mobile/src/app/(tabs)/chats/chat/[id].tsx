@@ -1,5 +1,7 @@
 import { uuidv7, type UserMessage } from '@earendil-works/pi-ai';
 import type { ConversationId } from '@earendil-works/pi-durable';
+import { findCatalogModel, getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
+import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
@@ -13,8 +15,6 @@ import { ChatTranscript } from '@/components/chat/transcript';
 import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import { findCatalogModel, getModelSettingsError } from '@/pi/model-catalog';
-import { userInput } from '@/pi/user-input';
 
 export default function ConversationRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();

@@ -4,9 +4,8 @@ import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 
 import { webSocketLink, type Host } from '@earendil-works/chord';
+import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { WebSocketServer } from 'ws';
-
-import type { InfiniChatPrincipal } from '../src/pi/infinichat-remote/contract';
 
 /** Whether the request carries `Authorization: Bearer <secret>`, compared in constant time. */
 function authorized(request: IncomingMessage, secret: Buffer): boolean {

@@ -1,7 +1,6 @@
+import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import type { FlashListRef } from '@shopify/flash-list';
 import { useRef, useState } from 'react';
-
-import type { ChatMessage } from '@/chat/types';
 
 /** Offers a jump to the newest message once the reader leaves it. */
 export function useTranscriptScroll() {

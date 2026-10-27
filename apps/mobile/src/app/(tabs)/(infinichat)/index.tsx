@@ -1,4 +1,6 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
+import { findCatalogModel, getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
+import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { router, Stack } from 'expo-router';
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
@@ -17,8 +19,6 @@ import { ChatTranscript } from '@/components/chat/transcript';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { InstallStage } from '@/pi/infinichat-remote/install';
 import type { MoveStatus } from '@/pi/infinichat-remote/move';
-import { findCatalogModel, getModelSettingsError } from '@/pi/model-catalog';
-import { userInput } from '@/pi/user-input';
 
 const TITLE = 'InfiniChat';
 const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its settings to send a message.';

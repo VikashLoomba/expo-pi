@@ -1,12 +1,12 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
+import type { ImageInput } from '@pi-agent/infinichat/pi/model-catalog';
+import type { ChatImage } from '@pi-agent/infinichat/pi/user-input';
 import {
   launchCameraAsync, launchImageLibraryAsync, requestCameraPermissionsAsync, type ImagePickerAsset,
   type ImagePickerResult,
 } from 'expo-image-picker';
 
 import { fitImage } from '../pi/images';
-import type { ImageInput } from '../pi/model-catalog';
-import type { ChatImage } from '../pi/user-input';
 
 /** A photo fitted to the chat's model: pi-ai's image part, and a file the composer shows while it is a draft. */
 export interface PhotoAttachment extends ChatImage {

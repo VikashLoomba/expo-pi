@@ -2,13 +2,13 @@ import {
   Button, HStack, Image, Label, LabeledContent, SecureField, Section, Text, useNativeState,
 } from '@expo/ui/swift-ui';
 import { disabled as disable, foregroundStyle } from '@expo/ui/swift-ui/modifiers';
+import type { ModelCatalog, ProviderOption } from '@pi-agent/infinichat/pi/model-catalog';
+import { OPENAI_PROVIDER_ID } from '@pi-agent/infinichat/pi/openai-auth/core';
 import { useRef, useState } from 'react';
 
 import type { ProviderAccount } from '@/chat/provider-account';
 import { AuthPromptRows } from '@/components/chat/auth-prompt';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { ModelCatalog, ProviderOption } from '@/pi/model-catalog';
-import { OPENAI_PROVIDER_ID } from '@/pi/openai-auth/core';
 
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 

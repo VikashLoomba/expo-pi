@@ -7,9 +7,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Storage } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
+import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
 
-import type { ConversationFiles, ConversationState } from '../src/pi/infinichat-remote/contract';
-import type { InfiniChatService } from '../src/pi/infinichat-service';
 import { readState, updateState } from './state';
 
 export const noop = () => {};

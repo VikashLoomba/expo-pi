@@ -1,11 +1,12 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
-
-import type { ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
-import type { ScheduledTask } from '../pi/infinichat-scheduled';
-import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../pi/infinichat-service';
-import type { InfiniChatControls } from '../pi/infinichat-view';
-import type { ScheduledInput } from '../pi/infinichat/schedule';
-import type { ChatMessage } from './types';
+import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
+import type { ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
+import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
+import type {
+  InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot,
+} from '@pi-agent/infinichat/pi/infinichat-service';
+import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
+import type { ScheduledInput } from '@pi-agent/infinichat/pi/infinichat/schedule';
 
 const noop = () => {};
 const LOADING: ChatViewSnapshot = { status: 'loading' };

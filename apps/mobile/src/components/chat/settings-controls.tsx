@@ -2,14 +2,14 @@ import { Button, Host, HStack, Image, Label, List, Picker, Section, Spacer, Text
 import {
   disabled as disable, font, foregroundStyle, listStyle, pickerStyle, tag,
 } from '@expo/ui/swift-ui/modifiers';
+import {
+  findCatalogModel, type ChatModelSettings, type ModelCatalog, type ModelOption, type ModelThinkingLevel,
+  type ProviderOption,
+} from '@pi-agent/infinichat/pi/model-catalog';
 import { useCallback } from 'react';
 import { ActivityIndicator, PlatformColor, StyleSheet, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
-import {
-  findCatalogModel, type ChatModelSettings, type ModelCatalog, type ModelOption, type ModelThinkingLevel,
-  type ProviderOption,
-} from '@/pi/model-catalog';
 import { ActionButton, InlineNotice } from './primitives';
 
 const thinkingLabels: Record<ModelThinkingLevel, string> = {

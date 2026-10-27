@@ -1,8 +1,8 @@
+import { OPENAI_DISCOVERY } from '@pi-agent/infinichat/pi/openai-auth/core';
 import type { AuthRequest, AuthSessionResult } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 
 import receiver from '../../../modules/pi-oauth-callback/src/PiOAuthCallbackModule';
-import { OPENAI_DISCOVERY } from './core';
 
 type BrowserOutcome = { source: 'browser'; result?: AuthSessionResult };
 type CallbackOutcome = { source: 'listener'; url?: string };

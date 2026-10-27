@@ -1,5 +1,5 @@
-import type { ProviderAccess } from '../pi/provider-credentials';
-import type { PendingAuthPrompt } from './auth-prompt-controller';
+import type { PendingAuthPrompt } from '@pi-agent/infinichat/chat/auth-prompt-controller';
+import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
 
 /**
  * A credential store's sign-ins and their operations, as the providers screens show them: this iPhone's account

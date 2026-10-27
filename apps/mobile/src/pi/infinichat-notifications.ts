@@ -1,6 +1,5 @@
+import type { InfiniChatHost } from '@pi-agent/infinichat/pi/infinichat-service';
 import * as Notifications from 'expo-notifications';
-
-import type { InfiniChatHost } from './infinichat-service';
 
 const IDENTIFIER_PREFIX = 'infinichat-task-';
 const identifierOf = (id: number) => `${IDENTIFIER_PREFIX}${id}`;

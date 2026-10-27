@@ -1,9 +1,8 @@
 import type { AuthPrompt, LoginOptions, Models } from '@earendil-works/pi-ai';
-
-import { AuthPromptController } from '../src/chat/auth-prompt-controller';
-import type { SignInAttempt } from '../src/pi/infinichat-remote/contract';
-import { OPENAI_PROVIDER_ID } from '../src/pi/openai-auth/core';
-import type { ProviderCredentialStore } from '../src/pi/provider-credentials';
+import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-controller';
+import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { OPENAI_PROVIDER_ID } from '@pi-agent/infinichat/pi/openai-auth/core';
+import type { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
 type Attempt = Exclude<SignInAttempt, null>;
 

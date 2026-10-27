@@ -1,13 +1,15 @@
 import type { OAuthAuth } from '@earendil-works/pi-ai';
+import {
+  OPENAI_DISCOVERY, OPENAI_DYNAMIC_CLIENT_ID, OPENAI_REDIRECT_URI, OPENAI_RESOURCE, OPENAI_SCOPES, requestOpenAIToken,
+  validateOpenAICallback, validateOpenAICredential,
+} from '@pi-agent/infinichat/pi/openai-auth/core';
 import { AccessTokenRequest, AuthRequest, RefreshTokenRequest, ResponseType } from 'expo-auth-session';
 import * as Crypto from 'expo-crypto';
 import * as Linking from 'expo-linking';
 
-import { OPENAI_DISCOVERY, OPENAI_DYNAMIC_CLIENT_ID, OPENAI_REDIRECT_URI, OPENAI_RESOURCE, OPENAI_SCOPES,
-  requestOpenAIToken, validateOpenAICallback, validateOpenAICredential } from './core';
 import { openOpenAIBrowser } from './browser';
 
-export { OPENAI_PROVIDER_ID } from './core';
+export { OPENAI_PROVIDER_ID } from '@pi-agent/infinichat/pi/openai-auth/core';
 
 /** An authorization URL for ChatGPT that returns to the redirect the native receiver serves. */
 function authorizationUrl(value: string): URL {

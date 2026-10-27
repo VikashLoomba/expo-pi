@@ -5,13 +5,15 @@ import { googleProvider } from '@earendil-works/pi-ai/providers/google';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
+import { STORED_CREDENTIALS_ONLY } from '@pi-agent/infinichat/pi/model-auth';
+import type { NewChatDefaults } from '@pi-agent/infinichat/pi/model-catalog';
+import {
+  isPermanentOpenAIAuthError, OPENAI_PROVIDER_ID, validateOpenAICredential,
+} from '@pi-agent/infinichat/pi/openai-auth/core';
+import { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
-import { STORED_CREDENTIALS_ONLY } from './model-auth';
-import type { NewChatDefaults } from './model-catalog';
 import { createNativeOpenAIOAuth } from './openai-auth';
-import { isPermanentOpenAIAuthError, OPENAI_PROVIDER_ID, validateOpenAICredential } from './openai-auth/core';
 import { withNativeWebSearch } from './native-web-search/provider';
-import { ProviderCredentialStore } from './provider-credentials';
 import { createCredentialBackend } from './secure-storage';
 
 /**

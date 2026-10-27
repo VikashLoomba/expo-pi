@@ -2,9 +2,8 @@ import { Button, SecureField, Text, TextField, VStack, useNativeState } from '@e
 import {
   autocorrectionDisabled, disabled as disable, font, foregroundStyle, onSubmit, textInputAutocapitalization,
 } from '@expo/ui/swift-ui/modifiers';
+import type { PendingAuthPrompt } from '@pi-agent/infinichat/chat/auth-prompt-controller';
 import { useState } from 'react';
-
-import type { PendingAuthPrompt } from '@/chat/auth-prompt-controller';
 
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 const MANUAL_INSTRUCTIONS = 'Finish sign-in in your browser, then copy the full address of the final callback page '

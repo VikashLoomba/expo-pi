@@ -8,12 +8,12 @@ import { createHost } from '@earendil-works/chord';
 import { processLock } from '@earendil-works/chord/node';
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 import type { SessionEnd } from '@earendil-works/pi-durable';
+import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
+import { buildModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
+import { validateOpenAICredential } from '@pi-agent/infinichat/pi/openai-auth/core';
+import { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
-import type { InfiniChatPrincipal } from '../src/pi/infinichat-remote/contract';
-import { InfiniChatService } from '../src/pi/infinichat-service';
-import { buildModelCatalog } from '../src/pi/model-catalog';
-import { validateOpenAICredential } from '../src/pi/openai-auth/core';
-import { ProviderCredentialStore } from '../src/pi/provider-credentials';
 import { ServerConversation } from './conversation';
 import { fileCredentialBackend, openAILoginOptions } from './credentials';
 import { serverDevices } from './devices';

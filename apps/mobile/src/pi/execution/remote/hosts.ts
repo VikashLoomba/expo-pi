@@ -1,6 +1,5 @@
 import type { SshHostKey } from '@osuki-dev/react-native-ssh';
-
-import type { CredentialBackend } from '../../provider-credentials';
+import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 
 export type RemoteCredential = Readonly<{ type: 'password'; password: string } |
   { type: 'privateKey'; privateKey: string; passphrase?: string }>;

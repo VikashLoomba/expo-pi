@@ -1,7 +1,7 @@
+import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { ChatMessage } from '@/chat/types';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
 import { MessageImages } from './message-images';

@@ -1,3 +1,4 @@
+import type { ChatModelSettings } from '@pi-agent/infinichat/pi/model-catalog';
 import { router, Stack } from 'expo-router';
 
 import {
@@ -6,7 +7,6 @@ import {
 import { SettingsUnavailable } from '@/components/chat/settings-controls';
 import { InfiniChatSettingsDraftProvider } from '@/components/chat/settings-drafts';
 import { useStackScreenOptions } from '@/hooks/use-stack-screen-options';
-import type { ChatModelSettings } from '@/pi/model-catalog';
 
 /** OptChat has no default model; an unchosen one is shown as such until the user picks it. */
 const unchosen: ChatModelSettings = { model: { provider: '', modelId: '' }, thinkingLevel: 'off' };

@@ -1,9 +1,8 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
 import type { ImageLimits, ImageProcessor, PreparedImage } from '@earendil-works/pi-durable/tools';
+import { DEFAULT_JPEG_QUALITY } from '@pi-agent/infinichat/pi/model-catalog';
 import { File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-
-import { DEFAULT_JPEG_QUALITY } from './model-catalog';
 
 /** Each shrink step while an image is still over the model's byte limit, as pi-durable's Photon processor shrinks. */
 const SHRINK = 0.75;

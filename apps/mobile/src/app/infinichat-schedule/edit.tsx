@@ -1,5 +1,7 @@
 import { Button, DatePicker, Form, Host, Section, Text, TextField, useNativeState } from '@expo/ui/swift-ui';
 import { disabled as disable, lineLimit } from '@expo/ui/swift-ui/modifiers';
+import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
+import type { ScheduledInput } from '@pi-agent/infinichat/pi/infinichat/schedule';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
@@ -7,8 +9,6 @@ import { ActivityIndicator, StyleSheet } from 'react-native';
 import { useChatApp, useScheduledTasks } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { ScheduledTask } from '@/pi/infinichat-scheduled';
-import type { ScheduledInput } from '@/pi/infinichat/schedule';
 
 /** Edits the scheduled task `id` names, as the list showed it; saving or deleting returns to the list. */
 export default function EditScheduledTaskScreen() {

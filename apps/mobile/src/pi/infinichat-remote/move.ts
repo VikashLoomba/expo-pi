@@ -1,4 +1,6 @@
 import type { SshConnection, SshShell } from '@osuki-dev/react-native-ssh';
+import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { apply, diff, pages, type Bytes, type PagePlatform } from '@pi-agent/infinichat/pi/infinichat-remote/pages';
 import { deflateAsync, inflateAsync } from '@strawberrytech/react-native-nitro-zlib';
 import { Buffer } from 'buffer';
 import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
@@ -9,10 +11,8 @@ import { connectionFailure } from '../execution/remote/channel';
 import type { RemoteHostRepository } from '../execution/remote/hosts';
 import { HASH, quotePosix, script } from '../execution/remote/provisioning';
 import type { RemoteInfiniChat } from './client';
-import type { ConversationFiles, ConversationState } from './contract';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
 import { connectAdmitted, NODE, PRINT_MARKER, runScript, SERVER_BUNDLE } from './install';
-import { apply, diff, pages, type Bytes, type PagePlatform } from './pages';
 
 /** The phone's InfiniChat database, which expo-sqlite opens by name. */
 export const INFINICHAT_DATABASE = 'infinichat.db';

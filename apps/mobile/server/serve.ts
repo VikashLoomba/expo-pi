@@ -1,13 +1,13 @@
 import type { Ctx, Host } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
-
 import {
   AccessSchema, ControlsSchema, ConversationSchema, InfiniChatRemote, MessagesSchema, PendingHostKeysSchema,
   ReachSchema, ScheduledSchema, ServerSchema, SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal,
   type InfiniChatServer,
-} from '../src/pi/infinichat-remote/contract';
-import { ModelCatalogSchema, type ModelCatalog } from '../src/pi/model-catalog';
-import type { ProviderCredentialStore } from '../src/pi/provider-credentials';
+} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { ModelCatalogSchema, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
+import type { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
+
 import type { ServerConversation } from './conversation';
 import type { ServerMachines } from './machines';
 import type { ServerSignIn } from './sign-in';

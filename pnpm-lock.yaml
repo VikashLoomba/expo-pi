@@ -28,6 +28,9 @@ importers:
       '@osuki-dev/react-native-ssh':
         specifier: 0.3.0
         version: 0.3.0(react-native-nitro-modules@0.37.1(react-native@0.88.0(@babel/core@7.29.7)(@react-native/metro-config@0.88.0(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0))(react-native@0.88.0(@babel/core@7.29.7)(@react-native/metro-config@0.88.0(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
+      '@pi-agent/infinichat':
+        specifier: workspace:*
+        version: link:../../packages/infinichat
       '@shopify/flash-list':
         specifier: 2.3.2
         version: 2.3.2(@babel/runtime@7.29.7)(react-native@0.88.0(@babel/core@7.29.7)(@react-native/metro-config@0.88.0(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
@@ -188,6 +191,25 @@ importers:
       ws:
         specifier: ^8.22.0
         version: 8.22.0
+
+  packages/infinichat:
+    dependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@earendil-works/pi-ai':
+        specifier: 1.4.0
+        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.29.0)(ws@8.22.0)(zod@3.25.76)
+      '@earendil-works/pi-durable':
+        specifier: 1.4.0
+        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.29.0)(ws@8.22.0)(zod@3.25.76)
+    devDependencies:
+      eslint:
+        specifier: ^9.39.5
+        version: 9.39.5
+      eslint-config-expo:
+        specifier: ~58.0.4
+        version: 58.0.4(eslint@9.39.5)(typescript@6.0.3)
 
 packages:
 

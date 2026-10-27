@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ConversationFiles, ConversationState } from '../src/pi/infinichat-remote/contract';
+import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 
 /**
  * What `~/.infinichat/state.json` keeps across restarts: whether this machine holds the conversation, with the files

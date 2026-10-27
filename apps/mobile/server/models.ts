@@ -5,8 +5,7 @@ import { googleProvider } from '@earendil-works/pi-ai/providers/google';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
-
-import { STORED_CREDENTIALS_ONLY } from '../src/pi/model-auth';
+import { STORED_CREDENTIALS_ONLY } from '@pi-agent/infinichat/pi/model-auth';
 
 /**
  * The providers the phone's `createChatModels` registers, with pi-ai's own auth over this machine's credential store:

@@ -4,7 +4,7 @@ import { backup, DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { gunzip, gzip } from 'node:zlib';
 
-import { apply, diff, pages, type PagePlatform } from '../src/pi/infinichat-remote/pages';
+import { apply, diff, pages, type PagePlatform } from '@pi-agent/infinichat/pi/infinichat-remote/pages';
 
 const node: PagePlatform = {
   sha256: async (bytes) => createHash('sha256').update(bytes).digest(),

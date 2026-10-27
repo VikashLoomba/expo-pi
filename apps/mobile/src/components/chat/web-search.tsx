@@ -1,7 +1,7 @@
+import type { WebSearchCall } from '@pi-agent/infinichat/chat/web-search-types';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { WebSearchCall } from '@/chat/web-search-types';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
 import { openExternalLink } from './source-link';

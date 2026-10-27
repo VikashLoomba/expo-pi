@@ -2,6 +2,7 @@ import {
   Button, ContentUnavailableView, Host, HStack, Image, List, ProgressView, Section, Spacer, Text, VStack,
 } from '@expo/ui/swift-ui';
 import { font, foregroundStyle, lineLimit, listStyle } from '@expo/ui/swift-ui/modifiers';
+import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import { router, Stack } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { PlatformColor, StyleSheet } from 'react-native';
@@ -9,7 +10,6 @@ import { PlatformColor, StyleSheet } from 'react-native';
 import { useChatApp, useScheduledTasks } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { ScheduledTask } from '@/pi/infinichat-scheduled';
 
 // Inside a button, hierarchical styles derive from the tint, so its text takes the label colors explicitly.
 const buttonLabel = foregroundStyle(PlatformColor('label'));

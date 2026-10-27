@@ -1,12 +1,11 @@
 import type { ConversationId } from '@earendil-works/pi-durable';
 import { useNativeState } from '@expo/ui/swift-ui';
+import type { ChatView, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
+import type { ChatExecutionSettings } from '@pi-agent/infinichat/pi/execution/document';
+import type { InfiniChatSettings } from '@pi-agent/infinichat/pi/infinichat-service';
+import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
+import type { ChatModelSettings } from '@pi-agent/infinichat/pi/model-catalog';
 import { createContext, use, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
-
-import type { ChatView, ChatViewSource } from '@/pi/chat-view';
-import type { ChatExecutionSettings } from '@/pi/execution/document';
-import type { InfiniChatSettings } from '@/pi/infinichat-service';
-import type { InfiniChatControls } from '@/pi/infinichat-view';
-import type { ChatModelSettings } from '@/pi/model-catalog';
 
 type ChatSettings = { settings: ChatModelSettings; execution: ChatExecutionSettings };
 /** @expo/ui exports `useNativeState` but not the type of the state it returns. */

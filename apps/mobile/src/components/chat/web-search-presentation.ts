@@ -1,7 +1,7 @@
-import type { WebSearchCall, WebSearchPresentation, WebSearchSource } from '../../chat/web-search-types';
-import { safeSourceUrl } from '../../chat/web-search-url';
+import type { WebSearchCall, WebSearchPresentation, WebSearchSource } from '@pi-agent/infinichat/chat/web-search-types';
+import { safeSourceUrl } from '@pi-agent/infinichat/chat/web-search-url';
 
-export { safeSourceUrl } from '../../chat/web-search-url';
+export { safeSourceUrl } from '@pi-agent/infinichat/chat/web-search-url';
 
 export interface SearchSource extends WebSearchSource {
   number: number;

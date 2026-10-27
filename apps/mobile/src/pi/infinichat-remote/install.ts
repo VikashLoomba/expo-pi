@@ -1,4 +1,5 @@
 import { connect, type SshConnection } from '@osuki-dev/react-native-ssh';
+import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import { Buffer } from 'buffer';
 import { getRandomBytesAsync } from 'expo-crypto';
 
@@ -9,7 +10,6 @@ import { loadPackagedDaemon, type DaemonPlatform } from '../execution/remote/dae
 import { PI_DAEMON_MANIFEST } from '../execution/remote/daemon-manifest';
 import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
 import { HASH, quotePosix, script } from '../execution/remote/provisioning';
-import { machineDescription } from '../infinichat/device-tools';
 import { createCredentialBackend } from '../secure-storage';
 import { loadServerBundle } from './server-assets';
 import { INFINICHAT_SERVER_MANIFEST } from './server-manifest';

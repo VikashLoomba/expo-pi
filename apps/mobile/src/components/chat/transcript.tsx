@@ -1,4 +1,6 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
+import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
+import type { ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { FlashList } from '@shopify/flash-list';
 import { GlassView } from 'expo-glass-effect';
 import { router } from 'expo-router';
@@ -14,8 +16,6 @@ import { useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@/chat/chat-provider';
-import type { ChatMessage } from '@/chat/types';
-import type { ChatViewSource } from '@/pi/chat-view';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { useTranscriptScroll } from '@/hooks/use-transcript-scroll';
 import { ChatIcon, type ChatIconName } from './icon';

@@ -1,6 +1,13 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
 import type { ConversationId, Storage } from '@earendil-works/pi-durable';
+import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-controller';
+import type { ChatControls, ChatMessage } from '@pi-agent/infinichat/chat/types';
+import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
+import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
+import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
+import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
+import type { ProviderAccess, ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
 } from 'react';
@@ -9,7 +16,6 @@ import { AppState } from 'react-native';
 import { KeepAliveController } from '../keep-alive/controller';
 import { createKeepAliveSettings } from '../keep-alive/settings';
 import { DurableChatService, type ChatServiceSnapshot } from '../pi/chat-service';
-import type { ChatView, ChatViewSnapshot, ChatViewSource } from '../pi/chat-view';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
 import { ScheduledTaskNotifications } from '../pi/infinichat-notifications';
@@ -17,20 +23,14 @@ import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phon
 import { RemoteInfiniChat, type RemoteConnection } from '../pi/infinichat-remote/client';
 import { createInfiniChatHome } from '../pi/infinichat-remote/home';
 import { INFINICHAT_DATABASE, InfiniChatMoves } from '../pi/infinichat-remote/move';
-import type { ScheduledTask } from '../pi/infinichat-scheduled';
-import type { InfiniChatControls } from '../pi/infinichat-view';
-import { buildModelCatalog, type ModelCatalog } from '../pi/model-catalog';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
-import type { ProviderAccess, ProviderCredentialStore } from '../pi/provider-credentials';
 import { openExpoSqliteStorage } from '../pi/storage';
 import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
-import { AuthPromptController } from './auth-prompt-controller';
 import { createInfiniChatAvatar } from './infinichat-avatar';
 import type { ProviderAccount } from './provider-account';
 import { ShownInfiniChat } from './shown-infinichat';
-import type { ChatControls, ChatMessage } from './types';
 
 const subscribeNothing = () => () => {};
 const closedService: ChatServiceSnapshot = { chats: [] };
