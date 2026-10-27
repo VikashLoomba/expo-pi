@@ -39,7 +39,8 @@ Nothing moves for the Mac app's dialers or settings yet. They get no caller unti
 
 ### Imports and the lint guard
 
-- Extend the package's lint guard (piece 2): files under `src/node/` may import Node's built-in modules, pi-env and
+- Extend the package's lint guard (piece 2): files under `src/node/` may import Node's built-in modules, pi's Node
+  subpaths (`pi-durable/storage/sqlite/node`, `pi-durable/env/node`, `chord/node`; the guard's Node group), pi-env and
   Photon's WebAssembly. The rest of the package may import neither Node's built-in modules nor anything under `node/`.
 - `machines.ts` imports `@earendil-works/pi-env`, which today is a development dependency of the app, since the app
   bundles the server. Declare it in the package as an optional peer dependency

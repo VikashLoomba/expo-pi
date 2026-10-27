@@ -13,10 +13,14 @@ module.exports = defineConfig([
       'no-restricted-imports': ['error', { patterns: [
         // A group is a gitignore pattern, so a bare `events` would also match `./events`; the slash anchors each name
         // at the start of the specifier, where `/fs` still matches `fs` and `fs/promises`.
-        { group: ['node:*', ...builtinModules.map((name) => `/${name}`)],
+        // pi's host adapters are subpaths of the packages allowed here (`env/node`, `chord/sqlite/node`,
+        // `storage/sqlite/cloudflare`, …), and they resolve from the package's own peers, so they're named too.
+        { group: ['node:*', ...builtinModules.map((name) => `/${name}`), '@earendil-works/**/node',
+          '@earendil-works/pi-ai/bun-oauth', '@earendil-works/pi-env'],
           message: 'Node APIs belong in src/node (piece 5).' },
         { group: ['expo', 'expo-*', 'expo/*', '@expo/*', 'react', 'react-native', 'react-native-*', '@osuki-dev/*',
-          '@shopify/*', '@strawberrytech/*', 'torch-image-playground', 'just-bash', 'just-bash/*', 'ws'],
+          '@shopify/*', '@strawberrytech/*', 'torch-image-playground', 'just-bash', 'just-bash/*', 'ws',
+          '@earendil-works/**/cloudflare', '@earendil-works/pi-durable/storage/indexeddb'],
           message: 'Host APIs stay in the apps.' },
       ] }],
     },
