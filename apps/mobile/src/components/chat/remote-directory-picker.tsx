@@ -10,9 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
-import { RemoteError } from '@/pi/execution/remote/connection';
 import type { RemoteExecution, RemoteFolder, RemoteFolderSearch } from '@/pi/execution/remote/owner';
-import { remoteHostConnectionMessage } from '@/pi/execution/remote/test-host';
 
 export type RemoteFolderState =
   | { status: 'loading' }
@@ -33,10 +31,8 @@ function remoteFailureMessage(error: unknown, fallback: string): string {
     if (error.code === 'not_found') return 'This folder no longer exists on the machine.';
     if (error.code === 'not_directory') return 'This path is a file, not a folder.';
     if (error.code === 'permission_denied') return 'The SSH account cannot read this folder.';
-    const { cause } = error;
-    if (cause instanceof RemoteError) return cause.message;
-    // SSH and bootstrap failures carry codes with sanitized copy; the app's own errors are shown as written.
-    if (cause instanceof Error) return 'code' in cause ? remoteHostConnectionMessage(cause) : cause.message;
+    // A connection that fails to start says why in the app's own text or the SSH failure's sanitized one
+    // (`connectionFailure`), never the native diagnostics.
     return error.message;
   }
   if (error instanceof ExecutionError) {

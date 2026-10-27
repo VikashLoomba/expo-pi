@@ -212,8 +212,12 @@ export class Connection {
       session.ready = true;
       return { info, session };
     } catch (error) {
-      this.#teardown(session, error);
-      throw error;
+      // pi-env marks every start that fails lost (`dist/connection.js:198-215` at v1.4.0): a watcher keeps retrying,
+      // and a caller can tell the connection failed, not the request. The SSH or setup failure stays as the cause.
+      const failure = error instanceof RemoteError ? error
+        : Object.assign(lost(error instanceof Error ? error.message : String(error)), { cause: error });
+      this.#teardown(session, failure);
+      throw failure;
     } finally { clearTimeout(timer); }
   }
 

@@ -1,7 +1,7 @@
 import type { SshHostKey } from '@osuki-dev/react-native-ssh';
 
 import { createSshChannelFactory, type SshSetupStage } from './channel';
-import { Connection } from './connection';
+import { Connection, RemoteError } from './connection';
 import { matchesHostKey, type RemoteHost, type RemoteHostRepository } from './hosts';
 
 export interface HostKeyChallenge {
@@ -18,7 +18,7 @@ export interface RemoteHostTestOptions {
 export interface RemoteHostTestResult { version: string; os: string; arch: string; home: string }
 
 /** Stable, sanitized user feedback. Never display native errors containing secret input or remote stderr. */
-export function remoteHostConnectionMessage(error: unknown): string {
+function remoteHostConnectionMessage(error: unknown): string {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   if (code === 'AUTH_FAILED') return 'SSH authentication failed. Check the SSH username and password or private key in this machine’s settings.';
   if (code === 'KEY') return 'The SSH private key could not be unlocked. Check the key format and passphrase.';
@@ -84,7 +84,8 @@ export async function testRemoteHost(repository: RemoteHostRepository, id: strin
   } catch (error) {
     if (trustFailure) throw trustFailure;
     if (options.signal.aborted) throw Object.assign(new Error('Remote connection cancelled.'), { code: 'aborted' });
-    throw new Error(remoteHostConnectionMessage(error));
+    // A start that fails is lost, as pi-env marks it; the SSH or setup failure it keeps has the code.
+    throw new Error(remoteHostConnectionMessage(error instanceof RemoteError && error.cause ? error.cause : error));
   } finally {
     options.signal.removeEventListener('abort', abort);
     await connection.close();

@@ -1,6 +1,5 @@
 import { err, FileError, type Result } from "@earendil-works/pi-durable/env";
 import { RemoteError } from "./connection";
-import { BootstrapError } from "./bootstrap-errors";
 
 export function abortResult<T>(signal: AbortSignal | undefined, path?: string): Result<T, FileError> | undefined {
 	return signal?.aborted ? err(new FileError("aborted", "aborted", path)) : undefined;
@@ -9,12 +8,6 @@ export function abortResult<T>(signal: AbortSignal | undefined, path?: string): 
 /** `NodeExecutionEnv`'s mapping of Node error codes to `FileError` codes. */
 export function toFileError(error: unknown, fallbackPath?: string): FileError {
 	if (error instanceof FileError) return error;
-	if (error instanceof BootstrapError && error.code === 'UNSUPPORTED_REMOTE') {
-		return new FileError('not_supported', error.message, fallbackPath, error);
-	}
-	if (error instanceof BootstrapError && error.code === 'CANCELLED') {
-		return new FileError('aborted', error.message, fallbackPath, error);
-	}
 	if (!(error instanceof RemoteError)) {
 		const cause = error instanceof Error ? error : new Error(String(error));
 		return new FileError("unknown", cause.message, fallbackPath, cause);

@@ -228,7 +228,8 @@ the hash function). The doc names no steps, so it is one commit. `git` records `
 Together 1,458 lines where there were 1,314, against the plan's "about as many": the marker streaming and the
 reconnects went (about 90 lines), and the seams' interfaces (about 65), the chunked copies (about 50) and the install
 upload's three steps took their place. The review's fixes added about 25 (the connection owner's `lost` test and the
-removal of the page commands' own files); the daemon channel's queue (below) adds 32 lines to `channel.ts`.
+removal of the page commands' own files); the daemon channel's queue (below) adds 32 lines to `channel.ts`. The second
+round's fix (a daemon that fails to start is a lost connection, below) takes 6 lines out of the remote port.
 
 What differs from the plan:
 
@@ -278,8 +279,11 @@ What differs from the plan:
 - **The 300 s upload timeout is a deadline on the write.** `writeFile` takes no timeout, so the context aborts after
   `UPLOAD_TIMEOUT_MS` (`AbortSignal.timeout`, which React Native 0.88 has); the verify-and-rename command keeps 60 s.
   Copies have none, other commands 60 s, as before.
-- **The install reports `checking` after detecting the system.** `connecting` covers the first command, where a lazily
-  connected environment connects; the screen shows "Connecting to …" for both.
+- **The install reports `checking` after detecting the system.** `connecting` is reported before the first command.
+  On the phone the environment has already connected by then (owner.ts's `environment` awaits `connection.info()` for
+  the cwd, and the client's stageless `connecting` keeps "Connecting to …" on screen meanwhile); pi-env's
+  `RemoteExecutionEnv` connects at that first command. The screen shows "Connecting to …" for `connecting` and
+  `checking` alike.
 - **`TRANSFER` stays**, as the local file a downloaded patch goes through (`DatabaseFiles.open`). `DatabaseFiles.fold`
   does nothing when the database isn't there, the check `phoneFiles` made before folding, since opening would create it.
 - **Messages.** The device's name in the moves' messages comes from the app ("this iPhone"), capitalized where a
@@ -295,6 +299,22 @@ What differs from the plan:
   `lost(error)` test from the connection's owner; the phone's is `remote.lost` in `owner.ts`,
   `isConnectionLost(error.cause)` over the port's own `isConnectionLost`, and the Mac's would be pi-env's. A failed
   read in a download keeps "The SSH connection closed before the copy was complete." Remote text never reaches one.
+- **A daemon that fails to start is a lost connection on the phone too.** pi-env marks every failed start `lost: true`
+  (`dist/connection.js:198-200`, `:213-215`: a failing `command()`, a spawn error, an early exit, the start timeout),
+  and `docs/protocol.md` ("Liveness") fails a lost connection's requests with `{ code: "unknown", lost: true }`. The
+  port's `Connection` rejected a failed start with the SSH or setup error itself, so a file operation that was the first
+  to find the connection gone, and couldn't reconnect, showed the step's message. Its `#start` now rejects with a
+  lost-marked `RemoteError` (code `unknown`) that carries that error's message, so whatever shows the message shows
+  the same text, and keeps the error itself as the `cause`. What follows:
+  - The Remote machines test reads the cause's code, so its messages are the same as before.
+  - The port's `toFileError` loses its two `BootstrapError` branches and now matches pi-env's. A setup failure no
+    longer reaches it directly, and a cancelled setup never did: `Connection` aborts a start only while tearing it
+    down, and that teardown's error has already settled the start. A chat on a machine the setup doesn't support gets
+    `unknown` instead of `not_supported`, with the same message, as pi-env reports it.
+  - The folder picker shows a `FileError`'s message without looking at its cause. A failed start's message is the
+    channel's sanitized SSH text or the app's own, as the picker already showed when `environment()` failed.
+  - The remote watcher (`watch.ts`, pi-env's `RemoteWatcher`) keeps retrying while the machine can't be reached, as
+    pi-env's does. Before, its first failed restart ended it with an error.
 - **The phone's SSH helpers shrank back.** `quotePosix` and `HASH` are the package's own in `machine.ts`, as pi-env
   keeps its own in `ssh.ts` and the port its own in `provisioning.ts`. The exports only the install used (`HASH`,
   `script`) are private again, and `runSshCommand`'s `onWritten` and `null` timeout, which only the moves used, are
@@ -371,16 +391,25 @@ Checks:
   - `fileFailure` with pi-env's `isConnectionLost(error.cause)`: removing a folder that isn't empty (`unknown`) gives
     the step's message; a 512 MiB write cut by killing the daemon (`unknown`, the cause marked lost) and a write past
     its deadline (`aborted`) give the connection message; a cancelled write throws the `AbortError`.
+- After the second round's fix: lint, typecheck, server typecheck, the iOS export with the same files and store
+  directories, and `--check` passing on the unchanged asset (the server imports none of the changed files). A probe of
+  the port's `Connection` with a stand-in channel, bundled with esbuild and run on Node 25.6.1 (expo-crypto's
+  `getRandomValues` from Node's): a start failing with an SSH error (`CONNECT`) or a `BootstrapError` rejects with a
+  lost `RemoteError` that carries its message and keeps it as the `cause`; `toFileError` gives `unknown` with that
+  message and the owner's `lost` test is true, so `fileFailure` gives the connection message; the next request starts
+  again; a daemon's `ENOENT` and a closed connection aren't lost; a watcher whose connection drops keeps retrying while
+  restarts fail and reports `overflow` once one succeeds. At `f0d08b8` the same probe got the SSH error itself, not
+  lost, and the watcher ended with an error at its first failed restart.
 
 Unverified: nothing ran on a device, nothing ran over SSH to a real machine, and the systemd and detached paths ran
 nowhere. By source assessment only: the phone's port in place of pi-env's client, the first connect after a long
 background (owner.ts's daemon connection has to notice it was lost before the dial's check uses it; its silence timer
 does that at the first tick after the app resumes), a force-quit's leftover file, the daemon channel's queue for
 `QUEUE_FULL` (react-native-ssh doesn't run in Node), and the phone's `remote.lost` (Hermes keeping `FileError`'s
-`cause`, which `client.ts` already relies on for Chord's errors). The phone port reports a daemon that fails to start
-again by its SSH error, which isn't marked lost as pi-env marks its own, so a file operation that is the first to find
-the connection gone and can't reconnect shows the step's message; a lost connection mid-operation is marked. Device
-checks, on the iPhone Release install with the database backed up:
+`cause`, which `client.ts` already relies on for Chord's errors), and the port's failed start marked lost with real
+SSH and setup failures (react-native-ssh doesn't run in Node; the `cause` is an own property set by `Object.assign`,
+so it doesn't depend on Hermes supporting `Error`'s `cause` option). Device checks, on the iPhone Release install with
+the database backed up:
 
 - A server install: the bundle is unchanged, so force one: on vikash-system stop the service
   (`systemctl --user stop infinichat`) and remove `~/.infinichat/server/<bundle>`, then open InfiniChat. The phone
@@ -397,6 +426,8 @@ checks, on the iPhone Release install with the database backed up:
 - During a move there that sends the whole file, have a chat whose tools run on vikash-system write a file of a few
   MiB: both finish, and neither shows a lost connection.
 - With Tailscale off during a move's copy, the move's failure names the connection ("Check Tailscale"), not disk space.
+- In Remote machines, test vikash-system with Tailscale off: the message names Tailscale, as before the failed start
+  was marked lost.
 - After those, `ls -a ~/.infinichat ~/.infinichat/data/incoming ~/.infinichat/copy` on the machine shows no `.pages.*`,
   `.patch.*`, `.secret.*` or `.service.*` files and no `infinichat.db.<pid>` asides, except after a force-quit
   mid-copy.
