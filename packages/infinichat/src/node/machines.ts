@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -13,15 +13,21 @@ import { MACHINE_WORK, machineDescription, type Device } from '../pi/infinichat/
 
 const noop = () => {};
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-/** What a check found of a machine holds while its endpoint and the key the client pinned stay the same. */
-const checked = (machine: Machine) => JSON.stringify([endpoint(machine), machine.hostKey?.fingerprint ?? null]);
+/**
+ * What a check found of a machine holds while its endpoint, the key the client pinned and the keys it authorized there
+ * stay the same.
+ */
+const checked = (machine: Machine) => JSON.stringify([endpoint(machine), machine.hostKey?.fingerprint ?? null,
+  [...(machine.authorizedKeys ?? [])].sort()]);
 const without = <T>(record: Readonly<Record<string, T>>, id: string): Record<string, T> =>
   Object.fromEntries(Object.entries(record).filter(([key]) => key !== id));
 
 const isMachine = (value: unknown): value is Machine => isRecord(value)
   && typeof value.name === 'string' && typeof value.hostname === 'string' && typeof value.port === 'number'
   && typeof value.username === 'string' && (value.hostKey === undefined || (isRecord(value.hostKey)
-    && typeof value.hostKey.algorithm === 'string' && typeof value.hostKey.fingerprint === 'string'));
+    && typeof value.hostKey.algorithm === 'string' && typeof value.hostKey.fingerprint === 'string'))
+  && (value.authorizedKeys === undefined || (Array.isArray(value.authorizedKeys)
+    && value.authorizedKeys.every((key: unknown) => typeof key === 'string')));
 
 type Lists = Readonly<Record<string, readonly Machine[]>>;
 
@@ -80,11 +86,14 @@ export class ServerMachines {
   private closed = false;
   private readonly file: string;
   private readonly knownHosts: string;
+  /** The InfiniChat key the phone gave this machine (the app's `ssh-keys.ts`), once it has. */
+  private readonly identity: string;
 
   /** `self` names this machine in messages. */
   constructor(home: string, private readonly self: string) {
     this.file = join(home, 'machines.json');
     this.knownHosts = join(home, 'known_hosts');
+    this.identity = join(home, 'ssh', 'id_ed25519');
     this.lists = readLists(this.file);
     this.machines = merged(this.lists);
   }
@@ -170,12 +179,15 @@ export class ServerMachines {
   }
 
   /**
-   * How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its endpoint,
-   * lowercased because ssh writes a `HostKeyAlias` that way and pi-env's `acceptHostKey` compares it exactly.
+   * How this machine's `ssh` reaches it: with its InfiniChat key alone when it has one, so personal keys and agents
+   * stay out of it (pi-env sets `IdentitiesOnly` with `identityFile`), checking the host key against the keys trusted
+   * here under its endpoint, lowercased because ssh writes a `HostKeyAlias` that way and pi-env's `acceptHostKey`
+   * compares it exactly.
    */
   private target(machine: Machine): SshTarget {
     return { host: machine.hostname, port: machine.port, user: machine.username, knownHostsFile: this.knownHosts,
-      hostKeyAlias: endpoint(machine).toLowerCase() };
+      hostKeyAlias: endpoint(machine).toLowerCase(),
+      ...(existsSync(this.identity) ? { identityFile: this.identity } : {}) };
   }
 
   /** Its daemon starts through the login shell, so the tools see the PATH the account's profile sets up there. */

@@ -125874,7 +125874,7 @@ function serverDevices(name, description, machines) {
 
 // ../../packages/infinichat/src/node/machines.ts
 init_define_INFINICHAT_PI();
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync as existsSync2, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join as join5 } from "node:path";
 
 // ../../node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/index.js
@@ -130815,7 +130815,8 @@ var MachineSchema = typebox_exports.Object({
   hostname: typebox_exports.String(),
   port: typebox_exports.Number(),
   username: typebox_exports.String(),
-  hostKey: typebox_exports.Optional(HostKeySchema)
+  hostKey: typebox_exports.Optional(HostKeySchema),
+  authorizedKeys: typebox_exports.Optional(typebox_exports.Array(typebox_exports.String()))
 });
 var machineEndpoint = ({ username, hostname, port }) => `${username}@${hostname}:${port}`;
 var ReachSchema = typebox_exports.Record(typebox_exports.String(), typebox_exports.Union([
@@ -130918,9 +130919,13 @@ var InfiniChatRemote = remote("infinichat.remote", {
 var noop4 = () => {
 };
 var isRecord3 = (value) => typeof value === "object" && value !== null;
-var checked = (machine) => JSON.stringify([machineEndpoint(machine), machine.hostKey?.fingerprint ?? null]);
+var checked = (machine) => JSON.stringify([
+  machineEndpoint(machine),
+  machine.hostKey?.fingerprint ?? null,
+  [...machine.authorizedKeys ?? []].sort()
+]);
 var without = (record2, id) => Object.fromEntries(Object.entries(record2).filter(([key2]) => key2 !== id));
-var isMachine = (value) => isRecord3(value) && typeof value.name === "string" && typeof value.hostname === "string" && typeof value.port === "number" && typeof value.username === "string" && (value.hostKey === void 0 || isRecord3(value.hostKey) && typeof value.hostKey.algorithm === "string" && typeof value.hostKey.fingerprint === "string");
+var isMachine = (value) => isRecord3(value) && typeof value.name === "string" && typeof value.hostname === "string" && typeof value.port === "number" && typeof value.username === "string" && (value.hostKey === void 0 || isRecord3(value.hostKey) && typeof value.hostKey.algorithm === "string" && typeof value.hostKey.fingerprint === "string") && (value.authorizedKeys === void 0 || Array.isArray(value.authorizedKeys) && value.authorizedKeys.every((key2) => typeof key2 === "string"));
 function readLists(file) {
   let text;
   try {
@@ -130948,6 +130953,7 @@ var ServerMachines = class {
     this.self = self2;
     this.file = join5(home, "machines.json");
     this.knownHosts = join5(home, "known_hosts");
+    this.identity = join5(home, "ssh", "id_ed25519");
     this.lists = readLists(this.file);
     this.machines = merged(this.lists);
   }
@@ -130965,6 +130971,8 @@ var ServerMachines = class {
   closed = false;
   file;
   knownHosts;
+  /** The InfiniChat key the phone gave this machine (the app's `ssh-keys.ts`), once it has. */
+  identity;
   subscribe = (listener) => {
     this.listeners.add(listener);
     return () => {
@@ -131039,8 +131047,10 @@ var ServerMachines = class {
     for (const key2 of [...this.connections.keys()]) this.drop(key2);
   }
   /**
-   * How this machine's `ssh` reaches it, checking its host key against the keys trusted here under its endpoint,
-   * lowercased because ssh writes a `HostKeyAlias` that way and pi-env's `acceptHostKey` compares it exactly.
+   * How this machine's `ssh` reaches it: with its InfiniChat key alone when it has one, so personal keys and agents
+   * stay out of it (pi-env sets `IdentitiesOnly` with `identityFile`), checking the host key against the keys trusted
+   * here under its endpoint, lowercased because ssh writes a `HostKeyAlias` that way and pi-env's `acceptHostKey`
+   * compares it exactly.
    */
   target(machine) {
     return {
@@ -131048,7 +131058,8 @@ var ServerMachines = class {
       port: machine.port,
       user: machine.username,
       knownHostsFile: this.knownHosts,
-      hostKeyAlias: machineEndpoint(machine).toLowerCase()
+      hostKeyAlias: machineEndpoint(machine).toLowerCase(),
+      ...existsSync2(this.identity) ? { identityFile: this.identity } : {}
     };
   }
   /** Its daemon starts through the login shell, so the tools see the PATH the account's profile sets up there. */
@@ -132701,7 +132712,7 @@ async function openNodeSqliteStorage(path6, options = {}) {
 // ../../packages/infinichat/src/node/database-files.ts
 init_define_INFINICHAT_PI();
 import { createHash as createHash4 } from "node:crypto";
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync3 } from "node:fs";
 import { readFile as readFile6, rename as rename4, writeFile as writeFile5 } from "node:fs/promises";
 import { backup, DatabaseSync as DatabaseSync2 } from "node:sqlite";
 import { promisify as promisify2 } from "node:util";
@@ -132732,7 +132743,7 @@ var nodeDatabaseFiles = {
    * can't.
    */
   async fold(path6) {
-    if (!existsSync2(path6)) return;
+    if (!existsSync3(path6)) return;
     const database = new DatabaseSync2(path6, { timeout: 5e3 });
     try {
       if (database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()?.busy !== 0) {

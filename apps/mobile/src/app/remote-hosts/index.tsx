@@ -165,6 +165,17 @@ export default function RemoteHostsScreen() {
       setBusy(undefined);
     }
   };
+  /** What lets the machine InfiniChat runs on into `host`: its InfiniChat key, which Test connection exchanges. */
+  const keyHint = (host: RemoteHost) => {
+    if (!infiniChatHost) return null;
+    const key = infiniChatHost.publicKey;
+    const hint = key === undefined
+      ? `Test connection on ${infiniChatHost.name} first, so this phone learns its InfiniChat key.`
+      : host.authorizedKeys?.includes(key) ? undefined
+        : `Test connection here authorizes ${infiniChatHost.name}’s InfiniChat key on ${host.name}.`;
+    return hint === undefined ? null
+      : <Text modifiers={[secondary, font({ textStyle: 'footnote' })]}>{hint}</Text>;
+  };
   /** Whether the machine InfiniChat runs on reaches `host`, and the host key it waits to have accepted there. */
   const reachFromInfiniChat = (host: RemoteHost) => {
     const reaches = infiniChat?.reach;
@@ -182,6 +193,7 @@ export default function RemoteHostsScreen() {
       </LabeledContent>
       {waiting === undefined && reach !== undefined && !reach.reachable && <Text
         modifiers={[secondary, font({ textStyle: 'footnote' }), textSelection(true)]}>{reach.error}</Text>}
+      {waiting === undefined && reach !== undefined && !reach.reachable && keyHint(host)}
       {waiting !== undefined && <>
         <Text modifiers={[secondary]}>
           {`Compare this fingerprint with the SSH server’s host key using a trusted source before ${from} `
@@ -277,7 +289,9 @@ export default function RemoteHostsScreen() {
         <Section footer={<Text>
           SSH over Tailscale connects to the machine’s existing SSH server. Keep Tailscale connected on your phone and
           the machine. Pi prepares remote execution when you test or connect, and each chat chooses where its tools
-          run. Your chat and model connection stay on this phone.
+          run. Testing a machine also gives it an InfiniChat SSH key and authorizes the other machines’ keys there, so
+          InfiniChat reaches your machines from whichever one it runs on. Your chat and model connection stay on this
+          phone.
         </Text>}>
           {!snapshot.ready && <Text modifiers={[secondary]}>Loading saved machines…</Text>}
           {snapshot.ready && !snapshot.hosts.length && !snapshot.error && <Text modifiers={[secondary]}>

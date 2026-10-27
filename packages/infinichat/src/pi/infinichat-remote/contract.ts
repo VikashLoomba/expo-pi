@@ -59,12 +59,13 @@ export type ConversationState = Static<typeof ConversationSchema>;
 /** An SSH host key as Remote machines shows it: its algorithm and OpenSSH's `SHA256:` fingerprint. */
 const HostKeySchema = Type.Object({ algorithm: Type.String(), fingerprint: Type.String() });
 /**
- * Another configured machine, which the server's tools reach with the server's own SSH (pi-env), and the host key the
- * client pinned for it, if any. Never its credentials.
+ * Another configured machine, which the server's tools reach with the server's own SSH (pi-env), the host key the
+ * client pinned for it, if any, and the machines' InfiniChat keys the client authorized there (the app's
+ * `ssh-keys.ts`), as `authorized_keys` matches them: a change is worth another check. Never its credentials.
  */
 export const MachineSchema = Type.Object({
   name: Type.String(), hostname: Type.String(), port: Type.Number(), username: Type.String(),
-  hostKey: Type.Optional(HostKeySchema),
+  hostKey: Type.Optional(HostKeySchema), authorizedKeys: Type.Optional(Type.Array(Type.String())),
 });
 export type Machine = Static<typeof MachineSchema>;
 /** What the server knows a machine by, whichever client lists it: `username@hostname:port`. */

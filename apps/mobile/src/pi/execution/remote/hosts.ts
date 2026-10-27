@@ -15,8 +15,13 @@ export interface RemoteHost {
   readonly username: string;
   readonly credentialRef: string;
   readonly credentialType: RemoteCredential['type'];
+  /** The machine's own InfiniChat SSH key, as `ssh-keys.ts` read it: its type and base64, without a comment. */
+  readonly publicKey?: string;
+  /** The other machines' InfiniChat keys this phone authorized there, in the same form. */
+  readonly authorizedKeys?: readonly string[];
 }
-export type RemoteHostInput = Omit<RemoteHost, 'id' | 'namespaceId' | 'credentialRef' | 'credentialType'> & { id?: string };
+export type RemoteHostInput = Omit<RemoteHost, 'id' | 'namespaceId' | 'credentialRef' | 'credentialType' | 'publicKey'
+  | 'authorizedKeys'> & { id?: string };
 export interface RemoteHostAdmission {
   readonly host: RemoteHost;
   readonly auth: RemoteCredential;
@@ -34,6 +39,14 @@ interface SecretRecord { version: 1; auth: RemoteCredential; trustedHostKey?: Ss
 export const PHONE_DEVICE = 'phone';
 const INDEX_KEY = 'pi.remote-hosts.v1';
 const CREDENTIAL_REF = /^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/;
+
+/** An OpenSSH public key as `authorized_keys` matches it: its type and base64, with no comment. */
+export const isSshKeyBlob = (value: unknown): value is string =>
+  typeof value === 'string' && /^[a-z][a-z0-9@.-]* [A-Za-z0-9+/]+={0,2}$/.test(value);
+/** A machine's InfiniChat keys, which stay with its account on its endpoint. */
+const keysOf = ({ publicKey, authorizedKeys }: RemoteHost) => ({
+  ...(publicKey === undefined ? {} : { publicKey }), ...(authorizedKeys === undefined ? {} : { authorizedKeys }),
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -84,14 +97,20 @@ export function matchesHostKey(trusted: Readonly<SshHostKey> | undefined, observ
 
 function storedHost(value: unknown): RemoteHost {
   if (!isRecord(value)) throw new Error();
-  const { id, namespaceId, credentialRef, credentialType, name, hostname, port, username } = value;
+  const { id, namespaceId, credentialRef, credentialType, name, hostname, port, username, publicKey, authorizedKeys }
+    = value;
   if (typeof id !== 'string' || !id || typeof namespaceId !== 'string' || !namespaceId ||
       typeof credentialRef !== 'string' || !CREDENTIAL_REF.test(credentialRef) ||
       (credentialType !== 'password' && credentialType !== 'privateKey') ||
       typeof name !== 'string' || typeof hostname !== 'string' || typeof port !== 'number' ||
       typeof username !== 'string') throw new Error();
+  if (publicKey !== undefined && !isSshKeyBlob(publicKey)) throw new Error();
+  if (authorizedKeys !== undefined && (!Array.isArray(authorizedKeys) || !authorizedKeys.every(isSshKeyBlob))) {
+    throw new Error();
+  }
   return Object.freeze({ ...validateRemoteHost({ name, hostname, port, username }), id, namespaceId, credentialRef,
-    credentialType });
+    credentialType, ...(publicKey === undefined ? {} : { publicKey }),
+    ...(authorizedKeys === undefined ? {} : { authorizedKeys: Object.freeze([...authorizedKeys]) }) });
 }
 function hostIndex(raw: string): HostIndex {
   const parsed: unknown = JSON.parse(raw);
@@ -252,7 +271,9 @@ export class RemoteHostRepository {
       if (!nextAuth) throw new Error('Enter an SSH password or private key.');
       return this.replace({ ...settings, id: previous?.id ?? this.createId(),
         namespaceId: sameEndpoint && previous?.username === settings.username ? previous.namespaceId : this.createId(),
-        credentialRef: '', credentialType: nextAuth.type }, { version: 1, auth: nextAuth,
+        credentialRef: '', credentialType: nextAuth.type,
+        ...(sameEndpoint && previous?.username === settings.username ? keysOf(previous) : {}) },
+      { version: 1, auth: nextAuth,
         ...(sameEndpoint && current?.trustedHostKey ? { trustedHostKey: current.trustedHostKey } : {}) });
     });
   }
@@ -265,6 +286,28 @@ export class RemoteHostRepository {
       const secret = await this.readSecret(host);
       if (matchesHostKey(secret.trustedHostKey, accepted)) return host;
       return this.replace({ ...host, namespaceId: this.createId() }, { ...secret, trustedHostKey: accepted });
+    });
+  }
+  /**
+   * Keeps the key `ssh-keys.ts` gave the machine and the others' keys it authorized there; a repeat changes nothing.
+   * The keys live with the account on the machine, so a credential or host key replaced meanwhile, as a first test
+   * accepting the host key does, doesn't lose them.
+   */
+  setKeys(expectedHost: RemoteHost,
+    keys: { publicKey: string; authorizedKeys: readonly string[] }): Promise<RemoteHost> {
+    const expected = { ...expectedHost };
+    const next = { publicKey: keys.publicKey, authorizedKeys: Object.freeze([...keys.authorizedKeys].sort()) };
+    return this.enqueue(async () => {
+      await this.load();
+      const host = this.requireHost(expected.id);
+      if (host.hostname !== expected.hostname || host.port !== expected.port || host.username !== expected.username) {
+        throw new Error('This machine changed. Test it again.');
+      }
+      if (host.publicKey === next.publicKey
+        && JSON.stringify(host.authorizedKeys) === JSON.stringify(next.authorizedKeys)) return host;
+      const updated = Object.freeze({ ...host, ...next });
+      await this.commit({ ...this.index, hosts: this.index.hosts.map((item) => item.id === host.id ? updated : item) });
+      return updated;
     });
   }
   forgetHostKey(expectedHost: RemoteHost): Promise<RemoteHost> {

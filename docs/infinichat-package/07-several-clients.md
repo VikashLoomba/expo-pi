@@ -133,6 +133,13 @@ since the doc names no steps. What differs from the plan:
   at start. A machine keeps its unused `~/.infinichat/secret`.
 - **Host keys on the server are stored under the endpoint**, not the phone's machine ID, so a key the phone pinned is
   accepted again by itself, and one accepted only on the server waits for a client once more.
+- **Machines reach each other with InfiniChat keys the phone exchanges** (2026-10-27, after the owner found a
+  `Permission denied` from the server's own `ssh` to a Mac on the same tailnet "silly"). At every connection to a
+  machine, the phone's `ssh-keys.ts` gives it `~/.infinichat/ssh/id_ed25519`, authorizes the other machines' keys in
+  its `authorized_keys` as `ssh-copy-id` does, and keeps the public keys on the machine's record (`publicKey`,
+  `authorizedKeys`). `MachineSchema` carries `authorizedKeys`, so a change re-checks the machine; `ServerMachines`
+  passes the key as pi-env's `identityFile` (`IdentitiesOnly`), so personal keys and agents stay out of it. Passwords
+  still never leave the phone; a machine running Tailscale SSH needs none of this.
 - The client ID is `pi.infinichat.client.v1` in kv-store and the name is expo-device's `deviceName` ("iPhone" on
   iOS 16 and later without the entitlement). Removal removes this phone's file only where it has a secret, so a
   machine never used for InfiniChat isn't connected to. The bundle is 8,355,444 bytes, SHA-256 `0d1897ad…3f8432`.

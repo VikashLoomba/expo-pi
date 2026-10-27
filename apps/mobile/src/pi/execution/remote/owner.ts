@@ -5,14 +5,16 @@ import { Connection } from './connection';
 import { MobileRemoteExecutionEnv } from './environment';
 import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from './hosts';
 import type { RemotePlatformState } from './provisioning';
+import { machineKeyExchange, type KeyExchange } from './ssh-keys';
 
-function admittedSshChannel(admission: RemoteHostAdmission, platform: RemotePlatformState): DaemonChannelFactory {
+function admittedSshChannel(admission: RemoteHostAdmission, platform: RemotePlatformState,
+  keys: KeyExchange): DaemonChannelFactory {
   const { host, auth, trustedHostKey } = admission;
   if (!trustedHostKey) {
     throw new Error('Test this machine in Remote machines and verify its SSH host key before running tools.');
   }
   return createSshChannelFactory({ host: host.hostname, port: host.port, username: host.username,
-    auth, platform, hostKeyAlgorithms: [trustedHostKey.algorithm],
+    auth, platform, keys, hostKeyAlgorithms: [trustedHostKey.algorithm],
     verifyHostKey: (observed) => matchesHostKey(trustedHostKey, observed) });
 }
 
@@ -60,7 +62,10 @@ export function createRemoteExecution(hosts: RemoteHostRepository) {
         const platform: RemotePlatformState = {};
         // Like pi-env's `command`, each start reads the machine's current credentials and trusted key.
         connection = new Connection({
-          openChannel: async (options) => admittedSshChannel(await hosts.admit(machineId), platform)(options),
+          openChannel: async (options) => {
+            const admission = await hosts.admit(machineId);
+            return admittedSshChannel(admission, platform, machineKeyExchange(hosts, admission.host))(options);
+          },
         });
         connections.set(machineId, connection);
       }

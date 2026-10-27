@@ -125,7 +125,7 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
 
 /**
  * The machine as Remote machines lists it, and the other configured machines, each with the host key this phone
- * pinned for it, never their credentials.
+ * pinned for it and the InfiniChat keys it authorized there, never their credentials.
  */
 export function phoneMachines(hosts: RemoteHostRepository, machineId: string): MachineDirectory {
   return {
@@ -134,13 +134,14 @@ export function phoneMachines(hosts: RemoteHostRepository, machineId: string): M
     others: async () => {
       const others = hosts.getSnapshot().hosts.filter((host) => host.id !== machineId);
       const machines = await Promise.all(others.map(async (host): Promise<Machine[]> => {
-        const { id, name, hostname, port, username } = host;
+        const { id, name, hostname, port, username, authorizedKeys } = host;
         // A pin that can't be read is left out, so that machine's key waits for this phone; one removed meanwhile
         // is left out entirely.
         const pinned = await hosts.admit(id).then(({ trustedHostKey }) => trustedHostKey, () => null);
         if (pinned === null && hosts.get(id) === undefined) return [];
         return [{ name, hostname, port, username,
-          ...(pinned ? { hostKey: { algorithm: pinned.algorithm, fingerprint: pinned.fingerprint } } : {}) }];
+          ...(pinned ? { hostKey: { algorithm: pinned.algorithm, fingerprint: pinned.fingerprint } } : {}),
+          ...(authorizedKeys === undefined ? {} : { authorizedKeys: [...authorizedKeys] }) }];
       }));
       return machines.flat();
     },

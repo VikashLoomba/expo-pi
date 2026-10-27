@@ -3,6 +3,7 @@ import type { SshHostKey } from '@osuki-dev/react-native-ssh';
 import { createSshChannelFactory, type SshSetupStage } from './channel';
 import { Connection, RemoteError } from './connection';
 import { matchesHostKey, type RemoteHost, type RemoteHostRepository } from './hosts';
+import { machineKeyExchange } from './ssh-keys';
 
 export interface HostKeyChallenge {
   readonly host: RemoteHost;
@@ -37,6 +38,14 @@ function remoteHostConnectionMessage(error: unknown): string {
   if (code === 'DAEMON_SETUP') return 'Remote execution could not be set up. Check that the SSH account can write to its home directory, then try again.';
   if (code === 'DAEMON_UPLOAD') return 'Remote execution software could not be transferred. Check the connection and available space on the machine, then try again.';
   if (code === 'DAEMON_VERIFY') return 'The remote execution software could not be verified. The machine needs sha256sum, shasum, or openssl for SHA-256 verification.';
+  if (code === 'SSH_KEYS') {
+    return 'The machine’s InfiniChat SSH key could not be set up. Check that ssh-keygen is available there and that '
+      + 'the SSH account can write to its home directory.';
+  }
+  if (code === 'AUTHORIZED_KEYS') {
+    return 'The SSH account can neither write nor read its ~/.ssh/authorized_keys on the machine, so the other '
+      + 'machines’ keys can’t be authorized there. Make that file the account’s own, then test again.';
+  }
   return 'Remote execution could not be prepared or verified. Check the connection and try again.';
 }
 
@@ -51,7 +60,7 @@ export async function testRemoteHost(repository: RemoteHostRepository, id: strin
   let trustFailure: Error | undefined;
   const connection = new Connection({
     openChannel: createSshChannelFactory({
-      host: host.hostname, port: host.port, username: host.username, auth,
+      host: host.hostname, port: host.port, username: host.username, auth, keys: machineKeyExchange(repository, host),
       // The connect timeout spans `verifyHostKey`, which waits here for the person comparing the fingerprint.
       connectTimeoutMs: 120_000,
       onProgress: options.onProgress,
