@@ -1,4 +1,5 @@
 import { connect, type SshConnection } from '@osuki-dev/react-native-ssh';
+import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import { Buffer } from 'buffer';
 import { getRandomBytesAsync } from 'expo-crypto';
@@ -13,8 +14,6 @@ import { HASH, quotePosix, script } from '../execution/remote/provisioning';
 import { createCredentialBackend } from '../secure-storage';
 import { loadServerBundle } from './server-assets';
 import { INFINICHAT_SERVER_MANIFEST } from './server-manifest';
-
-export type InstallStage = 'connecting' | 'checking' | 'uploading' | 'starting';
 
 /** The name of this app's bundle on a machine, its directory there: the first 32 hex digits of its SHA-256. */
 export const SERVER_BUNDLE = INFINICHAT_SERVER_MANIFEST.sha256.slice(0, 32);

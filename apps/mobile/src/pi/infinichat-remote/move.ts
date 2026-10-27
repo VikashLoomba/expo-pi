@@ -1,4 +1,5 @@
 import type { SshConnection, SshShell } from '@osuki-dev/react-native-ssh';
+import type { RemoteInfiniChat } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { apply, diff, pages, type Bytes, type PagePlatform } from '@pi-agent/infinichat/pi/infinichat-remote/pages';
 import { deflateAsync, inflateAsync } from '@strawberrytech/react-native-nitro-zlib';
@@ -10,7 +11,6 @@ import { backupDatabaseAsync, defaultDatabaseDirectory, openDatabaseAsync } from
 import { connectionFailure } from '../execution/remote/channel';
 import type { RemoteHostRepository } from '../execution/remote/hosts';
 import { HASH, quotePosix, script } from '../execution/remote/provisioning';
-import type { RemoteInfiniChat } from './client';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
 import { connectAdmitted, NODE, PRINT_MARKER, runScript, SERVER_BUNDLE } from './install';
 

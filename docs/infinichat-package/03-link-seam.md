@@ -150,3 +150,76 @@ moves into the package unchanged.
 ## Not in this piece
 
 Install and move (piece 4), the Mac app's dialers, and the server's single-client code (piece 7).
+
+## As built
+
+Built in the commit that adds this section, from `86bc596`, with pi 1.4.0 (pi-durable, pi-ai, chord and pi-env; the
+latest on npm on 2026-10-26), Expo 58.0.17 and React Native 0.88.0. Chord 1.4.0's contracts were read again at the
+installed version: `Link` (`dist/link.d.ts:3-16`), `host.connect` (`dist/host.d.ts:171-174`) and "References"
+(`docs/guide.md:396`, `:418`). `client.ts` moved with `git mv` to `packages/infinichat/src/pi/infinichat-remote/`,
+and `git` records the rename.
+
+| File | Lines |
+| --- | --- |
+| `packages/infinichat/src/pi/infinichat-remote/client.ts`: RemoteInfiniChat | 484, from 529 |
+| `packages/infinichat/src/pi/infinichat-remote/dialer.ts`: `InstallStage`, `DialOptions`, `ServerDialer`, `DialedServer`, `MachineDirectory` | 47 |
+| `apps/mobile/src/pi/infinichat-remote/phone-dialer.ts`: `phoneDialer` and `phoneMachines` | 110 |
+
+What differs from the plan:
+
+- **An install reports its notice through a callback, not two fields.** `DialOptions` has `onInstalled(notice)`, and
+  `DialedServer` has no `installed` or `notice`, so `reinstall()` returns only the link, as sketched. Today the notice
+  is set and the stage cleared as soon as `installServer` returns (`client.ts:367-374` at `86bc596`), before the tunnel
+  opens. Fields on the returned `DialedServer` would arrive only after the tunnel and socket open, so an install
+  followed by a failed tunnel would lose its notice (the missing service manager, or the linger advice), and
+  `reinstall()` would have to return a notice as well. RemoteInfiniChat treats an attempt as installed once the
+  callback runs, the moment today's `installed` flag was set.
+- **A reinstall doesn't install over the dial's SSH connection, and never did.** The plan says a refused server is
+  reinstalled "over the same SSH connection (`client.ts:387-390`)". In fact `installServer` admits the machine again
+  and opens its own connection (`install.ts:319` at `86bc596`), which it disconnects when done (`:394`). Only the
+  tunnel uses the attempt's connection. `reinstall` keeps that: it runs `installServer` as before, then closes the old
+  link and tunnel and tunnels again over the dial's connection. The plan's intent holds: there is no second dial, so
+  no second restore, secret read, admission for the tunnel or `runningServer`.
+- **The dialer's `close` closes the link too.** The sketch's comment says `close` closes "the tunnel, then the
+  connection". The "Starts from" table sends all of `dispose` (link, tunnel, connection) to the dialer's `close`, which
+  is what it does, because the dialer makes the link. Likewise `reinstall` closes the previous link and tunnel before
+  it tunnels again, as `open` did.
+- **`MachineDirectory` has an `id`, and `name()` may be undefined.** The provider finds the client by machine
+  (`state.remote?.machineId`), and `useInfiniChatMachines` reports `remote.machineId`, so RemoteInfiniChat's
+  `machineId` reads `directory.id`. `name()` returns undefined once the machine is gone from this app's list, so the
+  fallback "The machine" stays in the package with the messages that use it.
+- **`DialOptions` is a named interface;** the sketch writes it inline.
+
+Choices:
+
+- The interfaces are in their own `dialer.ts`, so `install.ts` and the InfiniChat screen import `InstallStage` without
+  the client, and the client's imports of other package files are relative, like the other package files'.
+- `phoneMachines`, the directory over `RemoteHostRepository`, sits beside `phoneDialer` in `phone-dialer.ts`.
+  `others()` is `sendMachines`'s list-building code, moved unchanged.
+- Nothing users see changed, including the wording: the client host is still named `phone`, and the refusal still says
+  "did not accept this iPhone". The name in it is `expected.device`, the name from the admission, as before. The Mac
+  app's piece can reword them.
+- RemoteInfiniChat's `dispose` ignores a `close()` that fails, because `dropped` doesn't await it; today's `dispose`
+  ignored each step's failure itself. The phone dialer still catches each step, so a failed tunnel close doesn't skip
+  the disconnect.
+- The comment saying owner.ts's daemon connections aren't used while the machine runs InfiniChat moved to
+  `phone-dialer.ts`, beside the SSH connection it describes. Piece 4's check 7 quotes it from `client.ts`.
+- Nothing stored is renamed, and the server bundle is byte-identical, so no machine reinstalls and no app data needs
+  clearing.
+
+Checks:
+
+- From `apps/mobile`: `npx @expo/agent-cli lint` (exit 0, and `npx expo lint -- --max-warnings 0` is clean),
+  `npx @expo/agent-cli typecheck` (no type errors) and `pnpm exec tsc -p server` (no errors). From the root:
+  `pnpm --filter @pi-agent/infinichat lint`, 38 files, no problems besides the known warning that React can't be
+  detected.
+- The server asset, rebuilt in this checkout: 8,352,831 bytes, SHA-256 `668a9eec…3cecff`, the same as piece 2's,
+  because the server doesn't import the client. `--check` passes.
+- An iOS export with source maps (`npx expo export --platform ios --source-maps`) bundles
+  `/packages/infinichat/src/pi/infinichat-remote/client.ts` and `/apps/mobile/src/pi/infinichat-remote/phone-dialer.ts`,
+  with one store directory each for chord, pi-ai, pi-durable and pi-telemetry. `dialer.ts` contains only types, so it
+  isn't in the bundle.
+
+Unverified: nothing ran on a device. Every device check above is left to the owner's iPhone. The paths that matter
+most there are by source assessment only: the notice after an install, a refused server reinstalled once, a drop of
+the SSH session or the tunnel while live, and a dial cancelled by `close()`.

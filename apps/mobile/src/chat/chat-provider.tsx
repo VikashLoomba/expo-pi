@@ -4,6 +4,7 @@ import type { ConversationId, Storage } from '@earendil-works/pi-durable';
 import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-controller';
 import type { ChatControls, ChatMessage } from '@pi-agent/infinichat/chat/types';
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
+import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
@@ -20,9 +21,9 @@ import { createRemoteHostRepository } from '../pi/execution/remote/host-storage'
 import { createRemoteExecution } from '../pi/execution/remote/owner';
 import { ScheduledTaskNotifications } from '../pi/infinichat-notifications';
 import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
-import { RemoteInfiniChat, type RemoteConnection } from '../pi/infinichat-remote/client';
 import { createInfiniChatHome } from '../pi/infinichat-remote/home';
 import { INFINICHAT_DATABASE, InfiniChatMoves } from '../pi/infinichat-remote/move';
+import { phoneDialer, phoneMachines } from '../pi/infinichat-remote/phone-dialer';
 import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
@@ -131,7 +132,7 @@ function useChatRuntime() {
       if (state.remote?.machineId === machineId) return state.remote;
       const previous = state.remote;
       if (previous) serialize(() => previous.close());
-      state.remote = new RemoteInfiniChat(remoteHosts, machineId);
+      state.remote = new RemoteInfiniChat(phoneDialer(remoteHosts, machineId), phoneMachines(remoteHosts, machineId));
       setInfiniChatClient(state.remote);
       return state.remote;
     };

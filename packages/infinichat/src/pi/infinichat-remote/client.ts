@@ -1,51 +1,32 @@
-import { createHost, isChordError, webSocketLink, type Ctx, type Link, type Ref } from '@earendil-works/chord';
+import { createHost, isChordError, type Ctx, type Link, type Ref } from '@earendil-works/chord';
 import type { UserMessage } from '@earendil-works/pi-ai';
-import type { SshConnection, SshLocalForward } from '@osuki-dev/react-native-ssh';
-import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
-import type { ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
-import {
-  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type Machine,
-  type PendingHostKeys, type Reach, type SignInAttempt,
-} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
-import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
-import type {
-  InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot,
-} from '@pi-agent/infinichat/pi/infinichat-service';
-import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
-import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
-import type { ScheduledInput } from '@pi-agent/infinichat/pi/infinichat/schedule';
-import type { ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
-import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
 
-import { connectionFailure } from '../execution/remote/channel';
-import type { RemoteHostRepository } from '../execution/remote/hosts';
+import type { ChatMessage } from '../../chat/types';
+import type { ChatViewSnapshot, ChatViewSource } from '../chat-view';
+import type { ScheduledTask } from '../infinichat-scheduled';
+import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
+import type { InfiniChatControls } from '../infinichat-view';
+import type { ScheduledInput } from '../infinichat/schedule';
+import type { ModelCatalog } from '../model-catalog';
+import type { ProviderAccess } from '../provider-credentials';
 import {
-  connectAdmitted, installServer, runningServer, savedSecret, SERVER_BUNDLE, type InstallStage,
-} from './install';
+  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatPrincipal, type PendingHostKeys,
+  type Reach, type SignInAttempt,
+} from './contract';
+import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from './dialer';
 
 type ConnectionStatus =
   | { status: 'connecting'; stage?: InstallStage }
   | { status: 'connected' }
   | { status: 'failed'; error: string };
-/** The phone's connection to a machine's InfiniChat; `notice` is what the latest install said, until dismissed. */
+/** This app's connection to a machine's InfiniChat; `notice` is what the latest install said, until dismissed. */
 export type RemoteConnection = ConnectionStatus & { notice?: string };
 
 type InfiniChatRef = Ref<typeof InfiniChatRemote>;
 /** The sign-ins of the machine's own credential store, by provider. */
 export type MachineAccess = Readonly<Record<string, ProviderAccess>>;
-/** One connection attempt's SSH connection, tunnel and link; `live` once its server's reference is. */
-interface Session { connection?: SshConnection; forward?: SshLocalForward; link?: Link; live: boolean }
-type Target = { port: number; secret: string };
-
-/**
- * React Native's own declaration of its WebSocket constructor, restated from
- * `react-native/src/types/globals.d.ts:569-578`: request headers are the third argument
- * (`Libraries/WebSocket/WebSocket.js:100`). Expo's tsconfig loads the DOM lib first, whose constructor declares two,
- * and a constructor of fewer parameters is assignable to this type as it is.
- */
-type HeaderWebSocket = new (url: string, protocols: undefined, options: { headers: Record<string, string> }) =>
-  WebSocket;
-const NativeWebSocket: HeaderWebSocket = WebSocket;
+/** One connection attempt's dialed server; `live` once its server's reference is. */
+interface Session { server?: DialedServer; live: boolean }
 
 /** Chord's code prefix, which `fromWireError` adds to a server's error again (chord `src/errors.ts:36`). */
 const CODE_PREFIX = /^[a-z_]+(\/[a-z_]+)?: /;
@@ -60,12 +41,11 @@ function plain(error: unknown): Error {
 }
 
 /**
- * InfiniChat running on a configured machine, shown through one Chord client host whose upstream is a WebSocket
- * tunnelled over SSH to the server's loopback port (piece 1's `server/listen.ts`). The host holds the contract once;
- * after a lost link `host.connect` re-holds it, and the screens keep the last values meanwhile. It borrows the
- * machine record and the phone's secret, and closes only the connections it opened, which are its own: the tools'
- * daemon connections in owner.ts are not used while the machine runs InfiniChat. The machine's own tools reach the
- * other configured machines with its own SSH; it hears of them on every connect and whenever Remote machines change.
+ * InfiniChat running on a configured machine, shown through one Chord client host whose upstream is the link the
+ * app's dialer makes to the machine's server. The host holds the contract once; after a lost link `host.connect`
+ * re-holds it, and the screens keep the last values meanwhile. It closes each dialed server's link and transport
+ * through the dialer, and borrows the machine directory. The machine's own tools reach the other configured machines
+ * with its own SSH; it hears of them on every connect and whenever the directory changes.
  */
 export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
@@ -91,10 +71,15 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private closing?: Promise<void>;
   /** The latest list of the other machines on its way to the server; each waits for the one before. */
   private machinesSent: Promise<void> = Promise.resolve();
-  private readonly stopHosts: () => void;
+  private readonly stopMachines: () => void;
 
-  constructor(private readonly hosts: RemoteHostRepository, readonly machineId: string) {
-    this.stopHosts = hosts.subscribe(() => this.sendMachines());
+  constructor(private readonly dialer: ServerDialer, private readonly machines: MachineDirectory) {
+    this.stopMachines = machines.subscribe(() => this.sendMachines());
+  }
+
+  /** The machine's ID in this app's list. */
+  get machineId(): string {
+    return this.machines.id;
   }
 
   /** One store for the view, the report, the scheduled tasks and the connection; `scheduled` also has its own. */
@@ -278,8 +263,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   /**
-   * Connects unless connected or connecting, on demand as the daemon connection restarts: when the socket, the tunnel
-   * or the SSH session closes, when the app becomes active, and when the user acts. A failure stays until then. Coming
+   * Connects unless connected or connecting, on demand as the daemon connection restarts: when the link or the
+   * transport under it closes, when the app becomes active, and when the user acts. A failure stays until then. Coming
    * back from the background replaces even a live link (`resume`).
    */
   reconnect(): void {
@@ -306,12 +291,12 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   /**
    * Runs when the choice changes or the provider unmounts: cancels an attempt, releases the reference, closes the
-   * client host and its link, then the tunnel and the SSH connection.
+   * client host, then the dialed server's link and transport.
    */
   close(): Promise<void> {
     this.closing ??= (async () => {
       this.closed = true;
-      this.stopHosts();
+      this.stopMachines();
       this.attempt?.abort();
       this.calls.abort(new Error(`InfiniChat no longer runs on ${this.name}.`));
       this.listeners.clear();
@@ -330,7 +315,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   private get name(): string {
-    return this.hosts.get(this.machineId)?.name ?? 'The machine';
+    return this.machines.name() ?? 'The machine';
   }
 
   /**
@@ -356,39 +341,31 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   /**
-   * One attempt: installs or updates the machine's server only when needed, then opens the tunnel, the socket and the
-   * reference. Install runs when this phone has no secret for the machine, when `server.json` names no live server of
-   * this bundle, and when the server refuses the socket or is another bundle or device.
+   * One attempt: dials the machine's server, which installs or updates it only when needed, then connects the client
+   * host over its link and holds the reference. When the server refuses the socket or is another bundle or device,
+   * the dialed server is installed again, unless this attempt already installed it.
    */
   private async connect(signal: AbortSignal): Promise<void> {
     const session: Session = { live: false };
     this.session = session;
     let installed = false;
-    const install = async (): Promise<Target> => {
-      const server = await installServer(this.hosts, this.machineId,
-        { signal, onProgress: (stage) => this.publishConnection({ status: 'connecting', stage }) });
-      installed = true;
-      this.notice = server.notice;
-      this.publishConnection({ status: 'connecting' });
-      return server;
-    };
     try {
-      // As owner.ts checks a chat's machine, with InfiniChat's own way out.
-      await this.hosts.restore();
-      if (!this.hosts.get(this.machineId)) {
-        throw new Error('This machine was removed from Remote machines while InfiniChat’s conversation is on it.');
-      }
-      const secret = await savedSecret(this.machineId);
-      const admission = await this.hosts.admit(this.machineId);
-      const name = admission.host.name;
-      const connection = await connectAdmitted(admission, { signal, onDisconnected: () => this.dropped(session) });
-      session.connection = connection;
-      const port = secret === undefined ? undefined : await runningServer(connection, name, signal);
-      let target = secret !== undefined && port !== undefined ? { port, secret } : await install();
-      const description = machineDescription(admission.host);
-      while (!(await this.open(session, connection, target, name, description, signal))) {
-        if (installed) throw new Error(`InfiniChat on ${name} did not accept this iPhone. Try again.`);
-        target = await install();
+      const server = await this.dialer.dial({
+        signal,
+        onStage: (stage) => this.publishConnection({ status: 'connecting', stage }),
+        onInstalled: (notice) => {
+          installed = true;
+          this.notice = notice;
+          this.publishConnection({ status: 'connecting' });
+        },
+        onDropped: () => this.dropped(session),
+      });
+      session.server = server;
+      const { expected } = server;
+      let { link } = server;
+      while (!(await this.open(session, link, expected, signal))) {
+        if (installed) throw new Error(`InfiniChat on ${expected.device} did not accept this iPhone. Try again.`);
+        link = await server.reinstall();
       }
       session.live = true;
       this.refresh();
@@ -403,24 +380,12 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   /**
-   * Tunnels to the server's port and connects the client host over a new socket, which re-holds the reference.
-   * Resolves true once the reference is live and this bundle's server for this device answers; false when the
-   * socket closed first, as a stale port or another phone's secret makes it.
+   * Connects the client host over a dialed link, which re-holds the reference. Resolves true once the reference is
+   * live and the expected server answers; false when the link closed first, as a stale port or another phone's secret
+   * makes it.
    */
-  private async open(session: Session, connection: SshConnection, target: Target, name: string, description: string,
+  private async open(session: Session, link: Link, expected: DialedServer['expected'],
     signal: AbortSignal): Promise<boolean> {
-    session.link?.close();
-    await session.forward?.close().catch(() => {});
-    session.forward = await connection.forwardLocal({ remoteHost: '127.0.0.1', remotePort: target.port },
-      { onClosed: (reason) => { if (reason !== undefined) this.dropped(session); } })
-      .catch((error: unknown) => {
-        throw connectionFailure(error);
-      });
-    const socket = new NativeWebSocket(`ws://127.0.0.1:${session.forward.localPort}`, undefined,
-      { headers: { authorization: `Bearer ${target.secret}` } });
-    // The client side of a link never deflates, which Hermes could not inflate anyway.
-    const link = webSocketLink(socket);
-    session.link = link;
     link.onClose(() => this.dropped(session));
     this.host.connect(link, { principal: { kind: 'host' } });
     const ref = this.ref === undefined || this.ref.status === 'gone' ? this.hold() : this.ref;
@@ -441,7 +406,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     });
     if (!live) return false;
     const server = ref.server.value;
-    return server.bundle === SERVER_BUNDLE && server.device === name && server.description === description;
+    return server.bundle === expected.bundle && server.device === expected.device
+      && server.description === expected.description;
   }
 
   /** The one reference to the machine's InfiniChat, held again only after the server forced it away. */
@@ -482,28 +448,18 @@ export class RemoteInfiniChat implements InfiniChatHost {
   };
 
   /**
-   * Tells a connected server the other configured machines, each with the host key this phone pinned for it, never
-   * their credentials. A send that fails changes nothing: the next connect sends them again.
+   * Tells a connected server the other configured machines, as the directory lists them. A send that fails changes
+   * nothing: the next connect sends them again.
    */
   private sendMachines(): void {
     this.machinesSent = this.machinesSent.then(async () => {
       const ref = this.ref;
       if (this.closed || ref === undefined || !this.session?.live) return;
-      const others = this.hosts.getSnapshot().hosts.filter((host) => host.id !== this.machineId);
-      const machines = await Promise.all(others.map(async (host): Promise<Machine[]> => {
-        const { id, name, hostname, port, username } = host;
-        // A pin that can't be read is left out, so that machine's key waits for this phone; one removed meanwhile
-        // is left out entirely.
-        const pinned = await this.hosts.admit(id).then(({ trustedHostKey }) => trustedHostKey, () => null);
-        if (pinned === null && this.hosts.get(id) === undefined) return [];
-        return [{ id, name, hostname, port, username,
-          ...(pinned ? { hostKey: { algorithm: pinned.algorithm, fingerprint: pinned.fingerprint } } : {}) }];
-      }));
-      await ref.setMachines({ machines: machines.flat() });
+      await ref.setMachines({ machines: await this.machines.others() });
     }).catch(() => {});
   }
 
-  /** A live session lost its socket, its tunnel or its SSH connection: dispose of it and connect again. */
+  /** A live session lost its link or the transport under it: dispose of it and connect again. */
   private dropped(session: Session | undefined) {
     if (session === undefined || session !== this.session || !session.live) return;
     this.session = undefined;
@@ -511,10 +467,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
     this.reconnect();
   }
 
+  /** Closes the dialed server's link and transport; a close that fails leaves nothing to retry. */
   private async dispose(session: Session): Promise<void> {
-    session.link?.close();
-    await session.forward?.close().catch(() => {});
-    await session.connection?.disconnect().catch(() => {});
+    await session.server?.close().catch(() => {});
   }
 
   private publishConnection(status?: ConnectionStatus) {

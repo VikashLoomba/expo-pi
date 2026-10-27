@@ -1,4 +1,5 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
+import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { findCatalogModel, getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { router, Stack } from 'expo-router';
@@ -17,7 +18,6 @@ import { InlineNotice } from '@/components/chat/primitives';
 import { thinkingLevelLabel } from '@/components/chat/settings-controls';
 import { ChatTranscript } from '@/components/chat/transcript';
 import { useChatColors } from '@/hooks/use-chat-colors';
-import type { InstallStage } from '@/pi/infinichat-remote/install';
 import type { MoveStatus } from '@/pi/infinichat-remote/move';
 
 const TITLE = 'InfiniChat';
