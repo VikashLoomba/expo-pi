@@ -3,9 +3,9 @@ import { join } from 'node:path';
 
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { createPhotonImages } from '@earendil-works/pi-durable/images';
-import { MACHINE_WORK, infiniChatDevices } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import photon from '@silvia-odwyer/photon/photon_rs_bg.wasm';
 
+import { MACHINE_WORK, infiniChatDevices } from '../pi/infinichat/device-tools';
 import type { ServerMachines } from './machines';
 
 /**

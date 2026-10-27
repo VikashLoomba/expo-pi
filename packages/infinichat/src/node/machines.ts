@@ -5,12 +5,12 @@ import {
   acceptHostKey, connectSsh, forgetHostKey, HostKeyChangedError, HostKeyUnknownError, RemoteExecutionEnv, scanHostKey,
   type Connection, type RemoteInfo, type SshTarget,
 } from '@earendil-works/pi-env';
-import type { Machine, PendingHostKeys, Reach } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
-import { MACHINE_WORK, machineDescription, type Device } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
-import { noop } from './conversation';
-import { isRecord } from './state';
+import type { Machine, PendingHostKeys, Reach } from '../pi/infinichat-remote/contract';
+import { MACHINE_WORK, machineDescription, type Device } from '../pi/infinichat/device-tools';
 
+const noop = () => {};
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 /** What a machine's connection depends on; a name or a pinned key may change under the same connection. */
 const endpoint = ({ id, hostname, port, username }: Machine) => JSON.stringify([id, hostname, port, username]);
 /** What a check found of a machine holds while its endpoint and the key the phone pinned stay the same. */

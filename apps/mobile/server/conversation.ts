@@ -1,52 +1,21 @@
-import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename } from 'node:fs/promises';
+import { mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Storage } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
+import { nodeDatabaseFiles } from '@pi-agent/infinichat/node/database-files';
 import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
 
 import { readState, updateState } from './state';
 
-export const noop = () => {};
+const noop = () => {};
 const DATABASE = 'infinichat.db';
 type ConversationFile = ConversationFiles['db'];
 
-async function describe(path: string): Promise<ConversationFile | undefined> {
-  let bytes: Buffer;
-  try {
-    bytes = await readFile(path);
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
-    throw error;
-  }
-  return { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.byteLength };
-}
-
 const same = (left: ConversationFile | undefined, right: ConversationFile | undefined) =>
   left?.sha256 === right?.sha256 && left?.size === right?.size;
-
-/**
- * Folds the WAL beside a closed database into it, so the database file alone is the conversation. Chord's close
- * checkpoints already, but a reader such as a `diff --live` still copying keeps it from finishing then, which that
- * close doesn't report, so this checkpoint waits for readers (chord's 5 s busy timeout) and fails when it can't.
- */
-function fold(path: string) {
-  // Opening would create a database that isn't there.
-  if (!existsSync(path)) return;
-  const database = new DatabaseSync(path, { timeout: 5_000 });
-  try {
-    if (database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()?.busy !== 0) {
-      throw new Error('InfiniChat’s database on this machine is still in use. Try again.');
-    }
-  } finally {
-    database.close();
-  }
-}
 
 /**
  * InfiniChat's conversation on this machine. One process owns a storage at a time (pi-durable README), so this
@@ -131,7 +100,7 @@ export class ServerConversation {
         await core.close();
       }
       if (this.state.active) this.setState({ active: false });
-      fold(join(this.data, DATABASE));
+      await nodeDatabaseFiles.fold(join(this.data, DATABASE));
       const files = await this.files();
       if (!files) throw new Error('This machine holds no InfiniChat conversation.');
       return files;
@@ -172,7 +141,7 @@ export class ServerConversation {
   }
 
   private async files(): Promise<ConversationFiles | undefined> {
-    const db = await describe(join(this.data, DATABASE));
+    const db = await nodeDatabaseFiles.describe(join(this.data, DATABASE));
     return db && { db };
   }
 

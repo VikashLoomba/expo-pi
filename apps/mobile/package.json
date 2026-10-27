@@ -55,7 +55,7 @@
     "torch-image-playground": "^0.1.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-env": "1.4.0",
+    "@earendil-works/pi-env": "catalog:",
     "@types/node": "^22.20.5",
     "@types/react": "~19.3.0",
     "@types/ws": "^8.18.2",

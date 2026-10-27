@@ -3,11 +3,13 @@ packages:
   - 'packages/*'
 
 # pi's versions, for the app and packages/infinichat's peers alike: pnpm installs the package's peers as its own
-# dependencies, so two version fields could drift into two copies of pi-durable in one bundle.
+# dependencies, so two version fields could drift into two copies of pi-durable in one bundle. pi-env depends on chord
+# and pi-durable at exact versions, so it moves with them.
 catalog:
   '@earendil-works/chord': 1.4.0
   '@earendil-works/pi-ai': 1.4.0
   '@earendil-works/pi-durable': 1.4.0
+  '@earendil-works/pi-env': 1.4.0
 
 onlyBuiltDependencies:
   - react-native-enriched-markdown

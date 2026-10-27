@@ -1,5 +1,6 @@
 import type { Ctx, Host } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
+import type { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import {
   AccessSchema, ControlsSchema, ConversationSchema, InfiniChatRemote, MessagesSchema, PendingHostKeysSchema,
   ReachSchema, ScheduledSchema, ServerSchema, SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal,
@@ -9,7 +10,6 @@ import { ModelCatalogSchema, type ModelCatalog } from '@pi-agent/infinichat/pi/m
 import type { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
 import type { ServerConversation } from './conversation';
-import type { ServerMachines } from './machines';
 import type { ServerSignIn } from './sign-in';
 
 /** A call's context for the core's own waits: the caller cancels the wait, never the work. */

@@ -78,3 +78,17 @@ Node `DatabaseFiles`.
 
 The Mac app itself: its dialers, its settings, its keychain backend, and whether it runs the server as a LaunchAgent
 or inside the app.
+
+## As built
+
+From `5f5d9d5`, with pi 1.4.0 (the latest on npm on 2026-10-26), Expo 58.0.17 and React Native 0.88.0; one commit,
+since the doc names no steps. What differs from the plan:
+
+- **The Node `DatabaseFiles` is the part the server uses:** `Omit<DatabaseFiles, 'rename' | 'remove' | 'open'>`, with
+  paths for names. The server's code gives only the `PagePlatform`, `backup`, `describe` and `fold`; the other three
+  serve a move's local side, so they come with the Mac app, their first caller.
+- **`machines.ts` keeps its own `noop` and `isRecord`,** as package files do; the server's exports of both lost their
+  only importer and are private again.
+- **The bundle (8,353,006 bytes, SHA-256 `092047cc…965cfa`)** differs in module paths and order and in `fold` and
+  `describe` becoming methods. In a probe, its page commands' outputs matched the previous bundle's byte for byte,
+  and `serve` started and stopped cleanly in a scratch `HOME`.

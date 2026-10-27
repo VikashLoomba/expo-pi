@@ -1,22 +1,7 @@
-import { createHash } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { backup, DatabaseSync } from 'node:sqlite';
-import { promisify } from 'node:util';
-import { gunzip, gzip } from 'node:zlib';
+import { readFile, rm } from 'node:fs/promises';
 
-import { apply, diff, pages, type PagePlatform } from '@pi-agent/infinichat/pi/infinichat-remote/pages';
-
-const node: PagePlatform = {
-  sha256: async (bytes) => createHash('sha256').update(bytes).digest(),
-  gzip: promisify(gzip),
-  gunzip: promisify(gunzip),
-  read: (path) => readFile(path),
-  async write(path, bytes) {
-    const aside = `${path}.${process.pid}`;
-    await writeFile(aside, bytes);
-    await rename(aside, path);
-  },
-};
+import { nodeDatabaseFiles as node } from '@pi-agent/infinichat/node/database-files';
+import { apply, diff, pages } from '@pi-agent/infinichat/pi/infinichat-remote/pages';
 
 // The commands the phone runs through its ExecutionEnv with the Node that runs the server, beside the server's
 // process. Their inputs and outputs are files the phone names, writes or reads, and removes.
@@ -29,21 +14,12 @@ export async function writePages(db: string, out: string): Promise<void> {
 /**
  * `diff <db> <pages> <out> [--live]`: the patch of `db` against the receiver's page list. With `--live`, `db` is the
  * database the server holds open, and the patch is of a backup of it, which SQLite's backup API takes consistently
- * and at the same page numbers. It copies in one step, as expo-sqlite's backup does: a backup in steps starts over
- * at each commit another connection makes between them, as the server's Harness does while it streams.
+ * and at the same page numbers.
  */
 export async function writeDiff(db: string, list: string, out: string, live: boolean): Promise<void> {
   const copy = `${out}.${process.pid}.db`;
   try {
-    if (live) {
-      // Read-only, so a database that isn't there fails instead of being created.
-      const source = new DatabaseSync(db, { readOnly: true });
-      try {
-        await backup(source, copy, { rate: -1 });
-      } finally {
-        source.close();
-      }
-    }
+    if (live) await node.backup(db, copy);
     await node.write(out, await diff(node, live ? copy : db, await readFile(list)));
   } finally {
     await rm(copy, { force: true });

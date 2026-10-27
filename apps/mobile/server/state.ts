@@ -10,7 +10,7 @@ import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/
  */
 export type ServerState = ConversationState & { timeZone?: string };
 
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 const fileOf = (value: unknown) => isRecord(value) && typeof value.sha256 === 'string'
   && typeof value.size === 'number' ? { sha256: value.sha256, size: value.size } : undefined;
