@@ -1,0 +1,31 @@
+{
+  "name": "@pi-agent/infinichat-server",
+  "private": true,
+  "exports": {
+    "./*": "./src/*.ts",
+    "./assets/*": "./assets/*"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -p .",
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/build.mjs --check && node scripts/sync-daemons.mjs --check",
+    "sync-daemons": "node scripts/sync-daemons.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "catalog:",
+    "@earendil-works/pi-ai": "catalog:",
+    "@earendil-works/pi-durable": "catalog:",
+    "@earendil-works/pi-env": "catalog:",
+    "@pi-agent/infinichat": "workspace:*",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
+    "typescript": "~6.0.3"
+  }
+}

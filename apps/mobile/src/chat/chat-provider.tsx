@@ -36,7 +36,7 @@ import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
 import { WorkspaceExecutionEnv } from '../pi/workspace/execution-env';
 import { createInfiniChatAvatar } from './infinichat-avatar';
 import type { ProviderAccount } from './provider-account';
-import { ShownInfiniChat } from './shown-infinichat';
+import { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
 
 const subscribeNothing = () => () => {};
 const closedService: ChatServiceSnapshot = { chats: [] };

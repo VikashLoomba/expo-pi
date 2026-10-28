@@ -2,14 +2,20 @@
   "compilerOptions": {
     "strict": true,
     "target": "ES2023",
-    "lib": ["ES2024"],
+    "lib": [
+      "ES2024"
+    ],
     "module": "preserve",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

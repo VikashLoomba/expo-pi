@@ -5,8 +5,8 @@ import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
 import { File } from 'expo-file-system';
 
 import { loadPackagedDaemon } from '../execution/remote/daemon-assets';
-import { PI_DAEMON_MANIFEST } from '../execution/remote/daemon-manifest';
-import { INFINICHAT_SERVER_MANIFEST } from './server-manifest';
+import { PI_DAEMON_MANIFEST } from '@pi-agent/infinichat-server/daemon-manifest';
+import { INFINICHAT_SERVER_MANIFEST } from '@pi-agent/infinichat-server/manifest';
 
 const UNAVAILABLE = 'The bundled InfiniChat server is unavailable or failed verification. Reinstall the app.';
 
@@ -20,7 +20,7 @@ export const SERVER_BUNDLE = serverBundle(INFINICHAT_SERVER_MANIFEST.sha256);
 async function loadServerBundle(signal: AbortSignal): Promise<Uint8Array> {
   signal.throwIfAborted();
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const asset = await Asset.fromModule(require('../../../assets/infinichat-server/server.bin')).downloadAsync();
+  const asset = await Asset.fromModule(require('@pi-agent/infinichat-server/assets/server.bin')).downloadAsync();
   if (!asset.localUri) throw new Error(UNAVAILABLE);
   const bytes = await new File(asset.localUri).bytes();
   if (bytes.byteLength !== INFINICHAT_SERVER_MANIFEST.size) throw new Error(UNAVAILABLE);

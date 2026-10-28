@@ -102,7 +102,9 @@ A piece that grows to several times its size means its design is wrong; stop and
 
 Paths and `file:line` references in these docs are as of `348f26a`. After piece 2, the app's files, including
 `server/` and `scripts/`, are under `apps/mobile/`, and the moved files under `packages/infinichat/src/`. The
-commands in "Working on a piece" then run from `apps/mobile`.
+commands in "Working on a piece" then run from `apps/mobile`. Since the Mac app's piece 2 (docs/mac-app), the server,
+its scripts, manifests and assets are `packages/infinichat-server`: its gates are `pnpm --filter
+@pi-agent/infinichat-server typecheck` and `pnpm --filter @pi-agent/infinichat-server check`.
 
 ## References
 

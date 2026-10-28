@@ -1,7 +1,7 @@
 import { Asset } from 'expo-asset';
 import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
 import { File } from 'expo-file-system';
-import { PI_DAEMON_MANIFEST } from './daemon-manifest';
+import { PI_DAEMON_MANIFEST } from '@pi-agent/infinichat-server/daemon-manifest';
 import { BootstrapError } from './bootstrap-errors';
 
 export interface DaemonPlatform { platform: 'darwin' | 'linux'; arch: 'arm64' | 'x64' }
@@ -13,10 +13,10 @@ type Target = keyof typeof PI_DAEMON_MANIFEST;
 /* eslint-disable @typescript-eslint/no-require-imports */
 function bundledModule(target: Target): number {
   switch (target) {
-    case 'darwin-arm64': return require('../../../../assets/pi-env/pi-env-darwin-arm64.bin');
-    case 'darwin-x64': return require('../../../../assets/pi-env/pi-env-darwin-x64.bin');
-    case 'linux-arm64': return require('../../../../assets/pi-env/pi-env-linux-arm64.bin');
-    case 'linux-x64': return require('../../../../assets/pi-env/pi-env-linux-x64.bin');
+    case 'darwin-arm64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-darwin-arm64.bin');
+    case 'darwin-x64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-darwin-x64.bin');
+    case 'linux-arm64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-linux-arm64.bin');
+    case 'linux-x64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-linux-x64.bin');
   }
 }
 /* eslint-enable @typescript-eslint/no-require-imports */

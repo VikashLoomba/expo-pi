@@ -1,7 +1,9 @@
 This is an Expo/React Native app for iOS. Prioritize iOS-native patterns and the components Expo provides.
 
-The repository is a pnpm workspace in Expo's monorepo layout, and the app, with its `server/` and `scripts/`, is in
-`apps/mobile`. App paths in this file (`src/app/`, `app.json`, `package.json`, `ios/`) are relative to `apps/mobile`.
+The repository is a pnpm workspace in Expo's monorepo layout: the iOS app is in `apps/mobile`, the Mac app in
+`apps/mac`, the shared InfiniChat code in `packages/infinichat`, and the server the apps install on machines, with its
+build script, generated manifests and the bundled assets both apps ship, in `packages/infinichat-server`. App paths
+in this file (`src/app/`, `app.json`, `package.json`, `ios/`) are relative to `apps/mobile`.
 Install with `pnpm install` from the root; run Expo, EAS and `@expo/agent-cli` commands from `apps/mobile`.
 `@expo/agent-cli` writes its AGENTS.md block and skill links relative to the Expo project, but agents read this
 AGENTS.md at the root, so keep it the only one and its block up to date here.

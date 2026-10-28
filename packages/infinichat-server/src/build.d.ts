@@ -1,4 +1,4 @@
-// What scripts/build-infinichat-server.mjs gives the bundle.
+// What scripts/build.mjs gives the bundle.
 
 /** esbuild's binary loader gives a `.wasm` import its bytes. */
 declare module '*.wasm' {
