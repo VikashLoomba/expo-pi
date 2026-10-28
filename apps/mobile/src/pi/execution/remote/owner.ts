@@ -3,15 +3,16 @@ import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/conte
 import { createSshChannelFactory, type DaemonChannelFactory } from './channel';
 import { Connection } from './connection';
 import { MobileRemoteExecutionEnv } from './environment';
+import type { MachinesAccess } from '../../infinichat-remote/phone-machines';
 import { hostKeyPolicy, type RemoteHostAdmission, type RemoteHostRepository } from './hosts';
 import type { RemotePlatformState } from './provisioning';
 import { machineKeyExchange } from './ssh-keys';
 
-function admittedSshChannel(hosts: RemoteHostRepository, admission: RemoteHostAdmission,
+function admittedSshChannel(hosts: RemoteHostRepository, machines: MachinesAccess, admission: RemoteHostAdmission,
   platform: RemotePlatformState): DaemonChannelFactory {
   const { host, auth } = admission;
   return createSshChannelFactory({ host: host.hostname, port: host.port, username: host.username,
-    auth, platform, keys: machineKeyExchange(hosts, host), ...hostKeyPolicy(hosts, admission) });
+    auth, platform, keys: machineKeyExchange(machines, host.id), ...hostKeyPolicy(hosts, admission) });
 }
 
 export type RemoteExecution = ReturnType<typeof createRemoteExecution>;
@@ -44,26 +45,28 @@ const globLiteral = (text: string) => text.replace(/[\\*?[\]]/g, '\\$&');
  * the chats' tools, and InfiniChat's install and moves. The provider that creates it closes it after both Harnesses;
  * a resolve after that opens a new connection.
  */
-export function createRemoteExecution(hosts: RemoteHostRepository) {
+export function createRemoteExecution(hosts: RemoteHostRepository, machines: MachinesAccess) {
   const connections = new Map<string, Connection>();
   return {
     async environment(machineId: string, cwd: string | undefined): Promise<MobileRemoteExecutionEnv> {
       await hosts.restore();
       const host = hosts.get(machineId);
       if (!host) {
-        throw new Error('This remote machine was removed. Choose another execution environment in chat settings.');
+        throw new Error('This iPhone has no credentials for that machine. Add them in Remote machines, or choose '
+          + 'another execution environment in chat settings.');
       }
       let connection = connections.get(machineId);
       if (!connection) {
         const platform: RemotePlatformState = {};
         // Like pi-env's `command`, each start reads the machine's current credentials and trusted key.
         connection = new Connection({
-          openChannel: async (options) => admittedSshChannel(hosts, await hosts.admit(machineId), platform)(options),
+          openChannel: async (options) =>
+            admittedSshChannel(hosts, machines, await hosts.admit(machineId), platform)(options),
         });
         connections.set(machineId, connection);
       }
       // A chat without a working directory uses the account's home, as pi-env's external SSH test does.
-      return new MobileRemoteExecutionEnv({ connection, id: `ssh:${host.namespaceId}`,
+      return new MobileRemoteExecutionEnv({ connection, id: `ssh:${host.id}`,
         cwd: cwd ?? (await connection.info()).home });
     },
     /**

@@ -11,9 +11,10 @@ import type { ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
 import {
   InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatClient, type InfiniChatPrincipal,
-  type PendingHostKeys, type Reach, type SignInAttempt,
+  type Machine, type PendingHostKeys, type Reach, type SignInAttempt,
 } from './contract';
 import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from './dialer';
+import type { MachinePatch, MachinesState } from './machines';
 
 type ConnectionStatus =
   | { status: 'connecting'; stage?: InstallStage }
@@ -44,9 +45,9 @@ function plain(error: unknown): Error {
  * InfiniChat running on a configured machine, shown through one Chord client host whose upstream is the link the
  * app's dialer makes to the machine's server. The host holds the contract once; after a lost link `host.connect`
  * re-holds it, and the screens keep the last values meanwhile. It closes each dialed server's link and transport
- * through the dialer, and borrows the machine directory. The machine's own tools reach the other configured machines
- * with its own SSH; it hears of this app's on every connect and whenever the directory changes. `client` is this app
- * as the server's client: its ID, which its machine list goes under, and the name a move back records.
+ * through the dialer, and borrows the machine directory. The machine's own tools reach the conversation's other
+ * machines with its own SSH, from the machines document it serves. `client` is this app as the server's client: its
+ * ID and the name a move back records.
  */
 export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
@@ -63,25 +64,22 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
     scheduled: readonly ScheduledTask[] | undefined; catalog: ModelCatalog; access: MachineAccess;
-    signIn: SignInAttempt; conversation: ConversationState; reach: Reach; pendingHostKeys: PendingHostKeys;
+    signIn: SignInAttempt; conversation: ConversationState; machines: MachinesState | undefined; reach: Reach;
+    pendingHostKeys: PendingHostKeys;
   };
   private report = NO_REPORT;
   private status: ConnectionStatus = { status: 'connecting' };
   private connection: RemoteConnection = this.status;
   private closed = false;
   private closing?: Promise<void>;
-  /** The latest list of the other machines on its way to the server; each waits for the one before. */
-  private machinesSent: Promise<void> = Promise.resolve();
-  private readonly stopMachines: () => void;
+  private readonly machineListeners = new Set<() => void>();
 
-  constructor(private readonly dialer: ServerDialer, private readonly machines: MachineDirectory,
-    private readonly client: InfiniChatClient) {
-    this.stopMachines = machines.subscribe(() => this.sendMachines());
-  }
+  constructor(private readonly dialer: ServerDialer, private readonly directory: MachineDirectory,
+    private readonly client: InfiniChatClient) {}
 
-  /** The machine's ID in this app's list. */
+  /** The machine's endpoint, its ID in this app. */
   get machineId(): string {
-    return this.machines.id;
+    return this.directory.id;
   }
 
   /** One store for the view, the report, the scheduled tasks and the connection; `scheduled` also has its own. */
@@ -102,6 +100,14 @@ export class RemoteInfiniChat implements InfiniChatHost {
       return () => { this.scheduledListeners.delete(listener); };
     },
     getSnapshot: () => this.values?.scheduled,
+  };
+  /** The conversation's machines document as the machine serves it; undefined until connected and while it is away. */
+  readonly machines = {
+    subscribe: (listener: () => void) => {
+      this.machineListeners.add(listener);
+      return () => { this.machineListeners.delete(listener); };
+    },
+    getSnapshot: () => this.values?.machines,
   };
   private readonly shown: ChatViewSource<InfiniChatControls> = {
     subscribe: this.subscribe,
@@ -171,7 +177,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   /** Has the machine bring the database the machine at `from` released into its own `data/`, once it matches. */
-  pull(from: string, files: ConversationFiles): Promise<void> {
+  pull(from: Machine, files: ConversationFiles): Promise<void> {
     return this.call((ref, ctx) => ref.pull({ from, files }, ctx));
   }
 
@@ -203,6 +209,18 @@ export class RemoteInfiniChat implements InfiniChatHost {
   /** Trusts the host keys with these fingerprints that the machine at `endpoint` presented to this machine. */
   acceptHostKey(endpoint: string, fingerprints: string[]): Promise<void> {
     return this.call((ref, ctx) => ref.acceptHostKey({ endpoint, fingerprints }, ctx));
+  }
+
+  putMachine(record: Machine): Promise<void> {
+    return this.call((ref, ctx) => ref.putMachine(record, ctx));
+  }
+
+  patchMachine(endpoint: string, patch: MachinePatch): Promise<void> {
+    return this.call((ref, ctx) => ref.patchMachine({ endpoint, patch }, ctx));
+  }
+
+  removeMachine(endpoint: string): Promise<void> {
+    return this.call((ref, ctx) => ref.removeMachine({ endpoint }, ctx));
   }
 
   /**
@@ -306,11 +324,11 @@ export class RemoteInfiniChat implements InfiniChatHost {
   close(): Promise<void> {
     this.closing ??= (async () => {
       this.closed = true;
-      this.stopMachines();
       this.attempt?.abort();
       this.calls.abort(new Error(`InfiniChat no longer runs on ${this.name}.`));
       this.listeners.clear();
       this.scheduledListeners.clear();
+      this.machineListeners.clear();
       await this.running;
       const session = this.session;
       this.session = undefined;
@@ -325,7 +343,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   private get name(): string {
-    return this.machines.name() ?? 'The machine';
+    return this.directory.machine()?.name ?? 'The machine';
   }
 
   /**
@@ -381,7 +399,6 @@ export class RemoteInfiniChat implements InfiniChatHost {
       this.refresh();
       // The next connect sends it again, so one lost with its link changes nothing.
       this.ref?.setTimeZone({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone }).catch(() => {});
-      this.sendMachines();
     } catch (error) {
       if (this.session === session) this.session = undefined;
       await this.dispose(session);
@@ -431,6 +448,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
     ref.access.subscribe(this.refresh);
     ref.signInAttempt.subscribe(this.refresh);
     ref.conversation.subscribe(this.refresh);
+    ref.machines.subscribe(this.refresh);
     ref.reach.subscribe(this.refresh);
     ref.pendingHostKeys.subscribe(this.refresh);
     // Forced away while connected, as when the server shuts down: connecting again holds a new one.
@@ -449,25 +467,17 @@ export class RemoteInfiniChat implements InfiniChatHost {
     // The values are copied here only, once the server is checked, so the list's own store compares; Chord replaces a
     // member's value only when that member changes.
     const rescheduled = scheduled !== this.values?.scheduled;
+    const machines = ref.machines.value ?? undefined;
+    const relisted = machines !== this.values?.machines;
     this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled,
       catalog: ref.catalog.value, access: ref.access.value, signIn: ref.signInAttempt.value,
-      conversation: ref.conversation.value, reach: ref.reach.value, pendingHostKeys: ref.pendingHostKeys.value };
+      conversation: ref.conversation.value, machines, reach: ref.reach.value,
+      pendingHostKeys: ref.pendingHostKeys.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };
     this.notify();
     if (rescheduled) for (const listener of [...this.scheduledListeners]) listener();
+    if (relisted) for (const listener of [...this.machineListeners]) listener();
   };
-
-  /**
-   * Tells a connected server this app's other configured machines, as the directory lists them, in place of the ones
-   * it sent before. A send that fails changes nothing: the next connect sends them again.
-   */
-  private sendMachines(): void {
-    this.machinesSent = this.machinesSent.then(async () => {
-      const ref = this.ref;
-      if (this.closed || ref === undefined || !this.session?.live) return;
-      await ref.setMachines({ client: this.client.id, machines: await this.machines.others() });
-    }).catch(() => {});
-  }
 
   /** A live session lost its link or the transport under it: dispose of it and connect again. */
   private dropped(session: Session | undefined) {

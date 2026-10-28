@@ -9,7 +9,7 @@ import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstanc
 
 import {
   useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatAvatar, useInfiniChatConnection, useInfiniChatError,
-  useInfiniChatView,
+  useInfiniChatView, useMachines,
 } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { ChatAgentContext } from '@/components/chat/agent';
@@ -73,13 +73,17 @@ export default function InfiniChatScreen() {
   const agent = useMemo(() => ({ name: agentName, avatar }), [agentName, avatar]);
   const serviceError = useInfiniChatError();
   const connection = useInfiniChatConnection();
-  const machines = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  const hosts = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  const listed = useMachines();
   const remote = shown !== undefined;
-  // The machine the conversation is on or moving to or from, named once the machines are restored, so a launch never
-  // shows a placeholder name first.
+  // The machine the conversation is on or moving to or from, by the name the conversation's document gives it, or
+  // its host name until that is read; a launch never shows a placeholder name first.
   const machineId = move?.machineId ?? (home.home === 'machine' ? home.machineId : null);
-  const machine = machines.hosts.find((host) => host.id === machineId)?.name;
-  const removed = machineId !== null && machines.ready && machine === undefined;
+  const nameOf = (endpoint: string) =>
+    listed?.machines[endpoint]?.name ?? hosts.hosts.find((host) => host.id === endpoint)?.hostname;
+  const machine = machineId === null ? undefined : nameOf(machineId);
+  // Without credentials here, this iPhone can't reach the machine the conversation is on.
+  const removed = machineId !== null && hosts.ready && !hosts.hosts.some((host) => host.id === machineId);
   // The checkmark is on where the conversation is going during a move, back where it was during a Cancel, and where
   // it lives otherwise.
   const chosen = move ? ((move.to === 'machine') !== !!move.undoing ? move.machineId : move.from ?? null)
@@ -185,7 +189,7 @@ export default function InfiniChatScreen() {
   const subtitle = removed ? 'Machine removed'
     : move && machine !== undefined
       ? moving(move, machine, connection?.status === 'connecting' ? connection.stage : undefined,
-        machines.hosts.find((host) => host.id === move.from)?.name)
+        move.from === undefined ? undefined : nameOf(move.from))
       : !there || machine === undefined ? working
         : connection?.status === 'failed' ? `Can’t connect to ${machine}`
           : connection?.status === 'connecting' ? connecting(machine, connection.stage)
@@ -227,10 +231,10 @@ export default function InfiniChatScreen() {
             onPress={() => moves?.choose(null)}>
             {PHONE}
           </Stack.Toolbar.MenuAction>
-          {machines.hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
+          {hosts.hosts.map((host) => <Stack.Toolbar.MenuAction key={host.id} icon="server.rack"
             isOn={host.id === chosen} disabled={movingNow}
             onPress={() => moves?.choose(host.id)}>
-            {host.name}
+            {nameOf(host.id) ?? host.hostname}
           </Stack.Toolbar.MenuAction>)}
         </Stack.Toolbar.Menu>
         {move?.cancellable && <Stack.Toolbar.Menu inline>
@@ -239,7 +243,7 @@ export default function InfiniChatScreen() {
           </Stack.Toolbar.MenuAction>
         </Stack.Toolbar.Menu>}
         <Stack.Toolbar.Menu inline>
-          <Stack.Toolbar.MenuAction icon="plus" disabled={!machines.ready || !!machines.error}
+          <Stack.Toolbar.MenuAction icon="plus" disabled={!hosts.ready || !!hosts.error}
             onPress={() => router.push('/remote-hosts/edit')}>
             Add Machine…
           </Stack.Toolbar.MenuAction>

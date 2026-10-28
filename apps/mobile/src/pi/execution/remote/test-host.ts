@@ -1,9 +1,10 @@
 import { machineIdentity } from '@pi-agent/infinichat/pi/infinichat-remote/install';
 
+import type { MachinesAccess } from '../../infinichat-remote/phone-machines';
 import { createSshChannelFactory, type SshSetupStage } from './channel';
 import { Connection, RemoteError } from './connection';
 import { MobileRemoteExecutionEnv } from './environment';
-import { hostKeyPolicy, type RemoteHostRepository } from './hosts';
+import { hostKeyPolicy, PHONE_DEVICE, type RemoteHostRepository } from './hosts';
 import { machineKeyExchange } from './ssh-keys';
 
 export interface RemoteHostTestOptions {
@@ -60,17 +61,24 @@ function remoteHostConnectionMessage(error: unknown): string {
 /**
  * Connects to the machine, trusting its SSH host key on first use (`hostKeyPolicy`), prepares it for remote
  * execution, reports what its daemon says, independently of any chat directory, and keeps the name the machine gives
- * itself on the record. A failure carries its code.
+ * itself in the conversation's machines document, listing the machine there first if it isn't yet. A failure carries
+ * its code.
  */
-export async function testRemoteHost(repository: RemoteHostRepository, id: string,
+export async function testRemoteHost(repository: RemoteHostRepository, machines: MachinesAccess, id: string,
   options: RemoteHostTestOptions): Promise<RemoteHostTestResult> {
   options.signal.throwIfAborted();
   const admission = await repository.admit(id);
   options.signal.throwIfAborted();
   const { host, auth } = admission;
+  // Listed before connecting, under its host name until it names itself, so the connection's key exchange has a
+  // record to keep the keys on.
+  if (machines.get()?.machines[host.id] === undefined) {
+    const { hostname, port, username } = host;
+    await machines.put({ name: hostname, hostname, port, username });
+  }
   const connection = new Connection({
     openChannel: createSshChannelFactory({
-      host: host.hostname, port: host.port, username: host.username, auth, keys: machineKeyExchange(repository, host),
+      host: host.hostname, port: host.port, username: host.username, auth, keys: machineKeyExchange(machines, host.id),
       onProgress: options.onProgress, ...hostKeyPolicy(repository, admission),
     }),
   });
@@ -83,8 +91,8 @@ export async function testRemoteHost(repository: RemoteHostRepository, id: strin
     const info = await connection.info();
     if (info.separator !== '/' || info.os === 'windows') throw Object.assign(new Error('Unsupported remote operating system.'), { code: 'not_supported' });
     result = { version: info.version, os: info.os, arch: info.arch, home: info.home };
-    const environment = new MobileRemoteExecutionEnv({ connection, id: `ssh:${host.namespaceId}`, cwd: info.home });
-    name = (await machineIdentity(environment, host.name, options.signal)).name;
+    const environment = new MobileRemoteExecutionEnv({ connection, id: `ssh:${host.id}`, cwd: info.home });
+    name = (await machineIdentity(environment, host.hostname, options.signal)).name;
   } catch (error) {
     if (options.signal.aborted) throw Object.assign(new Error('Remote connection cancelled.'), { code: 'aborted' });
     // A start that fails is lost, as pi-env marks it; the SSH or setup failure it keeps has the code.
@@ -95,6 +103,9 @@ export async function testRemoteHost(repository: RemoteHostRepository, id: strin
     await connection.close();
   }
   // Its own message: a name another machine already has is not a connection failure.
-  const named = await repository.setName(host, name);
-  return { ...result, name: named.name };
+  if (name.toLowerCase() === PHONE_DEVICE) {
+    throw new Error(`“${PHONE_DEVICE}” is this phone in InfiniChat. Rename the machine.`);
+  }
+  await machines.patch(host.id, { name });
+  return { ...result, name };
 }

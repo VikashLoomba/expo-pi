@@ -62,15 +62,23 @@ export type ConversationState = Static<typeof ConversationSchema>;
 /** An SSH host key as Remote machines shows it: its algorithm and OpenSSH's `SHA256:` fingerprint. */
 const HostKeySchema = Type.Object({ algorithm: Type.String(), fingerprint: Type.String() });
 /**
- * Another configured machine, which the server's tools reach with the server's own SSH (pi-env), the host key the
- * client pinned for it, if any, and the machines' InfiniChat keys the client authorized there (the app's
- * `ssh-keys.ts`), as `authorized_keys` matches them: a change is worth another check. Never its credentials.
+ * A machine of the conversation, which a server's tools reach with its own SSH (pi-env): the name the machine gives
+ * itself, its endpoint, the host key a client accepted for it (trust on first use, decided once), its own InfiniChat
+ * key and the machines' keys authorized there by the key exchange (`keys.ts`), as `authorized_keys` matches them: a
+ * change is worth another check. Never its credentials, which each client keeps for itself.
  */
 export const MachineSchema = Type.Object({
   name: Type.String(), hostname: Type.String(), port: Type.Number(), username: Type.String(),
-  hostKey: Type.Optional(HostKeySchema), authorizedKeys: Type.Optional(Type.Array(Type.String())),
+  hostKey: Type.Optional(HostKeySchema), publicKey: Type.Optional(Type.String()),
+  authorizedKeys: Type.Optional(Type.Array(Type.String())),
 });
 export type Machine = Static<typeof MachineSchema>;
+/** The conversation's machines document (`machines.ts`), by endpoint; null while the machine doesn't hold it. */
+export const MachinesSchema = Type.Union([
+  Type.Object({ machines: Type.Record(Type.String(), MachineSchema) }), Type.Null(),
+]);
+/** What a check or an accepted host key changes on a record. */
+export const MachinePatchSchema = Type.Partial(Type.Pick(MachineSchema, ['name', 'publicKey', 'authorizedKeys', 'hostKey']));
 /** What the server knows a machine by, whichever client lists it: `username@hostname:port`. */
 export const machineEndpoint = ({ username, hostname, port }: { username: string; hostname: string; port: number }) =>
   `${username}@${hostname}:${port}`;
@@ -124,7 +132,7 @@ export type SignInAttempt = Static<typeof SignInAttemptSchema>;
  * and the operations of its screens.
  */
 export const InfiniChatRemote = remote('infinichat.remote', {
-  version: 3,
+  version: 4,
   input: Type.Object({}),
   host: hostNamed('infinichat-server'),
   variants: {
@@ -134,7 +142,7 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
         // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:237`).
         signInAttempt: SignInAttemptSchema,
-        reach: ReachSchema, pendingHostKeys: PendingHostKeysSchema,
+        machines: MachinesSchema, reach: ReachSchema, pendingHostKeys: PendingHostKeysSchema,
       },
       methods: {
         accept: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
@@ -165,14 +173,17 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         adopt: method(ConversationFilesSchema),
         relinquish: method(Type.Object({ to: ClientSchema }), ConversationFilesSchema),
         archive: method(),
-        // `pull` brings the database another listed machine (`from`, by endpoint) released into `data/`, read over
-        // this machine's own SSH, once it matches `files`; refused while active, as a phone's upload is. A move between
-        // two machines is relinquish there, pull and adopt here, then archive there, with a phone orchestrating.
-        pull: method(Type.Object({ from: Type.String(), files: ConversationFilesSchema })),
-        // A client's other machines, sent on every connect and whenever its Remote machines change. The server keeps
-        // each client's list for its tools while the clients are away, and uses each endpoint once, so clients never
-        // replace each other's machines. `acceptHostKey` trusts the pending keys with these fingerprints.
-        setMachines: method(Type.Object({ client: Type.String(), machines: Type.Array(MachineSchema) })),
+        // `pull` brings the database another machine (`from`, as the conversation there lists it, since this one has
+        // no conversation open to read it from) released into `data/`, read over this machine's own SSH, once it
+        // matches `files`; refused while active, as a phone's upload is. A move between two machines is relinquish
+        // there, pull and adopt here, then archive there, with a client orchestrating.
+        pull: method(Type.Object({ from: MachineSchema, files: ConversationFilesSchema })),
+        // The conversation's machines document, edited through the side that holds it: a record whole, part of one
+        // (what a check found, an accepted host key), or its removal. `acceptHostKey` trusts the pending keys with
+        // these fingerprints here and records the key on the machine, so the next holder trusts it too.
+        putMachine: method(MachineSchema),
+        patchMachine: method(Type.Object({ endpoint: Type.String(), patch: MachinePatchSchema })),
+        removeMachine: method(Type.Object({ endpoint: Type.String() })),
         acceptHostKey: method(Type.Object({ endpoint: Type.String(), fingerprints: Type.Array(Type.String()) })),
       },
     },

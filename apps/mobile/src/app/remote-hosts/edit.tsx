@@ -9,9 +9,11 @@ import { router, Stack, useLocalSearchParams, useNavigation, usePreventRemove } 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActionSheetIOS, ActivityIndicator, StyleSheet } from 'react-native';
 
-import { useChatApp } from '@/chat/chat-provider';
+import { useChatApp, useMachines } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
+import type { Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+
 import type { RemoteCredential, RemoteHost } from '@/pi/execution/remote/hosts';
 import { setupStageLabels, testRemoteHost } from '@/pi/execution/remote/test-host';
 
@@ -26,8 +28,11 @@ export default function RemoteHostEditScreen() {
   const colors = useChatColors();
   const { remoteHosts } = useChatApp();
   const snapshot = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  const listed = useMachines();
   const host = id === undefined ? undefined : snapshot.hosts.find((entry) => entry.id === id);
-  if (id !== undefined && !host) {
+  // A machine another device added has a record but no credential here yet; its endpoint fills the form.
+  const machine = id === undefined ? undefined : listed?.machines[id];
+  if (id !== undefined && !host && !machine) {
     return <Host style={styles.fill} seedColor={colors.accent}>
       <Form>
         <SettingsNotice message={snapshot.ready ? 'This machine was removed.' : 'Loading saved machines…'}
@@ -35,12 +40,13 @@ export default function RemoteHostEditScreen() {
       </Form>
     </Host>;
   }
-  return <MachineForm key={host?.id ?? 'new'} host={host} />;
+  return <MachineForm key={id ?? 'new'} host={host} machine={machine} />;
 }
 
-function MachineForm({ host }: { host?: RemoteHost }) {
+function MachineForm({ host, machine }: { host?: RemoteHost; machine?: Machine }) {
   const colors = useChatColors();
-  const { remoteHosts } = useChatApp();
+  const { remoteHosts, machines } = useChatApp();
+  const listed = useMachines();
   // The record this form edits: the one it opened with, or the one Add saved before a connection that failed.
   const [saved, setSaved] = useState(host);
   const [credentialType, setCredentialType] = useState<RemoteCredential['type']>(host?.credentialType ?? 'password');
@@ -50,8 +56,9 @@ function MachineForm({ host }: { host?: RemoteHost }) {
   // The connection a save runs, which leaving the form stops; the record stays.
   const connecting = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => connecting.current?.abort(), []);
-  const initial = { hostname: host?.hostname ?? '', port: String(host?.port ?? 22),
-    username: host?.username ?? '', password: '', privateKey: '', passphrase: '' };
+  const known = host ?? machine;
+  const initial = { hostname: known?.hostname ?? '', port: String(known?.port ?? 22),
+    username: known?.username ?? '', password: '', privateKey: '', passphrase: '' };
   // The fields' latest text, read when saving.
   const fields = useRef(initial);
   // Presented alone from the InfiniChat menu, the sheet has no Back button, so Cancel on the leading edge dismisses
@@ -110,16 +117,21 @@ function MachineForm({ host }: { host?: RemoteHost }) {
         throw new Error('Enter the selected SSH credential.');
       }
       if (!/^\d+$/.test(port.trim())) throw new Error('SSH port must be a number from 1 to 65535.');
-      // The machine names itself when the connection below reads its name; until then, its host name stands in.
-      const record = await remoteHosts.save({ ...(saved ? { id: saved.id } : {}), name: saved?.name ?? hostname,
-        hostname, port: Number(port), username }, replacement, saved);
+      const record = await remoteHosts.save({ hostname, port: Number(port), username }, replacement, saved);
       setSaved(record);
       setDirty(false);
       disablePrevention();
+      // The conversation's record follows the credential: a changed endpoint is another machine there too. The
+      // machine names itself when the connection below reads its name; until then, its host name stands in.
+      if (saved && saved.id !== record.id && listed?.machines[saved.id]) await machines.remove(saved.id);
+      if (listed?.machines[record.id] === undefined) {
+        await machines.put({ name: machine?.name ?? record.hostname, hostname: record.hostname, port: record.port,
+          username: record.username });
+      }
       // Saved, the machine connects at once: its SSH host key is trusted on first use, remote execution is prepared
       // and the InfiniChat keys are exchanged, so it is ready wherever machines are chosen.
       setProgress('Connecting through Tailscale…');
-      await testRemoteHost(remoteHosts, record.id, { signal: controller.signal,
+      await testRemoteHost(remoteHosts, machines, record.id, { signal: controller.signal,
         onProgress: (stage) => setProgress(setupStageLabels[stage]) });
       if (controller.signal.aborted) return;
       router.back();
@@ -133,7 +145,7 @@ function MachineForm({ host }: { host?: RemoteHost }) {
     }
   };
   return <>
-    <Stack.Screen options={{ title: host ? 'Edit machine' : 'Add machine' }} />
+    <Stack.Screen options={{ title: host ? 'Edit machine' : machine ? 'Add credentials' : 'Add machine' }} />
     {firstInSheet && <Stack.Toolbar placement="left">
       <Stack.Toolbar.Button icon="xmark" accessibilityLabel="Cancel" onPress={() => router.back()} />
     </Stack.Toolbar>}
@@ -153,7 +165,7 @@ function MachineForm({ host }: { host?: RemoteHost }) {
         </Section>}
         <Section title="Machine" footer={<Text>
           Use the full MagicDNS name when available. Both devices must already be connected to Tailscale. The machine
-          names itself when it connects.
+          names itself when it connects, and joins InfiniChat’s list on every device.
         </Text>}>
           <LabeledContent label="Hostname">
             <TextField text={hostnameText} placeholder="machine.tailnet.ts.net"

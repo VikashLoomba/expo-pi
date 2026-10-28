@@ -5,6 +5,8 @@ import type { ScheduledTask } from './infinichat-scheduled';
 import type {
   InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot,
 } from './infinichat-service';
+import type { Machine } from './infinichat-remote/contract';
+import type { MachinePatch, MachinesState } from './infinichat-remote/machines';
 import type { InfiniChatControls } from './infinichat-view';
 import type { ScheduledInput } from './infinichat/schedule';
 
@@ -32,6 +34,7 @@ export class ShownInfiniChat implements InfiniChatHost {
   private controls?: InfiniChatControls;
   private messages = NO_MESSAGES;
   private tasks?: readonly ScheduledTask[];
+  private machineList?: MachinesState;
   private report = NO_REPORT;
 
   constructor(private readonly heldMessage: string) {}
@@ -49,6 +52,7 @@ export class ShownInfiniChat implements InfiniChatHost {
     };
   };
   readonly scheduled = { subscribe: this.subscribe, getSnapshot: () => this.tasks };
+  readonly machines = { subscribe: this.subscribe, getSnapshot: () => this.machineList };
   private readonly shown: ChatViewSource<InfiniChatControls> = {
     subscribe: this.subscribe,
     getSnapshot: () => this.snapshot,
@@ -97,6 +101,18 @@ export class ShownInfiniChat implements InfiniChatHost {
     return this.current().cancelScheduled(id, replacement);
   }
 
+  putMachine(record: Machine): Promise<void> {
+    return this.current().putMachine(record);
+  }
+
+  patchMachine(endpoint: string, patch: MachinePatch): Promise<void> {
+    return this.current().patchMachine(endpoint, patch);
+  }
+
+  removeMachine(endpoint: string): Promise<void> {
+    return this.current().removeMachine(endpoint);
+  }
+
   dismissError() {
     if (!this.held) this.host?.dismissError();
   }
@@ -138,11 +154,13 @@ export class ShownInfiniChat implements InfiniChatHost {
       this.controls = view.getControls();
       this.messages = view.getMessages();
       this.tasks = host.scheduled.getSnapshot();
+      this.machineList = host.machines.getSnapshot();
       this.report = host.getSnapshot();
       this.notify();
     };
     const stops = waiting ? [view.subscribe(update)]
-      : [view.subscribe(update), host.subscribe(update), host.scheduled.subscribe(update)];
+      : [view.subscribe(update), host.subscribe(update), host.scheduled.subscribe(update),
+        host.machines.subscribe(update)];
     this.unfollow = () => {
       for (const stop of stops) stop();
     };

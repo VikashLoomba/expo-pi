@@ -9,6 +9,10 @@ import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
 import type { ChatViewSource } from './chat-view';
 import { ScheduledTasks, type ScheduledTask } from './infinichat-scheduled';
+import type { Machine } from './infinichat-remote/contract';
+import {
+  MachineList, patchMachine, putMachine, removeMachine, type MachinePatch, type MachinesState,
+} from './infinichat-remote/machines';
 import { InfiniChatView, type InfiniChatControls } from './infinichat-view';
 import { AGENT_TASK } from './infinichat/agents';
 import { openOptChat, type OptChat } from './infinichat/app';
@@ -45,6 +49,11 @@ interface Store<T> {
  */
 export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   view(): ChatViewSource<InfiniChatControls>;
+  /** The conversation's machines document (`infinichat-remote/machines.ts`); undefined until read. */
+  readonly machines: Store<MachinesState | undefined>;
+  putMachine(record: Machine): Promise<void>;
+  patchMachine(endpoint: string, patch: MachinePatch): Promise<void>;
+  removeMachine(endpoint: string): Promise<void>;
   accept(input: UserMessage['content'], requestId: string): Promise<void>;
   stop(): Promise<void>;
   updateSettings(settings: InfiniChatSettings): Promise<void>;
@@ -84,6 +93,7 @@ export class InfiniChatService implements InfiniChatHost {
     private readonly chat: OptChat,
     /** The scheduled tasks still waiting. */
     readonly scheduled: ScheduledTasks,
+    readonly machines: MachineList,
     private readonly models: Models,
     private readonly authError?: (providerId: string) => string | undefined,
     private readonly machine?: string,
@@ -115,8 +125,10 @@ export class InfiniChatService implements InfiniChatHost {
       },
     }, BACKGROUND_CONTEXT);
     const scheduled = new ScheduledTasks(chat.harness, (error) => service?.report(error));
-    service = new InfiniChatService(chat, scheduled, options.models, options.authError, options.machine);
+    const machines = new MachineList(chat.harness);
+    service = new InfiniChatService(chat, scheduled, machines, options.models, options.authError, options.machine);
     void scheduled.start().catch((error: unknown) => service?.report(error));
+    void machines.start().catch((error: unknown) => service?.report(error));
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
       if (end.reason === 'failed') service.report(end.error);
@@ -171,6 +183,21 @@ export class InfiniChatService implements InfiniChatHost {
     await root.commit(async (tx) => {
       (await tx.doc(ChatMetadataDoc, root.id)).lastRequest = requestId;
     }, BACKGROUND_CONTEXT);
+  }
+
+  putMachine(record: Machine): Promise<void> {
+    this.assertOpen();
+    return putMachine(this.chat.harness, record);
+  }
+
+  patchMachine(endpoint: string, patch: MachinePatch): Promise<void> {
+    this.assertOpen();
+    return patchMachine(this.chat.harness, endpoint, patch);
+  }
+
+  removeMachine(endpoint: string): Promise<void> {
+    this.assertOpen();
+    return removeMachine(this.chat.harness, endpoint);
   }
 
   /** Cancels accepted inputs not yet sent and aborts the running turn; summaries and agents keep running. */
@@ -237,6 +264,7 @@ export class InfiniChatService implements InfiniChatHost {
         await this.chat.close();
       } finally {
         this.scheduled.close();
+        this.machines.close();
       }
     })();
     return this.closePromise;

@@ -575,9 +575,9 @@ export class InfiniChatMoves {
       if (held?.active) throw new Error(`InfiniChat on ${this.name(toId)} already has another conversation open.`);
       this.machineClosed = true;
       this.step({ step: 'copying' });
-      const endpoint = this.directory(fromId).endpoint();
-      if (endpoint === undefined) throw new Error(`${this.name(fromId)} is no longer in Remote machines.`);
-      await target.pull(endpoint, files);
+      const record = this.directory(fromId).machine();
+      if (record === undefined) throw new Error(`${this.name(fromId)} is no longer among the machines.`);
+      await target.pull(record, files);
       signal.throwIfAborted();
       this.machineClosed = false;
       this.step({ step: 'opening' }, false);
@@ -596,7 +596,7 @@ export class InfiniChatMoves {
    * through the environment this device borrows for the source. A later connection to the source finds it there.
    */
   private async authorize(fromId: string, toId: string, signal: AbortSignal) {
-    const key = this.directory(toId).publicKey();
+    const key = this.directory(toId).machine()?.publicKey;
     const to = this.name(toId);
     if (key === undefined) {
       throw new Error(`Test ${to} in Remote machines first, so this device learns its InfiniChat key.`);
@@ -613,7 +613,7 @@ export class InfiniChatMoves {
 
   /** The machine as `relinquish` records who takes the conversation: by its endpoint, which every client knows. */
   private holder(machineId: string): InfiniChatClient {
-    return { id: this.directory(machineId).endpoint() ?? machineId, name: this.name(machineId) };
+    return { id: machineId, name: this.name(machineId) };
   }
 
   /** The machine holds the conversation: the record says so, and the screens show it there. */
@@ -730,7 +730,7 @@ export class InfiniChatMoves {
   }
 
   private name(machineId: string): string {
-    return this.directory(machineId).name() ?? 'the machine';
+    return this.directory(machineId).machine()?.name ?? 'the machine';
   }
 
   /** Names the step that failed, then why. */

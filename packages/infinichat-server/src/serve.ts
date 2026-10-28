@@ -4,7 +4,7 @@ import type { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import type { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import {
   AccessSchema, ControlsSchema, ConversationSchema, InfiniChatRemote, MessagesSchema, PendingHostKeysSchema,
-  ReachSchema, ScheduledSchema, ServerSchema, SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal,
+  MachinesSchema, ReachSchema, ScheduledSchema, ServerSchema, SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal,
   type InfiniChatServer,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { ModelCatalogSchema, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
@@ -52,10 +52,12 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
     const currentControls = () => conversation.current?.view().getControls() ?? null;
     const currentMessages = () => conversation.current?.view().getMessages() ?? [];
     const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? null;
+    const currentMachines = () => conversation.current?.machines.getSnapshot() ?? null;
     const snapshot = self.state('snapshot', SnapshotSchema, { init: currentSnapshot });
     const controls = self.state('controls', ControlsSchema, { init: currentControls });
     const messages = self.state('messages', MessagesSchema, { init: currentMessages });
     const scheduled = self.state('scheduled', ScheduledSchema, { init: currentScheduled });
+    const machineList = self.state('machines', MachinesSchema, { init: currentMachines });
     const held = self.state('conversation', ConversationSchema, { init: conversation.getState });
     const server = self.state('server', ServerSchema, { init: () => options.server });
     const catalog = self.state('catalog', ModelCatalogSchema, { init: () => options.catalog });
@@ -81,6 +83,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       messages.replace(ctx, currentMessages(), { diff: true });
       controls.replace(ctx, currentControls(), { diff: true });
       scheduled.replace(ctx, currentScheduled(), { diff: true });
+      machineList.replace(ctx, currentMachines(), { diff: true });
       held.replace(ctx, conversation.getState(), { diff: true });
       snapshot.replace(ctx, currentSnapshot(), { diff: true });
     });
@@ -90,6 +93,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       controls,
       messages,
       scheduled,
+      machines: machineList,
       conversation: held,
       server,
       catalog,
@@ -114,8 +118,13 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       archive: () => conversation.archive(),
       pull: async ({ from, files }, ctx) =>
         conversation.pull(await machines.environment(from), files, callContext(ctx)),
-      setMachines: ({ client, machines: list }) => machines.set(client, list),
-      acceptHostKey: ({ endpoint, fingerprints }) => machines.acceptHostKey(endpoint, fingerprints),
+      putMachine: (record) => core().putMachine(record),
+      patchMachine: ({ endpoint, patch }) => core().patchMachine(endpoint, patch),
+      removeMachine: ({ endpoint }) => core().removeMachine(endpoint),
+      acceptHostKey: async ({ endpoint, fingerprints }) => {
+        const hostKey = await machines.acceptHostKey(endpoint, fingerprints);
+        if (hostKey !== undefined) await core().patchMachine(endpoint, { hostKey });
+      },
     };
   });
 }

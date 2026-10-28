@@ -4,7 +4,6 @@ import { InfiniChatService, infiniChatTasks } from '@pi-agent/infinichat/pi/infi
 import { infiniChatDevices } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
 import type { KeepAliveController } from '../keep-alive/controller';
-import type { RemoteHostRepository } from './execution/remote/hosts';
 import type { RemoteExecution } from './execution/remote/owner';
 import { createExpoImages } from './images';
 import type { ScheduledTaskNotifications } from './infinichat-notifications';
@@ -22,7 +21,6 @@ export type PhoneInfiniChat = { service: InfiniChatService; close(): Promise<voi
  */
 export async function openPhoneInfiniChat(options: {
   storage: Storage; models: Models; workspaces: Workspaces; remote: RemoteExecution;
-  remoteHosts: RemoteHostRepository;
   authError?: (providerId: string) => string | undefined;
   onClosed?: (end: SessionEnd) => void;
   /** Counts InfiniChat's live work while it is open; its owner closes it. */
@@ -30,8 +28,10 @@ export async function openPhoneInfiniChat(options: {
   /** Follows its scheduled tasks from the open on, until the side that opens next replaces it; its owner closes it. */
   notifications: ScheduledTaskNotifications;
 }): Promise<PhoneInfiniChat> {
-  const devices = createDevices(options.workspaces, options.remote, options.remoteHosts);
-  const service = await InfiniChatService.open({
+  // The machines are the service's own document; the list reads it once the service is open.
+  let service: InfiniChatService | undefined;
+  const devices = createDevices(options.workspaces, options.remote, () => service?.machines.getSnapshot());
+  service = await InfiniChatService.open({
     storage: options.storage,
     models: options.models,
     devices: infiniChatDevices(devices, createExpoImages()),

@@ -1,8 +1,7 @@
 import { webSocketLink, type Link } from '@earendil-works/chord';
 import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import { connect, type SshConnection, type SshLocalForward } from '@osuki-dev/react-native-ssh';
-import { machineEndpoint, type Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
-import type { MachineDirectory, ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
+import type { ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
   installServer, machineIdentity, machineSecret, runningServer, savedSecret,
 } from '@pi-agent/infinichat/pi/infinichat-remote/install';
@@ -60,7 +59,8 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
       // As owner.ts checks a chat's machine, with InfiniChat's own way out.
       await hosts.restore();
       if (!hosts.get(machineId)) {
-        throw new Error('This machine was removed from Remote machines while InfiniChat’s conversation is on it.');
+        throw new Error('This iPhone has no credentials for the machine InfiniChat’s conversation is on. Add them in '
+          + 'Remote machines.');
       }
       const credentials = createCredentialBackend();
       const secret = await savedSecret(credentials, machineId);
@@ -71,8 +71,8 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
       const machine = () => awaitWithContext(remote.environment(machineId, undefined),
         withAbortSignal(signal, BACKGROUND_CONTEXT));
       // The server's device name and description are the machine's own, as every client reads them.
-      const identity = await machineIdentity(await machine(), host.name, signal);
-      const name = (await hosts.setName(host, identity.name)).name;
+      const identity = await machineIdentity(await machine(), host.hostname, signal);
+      const name = identity.name;
       const description = machineDescription({ username: host.username, hostname: identity.hostname });
       let forward: SshLocalForward | undefined;
       let link: Link | undefined;
@@ -118,36 +118,5 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
         throw error;
       }
     },
-  };
-}
-
-/**
- * The machine as Remote machines lists it, and the other configured machines, each with the host key this phone
- * pinned for it and the InfiniChat keys it authorized there, never their credentials.
- */
-export function phoneMachines(hosts: RemoteHostRepository, machineId: string): MachineDirectory {
-  return {
-    id: machineId,
-    name: () => hosts.get(machineId)?.name,
-    endpoint: () => {
-      const host = hosts.get(machineId);
-      return host && machineEndpoint(host);
-    },
-    publicKey: () => hosts.get(machineId)?.publicKey,
-    others: async () => {
-      const others = hosts.getSnapshot().hosts.filter((host) => host.id !== machineId);
-      const machines = await Promise.all(others.map(async (host): Promise<Machine[]> => {
-        const { id, name, hostname, port, username, authorizedKeys } = host;
-        // A pin that can't be read is left out, so that machine's key waits for this phone; one removed meanwhile
-        // is left out entirely.
-        const pinned = await hosts.admit(id).then(({ trustedHostKey }) => trustedHostKey, () => null);
-        if (pinned === null && hosts.get(id) === undefined) return [];
-        return [{ name, hostname, port, username,
-          ...(pinned ? { hostKey: { algorithm: pinned.algorithm, fingerprint: pinned.fingerprint } } : {}),
-          ...(authorizedKeys === undefined ? {} : { authorizedKeys: [...authorizedKeys] }) }];
-      }));
-      return machines.flat();
-    },
-    subscribe: hosts.subscribe,
   };
 }

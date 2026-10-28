@@ -1,9 +1,9 @@
 import type { SshConnection } from '@osuki-dev/react-native-ssh';
 import { isSshKeyBlob, keyBlob, keyExchangeLines } from '@pi-agent/infinichat/pi/infinichat-remote/keys';
 
+import { otherKeys, type MachinesAccess } from '../../infinichat-remote/phone-machines';
 import { BootstrapError } from './bootstrap-errors';
 import { runSshCommand } from './command-channel';
-import type { RemoteHost, RemoteHostRepository } from './hosts';
 import { quotePosix } from './provisioning';
 
 /** What a machine's key exchange found: its own key, and the others' keys now in its `authorized_keys`. */
@@ -36,11 +36,11 @@ export async function exchangeKeys(connection: SshConnection, others: readonly s
   return { publicKey, authorizedKeys: authorized };
 }
 
-/** The exchange for `host`: the other machines' keys this phone knows, kept on the machine's record. */
-export function machineKeyExchange(hosts: RemoteHostRepository, host: RemoteHost): KeyExchange {
+/** The exchange for the machine at `endpoint`: the others' keys as the document has them, and its keys kept there. */
+export function machineKeyExchange(machines: MachinesAccess, endpoint: string): KeyExchange {
   return {
-    others: () => hosts.getSnapshot().hosts.flatMap((other) =>
-      other.id !== host.id && other.publicKey !== undefined ? [other.publicKey] : []),
-    store: async (keys) => { await hosts.setKeys(host, keys); },
+    others: () => otherKeys(machines, endpoint),
+    store: (keys) => machines.patch(endpoint,
+      { publicKey: keys.publicKey, authorizedKeys: [...keys.authorizedKeys].sort() }),
   };
 }

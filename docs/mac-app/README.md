@@ -22,6 +22,7 @@ leaves to each app, and the screens.
 | Scope | Parity with the iPhone app before the owner uses it. Platform differences are listed below, not silently dropped. Only InfiniChat is shared through its server; each device keeps its own ordinary chats, as decided on 2026-10-26. |
 | Identity | Name InfiniChat, identifier `com.vikashloomba.piagent.mac`; the LaunchAgent label `com.vikashloomba.piagent.infinichat` stays. |
 | Machine names | A machine's own name, read on the machine by `machineIdentity` (`scutil --get ComputerName` on macOS; `hostnamectl --static`, else `hostname`, on Linux): both apps install and expect a server under it, and the phone's form no longer asks for one (2026-10-28, after the first move to the Mac failed because each app reinstalled the server under its own name for it). |
+| Machine list | A session document of InfiniChat's storage (docs/infinichat-package piece 8, decided 2026-10-28): the holder serves it as a cell and clients edit it through the holder; the Mac keeps only identity files. Replaces the per-client lists sent at connect and the Mac's planned `machines.json`. |
 
 Choices made by me and not objected to: the app is `apps/mac`; the main process is Bun (Electrobun's default);
 `packageManager: "pnpm"` in `hutch.config.ts`; `titleBarStyle: "hiddenInset"`; design docs first, as for
@@ -85,7 +86,7 @@ Implement in order; each leaves the app building, the phone app and the server u
 | 1 | [The shell](01-shell.md) | `apps/mac` on Hutch, the main window, menus, lifecycle, the loopback Chord host and the window's client, the layout and theme, the gates | ~450 lines + CSS |
 | 2 | [InfiniChat on this Mac](02-infinichat-on-this-mac.md) | the client identity, the home record, the server assets, the dialer for this Mac, `RemoteInfiniChat` served to the window, a plain transcript and the composer | ~750 |
 | 3 | [The transcript](03-transcript.md) | Markdown, thinking, work reports, tool cards, web search, images, copy, name and avatar, photo attachments | ~450 |
-| 4 | [Machines](04-machines.md) | the Mac's machine list over pi-env, check connection, host keys, key exchange, the Settings window with its Machines pane | ~600 |
+| 4 | [Machines](04-machines.md) | the Settings window with its Machines pane over the conversation's machines document (docs/infinichat-package piece 8), the Mac's own record and identity files, check connection, host keys, key exchange | ~420 |
 | 5 | [Moves](05-moves.md) | the dialer for other machines, `InfiniChatMoves` between machines, the machines menu, following `heldBy` | ~400 |
 | 6 | [InfiniChat settings, providers and tasks](06-infinichat-settings.md) | the settings sheet, the machine's providers with the sign-in relay, the scheduled tasks sheet, notifications | ~500 |
 | 7 | [Chats](07-chats.md) | `DurableChatService` in the main process, the chats sidebar, the chat screen, chat settings with the directory picker | ~800 |

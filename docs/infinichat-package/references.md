@@ -13,6 +13,11 @@ Checked on 2026-10-26 at revision `348f26a` (branch `feat/agent-name-avatar`). V
 | Contract | Source |
 | --- | --- |
 | One process owns a storage; no cross-process locking | pi-durable `README.md:790` |
+| A session document is one per storage: `scope: 'session'`; `tx.doc`, `watchDoc`, `snapshot`, `documentState` take its token alone | pi-durable `dist/types.d.ts:44-47`, `:877`, `:920`, `:954`, `:960` |
+| `Harness extends Session`: the Harness commits and observes session documents | pi-durable `dist/harness/types.d.ts:723` |
+| `documentState()` never creates a document; `tx.doc()` creates it on first use | pi-durable `test/examples/04-chord-state.ts` (tag `v1.4.0`) |
+| Clients attach to one Harness through Chord views; a late joiner starts from the current view | pi-durable `README.md` "Watching a Conversation", `test/examples/21-late-join.ts` |
+| No CRDT or offline multi-writer merge | pi-durable `docs/spec.md` §13 (tag `v1.4.0`) |
 | The portable SQLite and JSONL cores run without Node APIs, given a `SqliteDatabase` facade or a `FileSystem` | pi-durable `README.md:790` |
 | `env` builds an `ExecutionEnv` for each tool call | pi-durable `README.md:427-441` |
 | `FileSystem`, `Shell`, and `ExecutionEnv extends FileSystem, Shell` | pi-durable `dist/env/index.d.ts:164`, `:292`, `:302` |

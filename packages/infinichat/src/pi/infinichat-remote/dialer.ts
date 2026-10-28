@@ -36,17 +36,14 @@ export interface DialedServer {
   close(): Promise<void>;
 }
 
-/** The machine as this app knows it, and the other machines the server's tools reach. */
+/**
+ * A machine as the conversation's machines document lists it (`machines.ts`), read from the side this app shows: the
+ * holder's own document, or the last one a held side showed while a move is under way.
+ */
 export interface MachineDirectory {
-  /** The machine's ID in this app's list. */
+  /** The machine's endpoint (`machineEndpoint`), its ID everywhere. */
   readonly id: string;
-  /** Its name, or undefined once it is gone from this app's list. */
-  name(): string | undefined;
-  /** Its endpoint as the servers know it (`machineEndpoint`), or undefined once it is gone. */
-  endpoint(): string | undefined;
-  /** Its InfiniChat SSH public key, once this app's key exchange learned it there. */
-  publicKey(): string | undefined;
-  /** As `setMachines` sends them: never credentials, with the host key this app pinned, if any. */
-  others(): Promise<Machine[]>;
+  /** Its record, or undefined once it is gone from the document. */
+  machine(): Machine | undefined;
   subscribe(listener: () => void): () => void;
 }

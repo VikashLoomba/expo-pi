@@ -73,6 +73,7 @@ comes after them. Each piece leaves the iOS app and the server working.
 | 5 | [The `node` subpath](05-node-subpath.md) | The server's Node implementations in `packages/infinichat/src/node` | ~400 lines moved |
 | 6 | [Ordinary chats](06-ordinary-chats.md) | `DurableChatService` in the package, taking its images, environments and keep-alive from the app | ~20 lines changed; can follow piece 2 directly |
 | 7 | [Several clients](07-several-clients.md) | The server's single-client code fixed: a credential per client, the server's own machine list, the holder recorded on the machines | ~150 lines |
+| 8 | [The machines document](08-machines-document.md) | The machine list as a session document of InfiniChat's storage, served by the holder and edited through it; clients keep credentials only | ~220 package, ~350 phone |
 
 A piece that grows to several times its size means its design is wrong; stop and revisit it.
 

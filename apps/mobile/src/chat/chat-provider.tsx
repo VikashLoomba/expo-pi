@@ -9,6 +9,7 @@ import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi
 import { INFINICHAT_DATABASE, InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
+import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/machines';
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderAccess, ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 import React, {
@@ -24,7 +25,8 @@ import { createExpoImages } from '../pi/images';
 import { ScheduledTaskNotifications } from '../pi/infinichat-notifications';
 import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phone';
 import { phoneClient } from '../pi/infinichat-remote/phone-client';
-import { phoneDialer, phoneMachines } from '../pi/infinichat-remote/phone-dialer';
+import { phoneDialer } from '../pi/infinichat-remote/phone-dialer';
+import { phoneMachines, shownMachines } from '../pi/infinichat-remote/phone-machines';
 import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
 import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
 import { SERVER_BUNDLE } from '../pi/infinichat-remote/server-assets';
@@ -51,7 +53,10 @@ const INFINICHAT_MOVING = 'InfiniChat is moving. Send again once the move is don
  */
 function useChatRuntime() {
   const [remoteHosts] = useState(createRemoteHostRepository);
-  const [remote] = useState(() => createRemoteExecution(remoteHosts));
+  // What the screens show of InfiniChat, across moves; the conversation's machines are read and edited through it.
+  const [infiniChat] = useState(() => new ShownInfiniChat(INFINICHAT_MOVING));
+  const [machines] = useState(() => shownMachines(infiniChat));
+  const [remote] = useState(() => createRemoteExecution(remoteHosts, machines));
   const [workspaces] = useState(() => createDeviceWorkspaces());
   const [credentials] = useState(createChatCredentialStore);
   const [keepAliveSettings] = useState(createKeepAliveSettings);
@@ -62,8 +67,6 @@ function useChatRuntime() {
   });
   // Where InfiniChat's conversation lives; only that side opens it.
   const [infiniChatHome] = useState(createPhoneHome);
-  // What the screens show of InfiniChat, across moves.
-  const [infiniChat] = useState(() => new ShownInfiniChat(INFINICHAT_MOVING));
   const [moves, setMoves] = useState<InfiniChatMoves>();
   // The client of the machine InfiniChat lives on or moves to or from, for its connection.
   const [infiniChatClient, setInfiniChatClient] = useState<RemoteInfiniChat>();
@@ -116,7 +119,7 @@ function useChatRuntime() {
     const openPhone = async () => {
       if (state.phone || unmounted) return;
       const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
-        storage, models, workspaces, remote, remoteHosts, keepAlive, notifications, authError,
+        storage, models, workspaces, remote, keepAlive, notifications, authError,
         onClosed: (end) => {
           if (end.reason !== 'failed') return;
           serialize(async () => {
@@ -138,7 +141,7 @@ function useChatRuntime() {
       let client = state.remotes.get(machineId);
       if (!client) {
         client = new RemoteInfiniChat(phoneDialer(remoteHosts, remote, machineId),
-          phoneMachines(remoteHosts, machineId), phoneClient());
+          phoneMachines(machines, machineId), phoneClient());
         state.remotes.set(machineId, client);
       }
       setInfiniChatClient(client);
@@ -152,7 +155,7 @@ function useChatRuntime() {
         report: (error) => setOpenError(`InfiniChat: ${errorText(error)}`) });
     };
     // A move borrows the remote owner's connection to the machine, as the chats' tools do, and never closes it.
-    const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(remoteHosts, machineId),
+    const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(machines, machineId),
       (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', SERVER_BUNDLE, {
       hold: () => infiniChat.hold(),
       closeLocal: () => queued(async () => {
@@ -276,9 +279,9 @@ function useChatRuntime() {
         if (failure !== undefined) throw failure;
       });
     };
-  }, [credentials, infiniChat, infiniChatHome, keepAliveSettings, models, remote, remoteHosts, workspaces]);
-  return { remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, infiniChatHome, moves,
-    infiniChatClient, openError, setOpenError };
+  }, [credentials, infiniChat, infiniChatHome, keepAliveSettings, machines, models, remote, remoteHosts, workspaces]);
+  return { remoteHosts, machines, remote, credentials, keepAliveSettings, models, service, infiniChat, infiniChatHome,
+    moves, infiniChatClient, openError, setOpenError };
 }
 
 /** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
@@ -381,7 +384,7 @@ function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: 
 
 function useChatController() {
   const {
-    remoteHosts, remote, credentials, keepAliveSettings, models, service, infiniChat, infiniChatHome, moves,
+    remoteHosts, machines, remote, credentials, keepAliveSettings, models, service, infiniChat, infiniChatHome, moves,
     infiniChatClient, openError, setOpenError,
   } = useChatRuntime();
   const [infiniChatAvatar] = useState(createInfiniChatAvatar);
@@ -460,7 +463,7 @@ function useChatController() {
     ready: service !== undefined, chats: serviceState.chats,
     error: openError ?? serviceState.error,
     dismissError, signOutPending, disconnectingProvider,
-    ...signIn, remoteHosts, remote, catalog, refreshCatalog, providerAccess, keepAliveSettings,
+    ...signIn, remoteHosts, machines, remote, catalog, refreshCatalog, providerAccess, keepAliveSettings,
     hasConnectedProvider: catalog.some((provider) => providerAccess(provider.id).connected),
     providerOAuth, retryAuth, saveProviderKey, disconnectProvider };
 }
@@ -522,6 +525,12 @@ export function useInfiniChatView(): ChatViewSource<InfiniChatControls> {
   return useMemo(() => infiniChat.view(), [infiniChat]);
 }
 
+/** The conversation's machines document, as the side the screens show serves it; undefined until read. */
+export function useMachines(): MachinesState | undefined {
+  const { machines } = useChatApp();
+  return useSyncExternalStore(machines.subscribe, machines.get, machines.get);
+}
+
 /** The machine whose InfiniChat the screens show; undefined while they show this iPhone's. */
 function useShownMachine(): RemoteInfiniChat | undefined {
   const { infiniChat } = useChatApp();
@@ -569,7 +578,7 @@ const notReady: ProviderAccess = { ready: false, connected: false };
  */
 export function useInfiniChatAccount(): ProviderAccount & { catalog: ModelCatalog; machine?: string } {
   const app = useChatApp();
-  const { remoteHosts, providerOAuth } = app;
+  const { providerOAuth } = app;
   const remote = useShownMachine();
   const subscribe = remote?.subscribe ?? subscribeNothing;
   const getCatalog = () => remote?.getCatalog() ?? noCatalog;
@@ -578,7 +587,7 @@ export function useInfiniChatAccount(): ProviderAccount & { catalog: ModelCatalo
   const catalog = useSyncExternalStore(subscribe, getCatalog, getCatalog);
   const access = useSyncExternalStore(subscribe, getAccess, getAccess);
   const shown = useSyncExternalStore(subscribe, getSignIn, getSignIn);
-  const machines = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  const listed = useMachines();
   const [notice, setNotice] = useState<{ providerId: string; message: string }>();
   const [browserOpen, setBrowserOpen] = useState(false);
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
@@ -665,7 +674,7 @@ export function useInfiniChatAccount(): ProviderAccount & { catalog: ModelCatalo
   const status = shown?.status === undefined ? undefined : { providerId: shown.providerId, message: shown.status };
   return {
     catalog,
-    machine: machines.hosts.find((host) => host.id === remote.machineId)?.name ?? 'the machine',
+    machine: listed?.machines[remote.machineId]?.name ?? 'the machine',
     providerAccess: (providerId) => {
       const state = access?.[providerId] ?? notReady;
       return signOutPending ? { ...state, ready: false, connected: false } : state;

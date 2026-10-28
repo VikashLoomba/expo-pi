@@ -2,7 +2,9 @@ import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
 import { MACHINE_WORK, machineDescription, type Device } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import { WorkspaceDoc } from '@pi-agent/infinichat/pi/workspace/document';
 
-import { PHONE_DEVICE, type RemoteHostRepository } from './execution/remote/hosts';
+import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/machines';
+
+import { PHONE_DEVICE } from './execution/remote/hosts';
 import type { RemoteExecution } from './execution/remote/owner';
 import { WorkspaceExecutionEnv } from './workspace/execution-env';
 import type { Workspaces } from './workspace/storage';
@@ -11,12 +13,12 @@ import type { Workspaces } from './workspace/storage';
 const PHONE_WORK = '/workspace';
 
 /**
- * The devices InfiniChat's tools run on from the phone: its workspace and the configured remote machines, resolved to
- * the environments the chats use.
+ * The devices InfiniChat's tools run on from the phone: its workspace and the conversation's machines, resolved to
+ * the environments the chats use, over this phone's credentials for each.
  */
-export function createDevices(workspaces: Workspaces, remote: RemoteExecution, hosts: RemoteHostRepository) {
+export function createDevices(workspaces: Workspaces, remote: RemoteExecution,
+  machines: () => MachinesState | undefined) {
   return async (): Promise<Device[]> => {
-    await hosts.restore();
     return [
       {
         name: PHONE_DEVICE,
@@ -28,13 +30,13 @@ export function createDevices(workspaces: Workspaces, remote: RemoteExecution, h
           return new WorkspaceExecutionEnv(workspaces.workspace(workspace.id), workspace.id, `${PHONE_WORK}/${who}`);
         },
       },
-      // The repository keeps machine names unique and never the phone's.
-      ...hosts.getSnapshot().hosts.map((host): Device => ({
-        name: host.name,
-        description: machineDescription(host),
+      // The document keeps machine names unique, and the phone's test never gives one the phone's.
+      ...Object.entries(machines()?.machines ?? {}).map(([endpoint, machine]): Device => ({
+        name: machine.name,
+        description: machineDescription(machine),
         async environment(who) {
-          const home = (await remote.environment(host.id, undefined)).cwd;
-          return remote.environment(host.id, `${home}/${MACHINE_WORK}/${who}`);
+          const home = (await remote.environment(endpoint, undefined)).cwd;
+          return remote.environment(endpoint, `${home}/${MACHINE_WORK}/${who}`);
         },
       })),
     ];

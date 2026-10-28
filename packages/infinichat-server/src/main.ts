@@ -75,6 +75,11 @@ async function serve(device: string, description: string): Promise<number> {
         if (end.reason === 'failed') stopping.resolve(end);
       },
     }));
+    // The machines are the open conversation's document; the connections follow it and outlive each hold.
+    const unfollow = machines.follow({
+      subscribe: conversation.subscribe, current: () => conversation.current?.machines.getSnapshot(),
+    });
+    closes.push(async () => unfollow());
     await conversation.start();
     // Closing waits for running task code; work it cuts off stays pending for the next start.
     closes.push(() => conversation.close());

@@ -1,6 +1,5 @@
 import { hostname, userInfo } from 'node:os';
 
-import { machineEndpoint } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { MachineDirectory } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 
 /** The ID of this Mac in the app's machine list, which its home record names from the first launch. */
@@ -19,14 +18,12 @@ export interface MacMachine {
 export const thisMac = (name: string): MacMachine =>
   ({ id: THIS_MAC, name, hostname: hostname(), port: 22, username: userInfo().username });
 
-/** The machine as `RemoteInfiniChat` knows it (`phone-dialer.ts`'s `phoneMachines`); no other machines yet. */
+/** The machine as `RemoteInfiniChat` knows it; piece 4 reads the conversation's machines document instead. */
 export function macDirectory(machine: MacMachine): MachineDirectory {
+  const { name, hostname, port, username } = machine;
   return {
     id: machine.id,
-    name: () => machine.name,
-    endpoint: () => machineEndpoint(machine),
-    publicKey: () => undefined,
-    others: async () => [],
+    machine: () => ({ name, hostname, port, username }),
     subscribe: () => () => {},
   };
 }

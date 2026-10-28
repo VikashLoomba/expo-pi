@@ -101,7 +101,11 @@ function messages(name: string) {
 type Run = (lines: string[], step: Step) => Promise<string[]>;
 
 const SECRET_UNAVAILABLE = 'Could not prepare InfiniChat’s key for this machine. Unlock this device and try again.';
-const secretKey = (machineId: string) => `pi.infinichat.secret.v1.${machineId}`;
+/**
+ * The key the secret is kept under. A machine's ID is its endpoint, whose `@` and `:` the phone's secure store refuses
+ * in a key (expo-secure-store: alphanumerics, `.`, `-` and `_`), so they are written as `_`.
+ */
+const secretKey = (machineId: string) => `pi.infinichat.secret.v1.${machineId.replace(/[^A-Za-z0-9._-]/g, '_')}`;
 /** Each client's secret on a machine, in a file named after its client ID; the server reads them at each connection. */
 const CLIENTS = '.infinichat/clients';
 

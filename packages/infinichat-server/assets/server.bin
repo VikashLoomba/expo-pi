@@ -152,8 +152,8 @@ function getBunSandboxEnvValue(name) {
   if (procEnvCache === null) {
     procEnvCache = /* @__PURE__ */ new Map();
     try {
-      const { readFileSync: readFileSync3 } = __require("node:fs");
-      const data = readFileSync3("/proc/self/environ", "utf-8");
+      const { readFileSync: readFileSync2 } = __require("node:fs");
+      const data = readFileSync2("/proc/self/environ", "utf-8");
       for (const entry2 of data.split("\0")) {
         const idx = entry2.indexOf("=");
         if (idx > 0) {
@@ -910,19 +910,19 @@ var init_version = __esm({
 
 // ../../node_modules/.pnpm/@earendil-works+pi-ai@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatur_650820bfd44a3c6cefd0e1345c0a96b9/node_modules/@earendil-works/pi-ai/dist/utils/identity.js
 function mergeClientIdentity(...sources) {
-  let merged2;
+  let merged;
   for (const source of sources) {
     if (!source)
       continue;
-    merged2 = { ...merged2 };
+    merged = { ...merged };
     if (source.userAgent !== void 0)
-      merged2.userAgent = source.userAgent;
+      merged.userAgent = source.userAgent;
     if (source.attribution !== void 0)
-      merged2.attribution = source.attribution;
+      merged.attribution = source.attribution;
     if (source.version !== void 0)
-      merged2.version = source.version;
+      merged.version = source.version;
   }
-  return merged2;
+  return merged;
 }
 function getClientVersion(identity) {
   return identity?.version ?? PI_AI_VERSION;
@@ -1267,16 +1267,16 @@ function withKnownModelTypes(entry2) {
 function mergeHeaders(base, override) {
   if (!base && !override)
     return void 0;
-  const merged2 = { ...base };
+  const merged = { ...base };
   for (const [name, value] of Object.entries(override ?? {})) {
     const lowerName = name.toLowerCase();
-    for (const existingName of Object.keys(merged2)) {
+    for (const existingName of Object.keys(merged)) {
       if (existingName.toLowerCase() === lowerName)
-        delete merged2[existingName];
+        delete merged[existingName];
     }
-    merged2[name] = value;
+    merged[name] = value;
   }
-  return merged2;
+  return merged;
 }
 function createModels(options) {
   return new ModelsImpl(options);
@@ -1296,15 +1296,15 @@ function createProvider(input) {
   let dynamicModels = [];
   const fetchModels = input.fetchModels;
   const currentModels2 = () => {
-    const merged2 = [...baselineModels];
+    const merged = [...baselineModels];
     for (const model2 of dynamicModels) {
-      const index3 = merged2.findIndex((entry2) => getModelType(entry2) === getModelType(model2) && entry2.id === model2.id);
+      const index3 = merged.findIndex((entry2) => getModelType(entry2) === getModelType(model2) && entry2.id === model2.id);
       if (index3 >= 0)
-        merged2[index3] = model2;
+        merged[index3] = model2;
       else
-        merged2.push(model2);
+        merged.push(model2);
     }
-    return merged2;
+    return merged;
   };
   const apiFor = (model2) => single ?? byApi?.[model2.api];
   const dispatch = (model2, run2) => {
@@ -3454,18 +3454,18 @@ async function readLimitedText(resp) {
     chunks.push(value);
     received += value.length;
   }
-  let merged2;
+  let merged;
   if (chunks.length === 1) {
-    merged2 = chunks[0];
+    merged = chunks[0];
   } else {
-    merged2 = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    merged = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
     let offset = 0;
     for (const c of chunks) {
-      merged2.set(c, offset);
+      merged.set(c, offset);
       offset += c.length;
     }
   }
-  return new TextDecoder("utf-8").decode(merged2);
+  return new TextDecoder("utf-8").decode(merged);
 }
 var GRANT_TYPE_JWT_BEARER, GRANT_TYPE_REFRESH_TOKEN, TOKEN_ENDPOINT, OAUTH_API_BETA_HEADER, FEDERATION_BETA_HEADER, ADVISORY_REFRESH_THRESHOLD_IN_SECONDS, MANDATORY_REFRESH_THRESHOLD_IN_SECONDS, ADVISORY_REFRESH_BACKOFF_IN_SECONDS, MAX_TOKEN_RESPONSE_BYTES, MAX_ERROR_BODY_CHARS, SAFE_ERROR_KEYS, WorkloadIdentityError;
 var init_types = __esm({
@@ -19674,16 +19674,16 @@ function headersToRecord(headers) {
   return result;
 }
 function providerHeadersToRecord(...headerSources) {
-  const merged2 = /* @__PURE__ */ new Map();
+  const merged = /* @__PURE__ */ new Map();
   for (const source of headerSources) {
     for (const [name, value] of Object.entries(source ?? {})) {
       const normalizedName = name.toLowerCase();
-      merged2.delete(normalizedName);
+      merged.delete(normalizedName);
       if (value !== null)
-        merged2.set(normalizedName, [name, value]);
+        merged.set(normalizedName, [name, value]);
     }
   }
-  return merged2.size > 0 ? Object.fromEntries(merged2.values()) : void 0;
+  return merged.size > 0 ? Object.fromEntries(merged.values()) : void 0;
 }
 var init_headers2 = __esm({
   "../../node_modules/.pnpm/@earendil-works+pi-ai@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatur_650820bfd44a3c6cefd0e1345c0a96b9/node_modules/@earendil-works/pi-ai/dist/utils/headers.js"() {
@@ -20381,13 +20381,13 @@ function getAnthropicCompat(model2) {
   };
 }
 function mergeHeaders2(...headerSources) {
-  const merged2 = {};
+  const merged = {};
   for (const headers of headerSources) {
     if (headers) {
-      Object.assign(merged2, headers);
+      Object.assign(merged, headers);
     }
   }
-  return merged2;
+  return merged;
 }
 function hasHeader(headers, name) {
   if (!headers)
@@ -88522,7 +88522,7 @@ function timeoutError(timeoutMs) {
   error.body = "";
   return error;
 }
-function isRecord4(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function requiredNumber(label, value, field) {
@@ -88574,7 +88574,7 @@ function tokenCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 function parseClassifierUsage(value, model2) {
-  if (!isRecord4(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
+  if (!isRecord3(value) || value.input_tokens === void 0 && value.output_tokens === void 0)
     return void 0;
   const input = tokenCount(value.input_tokens);
   const output = tokenCount(value.output_tokens);
@@ -88657,7 +88657,7 @@ function choiceProbabilities(value, id) {
   if (!Array.isArray(value))
     throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
   return Object.fromEntries(value.map((entry2) => {
-    if (!isRecord4(entry2) || typeof entry2.value !== "string") {
+    if (!isRecord3(entry2) || typeof entry2.value !== "string") {
       throw new Error(`${LABEL} returned invalid probabilities for ${id}`);
     }
     return [entry2.value, requiredNumber(LABEL, entry2.probability, `probability for ${id}.${entry2.value}`)];
@@ -88695,7 +88695,7 @@ function parseAnswers(value, context3) {
     throw new Error(`${LABEL} returned an unexpected response`);
   const byName = /* @__PURE__ */ new Map();
   for (const answer2 of value) {
-    if (isRecord4(answer2) && typeof answer2.name === "string")
+    if (isRecord3(answer2) && typeof answer2.name === "string")
       byName.set(answer2.name, answer2);
   }
   return Object.fromEntries(Object.entries(context3.questions).map(([id, question]) => {
@@ -88737,7 +88737,7 @@ var init_openai_decisions = __esm({
           input: wireInput(context3),
           questions: Object.entries(context3.questions).map(([id, question]) => wireQuestion(id, question))
         }, options, NO_RETRY_STATUSES);
-        if (!isRecord4(body))
+        if (!isRecord3(body))
           throw new Error(`${LABEL} returned an unexpected response`);
         const usage = parseClassifierUsage(body.usage, model2);
         if (usage)
@@ -89900,7 +89900,7 @@ var init_openrouter_images = __esm({
 
 // ../../node_modules/.pnpm/@earendil-works+pi-ai@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatur_650820bfd44a3c6cefd0e1345c0a96b9/node_modules/@earendil-works/pi-ai/dist/api/system-one-shared.js
 function probabilities(label, value, id) {
-  if (!isRecord4(value))
+  if (!isRecord3(value))
     throw new Error(`${label} returned invalid probabilities for ${id}`);
   return Object.fromEntries(Object.entries(value).map(([key2, probability]) => [
     key2,
@@ -89908,12 +89908,12 @@ function probabilities(label, value, id) {
   ]));
 }
 function parseAnswers2(label, value, context3) {
-  if (!isRecord4(value))
+  if (!isRecord3(value))
     throw new Error(`${label} returned an unexpected response`);
   const answers = [];
   for (const [id, question] of Object.entries(context3.questions)) {
     const answer2 = value[id];
-    if (!isRecord4(answer2))
+    if (!isRecord3(answer2))
       throw new Error(`${label} did not return an answer for ${id}`);
     if (question.type === "choice") {
       if (answer2.type !== "choice" || typeof answer2.choice !== "string") {
@@ -90063,7 +90063,7 @@ var init_typesafe_system_one = __esm({
       url: (model2) => new URL("systemone", `${model2.baseUrl.replace(/\/+$/u, "")}/`),
       payload: (model2, request2) => ({ model: model2.id, ...request2 }),
       output: (body) => {
-        if (!isRecord4(body))
+        if (!isRecord3(body))
           throw new Error("System One API returned an unexpected response");
         return body;
       }
@@ -124075,10 +124075,10 @@ var ConversationImpl = class {
 };
 var DEFAULT_HARNESS_IDENTITY = { attribution: PI_ATTRIBUTION };
 function currentModels(models, identity) {
-  const merged2 = mergeClientIdentity(DEFAULT_HARNESS_IDENTITY, identity) ?? DEFAULT_HARNESS_IDENTITY;
+  const merged = mergeClientIdentity(DEFAULT_HARNESS_IDENTITY, identity) ?? DEFAULT_HARNESS_IDENTITY;
   if (typeof models === "function")
-    return () => withClientIdentity(models(), merged2);
-  const wrapped = withClientIdentity(models, merged2);
+    return () => withClientIdentity(models(), merged);
+  const wrapped = withClientIdentity(models, merged);
   return () => wrapped;
 }
 function currentSettings(settings2) {
@@ -125895,7 +125895,7 @@ function serverDevices(name, description, machines) {
 
 // ../infinichat/src/node/machines.ts
 init_define_INFINICHAT_PI();
-import { existsSync as existsSync2, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync as existsSync2 } from "node:fs";
 import { join as join5 } from "node:path";
 
 // ../../node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/index.js
@@ -130837,8 +130837,14 @@ var MachineSchema = typebox_exports.Object({
   port: typebox_exports.Number(),
   username: typebox_exports.String(),
   hostKey: typebox_exports.Optional(HostKeySchema),
+  publicKey: typebox_exports.Optional(typebox_exports.String()),
   authorizedKeys: typebox_exports.Optional(typebox_exports.Array(typebox_exports.String()))
 });
+var MachinesSchema = typebox_exports.Union([
+  typebox_exports.Object({ machines: typebox_exports.Record(typebox_exports.String(), MachineSchema) }),
+  typebox_exports.Null()
+]);
+var MachinePatchSchema = typebox_exports.Partial(typebox_exports.Pick(MachineSchema, ["name", "publicKey", "authorizedKeys", "hostKey"]));
 var machineEndpoint = ({ username, hostname, port }) => `${username}@${hostname}:${port}`;
 var ReachSchema = typebox_exports.Record(typebox_exports.String(), typebox_exports.Union([
   typebox_exports.Object({ reachable: typebox_exports.Literal(true) }),
@@ -130874,7 +130880,7 @@ var SignInAttemptSchema = typebox_exports.Union([typebox_exports.Null(), typebox
   prompt: typebox_exports.Optional(typebox_exports.Object({ id: typebox_exports.Number(), prompt: AuthPromptSchema }))
 })]);
 var InfiniChatRemote = remote("infinichat.remote", {
-  version: 3,
+  version: 4,
   input: typebox_exports.Object({}),
   host: hostNamed("infinichat-server"),
   variants: {
@@ -130890,6 +130896,7 @@ var InfiniChatRemote = remote("infinichat.remote", {
         access: AccessSchema,
         // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:237`).
         signInAttempt: SignInAttemptSchema,
+        machines: MachinesSchema,
         reach: ReachSchema,
         pendingHostKeys: PendingHostKeysSchema
       },
@@ -130926,14 +130933,17 @@ var InfiniChatRemote = remote("infinichat.remote", {
         adopt: method(ConversationFilesSchema),
         relinquish: method(typebox_exports.Object({ to: ClientSchema }), ConversationFilesSchema),
         archive: method(),
-        // `pull` brings the database another listed machine (`from`, by endpoint) released into `data/`, read over
-        // this machine's own SSH, once it matches `files`; refused while active, as a phone's upload is. A move between
-        // two machines is relinquish there, pull and adopt here, then archive there, with a phone orchestrating.
-        pull: method(typebox_exports.Object({ from: typebox_exports.String(), files: ConversationFilesSchema })),
-        // A client's other machines, sent on every connect and whenever its Remote machines change. The server keeps
-        // each client's list for its tools while the clients are away, and uses each endpoint once, so clients never
-        // replace each other's machines. `acceptHostKey` trusts the pending keys with these fingerprints.
-        setMachines: method(typebox_exports.Object({ client: typebox_exports.String(), machines: typebox_exports.Array(MachineSchema) })),
+        // `pull` brings the database another machine (`from`, as the conversation there lists it, since this one has
+        // no conversation open to read it from) released into `data/`, read over this machine's own SSH, once it
+        // matches `files`; refused while active, as a phone's upload is. A move between two machines is relinquish
+        // there, pull and adopt here, then archive there, with a client orchestrating.
+        pull: method(typebox_exports.Object({ from: MachineSchema, files: ConversationFilesSchema })),
+        // The conversation's machines document, edited through the side that holds it: a record whole, part of one
+        // (what a check found, an accepted host key), or its removal. `acceptHostKey` trusts the pending keys with
+        // these fingerprints here and records the key on the machine, so the next holder trusts it too.
+        putMachine: method(MachineSchema),
+        patchMachine: method(typebox_exports.Object({ endpoint: typebox_exports.String(), patch: MachinePatchSchema })),
+        removeMachine: method(typebox_exports.Object({ endpoint: typebox_exports.String() })),
         acceptHostKey: method(typebox_exports.Object({ endpoint: typebox_exports.String(), fingerprints: typebox_exports.Array(typebox_exports.String()) }))
       }
     }
@@ -130943,27 +130953,12 @@ var InfiniChatRemote = remote("infinichat.remote", {
 // ../infinichat/src/node/machines.ts
 var noop4 = () => {
 };
-var isRecord3 = (value) => typeof value === "object" && value !== null;
 var checked = (machine) => JSON.stringify([
   machineEndpoint(machine),
   machine.hostKey?.fingerprint ?? null,
   [...machine.authorizedKeys ?? []].sort()
 ]);
 var without = (record2, id) => Object.fromEntries(Object.entries(record2).filter(([key2]) => key2 !== id));
-var isMachine = (value) => isRecord3(value) && typeof value.name === "string" && typeof value.hostname === "string" && typeof value.port === "number" && typeof value.username === "string" && (value.hostKey === void 0 || isRecord3(value.hostKey) && typeof value.hostKey.algorithm === "string" && typeof value.hostKey.fingerprint === "string") && (value.authorizedKeys === void 0 || Array.isArray(value.authorizedKeys) && value.authorizedKeys.every((key2) => typeof key2 === "string"));
-function readLists(file) {
-  let text;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return {};
-    throw error;
-  }
-  const lists = JSON.parse(text);
-  if (!isRecord3(lists)) return {};
-  return Object.fromEntries(Object.entries(lists).map(([client, machines]) => [client, Array.isArray(machines) ? machines.filter(isMachine) : []]));
-}
-var merged = (lists) => [...new Map(Object.values(lists).flat().map((machine) => [machineEndpoint(machine), machine])).values()];
 function scanned(name, { lines: lines2, fingerprints }) {
   if (lines2.length !== fingerprints.length) throw new Error(`The SSH host key of ${name} could not be read.`);
   return lines2.map((line, index3) => ({
@@ -130976,15 +130971,11 @@ var ServerMachines = class {
   /** `self` names this machine in messages. */
   constructor(home, self2) {
     this.self = self2;
-    this.file = join5(home, "machines.json");
     this.knownHosts = join5(home, "known_hosts");
     this.identity = join5(home, "ssh", "id_ed25519");
-    this.lists = readLists(this.file);
-    this.machines = merged(this.lists);
   }
   self;
-  lists;
-  machines;
+  machines = [];
   connections = /* @__PURE__ */ new Map();
   /** Connections that answered once: a later failed start may be a changed host key, which only `connectSsh` names. */
   answered = /* @__PURE__ */ new WeakSet();
@@ -130994,10 +130985,22 @@ var ServerMachines = class {
   pending = {};
   listeners = /* @__PURE__ */ new Set();
   closed = false;
-  file;
   knownHosts;
   /** The InfiniChat key the phone gave this machine (the app's `ssh-keys.ts`), once it has. */
   identity;
+  /** Follows the document: the list is what the open core serves, and what it last served while none is open. */
+  follow(source) {
+    let last;
+    const apply3 = () => {
+      const current = source.current();
+      if (current === void 0 || current === last) return;
+      last = current;
+      this.set(Object.values(current.machines));
+    };
+    const stop2 = source.subscribe(apply3);
+    apply3();
+    return stop2;
+  }
   subscribe = (listener) => {
     this.listeners.add(listener);
     return () => {
@@ -131021,17 +131024,9 @@ var ServerMachines = class {
       }
     }));
   }
-  /**
-   * Keeps a client's list in place of its previous one, lets go of the connections to machines no client lists any
-   * more, and checks new ones.
-   */
-  set(client, list) {
-    this.lists = { ...without(this.lists, client), [client]: list };
-    const temporary = `${this.file}.${process.pid}`;
-    writeFileSync(temporary, JSON.stringify(this.lists), { mode: 384 });
-    renameSync(temporary, this.file);
+  /** Takes the list as the document has it: lets go of the connections to machines gone from it, checks new ones. */
+  set(machines) {
     const before = new Map(this.machines.map((machine) => [machineEndpoint(machine), checked(machine)]));
-    const machines = merged(this.lists);
     this.machines = machines;
     const kept2 = new Set(machines.map(machineEndpoint));
     for (const key2 of [...this.connections.keys()]) {
@@ -131047,18 +131042,22 @@ var ServerMachines = class {
       if (this.reach[machineEndpoint(machine)] === void 0) void this.started(machine).catch(noop4);
     }
   }
-  /** A listed machine's files through this machine's own SSH, for a pull, with the account's home there. */
-  async environment(key2) {
-    const machine = this.machines.find((listed) => machineEndpoint(listed) === key2);
-    if (!machine) throw new Error(`${key2} isn\u2019t among the machines listed on ${this.self}.`);
+  /**
+   * A machine's files through this machine's own SSH, for a pull, with the account's home there. The record comes
+   * from the caller: a pull runs while no conversation is open here to list it.
+   */
+  async environment(machine) {
     const { connection, info } = await this.started(machine);
     return {
-      env: new RemoteExecutionEnv({ connection, id: `pi-env:${key2}`, cwd: info.home }),
+      env: new RemoteExecutionEnv({ connection, id: `pi-env:${machineEndpoint(machine)}`, cwd: info.home }),
       home: info.home,
       name: machine.name
     };
   }
-  /** Trusts the keys waiting for the machine at `key` once a client accepted these fingerprints, then checks it. */
+  /**
+   * Trusts the keys waiting for the machine at `key` once a client accepted these fingerprints, then checks it, and
+   * names the first key trusted, for the machine's record, so the next holder trusts it without asking.
+   */
   async acceptHostKey(key2, fingerprints) {
     const machine = this.machines.find((candidate) => machineEndpoint(candidate) === key2);
     const waiting = this.waiting.get(key2);
@@ -131076,6 +131075,8 @@ var ServerMachines = class {
     this.reach = without(this.reach, key2);
     this.publish();
     void this.started(machine).catch(noop4);
+    const [first2] = waiting.keys;
+    return first2 && { algorithm: first2.algorithm, fingerprint: first2.fingerprint };
   }
   /** At shutdown, once the conversation's tools stopped: stops each machine's daemon, also one still connecting. */
   close() {
@@ -131725,6 +131726,88 @@ function createServerModels(credentials) {
 // ../infinichat/src/pi/infinichat-service.ts
 init_define_INFINICHAT_PI();
 
+// ../infinichat/src/pi/infinichat-remote/machines.ts
+init_define_INFINICHAT_PI();
+var MachinesDoc = defineDoc({
+  kind: "infinichat.machines",
+  version: 1,
+  scope: "session",
+  checkpointWhen: () => true,
+  initial: () => ({ machines: {} })
+});
+async function putMachine(harness, record2, context3 = BACKGROUND_CONTEXT) {
+  const endpoint = machineEndpoint(record2);
+  await harness.commit(async (tx) => {
+    const { machines } = await tx.doc(MachinesDoc);
+    const taken = Object.entries(machines).find(([key2, other]) => key2 !== endpoint && other.name === record2.name);
+    if (taken) throw new Error(`${record2.name} is already the name of another machine (${taken[0]}).`);
+    machines[endpoint] = { ...record2 };
+  }, context3);
+}
+async function patchMachine(harness, endpoint, patch, context3 = BACKGROUND_CONTEXT) {
+  await harness.commit(async (tx) => {
+    const { machines } = await tx.doc(MachinesDoc);
+    const machine = machines[endpoint];
+    if (machine === void 0) throw new Error(`${endpoint} is no longer among the machines.`);
+    if (patch.name !== void 0) {
+      const taken = Object.entries(machines).find(([key2, other]) => key2 !== endpoint && other.name === patch.name);
+      if (taken) throw new Error(`${patch.name} is already the name of another machine (${taken[0]}).`);
+    }
+    machines[endpoint] = { ...machine, ...patch };
+  }, context3);
+}
+async function removeMachine(harness, endpoint, context3 = BACKGROUND_CONTEXT) {
+  await harness.commit(async (tx) => {
+    const { machines } = await tx.doc(MachinesDoc);
+    delete machines[endpoint];
+  }, context3);
+}
+var MachineList = class {
+  constructor(harness) {
+    this.harness = harness;
+  }
+  harness;
+  state;
+  value;
+  listeners = /* @__PURE__ */ new Set();
+  unsubscribe = () => {
+  };
+  closed = false;
+  async start() {
+    if (await this.harness.snapshot(MachinesDoc, BACKGROUND_CONTEXT) === void 0) {
+      await this.harness.commit(async (tx) => {
+        await tx.doc(MachinesDoc);
+      }, BACKGROUND_CONTEXT);
+    }
+    const state3 = await this.harness.documentState(MachinesDoc, BACKGROUND_CONTEXT);
+    if (state3 === void 0) throw new Error("The machines of the conversation could not be read.");
+    if (this.closed) {
+      state3.dispose();
+      return;
+    }
+    this.state = state3;
+    this.value = state3.value ?? void 0;
+    this.unsubscribe = state3.subscribe((value) => {
+      this.value = value ?? void 0;
+      for (const listener of [...this.listeners]) listener();
+    });
+    for (const listener of [...this.listeners]) listener();
+  }
+  subscribe = (listener) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  /** The machines by endpoint; undefined until first read. */
+  getSnapshot = () => this.value;
+  close() {
+    this.closed = true;
+    this.unsubscribe();
+    this.state?.dispose();
+  }
+};
+
 // ../infinichat/src/pi/workspace/document.ts
 init_define_INFINICHAT_PI();
 var WorkspaceDoc = defineDoc({
@@ -131742,15 +131825,17 @@ var TITLE = "InfiniChat";
 var errorText = (error) => error instanceof Error ? error.message : String(error);
 var infiniChatWork = /* @__PURE__ */ new Set([BuildNode.definition.name, AGENT_TASK]);
 var InfiniChatService = class _InfiniChatService {
-  constructor(chat, scheduled, models, authError, machine) {
+  constructor(chat, scheduled, machines, models, authError, machine) {
     this.chat = chat;
     this.scheduled = scheduled;
+    this.machines = machines;
     this.models = models;
     this.authError = authError;
     this.machine = machine;
   }
   chat;
   scheduled;
+  machines;
   models;
   authError;
   machine;
@@ -131777,8 +131862,10 @@ var InfiniChatService = class _InfiniChatService {
       }
     }, BACKGROUND_CONTEXT);
     const scheduled = new ScheduledTasks(chat.harness, (error) => service?.report(error));
-    service = new _InfiniChatService(chat, scheduled, options.models, options.authError, options.machine);
+    const machines = new MachineList(chat.harness);
+    service = new _InfiniChatService(chat, scheduled, machines, options.models, options.authError, options.machine);
     void scheduled.start().catch((error) => service?.report(error));
+    void machines.start().catch((error) => service?.report(error));
     void chat.harness.closed.then((end2) => {
       if (end2.reason === "failed") service.report(end2.error);
       options.onClosed?.(end2);
@@ -131827,6 +131914,18 @@ var InfiniChatService = class _InfiniChatService {
     await root.commit(async (tx) => {
       (await tx.doc(ChatMetadataDoc, root.id)).lastRequest = requestId;
     }, BACKGROUND_CONTEXT);
+  }
+  putMachine(record2) {
+    this.assertOpen();
+    return putMachine(this.chat.harness, record2);
+  }
+  patchMachine(endpoint, patch) {
+    this.assertOpen();
+    return patchMachine(this.chat.harness, endpoint, patch);
+  }
+  removeMachine(endpoint) {
+    this.assertOpen();
+    return removeMachine(this.chat.harness, endpoint);
   }
   /** Cancels accepted inputs not yet sent and aborts the running turn; summaries and agents keep running. */
   stop() {
@@ -131889,6 +131988,7 @@ var InfiniChatService = class _InfiniChatService {
         await this.chat.close();
       } finally {
         this.scheduled.close();
+        this.machines.close();
       }
     })();
     return this.closePromise;
@@ -132980,25 +133080,25 @@ var nodeDatabaseFiles = {
 
 // src/state.ts
 init_define_INFINICHAT_PI();
-import { readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join as join7 } from "node:path";
-var isRecord5 = (value) => typeof value === "object" && value !== null;
-var fileOf = (value) => isRecord5(value) && typeof value.sha256 === "string" && typeof value.size === "number" ? { sha256: value.sha256, size: value.size } : void 0;
-var clientOf = (value) => isRecord5(value) && typeof value.id === "string" && typeof value.name === "string" ? { id: value.id, name: value.name } : void 0;
+var isRecord4 = (value) => typeof value === "object" && value !== null;
+var fileOf = (value) => isRecord4(value) && typeof value.sha256 === "string" && typeof value.size === "number" ? { sha256: value.sha256, size: value.size } : void 0;
+var clientOf = (value) => isRecord4(value) && typeof value.id === "string" && typeof value.name === "string" ? { id: value.id, name: value.name } : void 0;
 function filesOf(value) {
-  const db = isRecord5(value) ? fileOf(value.db) : void 0;
+  const db = isRecord4(value) ? fileOf(value.db) : void 0;
   return db && { db };
 }
 function readState(home) {
   let text;
   try {
-    text = readFileSync2(join7(home, "state.json"), "utf8");
+    text = readFileSync(join7(home, "state.json"), "utf8");
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return { active: false };
     throw error;
   }
   const state3 = JSON.parse(text);
-  if (!isRecord5(state3)) return { active: false };
+  if (!isRecord4(state3)) return { active: false };
   const adopted = filesOf(state3.adopted);
   const heldBy = clientOf(state3.heldBy);
   return {
@@ -133012,8 +133112,8 @@ function updateState(home, change) {
   const state3 = change(readState(home));
   const file = join7(home, "state.json");
   const temporary = `${file}.${process.pid}`;
-  writeFileSync2(temporary, JSON.stringify(state3));
-  renameSync2(temporary, file);
+  writeFileSync(temporary, JSON.stringify(state3));
+  renameSync(temporary, file);
   return state3;
 }
 function restoreTimeZone(home) {
@@ -133238,7 +133338,8 @@ var ServerConversation = class {
       const stops = [
         core.view().subscribe(this.notify),
         core.subscribe(this.notify),
-        core.scheduled.subscribe(this.notify)
+        core.scheduled.subscribe(this.notify),
+        core.machines.subscribe(this.notify)
       ];
       this.unfollow = () => {
         for (const stop2 of stops) stop2();
@@ -133402,10 +133503,12 @@ function serveInfiniChat(host, conversation, options) {
     const currentControls = () => conversation.current?.view().getControls() ?? null;
     const currentMessages = () => conversation.current?.view().getMessages() ?? [];
     const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? null;
+    const currentMachines = () => conversation.current?.machines.getSnapshot() ?? null;
     const snapshot = self2.state("snapshot", SnapshotSchema, { init: currentSnapshot });
     const controls = self2.state("controls", ControlsSchema, { init: currentControls });
     const messages = self2.state("messages", MessagesSchema, { init: currentMessages });
     const scheduled = self2.state("scheduled", ScheduledSchema, { init: currentScheduled });
+    const machineList = self2.state("machines", MachinesSchema, { init: currentMachines });
     const held2 = self2.state("conversation", ConversationSchema, { init: conversation.getState });
     const server = self2.state("server", ServerSchema, { init: () => options.server });
     const catalog = self2.state("catalog", ModelCatalogSchema, { init: () => options.catalog });
@@ -133423,6 +133526,7 @@ function serveInfiniChat(host, conversation, options) {
       messages.replace(ctx2, currentMessages(), { diff: true });
       controls.replace(ctx2, currentControls(), { diff: true });
       scheduled.replace(ctx2, currentScheduled(), { diff: true });
+      machineList.replace(ctx2, currentMachines(), { diff: true });
       held2.replace(ctx2, conversation.getState(), { diff: true });
       snapshot.replace(ctx2, currentSnapshot(), { diff: true });
     });
@@ -133432,6 +133536,7 @@ function serveInfiniChat(host, conversation, options) {
       controls,
       messages,
       scheduled,
+      machines: machineList,
       conversation: held2,
       server,
       catalog,
@@ -133455,8 +133560,13 @@ function serveInfiniChat(host, conversation, options) {
       relinquish: ({ to }) => conversation.relinquish(to),
       archive: () => conversation.archive(),
       pull: async ({ from, files }, ctx2) => conversation.pull(await machines.environment(from), files, callContext(ctx2)),
-      setMachines: ({ client, machines: list }) => machines.set(client, list),
-      acceptHostKey: ({ endpoint, fingerprints }) => machines.acceptHostKey(endpoint, fingerprints)
+      putMachine: (record2) => core().putMachine(record2),
+      patchMachine: ({ endpoint, patch }) => core().patchMachine(endpoint, patch),
+      removeMachine: ({ endpoint }) => core().removeMachine(endpoint),
+      acceptHostKey: async ({ endpoint, fingerprints }) => {
+        const hostKey = await machines.acceptHostKey(endpoint, fingerprints);
+        if (hostKey !== void 0) await core().patchMachine(endpoint, { hostKey });
+      }
     };
   });
 }
@@ -133502,6 +133612,11 @@ async function serve(device, description) {
         if (end3.reason === "failed") stopping.resolve(end3);
       }
     }));
+    const unfollow = machines.follow({
+      subscribe: conversation.subscribe,
+      current: () => conversation.current?.machines.getSnapshot()
+    });
+    closes.push(async () => unfollow());
     await conversation.start();
     closes.push(() => conversation.close());
     const host = createHost({

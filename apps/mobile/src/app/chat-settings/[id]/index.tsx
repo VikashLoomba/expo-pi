@@ -11,7 +11,7 @@ import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
 
-import { useChatApp, useChatControls } from '@/chat/chat-provider';
+import { useChatApp, useChatControls, useMachines } from '@/chat/chat-provider';
 import { ModelSection, SectionFooter, SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatSettingsDraft } from '@/components/chat/settings-drafts';
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -31,6 +31,7 @@ export default function ChatSettingsScreen() {
   const { service, catalog, providerAccess, refreshCatalog, remoteHosts } = useChatApp();
   const conversation = useChatControls(view);
   const hosts = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
+  const listed = useMachines();
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
@@ -43,7 +44,9 @@ export default function ChatSettingsScreen() {
     return () => { mounted.current = false; };
   }, []);
   const target = execution.target;
-  const selectedHost = target.kind === 'ssh' ? hosts.hosts.find((host) => host.id === target.machineId) : undefined;
+  // A chat from before machines went by endpoint keeps the ID the list gave its machine, which `get` still resolves.
+  const selectedHost = target.kind === 'ssh' ? remoteHosts.get(target.machineId) : undefined;
+  const nameOf = (host: { id: string; hostname: string }) => listed?.machines[host.id]?.name ?? host.hostname;
   const executionChanged = !sameExecution(execution, initial.execution);
   let executionError: string | undefined;
   try { validateExecution(execution); }
@@ -132,10 +135,11 @@ export default function ChatSettingsScreen() {
           <Picker<string> label="Environment" selection={targetId(execution)} onSelectionChange={chooseEnvironment}
             modifiers={[pickerStyle('menu'), disable(disabled || !hosts.ready)]}>
             <Text modifiers={[tag(LOCAL)]}>On this device</Text>
-            {target.kind === 'ssh' && !selectedHost && <Text modifiers={[tag(target.machineId)]}>
-              Unavailable machine
-            </Text>}
-            {hosts.hosts.map((host) => <Text key={host.id} modifiers={[tag(host.id)]}>{host.name}</Text>)}
+            {target.kind === 'ssh' && !hosts.hosts.some((host) => host.id === target.machineId)
+              && <Text modifiers={[tag(target.machineId)]}>
+                {selectedHost ? nameOf(selectedHost) : 'Unavailable machine'}
+              </Text>}
+            {hosts.hosts.map((host) => <Text key={host.id} modifiers={[tag(host.id)]}>{nameOf(host)}</Text>)}
           </Picker>
           <LabeledContent label="Working directory">
             <TextField text={cwdText} placeholder={target.kind === 'ssh' ? 'Home directory' : '/workspace'}

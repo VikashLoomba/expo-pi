@@ -1,28 +1,25 @@
 import type { SshHostKey } from '@osuki-dev/react-native-ssh';
-import { isSshKeyBlob } from '@pi-agent/infinichat/pi/infinichat-remote/keys';
+import { machineEndpoint } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 
 export type RemoteCredential = Readonly<{ type: 'password'; password: string } |
   { type: 'privateKey'; privateKey: string; passphrase?: string }>;
 
-/** Public machine settings. Credentials and accepted keys never enter this record. */
+/**
+ * How this phone reaches a machine: its endpoint and the reference to the credential this phone keeps for it. The
+ * machine's name, its keys and what the machines found of each other are the conversation's (the machines document,
+ * `infinichat-remote/machines.ts`); the credential and the host key this phone trusts never leave this phone.
+ */
 export interface RemoteHost {
+  /** The machine's endpoint (`machineEndpoint`), its ID everywhere. */
   readonly id: string;
-  /** Opaque filesystem identity; changes when the endpoint, account, or accepted server changes. */
-  readonly namespaceId: string;
-  readonly name: string;
   readonly hostname: string;
   readonly port: number;
   readonly username: string;
   readonly credentialRef: string;
   readonly credentialType: RemoteCredential['type'];
-  /** The machine's own InfiniChat SSH key, as `ssh-keys.ts` read it: its type and base64, without a comment. */
-  readonly publicKey?: string;
-  /** The other machines' InfiniChat keys this phone authorized there, in the same form. */
-  readonly authorizedKeys?: readonly string[];
 }
-export type RemoteHostInput = Omit<RemoteHost, 'id' | 'namespaceId' | 'credentialRef' | 'credentialType' | 'publicKey'
-  | 'authorizedKeys'> & { id?: string };
+export type RemoteHostInput = Pick<RemoteHost, 'hostname' | 'port' | 'username'>;
 export interface RemoteHostAdmission {
   readonly host: RemoteHost;
   readonly auth: RemoteCredential;
@@ -34,17 +31,16 @@ export interface RemoteHostSnapshot {
   readonly error?: string;
   readonly cleanupError?: string;
 }
-interface HostIndex { version: 1; hosts: RemoteHost[]; pendingDelete: string[] }
+/**
+ * `legacy` maps the IDs version 1 gave the records to their endpoints, for the chats that chose a machine then: a
+ * chat's execution target keeps that ID.
+ */
+interface HostIndex { version: 2; hosts: RemoteHost[]; pendingDelete: string[]; legacy: Record<string, string> }
 interface SecretRecord { version: 1; auth: RemoteCredential; trustedHostKey?: SshHostKey }
-/** InfiniChat lists the phone as a device under this name, beside the remote machines under theirs. */
+/** InfiniChat lists the phone as a device under this name, beside the machines under theirs. */
 export const PHONE_DEVICE = 'phone';
 const INDEX_KEY = 'pi.remote-hosts.v1';
 const CREDENTIAL_REF = /^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/;
-
-/** A machine's InfiniChat keys, which stay with its account on its endpoint. */
-const keysOf = ({ publicKey, authorizedKeys }: RemoteHost) => ({
-  ...(publicKey === undefined ? {} : { publicKey }), ...(authorizedKeys === undefined ? {} : { authorizedKeys }),
-});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -54,15 +50,11 @@ function text(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`Enter a valid ${label}.`);
   return value.trim();
 }
-export function validateRemoteHost(input: RemoteHostInput): Omit<RemoteHostInput, 'id'> {
+export function validateRemoteHost(input: RemoteHostInput): RemoteHostInput {
   const hostname = text(input.hostname, 'Tailscale hostname or address').toLowerCase();
   if (/[\s/@?#\\]/.test(hostname)) throw new Error('Enter a Tailscale hostname or address without a URL prefix, username, or port.');
   if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) throw new Error('SSH port must be a number from 1 to 65535.');
-  const name = text(input.name, 'machine name');
-  if (name.toLowerCase() === PHONE_DEVICE) {
-    throw new Error(`“${PHONE_DEVICE}” is this phone in InfiniChat. Choose another machine name.`);
-  }
-  return { name, hostname, port: input.port, username: text(input.username, 'SSH username') };
+  return { hostname, port: input.port, username: text(input.username, 'SSH username') };
 }
 function credential(value: unknown): RemoteCredential {
   if (isRecord(value)) {
@@ -112,41 +104,47 @@ export function hostKeyPolicy(repository: RemoteHostRepository, { host, trustedH
   };
 }
 
-function storedHost(value: unknown): RemoteHost {
+/** A record's fields that both versions store; version 1 also had a name and keys, which the document holds now. */
+function storedFields(value: unknown): Omit<RemoteHost, 'id'> {
   if (!isRecord(value)) throw new Error();
-  const { id, namespaceId, credentialRef, credentialType, name, hostname, port, username, publicKey, authorizedKeys }
-    = value;
-  if (typeof id !== 'string' || !id || typeof namespaceId !== 'string' || !namespaceId ||
-      typeof credentialRef !== 'string' || !CREDENTIAL_REF.test(credentialRef) ||
+  const { credentialRef, credentialType, hostname, port, username } = value;
+  if (typeof credentialRef !== 'string' || !CREDENTIAL_REF.test(credentialRef) ||
       (credentialType !== 'password' && credentialType !== 'privateKey') ||
-      typeof name !== 'string' || typeof hostname !== 'string' || typeof port !== 'number' ||
-      typeof username !== 'string') throw new Error();
-  if (publicKey !== undefined && !isSshKeyBlob(publicKey)) throw new Error();
-  if (authorizedKeys !== undefined && (!Array.isArray(authorizedKeys) || !authorizedKeys.every(isSshKeyBlob))) {
-    throw new Error();
-  }
-  return Object.freeze({ ...validateRemoteHost({ name, hostname, port, username }), id, namespaceId, credentialRef,
-    credentialType, ...(publicKey === undefined ? {} : { publicKey }),
-    ...(authorizedKeys === undefined ? {} : { authorizedKeys: Object.freeze([...authorizedKeys]) }) });
+      typeof hostname !== 'string' || typeof port !== 'number' || typeof username !== 'string') throw new Error();
+  return { ...validateRemoteHost({ hostname, port, username }), credentialRef, credentialType };
 }
 function hostIndex(raw: string): HostIndex {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.hosts) ||
-      !Array.isArray(parsed.pendingDelete)) throw new Error();
-  const ids = new Set<string>();
-  const hosts = parsed.hosts.map((value: unknown) => {
-    const host = storedHost(value);
-    if (ids.has(host.id)) throw new Error();
-    ids.add(host.id);
-    return host;
-  });
+  if (!isRecord(parsed) || !Array.isArray(parsed.hosts) || !Array.isArray(parsed.pendingDelete)) throw new Error();
   const pendingDelete = parsed.pendingDelete.map((ref: unknown) => {
-    if (typeof ref !== 'string' || !CREDENTIAL_REF.test(ref) || hosts.some((host) => host.credentialRef === ref)) {
-      throw new Error();
-    }
+    if (typeof ref !== 'string' || !CREDENTIAL_REF.test(ref)) throw new Error();
     return ref;
   });
-  return { version: 1, hosts, pendingDelete };
+  const hosts: RemoteHost[] = [];
+  const legacy: Record<string, string> = {};
+  if (parsed.version === 2) {
+    if (!isRecord(parsed.legacy)) throw new Error();
+    for (const [old, endpoint] of Object.entries(parsed.legacy)) {
+      if (typeof endpoint !== 'string') throw new Error();
+      legacy[old] = endpoint;
+    }
+  } else if (parsed.version !== 1) {
+    throw new Error();
+  }
+  for (const value of parsed.hosts) {
+    const fields = storedFields(value);
+    const id = parsed.version === 1 ? machineEndpoint(fields) : isRecord(value) ? value.id : undefined;
+    if (typeof id !== 'string' || !id) throw new Error();
+    if (parsed.version === 1 && isRecord(value) && typeof value.id === 'string') legacy[value.id] = id;
+    // Two version 1 records of one endpoint keep the first; the other's credential is retired.
+    if (hosts.some((host) => host.id === id)) {
+      pendingDelete.push(fields.credentialRef);
+      continue;
+    }
+    hosts.push(Object.freeze({ ...fields, id }));
+  }
+  if (pendingDelete.some((ref) => hosts.some((host) => host.credentialRef === ref))) throw new Error();
+  return { version: 2, hosts, pendingDelete, legacy };
 }
 
 /** Display metadata does not change an admitted connection; saved secret records are immutable. */
@@ -156,13 +154,13 @@ export function sameRemoteConnection(a: RemoteHost | undefined, b: RemoteHost): 
 }
 
 /**
- * Settings reads are local and secret-free. Admission returns an immutable copy;
- * edits and removal affect future admissions, never a previously admitted session.
- * A new secure record is written before publishing its metadata reference. Old
- * records are retired through a persisted deletion queue, including after restart.
+ * This phone's credentials for the machines, by endpoint. Settings reads are local and secret-free. Admission
+ * returns an immutable copy; edits and removal affect future admissions, never a previously admitted session. A new
+ * secure record is written before publishing its metadata reference. Old records are retired through a persisted
+ * deletion queue, including after restart.
  */
 export class RemoteHostRepository {
-  private index: HostIndex = { version: 1, hosts: [], pendingDelete: [] };
+  private index: HostIndex = { version: 2, hosts: [], pendingDelete: [], legacy: {} };
   private snapshot: RemoteHostSnapshot = Object.freeze({ ready: false, hosts: Object.freeze([]) });
   private readonly listeners = new Set<() => void>();
   private tail: Promise<unknown> = Promise.resolve();
@@ -171,7 +169,11 @@ export class RemoteHostRepository {
 
   readonly subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   readonly getSnapshot = () => this.snapshot;
-  get(id: string): RemoteHost | undefined { return this.snapshot.hosts.find((host) => host.id === id); }
+  /** The record at an endpoint, or the one a chat chose by the ID version 1 gave it. */
+  get(id: string): RemoteHost | undefined {
+    const endpoint = this.index.legacy[id] ?? id;
+    return this.snapshot.hosts.find((host) => host.id === endpoint);
+  }
   private publish(error?: string, cleanupError?: string) {
     this.snapshot = Object.freeze({ ready: true, hosts: Object.freeze([...this.index.hosts]), ...(error ? { error } : {}), ...(cleanupError ? { cleanupError } : {}) });
     for (const listener of this.listeners) listener();
@@ -183,20 +185,24 @@ export class RemoteHostRepository {
   }
   private async load() {
     if (this.snapshot.ready && !this.snapshot.error) return;
+    let converted = false;
     try {
       const raw = await this.metadata.getItemAsync(INDEX_KEY);
-      this.index = raw === null ? { version: 1, hosts: [], pendingDelete: [] } : hostIndex(raw);
+      this.index = raw === null ? { version: 2, hosts: [], pendingDelete: [], legacy: {} } : hostIndex(raw);
+      converted = raw !== null && !raw.includes('"version":2');
       this.publish();
     } catch {
       const message = 'Could not restore remote machines. Unlock this device and retry. Saved settings have been preserved.';
       this.publish(message);
       throw new Error(message);
     }
+    // A version 1 index is written back in its new shape once.
+    if (converted) await this.commit(this.index);
   }
   restore(): Promise<void> { return this.enqueue(async () => { await this.load(); await this.retireSecrets(); }); }
   private requireHost(id: string, expected?: RemoteHost): RemoteHost {
     const host = this.get(id);
-    if (!host) throw new Error('This remote machine was removed. Choose another execution environment in chat settings.');
+    if (!host) throw new Error('This iPhone has no credentials for that machine. Add them in Remote machines.');
     if (expected && !sameRemoteConnection(host, expected)) throw new Error('This machine changed. Reopen its settings and try again.');
     return host;
   }
@@ -235,7 +241,9 @@ export class RemoteHostRepository {
       this.publish(undefined, 'Machine settings are saved, but retired SSH credentials could not be removed. Unlock this device and retry cleanup.');
     }
   }
-  private async replace(host: RemoteHost, secret: SecretRecord): Promise<RemoteHost> {
+  /** Writes `host` with a new secret record in place of `previous`, whose endpoint may differ. */
+  private async replace(host: Omit<RemoteHost, 'credentialRef'>, secret: SecretRecord,
+    previous: RemoteHost | undefined): Promise<RemoteHost> {
     const credentialRef = `pi.ssh.v1.${this.createId()}`;
     // Journal before writing the secure record, so a process crash between the
     // two stores cannot leave an untracked credential behind.
@@ -245,11 +253,12 @@ export class RemoteHostRepository {
       await this.retireSecrets();
       throw new Error('Could not save SSH credentials securely. Unlock this device and try again.');
     }
-    const previous = this.get(host.id);
     const next = Object.freeze({ ...host, credentialRef, credentialType: secret.auth.type });
-    const hosts = previous ? this.index.hosts.map((item) => item.id === next.id ? next : item) : [...this.index.hosts, next];
+    const hosts = [...this.index.hosts.filter((item) => item.id !== next.id && item.id !== previous?.id), next];
     try {
-      await this.commit({ version: 1, hosts, pendingDelete: [...this.index.pendingDelete.filter((ref) => ref !== credentialRef), ...(previous ? [previous.credentialRef] : [])] });
+      await this.commit({ ...this.index, hosts,
+        pendingDelete: [...this.index.pendingDelete.filter((ref) => ref !== credentialRef),
+          ...(previous ? [previous.credentialRef] : [])] });
     } catch (error) {
       await this.retireSecrets();
       throw error;
@@ -257,28 +266,22 @@ export class RemoteHostRepository {
     await this.retireSecrets();
     return next;
   }
+  /**
+   * Keeps the credential for the machine at the input's endpoint, replacing `expectedHost`'s record, whose endpoint
+   * may be another: a changed endpoint is another machine, with its own record.
+   */
   save(input: RemoteHostInput, replacement?: RemoteCredential, expectedHost?: RemoteHost): Promise<RemoteHost> {
     // Capture mutable form data before enqueueing behind native storage I/O.
     const settings = validateRemoteHost(input);
-    const id = input.id;
+    const id = machineEndpoint(settings);
     const expected = expectedHost && { ...expectedHost };
     const auth = replacement && credential(replacement);
     return this.enqueue(async () => {
       await this.load();
-      const previous = id ? this.requireHost(id, expected) : undefined;
-      // InfiniChat's tools name the machine they run on, so no two machines share a name.
-      const taken = this.index.hosts.find((host) =>
-        host.id !== id && host.name.toLowerCase() === settings.name.toLowerCase());
-      if (taken) throw new Error(`Another machine is already named ${taken.name}. Choose another machine name.`);
-      const sameEndpoint = previous?.hostname === settings.hostname && previous?.port === settings.port;
-      if (previous && sameEndpoint && !auth) {
-        // Name/account edits do not rewrite unchanged credentials or server trust.
-        const next = Object.freeze({ ...previous, ...settings,
-          namespaceId: previous.username === settings.username ? previous.namespaceId : this.createId() });
-        await this.commit({ ...this.index, hosts: this.index.hosts.map((host) => host.id === id ? next : host) });
-        await this.retireSecrets();
-        return next;
-      }
+      const previous = expected ? this.requireHost(expected.id, expected) : undefined;
+      if (previous && previous.id === id && !auth) return previous;
+      const taken = previous?.id === id ? undefined : this.index.hosts.find((host) => host.id === id);
+      if (taken) throw new Error(`${id} is already among your machines.`);
       let current: SecretRecord | undefined;
       if (previous) {
         try { current = await this.readSecret(previous); }
@@ -286,12 +289,11 @@ export class RemoteHostRepository {
       }
       const nextAuth = auth ?? current?.auth;
       if (!nextAuth) throw new Error('Enter an SSH password or private key.');
-      return this.replace({ ...settings, id: previous?.id ?? this.createId(),
-        namespaceId: sameEndpoint && previous?.username === settings.username ? previous.namespaceId : this.createId(),
-        credentialRef: '', credentialType: nextAuth.type,
-        ...(sameEndpoint && previous?.username === settings.username ? keysOf(previous) : {}) },
-      { version: 1, auth: nextAuth,
-        ...(sameEndpoint && current?.trustedHostKey ? { trustedHostKey: current.trustedHostKey } : {}) });
+      // The trusted host key goes with the endpoint: another endpoint is another server to trust on first use.
+      return this.replace({ ...settings, id, credentialType: nextAuth.type },
+        { version: 1, auth: nextAuth,
+          ...(previous?.id === id && current?.trustedHostKey ? { trustedHostKey: current.trustedHostKey } : {}) },
+        previous);
     });
   }
   acceptHostKey(expectedHost: RemoteHost, observed: SshHostKey): Promise<RemoteHost> {
@@ -302,53 +304,7 @@ export class RemoteHostRepository {
       const host = this.requireHost(expected.id, expected);
       const secret = await this.readSecret(host);
       if (matchesHostKey(secret.trustedHostKey, accepted)) return host;
-      return this.replace({ ...host, namespaceId: this.createId() }, { ...secret, trustedHostKey: accepted });
-    });
-  }
-  /**
-   * Keeps the key `ssh-keys.ts` gave the machine and the others' keys it authorized there; a repeat changes nothing.
-   * The keys live with the account on the machine, so a credential or host key replaced meanwhile, as a first test
-   * accepting the host key does, doesn't lose them.
-   */
-  setKeys(expectedHost: RemoteHost,
-    keys: { publicKey: string; authorizedKeys: readonly string[] }): Promise<RemoteHost> {
-    const expected = { ...expectedHost };
-    const next = { publicKey: keys.publicKey, authorizedKeys: Object.freeze([...keys.authorizedKeys].sort()) };
-    return this.enqueue(async () => {
-      await this.load();
-      const host = this.requireHost(expected.id);
-      if (host.hostname !== expected.hostname || host.port !== expected.port || host.username !== expected.username) {
-        throw new Error('This machine changed. Test it again.');
-      }
-      if (host.publicKey === next.publicKey
-        && JSON.stringify(host.authorizedKeys) === JSON.stringify(next.authorizedKeys)) return host;
-      const updated = Object.freeze({ ...host, ...next });
-      await this.commit({ ...this.index, hosts: this.index.hosts.map((item) => item.id === host.id ? updated : item) });
-      return updated;
-    });
-  }
-  /**
-   * Keeps the name the machine gave itself (`machineIdentity`), which InfiniChat's tools and the server name it by; a
-   * repeat changes nothing. No two machines share a name, and none is the phone's.
-   */
-  setName(expectedHost: RemoteHost, name: string): Promise<RemoteHost> {
-    const expected = { ...expectedHost };
-    const next = text(name, 'machine name');
-    return this.enqueue(async () => {
-      await this.load();
-      const host = this.requireHost(expected.id);
-      if (host.hostname !== expected.hostname || host.port !== expected.port || host.username !== expected.username) {
-        throw new Error('This machine changed. Test it again.');
-      }
-      if (host.name === next) return host;
-      if (next.toLowerCase() === PHONE_DEVICE) {
-        throw new Error(`“${PHONE_DEVICE}” is this phone in InfiniChat. Rename the machine.`);
-      }
-      const taken = this.index.hosts.find((item) => item.id !== host.id && item.name.toLowerCase() === next.toLowerCase());
-      if (taken) throw new Error(`Another machine is already named ${taken.name}. Rename one of them.`);
-      const updated = Object.freeze({ ...host, name: next });
-      await this.commit({ ...this.index, hosts: this.index.hosts.map((item) => item.id === host.id ? updated : item) });
-      return updated;
+      return this.replace(host, { ...secret, trustedHostKey: accepted }, host);
     });
   }
   forgetHostKey(expectedHost: RemoteHost): Promise<RemoteHost> {
@@ -357,7 +313,7 @@ export class RemoteHostRepository {
       await this.load();
       const host = this.requireHost(expected.id, expected);
       const { auth, trustedHostKey } = await this.readSecret(host);
-      return trustedHostKey ? this.replace(host, { version: 1, auth }) : host;
+      return trustedHostKey ? this.replace(host, { version: 1, auth }, host) : host;
     });
   }
   remove(id: string, expectedHost?: RemoteHost): Promise<void> {
@@ -365,8 +321,9 @@ export class RemoteHostRepository {
     return this.enqueue(async () => {
       await this.load();
       const host = this.requireHost(id, expected);
-      await this.commit({ version: 1, hosts: this.index.hosts.filter((item) => item.id !== id),
-        pendingDelete: [...this.index.pendingDelete, host.credentialRef] });
+      const legacy = Object.fromEntries(Object.entries(this.index.legacy).filter(([, endpoint]) => endpoint !== host.id));
+      await this.commit({ version: 2, hosts: this.index.hosts.filter((item) => item.id !== host.id),
+        pendingDelete: [...this.index.pendingDelete, host.credentialRef], legacy });
       await this.retireSecrets();
     });
   }
