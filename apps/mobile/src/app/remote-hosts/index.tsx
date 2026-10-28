@@ -7,22 +7,17 @@ import { forgetSecret, removeClient, savedSecret } from '@pi-agent/infinichat/pi
 import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { AppState, StyleSheet } from 'react-native';
+import { Alert, AppState, StyleSheet } from 'react-native';
 
 import { useChatApp, useInfiniChatMachines } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteHost } from '@/pi/execution/remote/hosts';
-import { testRemoteHost, type HostKeyChallenge } from '@/pi/execution/remote/test-host';
+import { failureCode, setupStageLabels, testRemoteHost } from '@/pi/execution/remote/test-host';
 import { phoneClient } from '@/pi/infinichat-remote/phone-client';
 import { createCredentialBackend } from '@/pi/secure-storage';
 
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
-const progressLabels = {
-  detecting: 'Checking remote machine…',
-  checking: 'Verifying remote setup…',
-  uploading: 'Preparing remote execution…',
-};
 const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
 
 /** The move back a removal runs first, worded as the InfiniChat header words its steps. */
@@ -43,12 +38,10 @@ export default function RemoteHostsScreen() {
   const [busy, setBusy] = useState<string>();
   const [testing, setTesting] = useState(false);
   const [progress, setProgress] = useState('Connecting through Tailscale…');
-  const [notice, setNotice] = useState<{ message: string; error?: boolean }>();
-  const [challenge, setChallenge] = useState<HostKeyChallenge>();
+  const [notice, setNotice] = useState<{ message: string; error?: boolean; trust?: RemoteHost }>();
   const [removing, setRemoving] = useState<RemoteHost>();
   const [releasing, setReleasing] = useState<RemoteHost>();
   const active = useRef<AbortController | undefined>(undefined);
-  const trustReply = useRef<((accepted: boolean) => void) | undefined>(undefined);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -59,7 +52,6 @@ export default function RemoteHostsScreen() {
       mounted.current = false;
       subscription.remove();
       active.current?.abort();
-      trustReply.current?.(false);
     };
   }, []);
   const test = async (host: RemoteHost) => {
@@ -71,37 +63,22 @@ export default function RemoteHostsScreen() {
     setNotice(undefined);
     try {
       const result = await testRemoteHost(remoteHosts, host.id, { signal: controller.signal,
-        onProgress: (stage) => { if (mounted.current) setProgress(progressLabels[stage]); },
-        onHostKey: (observed) => new Promise<boolean>((resolve) => {
-          const finish = (accepted: boolean) => {
-            controller.signal.removeEventListener('abort', cancel);
-            trustReply.current = undefined;
-            if (mounted.current) setChallenge(undefined);
-            resolve(accepted);
-          };
-          const cancel = () => finish(false);
-          trustReply.current = finish;
-          controller.signal.addEventListener('abort', cancel, { once: true });
-          setChallenge(observed);
-          if (controller.signal.aborted) cancel();
-        }),
-      });
+        onProgress: (stage) => { if (mounted.current) setProgress(setupStageLabels[stage]); } });
       if (mounted.current) {
         setNotice({ message: `Connected to ${host.name} and ready for remote execution. `
           + `Pi ${result.version} on ${result.os} (${result.arch}).` });
       }
     } catch (error) {
       if (mounted.current) {
-        setNotice({ message: error instanceof Error ? error.message : 'Connection test failed.',
-          error: !controller.signal.aborted });
+        setNotice({ message: error instanceof Error ? error.message : 'Connection check failed.',
+          error: !controller.signal.aborted,
+          ...(failureCode(error) === 'HOST_KEY_REJECTED' ? { trust: host } : {}) });
       }
     } finally {
-      trustReply.current?.(false);
       active.current = undefined;
       if (mounted.current) {
         setBusy(undefined);
         setTesting(false);
-        setChallenge(undefined);
       }
     }
   };
@@ -138,18 +115,17 @@ export default function RemoteHostsScreen() {
       setReleasing(undefined);
     }
   };
-  const forget = async (host: RemoteHost) => {
-    setBusy(host.id);
-    setNotice(undefined);
-    try {
-      await remoteHosts.forgetHostKey(host);
-      setNotice({ message: 'Accepted SSH key removed. Test this machine and verify its fingerprint before using it '
-        + 'again.' });
-    } catch (error) {
-      setNotice({ message: error instanceof Error ? error.message : 'Could not reset SSH host trust.', error: true });
-    } finally {
-      setBusy(undefined);
-    }
+  /** A changed host key is the one signal left to the user: trusting the new one is confirmed, then checked at once. */
+  const trustNewKey = (host: RemoteHost) => {
+    Alert.alert(`Trust ${host.name}’s new SSH key?`,
+      'Its SSH host key changed since it was trusted. Continue only if you reinstalled or replaced the machine; '
+      + 'otherwise something else may be answering at its address.',
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Trust', style: 'destructive', onPress: () => {
+        void remoteHosts.forgetHostKey(host).then(() => test(host), (error: unknown) => {
+          setNotice({ message: error instanceof Error ? error.message : 'Could not forget the trusted key.',
+            error: true });
+        });
+      } }]);
   };
   const restore = () => { void remoteHosts.restore().catch(() => {}); };
   const acceptOnInfiniChatHost = async (host: RemoteHost, fingerprints: string[]) => {
@@ -170,9 +146,9 @@ export default function RemoteHostsScreen() {
     if (!infiniChatHost) return null;
     const key = infiniChatHost.publicKey;
     const hint = key === undefined
-      ? `Test connection on ${infiniChatHost.name} first, so this phone learns its InfiniChat key.`
+      ? `Check connection on ${infiniChatHost.name} first, so this phone learns its InfiniChat key.`
       : host.authorizedKeys?.includes(key) ? undefined
-        : `Test connection here authorizes ${infiniChatHost.name}’s InfiniChat key on ${host.name}.`;
+        : `Check connection here authorizes ${infiniChatHost.name}’s InfiniChat key on ${host.name}.`;
     return hint === undefined ? null
       : <Text modifiers={[secondary, font({ textStyle: 'footnote' })]}>{hint}</Text>;
   };
@@ -196,8 +172,8 @@ export default function RemoteHostsScreen() {
       {waiting === undefined && reach !== undefined && !reach.reachable && keyHint(host)}
       {waiting !== undefined && <>
         <Text modifiers={[secondary]}>
-          {`Compare this fingerprint with the SSH server’s host key using a trusted source before ${from} `
-            + 'accepts it.'}
+          {`${host.name}’s SSH host key changed since ${from} trusted it. Accept it on ${from} only if you `
+            + `reinstalled or replaced ${host.name}; otherwise something else may be answering at its address.`}
         </Text>
         {waiting.keys.map((key) => <Text key={key.fingerprint}
           modifiers={[font({ design: 'monospaced', textStyle: 'callout' }), textSelection(true)]}>
@@ -218,12 +194,12 @@ export default function RemoteHostsScreen() {
     </Stack.Toolbar>
     <Host style={styles.fill} seedColor={colors.accent} testID="remote-hosts-screen">
       <Form>
-        {testing && <Section title="Connection test">
+        {testing && <Section title="Connection check">
           <HStack spacing={10}>
             <ProgressView />
-            <Text modifiers={[secondary]}>{challenge ? 'Waiting for your SSH host-key decision…' : progress}</Text>
+            <Text modifiers={[secondary]}>{progress}</Text>
           </HStack>
-          <Button label="Cancel connection test" onPress={() => active.current?.abort()} />
+          <Button label="Cancel connection check" onPress={() => active.current?.abort()} />
         </Section>}
         {releasing && move?.running && <Section title={`Removing ${releasing.name}`}>
           <HStack spacing={10}>
@@ -231,29 +207,12 @@ export default function RemoteHostsScreen() {
             <Text modifiers={[secondary]}>{movingBack(move, releasing.name)}</Text>
           </HStack>
         </Section>}
-        {challenge && <Section title={challenge.trusted ? 'SSH host key changed' : 'Verify this SSH server'}
-          footer={<Text>
-            Compare this fingerprint with the SSH server’s host key using a trusted source before accepting it.
-          </Text>}>
-          <Text modifiers={[textSelection(true)]}>
-            {`${challenge.host.hostname}:${challenge.host.port} · ${challenge.observed.algorithm}`}
-          </Text>
-          <Text modifiers={[font({ design: 'monospaced', textStyle: 'callout' }), textSelection(true)]}>
-            {challenge.observed.fingerprint}
-          </Text>
-          {challenge.trusted && <Text modifiers={[foregroundStyle(colors.danger), textSelection(true)]}>
-            {`Previously accepted: ${challenge.trusted.fingerprint}. Continue only if you have verified why this `
-              + 'machine’s key changed.'}
-          </Text>}
-          <Button label={challenge.trusted ? 'Accept verified replacement key' : 'Accept verified key'}
-            onPress={() => trustReply.current?.(true)} />
-          <Button label="Reject key" role="destructive" onPress={() => trustReply.current?.(false)} />
-        </Section>}
         {snapshot.error && <SettingsNotice message={snapshot.error} action="Retry" onAction={restore} />}
         {snapshot.cleanupError && <SettingsNotice message={snapshot.cleanupError} action="Retry cleanup"
           onAction={restore} />}
         {notice && <SettingsNotice testID="remote-host-notice" message={notice.message}
-          tone={notice.error ? 'error' : 'neutral'} />}
+          tone={notice.error ? 'error' : 'neutral'} action={notice.trust && !busy ? 'Trust new key' : undefined}
+          onAction={() => { if (notice.trust) trustNewKey(notice.trust); }} />}
         {snapshot.hosts.map((host) => <Section key={host.id} title={host.name}>
           <LabeledContent label="Address">
             <Text modifiers={[secondary, textSelection(true)]}>{`${host.username}@${host.hostname}:${host.port}`}</Text>
@@ -262,12 +221,10 @@ export default function RemoteHostsScreen() {
             <Text modifiers={[secondary]}>{host.credentialType === 'password' ? 'Password' : 'Private key'}</Text>
           </LabeledContent>
           {reachFromInfiniChat(host)}
-          <Button label="Test connection" systemImage="bolt.horizontal" modifiers={[disable(!!busy)]}
+          <Button label="Check connection" systemImage="bolt.horizontal" modifiers={[disable(!!busy)]}
             onPress={() => { void test(host); }} />
           <Button label="Edit machine" systemImage="pencil" modifiers={[disable(!!busy)]}
             onPress={() => router.push({ pathname: '/remote-hosts/edit', params: { id: host.id } })} />
-          <Button label="Reset accepted SSH key" systemImage="key" modifiers={[disable(!!busy)]}
-            onPress={() => { void forget(host); }} />
           <ConfirmationDialog title={`Remove ${host.name}?`} titleVisibility="visible"
             isPresented={removing?.id === host.id}
             onIsPresentedChange={(shown) => setRemoving(shown ? host : undefined)}>
@@ -288,10 +245,10 @@ export default function RemoteHostsScreen() {
         </Section>)}
         <Section footer={<Text>
           SSH over Tailscale connects to the machine’s existing SSH server. Keep Tailscale connected on your phone and
-          the machine. Pi prepares remote execution when you test or connect, and each chat chooses where its tools
-          run. Testing a machine also gives it an InfiniChat SSH key and authorizes the other machines’ keys there, so
-          InfiniChat reaches your machines from whichever one it runs on. Your chat and model connection stay on this
-          phone.
+          the machine. Adding a machine connects to it, trusts its SSH host key on first use, prepares remote
+          execution, gives it an InfiniChat SSH key and authorizes the other machines’ keys there, so InfiniChat
+          reaches your machines from whichever one it runs on. Each chat chooses where its tools run; your chat and
+          model connection stay on this phone.
         </Text>}>
           {!snapshot.ready && <Text modifiers={[secondary]}>Loading saved machines…</Text>}
           {snapshot.ready && !snapshot.hosts.length && !snapshot.error && <Text modifiers={[secondary]}>

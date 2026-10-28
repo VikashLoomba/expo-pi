@@ -10,7 +10,7 @@ import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-to
 import { getRandomBytesAsync } from 'expo-crypto';
 
 import { connectionFailure } from '../execution/remote/channel';
-import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
+import { hostKeyPolicy, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
 import type { RemoteExecution } from '../execution/remote/owner';
 import { createCredentialBackend } from '../secure-storage';
 import { phoneClient } from './phone-client';
@@ -29,21 +29,17 @@ type HeaderWebSocket = new (url: string, protocols: undefined, options: { header
 const NativeWebSocket: HeaderWebSocket = WebSocket;
 
 /**
- * An SSH connection with the machine's admission: its credentials, and its pinned host key checked and offered first,
- * as owner.ts admits its daemon channels. The caller owns the connection and disconnects it.
+ * An SSH connection with the machine's admission: its credentials, and its host key under the same policy as
+ * owner.ts's daemon channels. The caller owns the connection and disconnects it.
  */
-function connectAdmitted({ host, auth, trustedHostKey }: RemoteHostAdmission, options: {
+function connectAdmitted(hosts: RemoteHostRepository, admission: RemoteHostAdmission, options: {
   signal: AbortSignal;
   onDisconnected?: () => void;
 }): Promise<SshConnection> {
-  if (!trustedHostKey) {
-    throw new Error(`Test ${host.name} in Remote machines and verify its SSH host key before using InfiniChat there.`);
-  }
+  const { host, auth } = admission;
   return connect({
     host: host.hostname, port: host.port, username: host.username, auth, signal: options.signal,
-    hostKeyAlgorithms: [trustedHostKey.algorithm],
-    verifyHostKey: (observed) => matchesHostKey(trustedHostKey, observed),
-    onDisconnected: options.onDisconnected,
+    ...hostKeyPolicy(hosts, admission), onDisconnected: options.onDisconnected,
   }).catch((error: unknown) => {
     throw connectionFailure(error);
   });
@@ -72,7 +68,7 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
       const { host } = admission;
       const name = host.name;
       const description = machineDescription(host);
-      const connection = await connectAdmitted(admission, { signal, onDisconnected: onDropped });
+      const connection = await connectAdmitted(hosts, admission, { signal, onDisconnected: onDropped });
       // A dial that is cancelled stops waiting for it; the owner keeps the connection it opens.
       const machine = () => awaitWithContext(remote.environment(machineId, undefined),
         withAbortSignal(signal, BACKGROUND_CONTEXT));

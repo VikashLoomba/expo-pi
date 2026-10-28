@@ -50,7 +50,8 @@ export function connectionFailure(error: unknown): Error {
   const messages: Record<string, string> = {
     AUTH_FAILED: 'SSH authentication failed. Check this machine’s SSH account and saved credential.',
     KEY: 'The SSH private key could not be loaded. Check its format and passphrase.',
-    HOST_KEY_REJECTED: 'The SSH server key was not accepted. Test this machine and verify its fingerprint.',
+    HOST_KEY_REJECTED: 'This machine’s SSH host key changed since it was trusted. If you reinstalled or replaced it, '
+      + 'choose Trust new key in Remote machines.',
     TIMEOUT: 'The SSH connection timed out. Check the Tailscale VPN and remote SSH server.',
     CANCELLED: 'SSH connection cancelled.',
     INVALID_ARGUMENT: 'The SSH configuration is invalid. Check this machine’s settings.',

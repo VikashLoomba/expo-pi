@@ -93,6 +93,25 @@ export function matchesHostKey(trusted: Readonly<SshHostKey> | undefined, observ
   return !!trusted && trusted.algorithm === observed.algorithm && trusted.fingerprint === observed.fingerprint && trusted.publicKey === observed.publicKey;
 }
 
+/**
+ * How every connection to the machine checks its SSH host key, as OpenSSH's `accept-new` does (owner decision,
+ * 2026-10-27): the key the machine presents first is trusted and kept with its credentials, from then on only that
+ * key connects, offered first, and a different one is refused (`HOST_KEY_REJECTED`), which Remote machines turns into
+ * the choice to trust the new key.
+ */
+export function hostKeyPolicy(repository: RemoteHostRepository, { host, trustedHostKey }: RemoteHostAdmission): {
+  hostKeyAlgorithms?: string[]; verifyHostKey(observed: SshHostKey): Promise<boolean>;
+} {
+  return {
+    ...(trustedHostKey ? { hostKeyAlgorithms: [trustedHostKey.algorithm] } : {}),
+    verifyHostKey: async (observed) => {
+      if (trustedHostKey) return matchesHostKey(trustedHostKey, observed);
+      await repository.acceptHostKey(host, observed);
+      return true;
+    },
+  };
+}
+
 function storedHost(value: unknown): RemoteHost {
   if (!isRecord(value)) throw new Error();
   const { id, namespaceId, credentialRef, credentialType, name, hostname, port, username, publicKey, authorizedKeys }

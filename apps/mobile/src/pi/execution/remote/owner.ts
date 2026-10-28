@@ -3,19 +3,15 @@ import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/conte
 import { createSshChannelFactory, type DaemonChannelFactory } from './channel';
 import { Connection } from './connection';
 import { MobileRemoteExecutionEnv } from './environment';
-import { matchesHostKey, type RemoteHostAdmission, type RemoteHostRepository } from './hosts';
+import { hostKeyPolicy, type RemoteHostAdmission, type RemoteHostRepository } from './hosts';
 import type { RemotePlatformState } from './provisioning';
-import { machineKeyExchange, type KeyExchange } from './ssh-keys';
+import { machineKeyExchange } from './ssh-keys';
 
-function admittedSshChannel(admission: RemoteHostAdmission, platform: RemotePlatformState,
-  keys: KeyExchange): DaemonChannelFactory {
-  const { host, auth, trustedHostKey } = admission;
-  if (!trustedHostKey) {
-    throw new Error('Test this machine in Remote machines and verify its SSH host key before running tools.');
-  }
+function admittedSshChannel(hosts: RemoteHostRepository, admission: RemoteHostAdmission,
+  platform: RemotePlatformState): DaemonChannelFactory {
+  const { host, auth } = admission;
   return createSshChannelFactory({ host: host.hostname, port: host.port, username: host.username,
-    auth, platform, keys, hostKeyAlgorithms: [trustedHostKey.algorithm],
-    verifyHostKey: (observed) => matchesHostKey(trustedHostKey, observed) });
+    auth, platform, keys: machineKeyExchange(hosts, host), ...hostKeyPolicy(hosts, admission) });
 }
 
 export type RemoteExecution = ReturnType<typeof createRemoteExecution>;
@@ -62,10 +58,7 @@ export function createRemoteExecution(hosts: RemoteHostRepository) {
         const platform: RemotePlatformState = {};
         // Like pi-env's `command`, each start reads the machine's current credentials and trusted key.
         connection = new Connection({
-          openChannel: async (options) => {
-            const admission = await hosts.admit(machineId);
-            return admittedSshChannel(admission, platform, machineKeyExchange(hosts, admission.host))(options);
-          },
+          openChannel: async (options) => admittedSshChannel(hosts, await hosts.admit(machineId), platform)(options),
         });
         connections.set(machineId, connection);
       }

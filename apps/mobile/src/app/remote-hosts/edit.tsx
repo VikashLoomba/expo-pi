@@ -1,24 +1,26 @@
 import {
-  Form, Host, LabeledContent, Picker, SecureField, Section, Text, TextField, useNativeState,
+  Form, Host, HStack, LabeledContent, Picker, ProgressView, SecureField, Section, Text, TextField, useNativeState,
 } from '@expo/ui/swift-ui';
 import {
-  autocorrectionDisabled, disabled as disable, font, keyboardType, lineLimit, pickerStyle, tag,
+  autocorrectionDisabled, disabled as disable, font, foregroundStyle, keyboardType, lineLimit, pickerStyle, tag,
   textInputAutocapitalization,
 } from '@expo/ui/swift-ui/modifiers';
 import { router, Stack, useLocalSearchParams, useNavigation, usePreventRemove } from 'expo-router';
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActionSheetIOS, ActivityIndicator, StyleSheet } from 'react-native';
 
 import { useChatApp } from '@/chat/chat-provider';
 import { SettingsNotice } from '@/components/chat/settings-controls';
 import { useChatColors } from '@/hooks/use-chat-colors';
 import type { RemoteCredential, RemoteHost } from '@/pi/execution/remote/hosts';
+import { setupStageLabels, testRemoteHost } from '@/pi/execution/remote/test-host';
 
 const plainText = [autocorrectionDisabled(), textInputAutocapitalization('never')];
 const FIELDS = ['name', 'hostname', 'port', 'username', 'password', 'privateKey', 'passphrase'] as const;
 type Field = (typeof FIELDS)[number];
+const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 
-/** Adds a machine, or edits the one named by `id`; saving returns to the list or chat that opened it. */
+/** Adds a machine, or edits the one named by `id`; saving connects to it, then returns to where it was opened from. */
 export default function RemoteHostEditScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const colors = useChatColors();
@@ -39,9 +41,15 @@ export default function RemoteHostEditScreen() {
 function MachineForm({ host }: { host?: RemoteHost }) {
   const colors = useChatColors();
   const { remoteHosts } = useChatApp();
+  // The record this form edits: the one it opened with, or the one Add saved before a connection that failed.
+  const [saved, setSaved] = useState(host);
   const [credentialType, setCredentialType] = useState<RemoteCredential['type']>(host?.credentialType ?? 'password');
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<string>();
   const [error, setError] = useState<string>();
+  // The connection a save runs, which leaving the form stops; the record stays.
+  const connecting = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => connecting.current?.abort(), []);
   const initial = { name: host?.name ?? '', hostname: host?.hostname ?? '', port: String(host?.port ?? 22),
     username: host?.username ?? '', password: '', privateKey: '', passphrase: '' };
   // The fields' latest text, read when saving.
@@ -91,25 +99,37 @@ function MachineForm({ host }: { host?: RemoteHost }) {
     const { name, hostname, port, username, password, privateKey, passphrase } = fields.current;
     setSaving(true);
     setError(undefined);
+    const controller = new AbortController();
+    connecting.current = controller;
     try {
       let replacement: RemoteCredential | undefined;
       if (credentialType === 'password' && password) replacement = { type: 'password', password };
       if (credentialType === 'privateKey' && privateKey.trim()) {
         replacement = passphrase ? { type: 'privateKey', privateKey, passphrase } : { type: 'privateKey', privateKey };
       }
-      if ((!host || credentialType !== host.credentialType) && !replacement) {
+      if ((!saved || credentialType !== saved.credentialType) && !replacement) {
         throw new Error('Enter the selected SSH credential.');
       }
       if (!/^\d+$/.test(port.trim())) throw new Error('SSH port must be a number from 1 to 65535.');
-      await remoteHosts.save({ ...(host ? { id: host.id } : {}), name, hostname, port: Number(port), username },
-        replacement, host);
+      const record = await remoteHosts.save({ ...(saved ? { id: saved.id } : {}), name, hostname, port: Number(port),
+        username }, replacement, saved);
+      setSaved(record);
       setDirty(false);
       disablePrevention();
+      // Saved, the machine connects at once: its SSH host key is trusted on first use, remote execution is prepared
+      // and the InfiniChat keys are exchanged, so it is ready wherever machines are chosen.
+      setProgress('Connecting through Tailscale…');
+      await testRemoteHost(remoteHosts, record.id, { signal: controller.signal,
+        onProgress: (stage) => setProgress(setupStageLabels[stage]) });
+      if (controller.signal.aborted) return;
       router.back();
     } catch (cause) {
+      if (controller.signal.aborted) return;
       setError(cause instanceof Error ? cause.message : 'Could not save this machine.');
     } finally {
+      if (connecting.current === controller) connecting.current = undefined;
       setSaving(false);
+      setProgress(undefined);
     }
   };
   return <>
@@ -120,11 +140,17 @@ function MachineForm({ host }: { host?: RemoteHost }) {
     <Stack.Toolbar placement="right">
       {saving ? <Stack.Toolbar.View><ActivityIndicator /></Stack.Toolbar.View>
         : <Stack.Toolbar.Button icon="checkmark" variant="prominent" tintColor={colors.accent}
-          accessibilityLabel="Save machine" onPress={() => { void save(); }} />}
+          accessibilityLabel={host ? 'Save machine' : 'Add machine'} onPress={() => { void save(); }} />}
     </Stack.Toolbar>
     <Host style={styles.fill} seedColor={colors.accent} testID="remote-host-form">
       <Form>
         {error && <SettingsNotice testID="remote-host-save-error" message={error} />}
+        {progress !== undefined && <Section>
+          <HStack spacing={10}>
+            <ProgressView />
+            <Text modifiers={[secondary]}>{progress}</Text>
+          </HStack>
+        </Section>}
         <Section title="Machine" footer={<Text>
           Use the full MagicDNS name when available. Both devices must already be connected to Tailscale.
         </Text>}>
@@ -147,9 +173,9 @@ function MachineForm({ host }: { host?: RemoteHost }) {
           </LabeledContent>
         </Section>
         <Section title="SSH authentication" footer={<Text>
-          {'Credentials and accepted SSH keys stay in this device’s secure storage. '
-            + 'Save, then test the connection to verify the server and prepare it for remote execution.'
-            + (host ? ' Changes apply to later sessions; work already admitted keeps the previous configuration.' : '')}
+          {'Credentials and trusted SSH keys stay in this device’s secure storage. Saving connects to the machine, '
+            + 'trusts its SSH host key on first use and prepares it for InfiniChat.'
+            + (saved ? ' Changes apply to later sessions; work already admitted keeps its configuration.' : '')}
         </Text>}>
           <Picker<string> selection={credentialType} onSelectionChange={chooseCredential}
             modifiers={[pickerStyle('segmented'), disable(saving)]}>
@@ -158,11 +184,11 @@ function MachineForm({ host }: { host?: RemoteHost }) {
           </Picker>
           {credentialType === 'password'
             ? <SecureField text={passwordText} modifiers={[disable(saving)]}
-              placeholder={host ? 'Leave blank to keep the saved password' : 'SSH account password'}
+              placeholder={saved ? 'Leave blank to keep the saved password' : 'SSH account password'}
               onTextChange={(value) => edit('password', value)} />
             : <>
               <TextField text={privateKeyText} axis="vertical"
-                placeholder={host ? 'Leave blank to keep the saved key' : 'Paste your complete private key'}
+                placeholder={saved ? 'Leave blank to keep the saved key' : 'Paste your complete private key'}
                 modifiers={[...plainText, font({ design: 'monospaced', textStyle: 'footnote' }),
                   lineLimit({ min: 4, max: 10 }), disable(saving)]}
                 onTextChange={(value) => edit('privateKey', value)} />

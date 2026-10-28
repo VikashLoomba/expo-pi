@@ -131116,12 +131116,12 @@ var ServerMachines = class {
       const changed = error instanceof HostKeyChangedError;
       const keys = scanned(machine.name, await scanHostKey(target));
       const pinned = keys.filter(({ fingerprint }) => fingerprint === machine.hostKey?.fingerprint);
-      if (pinned.length === 0) {
+      if (changed && pinned.length === 0) {
         if (this.listed(machine)) this.pend(machineEndpoint(machine), { keys, changed });
-        throw new Error(changed ? `The SSH host key ${machine.name} presents to ${this.self} changed. Compare its fingerprint in Remote machines on the phone, and accept it there only if you know why it changed.` : `${this.self} doesn\u2019t trust the SSH host key ${machine.name} presents yet. Compare its fingerprint in Remote machines on the phone, then accept it there.`);
+        throw new Error(`The SSH host key ${machine.name} presents to ${this.self} changed. Trust it in Remote machines on the phone only if you know why it changed.`);
       }
       if (changed) await forgetHostKey(target);
-      await acceptHostKey(target, pinned.map(({ line }) => line));
+      await acceptHostKey(target, (pinned.length > 0 ? pinned : keys).map(({ line }) => line));
       return (await this.connect(machine)).connection;
     }
   }

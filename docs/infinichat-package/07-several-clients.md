@@ -150,6 +150,15 @@ since the doc names no steps. What differs from the plan:
   `adopt`s it, and the source archives. The home record keeps `from` while `moving-there`, so a relaunch resumes it
   and Cancel has the source adopt its files again. The provider keeps one client per machine, two during such a
   move. A Cancel during the pull waits for the pull to end.
+- **SSH host keys are trusted on first use** (2026-10-27, the owner: "no user is going to actually cross-check, and
+  pi-env already does verification"). pi-env's README example has the owner compare the fingerprint between
+  `scanHostKey` and `acceptHostKey`; the app now follows OpenSSH's `accept-new` instead, which pi-env also offers:
+  `hostKeyPolicy` in `hosts.ts`, shared by the test, the chats' tools and the InfiniChat dialer, pins the first key a
+  machine presents and refuses a different one (`HOST_KEY_REJECTED`), which Remote machines turns into a confirmed
+  "Trust new key". The server does the same for the machines it reaches (`ServerMachines.open`): the client's pin
+  when there is one, else the scanned keys; only a changed key waits for a client. Saving a machine now connects to
+  it in the form itself, so an added machine is ready at once; the fingerprint screen and the reset button are
+  gone. The exposure is a node already inside the tailnet answering at the address on the day a machine is added.
 - The client ID is `pi.infinichat.client.v1` in kv-store and the name is expo-device's `deviceName` ("iPhone" on
   iOS 16 and later without the entitlement). Removal removes this phone's file only where it has a secret, so a
   machine never used for InfiniChat isn't connected to. The bundle is 8,355,444 bytes, SHA-256 `0d1897ad…3f8432`.

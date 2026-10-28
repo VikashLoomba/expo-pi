@@ -69,8 +69,9 @@ function scanned(name: string, { lines, fingerprints }: { lines: string[]; finge
  * connection, its host keys and what was found of it. Connections come from `connectSsh` rather than `sshConnection`,
  * because only its failures say when the host key is why (`HostKeyUnknownError`, `HostKeyChangedError`); a lazy start
  * reports them as a message. So a connection whose start fails is let go, and the next start goes through
- * `connectSsh`. The key a client pinned is accepted without asking, since the owner compared it out of band there; any
- * other waits for a client.
+ * `connectSsh`. A host key is trusted on first use, as the clients trust theirs (OpenSSH's `accept-new`; owner
+ * decision, 2026-10-27): the key a client pinned when it has one, else the keys the scan found. Only a changed key
+ * waits for a client, which is where an impersonation would show.
  */
 export class ServerMachines {
   private lists: Lists;
@@ -243,16 +244,13 @@ export class ServerMachines {
       const changed = error instanceof HostKeyChangedError;
       const keys = scanned(machine.name, await scanHostKey(target));
       const pinned = keys.filter(({ fingerprint }) => fingerprint === machine.hostKey?.fingerprint);
-      if (pinned.length === 0) {
+      if (changed && pinned.length === 0) {
         if (this.listed(machine)) this.pend(endpoint(machine), { keys, changed });
-        throw new Error(changed
-          ? `The SSH host key ${machine.name} presents to ${this.self} changed. Compare its fingerprint in Remote `
-            + 'machines on the phone, and accept it there only if you know why it changed.'
-          : `${this.self} doesn’t trust the SSH host key ${machine.name} presents yet. Compare its fingerprint in `
-            + 'Remote machines on the phone, then accept it there.');
+        throw new Error(`The SSH host key ${machine.name} presents to ${this.self} changed. Trust it in Remote `
+          + 'machines on the phone only if you know why it changed.');
       }
       if (changed) await forgetHostKey(target);
-      await acceptHostKey(target, pinned.map(({ line }) => line));
+      await acceptHostKey(target, (pinned.length > 0 ? pinned : keys).map(({ line }) => line));
       return (await this.connect(machine)).connection;
     }
   }
