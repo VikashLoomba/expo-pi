@@ -122,3 +122,12 @@ server established, and `machines.json` gained the Mac's client ID with `[]`, wh
 once its reference is live (`client.ts:383-384`). The window should show "InfiniChat is on vikash-system", since the
 server's `conversation` cell says so; that, a sent turn and a reconnection after the server restarts are not verified
 from this session, which can't see the screen, and need the conversation on this Mac.
+
+**Found at the first move (2026-10-28):** the phone named this machine "Mac" and the Mac app named it by its
+computer name, and `RemoteInfiniChat` reinstalls a server whose device or description differs from its dialer's
+(`client.ts:421-423`), so the two apps reinstalled the server under each other at every connect and the phone's
+readiness check lost the race ("could not be started"). The owner's rule: a machine names itself.
+`machineIdentity` in `install.ts` reads the name and host name on the machine; both dialers install and expect the
+server under them and build the description from the machine's host name; the phone keeps the name on its record
+(`RemoteHostRepository.setName`) at Check connection and at each dial, and its form lost the Name field. The server
+bundle is unchanged. The phone needed another Release install for it.

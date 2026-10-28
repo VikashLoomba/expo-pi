@@ -4,7 +4,7 @@ import { connect, type SshConnection, type SshLocalForward } from '@osuki-dev/re
 import { machineEndpoint, type Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { MachineDirectory, ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
-  installServer, machineSecret, runningServer, savedSecret,
+  installServer, machineIdentity, machineSecret, runningServer, savedSecret,
 } from '@pi-agent/infinichat/pi/infinichat-remote/install';
 import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import { getRandomBytesAsync } from 'expo-crypto';
@@ -66,12 +66,14 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
       const secret = await savedSecret(credentials, machineId);
       const admission = await hosts.admit(machineId);
       const { host } = admission;
-      const name = host.name;
-      const description = machineDescription(host);
       const connection = await connectAdmitted(hosts, admission, { signal, onDisconnected: onDropped });
       // A dial that is cancelled stops waiting for it; the owner keeps the connection it opens.
       const machine = () => awaitWithContext(remote.environment(machineId, undefined),
         withAbortSignal(signal, BACKGROUND_CONTEXT));
+      // The server's device name and description are the machine's own, as every client reads them.
+      const identity = await machineIdentity(await machine(), host.name, signal);
+      const name = (await hosts.setName(host, identity.name)).name;
+      const description = machineDescription({ username: host.username, hostname: identity.hostname });
       let forward: SshLocalForward | undefined;
       let link: Link | undefined;
       const install = async (): Promise<Target> => {

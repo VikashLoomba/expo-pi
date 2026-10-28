@@ -1,5 +1,8 @@
+import { machineIdentity } from '@pi-agent/infinichat/pi/infinichat-remote/install';
+
 import { createSshChannelFactory, type SshSetupStage } from './channel';
 import { Connection, RemoteError } from './connection';
+import { MobileRemoteExecutionEnv } from './environment';
 import { hostKeyPolicy, type RemoteHostRepository } from './hosts';
 import { machineKeyExchange } from './ssh-keys';
 
@@ -7,7 +10,7 @@ export interface RemoteHostTestOptions {
   signal: AbortSignal;
   onProgress?: (stage: SshSetupStage) => void;
 }
-export interface RemoteHostTestResult { version: string; os: string; arch: string; home: string }
+export interface RemoteHostTestResult { version: string; os: string; arch: string; home: string; name: string }
 
 /** What each setup stage says while a machine is prepared, on the machine form and in Remote machines. */
 export const setupStageLabels: Record<SshSetupStage, string> = {
@@ -56,7 +59,8 @@ function remoteHostConnectionMessage(error: unknown): string {
 
 /**
  * Connects to the machine, trusting its SSH host key on first use (`hostKeyPolicy`), prepares it for remote
- * execution and reports what its daemon says, independently of any chat directory. A failure carries its code.
+ * execution, reports what its daemon says, independently of any chat directory, and keeps the name the machine gives
+ * itself on the record. A failure carries its code.
  */
 export async function testRemoteHost(repository: RemoteHostRepository, id: string,
   options: RemoteHostTestOptions): Promise<RemoteHostTestResult> {
@@ -73,10 +77,14 @@ export async function testRemoteHost(repository: RemoteHostRepository, id: strin
   // The test owns this connection; closing it is what stops connecting and requests on abort.
   const abort = () => { void connection.close(); };
   options.signal.addEventListener('abort', abort, { once: true });
+  let result: Omit<RemoteHostTestResult, 'name'>;
+  let name: string;
   try {
     const info = await connection.info();
     if (info.separator !== '/' || info.os === 'windows') throw Object.assign(new Error('Unsupported remote operating system.'), { code: 'not_supported' });
-    return { version: info.version, os: info.os, arch: info.arch, home: info.home };
+    result = { version: info.version, os: info.os, arch: info.arch, home: info.home };
+    const environment = new MobileRemoteExecutionEnv({ connection, id: `ssh:${host.namespaceId}`, cwd: info.home });
+    name = (await machineIdentity(environment, host.name, options.signal)).name;
   } catch (error) {
     if (options.signal.aborted) throw Object.assign(new Error('Remote connection cancelled.'), { code: 'aborted' });
     // A start that fails is lost, as pi-env marks it; the SSH or setup failure it keeps has the code.
@@ -86,4 +94,7 @@ export async function testRemoteHost(repository: RemoteHostRepository, id: strin
     options.signal.removeEventListener('abort', abort);
     await connection.close();
   }
+  // Its own message: a name another machine already has is not a connection failure.
+  const named = await repository.setName(host, name);
+  return { ...result, name: named.name };
 }

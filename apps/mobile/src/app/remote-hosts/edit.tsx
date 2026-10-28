@@ -16,7 +16,7 @@ import type { RemoteCredential, RemoteHost } from '@/pi/execution/remote/hosts';
 import { setupStageLabels, testRemoteHost } from '@/pi/execution/remote/test-host';
 
 const plainText = [autocorrectionDisabled(), textInputAutocapitalization('never')];
-const FIELDS = ['name', 'hostname', 'port', 'username', 'password', 'privateKey', 'passphrase'] as const;
+const FIELDS = ['hostname', 'port', 'username', 'password', 'privateKey', 'passphrase'] as const;
 type Field = (typeof FIELDS)[number];
 const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 
@@ -50,7 +50,7 @@ function MachineForm({ host }: { host?: RemoteHost }) {
   // The connection a save runs, which leaving the form stops; the record stays.
   const connecting = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => connecting.current?.abort(), []);
-  const initial = { name: host?.name ?? '', hostname: host?.hostname ?? '', port: String(host?.port ?? 22),
+  const initial = { hostname: host?.hostname ?? '', port: String(host?.port ?? 22),
     username: host?.username ?? '', password: '', privateKey: '', passphrase: '' };
   // The fields' latest text, read when saving.
   const fields = useRef(initial);
@@ -75,7 +75,6 @@ function MachineForm({ host }: { host?: RemoteHost }) {
         repeat();
       });
   });
-  const nameText = useNativeState(initial.name);
   const hostnameText = useNativeState(initial.hostname);
   const portText = useNativeState(initial.port);
   const usernameText = useNativeState(initial.username);
@@ -96,7 +95,7 @@ function MachineForm({ host }: { host?: RemoteHost }) {
     setDirty(unsaved(next));
   };
   const save = async () => {
-    const { name, hostname, port, username, password, privateKey, passphrase } = fields.current;
+    const { hostname, port, username, password, privateKey, passphrase } = fields.current;
     setSaving(true);
     setError(undefined);
     const controller = new AbortController();
@@ -111,8 +110,9 @@ function MachineForm({ host }: { host?: RemoteHost }) {
         throw new Error('Enter the selected SSH credential.');
       }
       if (!/^\d+$/.test(port.trim())) throw new Error('SSH port must be a number from 1 to 65535.');
-      const record = await remoteHosts.save({ ...(saved ? { id: saved.id } : {}), name, hostname, port: Number(port),
-        username }, replacement, saved);
+      // The machine names itself when the connection below reads its name; until then, its host name stands in.
+      const record = await remoteHosts.save({ ...(saved ? { id: saved.id } : {}), name: saved?.name ?? hostname,
+        hostname, port: Number(port), username }, replacement, saved);
       setSaved(record);
       setDirty(false);
       disablePrevention();
@@ -152,12 +152,9 @@ function MachineForm({ host }: { host?: RemoteHost }) {
           </HStack>
         </Section>}
         <Section title="Machine" footer={<Text>
-          Use the full MagicDNS name when available. Both devices must already be connected to Tailscale.
+          Use the full MagicDNS name when available. Both devices must already be connected to Tailscale. The machine
+          names itself when it connects.
         </Text>}>
-          <LabeledContent label="Name">
-            <TextField text={nameText} placeholder="My Mac" modifiers={[disable(saving)]}
-              onTextChange={(value) => edit('name', value)} />
-          </LabeledContent>
           <LabeledContent label="Hostname">
             <TextField text={hostnameText} placeholder="machine.tailnet.ts.net"
               modifiers={[...plainText, keyboardType('url'), disable(saving)]}

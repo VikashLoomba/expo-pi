@@ -33,11 +33,39 @@ export interface ServerAssets {
   daemon(platform: DaemonPlatform, signal: AbortSignal): Promise<{ bytes: Uint8Array; sha256: string }>;
 }
 
+/** What a machine calls itself, which every client installs and expects its server under (`machineIdentity`). */
+export interface MachineIdentity {
+  /** macOS's computer name, else Linux's static host name, else the host name. */
+  name: string;
+  /** The host name, which the description names it by. */
+  hostname: string;
+}
+
+/**
+ * The machine's own name and host name, read on the machine, so the apps agree on the server's device name without
+ * naming it themselves: a client that named it would reinstall a server another client named (the owner's rule,
+ * 2026-10-28). `label` names the machine in a connection failure, as the app lists it.
+ */
+export async function machineIdentity(machine: ExecutionEnv, label: string, signal: AbortSignal,
+): Promise<MachineIdentity> {
+  const failure = `The name of ${label} could not be read.`;
+  const [name, hostname] = await runScript(machine, signal, label, [
+    'if [ "$(uname -s 2>/dev/null || true)" = Darwin ]; then n=$(scutil --get ComputerName 2>/dev/null || true);',
+    'else n=$(hostnamectl --static 2>/dev/null || true); fi',
+    'h=$(hostname 2>/dev/null || true)',
+    '[ -n "$n" ] || n=$h',
+    PRINT_MARKER,
+    `printf '%s\\n' "$n" "$h"`,
+  ], { failure });
+  if (!name?.trim() || !hostname?.trim()) throw new Error(failure);
+  return { name: name.trim(), hostname: hostname.trim() };
+}
+
 /** The machine an install acts on, as the app knows it. */
 export interface InstallTarget {
   /** Its files and commands, borrowed from the owner of the app's connection to it. */
   machine: ExecutionEnv;
-  /** Its name in the app's list, for messages and as the server's device name. */
+  /** Its own name (`machineIdentity`), for messages and as the server's device name. */
   name: string;
   /** The device list's text for it (`machineDescription`), which the server describes itself with. */
   description: string;

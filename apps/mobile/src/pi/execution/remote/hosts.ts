@@ -327,6 +327,30 @@ export class RemoteHostRepository {
       return updated;
     });
   }
+  /**
+   * Keeps the name the machine gave itself (`machineIdentity`), which InfiniChat's tools and the server name it by; a
+   * repeat changes nothing. No two machines share a name, and none is the phone's.
+   */
+  setName(expectedHost: RemoteHost, name: string): Promise<RemoteHost> {
+    const expected = { ...expectedHost };
+    const next = text(name, 'machine name');
+    return this.enqueue(async () => {
+      await this.load();
+      const host = this.requireHost(expected.id);
+      if (host.hostname !== expected.hostname || host.port !== expected.port || host.username !== expected.username) {
+        throw new Error('This machine changed. Test it again.');
+      }
+      if (host.name === next) return host;
+      if (next.toLowerCase() === PHONE_DEVICE) {
+        throw new Error(`“${PHONE_DEVICE}” is this phone in InfiniChat. Rename the machine.`);
+      }
+      const taken = this.index.hosts.find((item) => item.id !== host.id && item.name.toLowerCase() === next.toLowerCase());
+      if (taken) throw new Error(`Another machine is already named ${taken.name}. Rename one of them.`);
+      const updated = Object.freeze({ ...host, name: next });
+      await this.commit({ ...this.index, hosts: this.index.hosts.map((item) => item.id === host.id ? updated : item) });
+      return updated;
+    });
+  }
   forgetHostKey(expectedHost: RemoteHost): Promise<RemoteHost> {
     const expected = { ...expectedHost };
     return this.enqueue(async () => {

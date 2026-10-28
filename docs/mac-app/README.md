@@ -21,6 +21,7 @@ leaves to each app, and the screens.
 | Releases | Signed and notarized from the first build; updates hosted on GitHub Releases of `VikashLoomba/expo-pi` (public). |
 | Scope | Parity with the iPhone app before the owner uses it. Platform differences are listed below, not silently dropped. Only InfiniChat is shared through its server; each device keeps its own ordinary chats, as decided on 2026-10-26. |
 | Identity | Name InfiniChat, identifier `com.vikashloomba.piagent.mac`; the LaunchAgent label `com.vikashloomba.piagent.infinichat` stays. |
+| Machine names | A machine's own name, read on the machine by `machineIdentity` (`scutil --get ComputerName` on macOS; `hostnamectl --static`, else `hostname`, on Linux): both apps install and expect a server under it, and the phone's form no longer asks for one (2026-10-28, after the first move to the Mac failed because each app reinstalled the server under its own name for it). |
 
 Choices made by me and not objected to: the app is `apps/mac`; the main process is Bun (Electrobun's default);
 `packageManager: "pnpm"` in `hutch.config.ts`; `titleBarStyle: "hiddenInset"`; design docs first, as for

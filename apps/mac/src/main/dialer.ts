@@ -6,7 +6,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import type { InfiniChatClient } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
-  installServer, machineSecret, runningServer, savedSecret,
+  installServer, machineIdentity, machineSecret, runningServer, savedSecret,
 } from '@pi-agent/infinichat/pi/infinichat-remote/install';
 import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
@@ -23,7 +23,8 @@ const random = (count: number) => Promise.resolve(new Uint8Array(randomBytes(cou
  * tunnel, since the server listens on this Mac's loopback (`listen.ts`). `runningServer` and `installServer` run
  * through a local `NodeExecutionEnv` in the home directory, and the socket is `ws`'s, which carries the Bearer header
  * a browser can't. It installs or updates the server, writing this app's client file there, when this app has no
- * secret for the Mac and when `server.json` names no live server of this bundle. With no transport under the link,
+ * secret for the Mac and when `server.json` names no live server of this bundle. The server's device name and
+ * description are the Mac's own (`machineIdentity`), as the phone reads them too. With no transport under the link,
  * the link's own close is the only drop.
  */
 export function macDialer(machine: MacMachine, client: InfiniChatClient, secrets: CredentialBackend): ServerDialer {
@@ -31,12 +32,14 @@ export function macDialer(machine: MacMachine, client: InfiniChatClient, secrets
     async dial({ signal, onStage, onInstalled }) {
       const environment = new NodeExecutionEnv({ cwd: homedir() });
       const secret = await savedSecret(secrets, machine.id);
-      const description = machineDescription(machine);
+      const identity = await machineIdentity(environment, machine.name, signal);
+      const name = identity.name;
+      const description = machineDescription({ username: machine.username, hostname: identity.hostname });
       let link: Link | undefined;
       const install = async (): Promise<Target> => {
         const installing = await machineSecret(secrets, random, machine.id);
         const server = await installServer(
-          { machine: environment, name: machine.name, description, username: machine.username },
+          { machine: environment, name, description, username: machine.username },
           macServerAssets, client.id, installing, { signal, onProgress: onStage });
         onInstalled(server.notice);
         return server;
@@ -51,11 +54,11 @@ export function macDialer(machine: MacMachine, client: InfiniChatClient, secrets
       };
       try {
         const port = secret === undefined ? undefined
-          : await runningServer(environment, machine.name, SERVER_BUNDLE, signal);
+          : await runningServer(environment, name, SERVER_BUNDLE, signal);
         const target = secret !== undefined && port !== undefined ? { port, secret } : await install();
         return {
           link: open(target),
-          expected: { bundle: SERVER_BUNDLE, device: machine.name, description },
+          expected: { bundle: SERVER_BUNDLE, device: name, description },
           reinstall: async () => open(await install()),
           close: async () => { link?.close(); },
         };
