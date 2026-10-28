@@ -1,0 +1,88 @@
+# Piece 2: InfiniChat on this Mac
+
+## Goal
+
+The window shows the conversation held by this Mac's server and sends to it: the Mac is a client of its own
+LaunchAgent server, which it installs and updates itself, with the package's client objects unchanged.
+
+## What upstream does
+
+- **The dialer and the install:** `apps/mobile/src/pi/infinichat-remote/phone-dialer.ts:59-114` is the pattern: read
+  the saved secret (`savedSecret`, `install.ts:81`), check for a live server of this bundle (`runningServer`,
+  `install.ts:388`), else install (`machineSecret` then `installServer`, `install.ts:95, 269`, which writes this
+  client's file to `~/.infinichat/clients/<client ID>`, `:347-349`, and starts the LaunchAgent, `:188`), then a
+  WebSocket to the port with `authorization: Bearer <secret>`, wrapped by `webSocketLink`. The server side is
+  `apps/mobile/server/listen.ts`. On this Mac there is no SSH and no tunnel: the environment is
+  `new NodeExecutionEnv({ cwd: homedir() })` (`node/devices.ts:21`), and `ws`'s client `WebSocket` takes `headers`.
+- **The client objects:** `RemoteInfiniChat(dialer, directory, client)` (`client.ts:51`) owns dial, reconnect,
+  reinstall on a bundle mismatch (`:377-379`), `setTimeZone` and `setMachines` at connect; `ShownInfiniChat`
+  (`apps/mobile/src/chat/shown-infinichat.ts:24`) is what screens read across moves. The phone wires them at
+  `chat-provider.tsx:136-146, 148-152, 227-234`.
+- **Serving a shown host:** `apps/mobile/server/serve.ts:40-112`: cells with `{ init }`, `self.on(name, store, …)`
+  mirrors with `replace(ctx, value, { diff: true })`, the snapshot last.
+- **Assets:** `ServerAssets` (`install.ts:27-34`) and the phone's loaders (`server-assets.ts:34`,
+  `daemon-assets.ts:37`) verify bytes against the generated manifests. On the Mac the files sit in the bundle's
+  `Resources`, found with `PATHS.RESOURCES_FOLDER`; `build.copy` places them (deviation 3 decides where they come from).
+
+## Builds
+
+- `src/main/identity.ts`: `macClient(): InfiniChatClient` from `userData/settings.json` (`clientId`, made once with
+  `randomUUID`) and the computer name (`scutil --get ComputerName`, read once; `os.hostname()` without `.local` if it
+  fails). `src/main/home.ts`: `InfiniChatHomeStorage` over `userData/infinichat-home.json` with `readFileSync` and an
+  atomic `writeFileSync` + `renameSync`. `src/main/secrets.ts`: `fileCredentialBackend(userData/credentials.json)`
+  (`node/credentials.ts:25`), the one store for the Mac's machine secrets and, later, its provider credentials.
+- `src/main/server-assets.ts`: `macServerAssets` reading `Resources/server/server.bin` and
+  `Resources/server/pi-env-<target>.bin`, checked against `INFINICHAT_SERVER_MANIFEST` and `PI_DAEMON_MANIFEST`;
+  `SERVER_BUNDLE = serverBundle(manifest.sha256)`.
+- `src/main/dialer.ts`: `macDialer(machines, machineId)`. For the Mac itself: environment = local `NodeExecutionEnv`,
+  `username = os.userInfo().username`, name = the computer name, description = `machineDescription`; the dial, install,
+  `open`, `reinstall` and `close` as the phone's, the socket `new WebSocket(url, { headers })` from `ws`, closed
+  socket → `onDropped`. Other machines come in piece 5 through the same function.
+- `src/main/infinichat.ts`: the InfiniChat part of the phone's runtime: `ShownInfiniChat`, `remotes` per machine,
+  `machine(id)`, `showMachine`, `open()` at launch. Until piece 4 the only machine is this Mac, with a directory
+  whose `others()` is empty. With no home record the Mac starts on its own server; a server that is not `active`
+  shows where the conversation went (`conversation.heldBy`, piece 7 of docs/infinichat-package): "InfiniChat is on
+  <phone>. Move it here from the phone."
+- `src/contract.ts`: `MacInfiniChat` (`hostNamed('mac')`, input `{}`): cells `snapshot`, `controls`, `messages`,
+  `scheduled` (the remote contract's schemas, imported), `connection` (`RemoteConnection`: status, stage, error,
+  notice), `held` (`ConversationSchema`), `machine` (`{ id, name }`); methods `accept({ content, requestId })`, `stop`,
+  `dismissError`, `dismissNotice`, `reconnect`.
+- `src/main/serve-infinichat.ts`: `host.serve(MacInfiniChat, …)` over `ShownInfiniChat` and the shown client's
+  `getConnection`/`getHeld`; the phone's `useInfiniChatView`, `useInfiniChatConnection` and `useInfiniChatError`
+  (`chat-provider.tsx:484-569`) become these cells.
+- `src/view/infinichat.tsx`: the screen: title (the agent's name or InfiniChat), subtitle (connected, connecting with
+  its stage, failed with Try Again), the transcript as plain rows (user and assistant text, the working footer
+  `transcript.tsx:101-102`), the composer (a growing textarea, Enter sends, Shift+Enter breaks, Send and Stop), the
+  banners (`(infinichat)/index.tsx:256-276` without the move ones): error with Try Again/Dismiss, install notice,
+  "on <phone>". A send keeps its request ID across retries (`index.tsx:56-58, 136-155`).
+- Deviation 2: `shown-infinichat.ts` moves to `packages/infinichat/src/pi/`; the phone imports it from there.
+
+## Ownership and lifetime
+
+`RemoteInfiniChat`s are made by `machine(id)` and closed by `closeMachine` or at quit, before the host closes (the
+phone's teardown order, `chat-provider.tsx:258-278`). The LaunchAgent server belongs to launchd and is never stopped by
+the app; an install replaces its bundle as the phone's does. The Mac's client file on the server is written by the
+install and removed only by "Remove machine" (piece 4), never by quitting.
+
+## Deviations
+
+2 and 3.
+
+## Size
+
+About 750 lines: dialer 120, assets 60, identity, home and secrets 60, composition 120, contract 60, serve 80, screen
+250.
+
+## Checks
+
+- First launch on this Mac with the phone's server already installed here: the app reuses it (same bundle), writes
+  `~/.infinichat/clients/<mac id>`, and shows the conversation or "on <phone>"; the phone stays connected.
+- Without a server: the app installs the LaunchAgent (`launchctl list | grep piagent`), waits for `server.json`, and
+  connects. A stale bundle is reinstalled; the notice shows once.
+- A turn sent from the Mac appears on the phone within the same session, and the other way round.
+- `launchctl kickstart -k` the server: the subtitle shows failed, Try Again reconnects. Quit and relaunch reconnect.
+- Lint, typecheck, dev build; the phone's gates since the package changed.
+
+## Not in this piece
+
+Markdown and tool rendering (3), other machines and moves (4, 5), settings, providers, tasks (6).
