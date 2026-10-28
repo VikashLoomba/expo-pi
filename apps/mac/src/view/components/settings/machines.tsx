@@ -1,9 +1,23 @@
 import type { Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { ServerIcon } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 
 import type { Check } from '../../../contract';
 import type { MachinesRef } from '../../hooks/use-machines';
 import { errorText, useMember } from '../../hooks/use-ref';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '../ui/alert-dialog';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../ui/card';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '../ui/field';
+import { Input } from '../ui/input';
+import {
+  Item, ItemActions, ItemContent, ItemDescription, ItemFooter, ItemGroup, ItemMedia, ItemTitle,
+} from '../ui/item';
+import { Spinner } from '../ui/spinner';
 
 const STAGES: Record<NonNullable<Check['stage']>, string> = {
   connecting: 'Connecting…', checking: 'Checking the machine…', exchanging: 'Exchanging InfiniChat keys…',
@@ -28,8 +42,8 @@ export function MachinesPane({ machines: api }: { machines: MachinesRef }) {
     <div className="pane-scroll">
       <header className="pane-header">
         <h1 className="pane-title">Machines</h1>
-        <button type="button" className="button" disabled={listed === undefined || listed === null}
-          onClick={() => setEditing({})}>Add Machine…</button>
+        <Button type="button" variant="outline" size="sm" disabled={listed === undefined || listed === null}
+          onClick={() => setEditing({})}>Add Machine…</Button>
       </header>
       {listed === undefined && <p className="pane-note">Loading the machines…</p>}
       {listed === null && <p className="pane-note">
@@ -43,10 +57,12 @@ export function MachinesPane({ machines: api }: { machines: MachinesRef }) {
       {listed !== undefined && listed !== null && rows.length === 0 && editing === undefined && (
         <p className="pane-note">No machines yet. Add one to reach it from InfiniChat wherever it runs.</p>
       )}
-      {rows.map(([endpoint, machine]) => (
-        <MachineRow key={endpoint} api={api} endpoint={endpoint} machine={machine} isSelf={endpoint === self}
-          onEdit={() => setEditing({ endpoint })} act={act} />
-      ))}
+      <ItemGroup>
+        {rows.map(([endpoint, machine]) => (
+          <MachineRow key={endpoint} api={api} endpoint={endpoint} machine={machine} isSelf={endpoint === self}
+            onEdit={() => setEditing({ endpoint })} act={act} />
+        ))}
+      </ItemGroup>
     </div>
   );
 }
@@ -68,12 +84,46 @@ function MachineRow({ api, endpoint, machine, isSelf, onEdit, act }: {
     if (path !== null) return api.setIdentity({ endpoint, path });
   }), 'The identity file could not be chosen.');
   return (
-    <article className="machine-card">
-      <div className="machine-title">
-        <span className="machine-name">{machine.name}</span>
-        {isSelf && <span className="tag">This Mac</span>}
-        <code className="machine-endpoint">{endpoint}</code>
-      </div>
+    <Item variant="outline" className="machine-item">
+      <ItemMedia variant="icon"><ServerIcon /></ItemMedia>
+      <ItemContent>
+        <ItemTitle className="machine-title">
+          <span className="machine-name">{machine.name}</span>
+          {isSelf && <Badge variant="secondary">This Mac</Badge>}
+        </ItemTitle>
+        <ItemDescription><code className="machine-endpoint">{endpoint}</code></ItemDescription>
+      </ItemContent>
+      <ItemActions className="row-actions">
+        {running
+          ? <Button type="button" variant="outline" size="sm" onClick={() => act(api.cancelCheck({ endpoint }), '')}>
+            Cancel
+          </Button>
+          : <Button type="button" variant="outline" size="sm"
+            onClick={() => act(api.check({ endpoint }), 'The check could not start.')}>Check Connection</Button>}
+        <Button type="button" variant="outline" size="sm" disabled={running} onClick={onEdit}>Edit…</Button>
+        <AlertDialog>
+          <AlertDialogTrigger render={<Button type="button" variant="outline" size="sm" className="button-danger"
+            disabled={running || isSelf} />}>
+            Remove…
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove {machine.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The machine leaves InfiniChat’s list on every device, and this Mac’s access to it is removed there.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive"
+                onClick={() => act(api.remove({ endpoint }), 'The machine could not be removed.')}>
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </ItemActions>
+      <ItemFooter className="machine-footer">
       <dl className="machine-meta">
         <dt>Reached with</dt>
         <dd>
@@ -98,11 +148,11 @@ function MachineRow({ api, endpoint, machine, isSelf, onEdit, act }: {
                   {waiting.keys.map((key) => (
                     <code key={key.fingerprint}>{`${key.algorithm} ${key.fingerprint}`}</code>
                   ))}
-                  <button type="button" className="link-button" onClick={() => act(
+                  <Button type="button" variant="link" size="xs" onClick={() => act(
                     api.acceptHostKey({ endpoint, fingerprints: waiting.keys.map((key) => key.fingerprint) }),
                     'The host key could not be accepted.')}>
                     {waiting.changed ? 'Accept verified replacement key' : 'Accept verified key'}
-                  </button>
+                  </Button>
                 </span>
               )}
             </dd>
@@ -112,32 +162,22 @@ function MachineRow({ api, endpoint, machine, isSelf, onEdit, act }: {
           <>
             <dt>Check</dt>
             <dd className={check.error !== undefined ? 'failed' : undefined}>
-              {check.stage !== undefined && <><span className="spinner" />{STAGES[check.stage]}</>}
+              {check.stage !== undefined && <><Spinner />{STAGES[check.stage]}</>}
               {check.result !== undefined && `Connected to ${check.result.name}: Pi ${check.result.version} on `
                 + `${check.result.os} (${check.result.arch}). InfiniChat keys exchanged.`}
               {check.error !== undefined && check.error}
               {check.pendingKey !== undefined && (
-                <button type="button" className="link-button"
+                <Button type="button" variant="link" size="xs"
                   onClick={() => act(api.trustNewKey({ endpoint }), 'The new key could not be trusted.')}>
                   Trust new key
-                </button>
+                </Button>
               )}
             </dd>
           </>
         )}
       </dl>
-      <div className="row-actions">
-        {running
-          ? <button type="button" className="button" onClick={() => act(api.cancelCheck({ endpoint }), '')}>
-            Cancel
-          </button>
-          : <button type="button" className="button"
-            onClick={() => act(api.check({ endpoint }), 'The check could not start.')}>Check Connection</button>}
-        <button type="button" className="button" disabled={running} onClick={onEdit}>Edit…</button>
-        <button type="button" className="button button-danger" disabled={running || isSelf}
-          onClick={() => act(api.remove({ endpoint }), 'The machine could not be removed.')}>Remove</button>
-      </div>
-    </article>
+      </ItemFooter>
+    </Item>
   );
 }
 
@@ -169,29 +209,42 @@ function MachineForm({ api, initial, endpoint, onDone }: {
     }).finally(() => setSaving(false));
   };
   return (
-    <form className="machine-form" onSubmit={submit}>
-      <h2 className="form-title">{initial === undefined ? 'Add Machine' : `Edit ${initial.name}`}</h2>
-      {error !== undefined && <p className="notice notice-error">{error}</p>}
-      <label className="field"><span>Hostname</span>
-        <input className="text-input" value={hostname} placeholder="machine.tailnet.ts.net" autoFocus
-          onChange={(event) => setHostname(event.target.value)} /></label>
-      <label className="field"><span>Port</span>
-        <input className="text-input" value={port} inputMode="numeric"
-          onChange={(event) => setPort(event.target.value)} />
-      </label>
-      <label className="field"><span>Username</span>
-        <input className="text-input" value={username} placeholder="Remote account"
-          onChange={(event) => setUsername(event.target.value)} /></label>
-      <p className="pane-note">
-        The machine is reached with your SSH setup, or the identity file you choose for it, and names itself when it
-        connects. Saving checks it at once and joins it to InfiniChat’s list on every device.
-      </p>
-      <div className="row-actions">
-        <button type="submit" className="button button-primary" disabled={saving}>
+    <form onSubmit={submit}>
+    <Card className="machine-form">
+      <CardHeader>
+        <CardTitle>{initial === undefined ? 'Add Machine' : `Edit ${initial.name}`}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {error !== undefined && <p className="notice notice-error">{error}</p>}
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldLabel htmlFor="machine-hostname">Hostname</FieldLabel>
+            <Input id="machine-hostname" value={hostname} placeholder="machine.tailnet.ts.net" autoFocus
+              onChange={(event) => setHostname(event.target.value)} />
+          </Field>
+          <Field orientation="horizontal">
+            <FieldLabel htmlFor="machine-port">Port</FieldLabel>
+            <Input id="machine-port" value={port} inputMode="numeric"
+              onChange={(event) => setPort(event.target.value)} />
+          </Field>
+          <Field orientation="horizontal">
+            <FieldLabel htmlFor="machine-username">Username</FieldLabel>
+            <Input id="machine-username" value={username} placeholder="Remote account"
+              onChange={(event) => setUsername(event.target.value)} />
+          </Field>
+          <FieldDescription>
+            The machine is reached with your SSH setup, or the identity file you choose for it, and names itself
+            when it connects. Saving checks it at once and joins it to InfiniChat’s list on every device.
+          </FieldDescription>
+        </FieldGroup>
+      </CardContent>
+      <CardFooter className="row-actions">
+        <Button type="submit" size="sm" disabled={saving}>
           {saving ? 'Saving…' : initial === undefined ? 'Add' : 'Save'}
-        </button>
-        <button type="button" className="button" disabled={saving} onClick={onDone}>Cancel</button>
-      </div>
+        </Button>
+        <Button type="button" variant="outline" size="sm" disabled={saving} onClick={onDone}>Cancel</Button>
+      </CardFooter>
+    </Card>
     </form>
   );
 }

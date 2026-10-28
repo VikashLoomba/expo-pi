@@ -1,13 +1,20 @@
+import { ArrowUpIcon, PlusIcon, SquareIcon, XIcon } from 'lucide-react';
 import {
-  useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject,
+  useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject,
 } from 'react';
 
-import type { Attachment } from '../../../contract';
+import type { Attachment as Photo } from '../../../contract';
+import {
+  Attachment, AttachmentAction, AttachmentActions, AttachmentContent, AttachmentMedia, AttachmentTitle,
+} from '../ui/attachment';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '../ui/input-group';
+import { Spinner } from '../ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useChatAgentName } from './agent';
-import { Icon } from './icon';
 
 /**
- * The message field and its controls, as the phone's `composer.tsx`: photos come from the open dialog behind the
+ * The message field as the Prompt Input pattern builds it: an Input Group with the attached photos as Attachment
+ * chips above the text and the attach, stop and send buttons below it. Photos come from the open dialog behind the
  * attach button, or dropped or pasted onto the field; each is fitted by the main process before it shows.
  */
 export function Composer({ value, onChange, onSend, onStop, busy, admitting, disabled, inputRef, attachments,
@@ -15,7 +22,7 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
   value: string; onChange: (text: string) => void; onSend: () => void; onStop: () => void;
   busy: boolean; admitting: boolean; disabled: boolean;
   inputRef: RefObject<HTMLTextAreaElement | null>;
-  attachments: readonly Attachment[];
+  attachments: readonly Photo[];
   /** Opens the photo dialog. */
   onAttach: () => void;
   /** Photos dropped or pasted. */
@@ -25,6 +32,7 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
   imagesSupported: boolean;
 }) {
   const agentName = useChatAgentName();
+  const form = useRef<HTMLFormElement>(null);
   const [dropping, setDropping] = useState(false);
   const canSend = !disabled && !admitting && !attaching && (!!value.trim() || attachments.length > 0);
   const canAttach = imagesSupported && !disabled && !admitting && !attaching;
@@ -36,7 +44,7 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (canSend) onSend();
+      form.current?.requestSubmit();
     }
   };
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -53,37 +61,58 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
     if (files.length && canAttach) onFiles(files);
   };
   return (
-    <form className={`composer${dropping ? ' dropping' : ''}`} onSubmit={submit}
+    <form ref={form} className="composer" onSubmit={submit}
       onDragOver={(event) => { event.preventDefault(); setDropping(canAttach); }}
       onDragLeave={() => setDropping(false)} onDrop={onDrop}>
-      {attachments.length > 0 && (
-        <div className="attachments">
-          {attachments.map((attachment, index) => (
-            <div key={attachment.id} className="attachment">
-              <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt={`Attached photo ${index + 1}`} />
-              <button type="button" aria-label={`Remove photo ${index + 1}`} disabled={admitting}
-                onClick={() => onRemoveAttachment(attachment.id)}>
-                <Icon name="close" size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="composer-row">
-        <button type="button" className="round-button secondary" aria-label="Attach a photo" disabled={!canAttach}
-          onClick={onAttach}>
-          {attaching ? <span className="spinner" /> : <Icon name="plus" size={18} />}
-        </button>
-        <textarea ref={inputRef} value={value} rows={1} disabled={admitting}
-          placeholder={busy ? 'Write a follow-up…' : `Message ${agentName}…`} maxLength={30000}
+      <InputGroup data-dropping={dropping || undefined} className="composer-group">
+        {attachments.length > 0 && (
+          <InputGroupAddon align="block-start" className="flex-wrap">
+            {attachments.map((photo, index) => (
+              <Attachment key={photo.id} size="sm">
+                <AttachmentMedia variant="image">
+                  <img src={`data:${photo.mimeType};base64,${photo.data}`} alt="" />
+                </AttachmentMedia>
+                <AttachmentContent>
+                  <AttachmentTitle>Photo {index + 1}</AttachmentTitle>
+                </AttachmentContent>
+                <AttachmentActions>
+                  <AttachmentAction aria-label={`Remove photo ${index + 1}`} disabled={admitting}
+                    onClick={() => onRemoveAttachment(photo.id)}>
+                    <XIcon />
+                  </AttachmentAction>
+                </AttachmentActions>
+              </Attachment>
+            ))}
+          </InputGroupAddon>
+        )}
+        <InputGroupTextarea ref={inputRef} value={value} disabled={admitting} aria-label="Message"
+          placeholder={busy ? 'Write a follow-up…' : `Message ${agentName}…`} maxLength={30000} className="p-3"
           onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} />
-        {busy
-          ? <button type="button" className="round-button stop" aria-label="Stop response" disabled={disabled}
-            onClick={onStop}><Icon name="stop" size={16} /></button>
-          : <button type="submit" className="round-button" aria-label="Send message" disabled={!canSend}>
-            {admitting ? <span className="spinner" /> : <Icon name="send" size={18} />}
-          </button>}
-      </div>
+        <InputGroupAddon align="block-end">
+          <Tooltip>
+            <TooltipTrigger render={<InputGroupButton type="button" size="icon-sm" variant="outline"
+              className="rounded-full" aria-label="Attach a photo" disabled={!canAttach} onClick={onAttach} />}>
+              {attaching ? <Spinner /> : <PlusIcon />}
+            </TooltipTrigger>
+            <TooltipContent>Attach a photo</TooltipContent>
+          </Tooltip>
+          {busy
+            ? <Tooltip>
+              <TooltipTrigger render={<InputGroupButton type="button" size="icon-sm" variant="destructive"
+                className="ml-auto rounded-full" aria-label="Stop response" disabled={disabled} onClick={onStop} />}>
+                <SquareIcon />
+              </TooltipTrigger>
+              <TooltipContent>Stop response</TooltipContent>
+            </Tooltip>
+            : <Tooltip>
+              <TooltipTrigger render={<InputGroupButton type="submit" size="icon-sm" variant="default"
+                className="ml-auto rounded-full" aria-label="Send message" disabled={!canSend} />}>
+                {admitting ? <Spinner /> : <ArrowUpIcon />}
+              </TooltipTrigger>
+              <TooltipContent>Send message</TooltipContent>
+            </Tooltip>}
+        </InputGroupAddon>
+      </InputGroup>
     </form>
   );
 }

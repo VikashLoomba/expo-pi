@@ -125,17 +125,11 @@ export class MacMachines {
     }
   }
 
-  /** Removes the machine from the conversation, and this Mac's client file there when it has one. */
+  /** Removes the machine from the conversation (the window confirms), and this Mac's client file there. */
   async remove(endpoint: string): Promise<void> {
     const machine = this.shown.machines.getSnapshot()?.machines[endpoint];
     if (machine === undefined) throw new Error('That machine is no longer among the machines.');
     if (endpoint === this.getSelf()) throw new Error('Move InfiniChat to another machine first.');
-    const { response } = await Utils.showMessageBox({
-      type: 'warning', title: `Remove ${machine.name}?`, message: `Remove ${machine.name}?`,
-      detail: 'The machine leaves InfiniChat’s list on every device.', buttons: ['Remove', 'Cancel'],
-      defaultId: 1, cancelId: 1,
-    });
-    if (response !== 0) return;
     this.cancelCheck(endpoint);
     if (await savedSecret(this.secrets, endpoint) !== undefined) {
       const signal = AbortSignal.timeout(20_000);

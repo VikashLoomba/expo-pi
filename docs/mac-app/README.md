@@ -92,6 +92,7 @@ Implement in order; each leaves the app building, the phone app and the server u
 | 7 | [Chats](07-chats.md) | `DurableChatService` in the main process, the chats sidebar, the chat screen, chat settings with the directory picker | ~800 |
 | 8 | [Providers](08-providers.md) | the Mac's own credential store and sign-in, the Providers pane | ~300 |
 | 9 | [Release](09-release.md) | icon, signing, notarization, the updater, publishing to GitHub Releases | ~200 |
+| 10 | [Components](10-components.md) | shadcn/ui on Base UI for the window's screens: tokens, the copied components, the screens restyled with states, tooltips, dialogs and lucide icons; done after piece 4 | ~60 + ~300 changed |
 
 About 4,500 lines plus CSS. The phone's own code for the same features (`apps/mobile/src` without the pi-env daemon
 client, keep-alive and the native auth module) is about 5,000. A piece that grows to several times its size means its
@@ -128,6 +129,10 @@ design is wrong; stop and revisit it.
 7. **The window bundle adds `react`, `react-dom` and `streamdown`** (with `streamdown/styles.css`): the web
    counterpart of the phone's react-native-enriched-markdown and react-native-streamdown, sanitizing with
    rehype-sanitize and rehype-harden and repairing streamed Markdown with remend.
+
+8. **The window bundle adds shadcn/ui's runtime** (`@base-ui/react`, `class-variance-authority`, `cn`, `lucide-react`,
+   `tw-animate-css`, `shadcn`), the web counterpart of the phone's `@expo/ui` controls (piece 10, decided
+   2026-10-28).
 
 ## Platform differences (not parity gaps)
 

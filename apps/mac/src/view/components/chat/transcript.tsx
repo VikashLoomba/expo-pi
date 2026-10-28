@@ -1,95 +1,104 @@
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
-import { memo } from 'react';
+import { HashIcon, LightbulbIcon, LoaderCircleIcon, MessageCircleDashedIcon, PencilIcon } from 'lucide-react';
+import { memo, type ReactNode } from 'react';
 
 import { useInfiniChatRef } from '../../hooks/use-infinichat';
 import { useMember } from '../../hooks/use-ref';
-import { useTranscriptScroll } from '../../hooks/use-transcript-scroll';
+import { Button } from '../ui/button';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../ui/empty';
+import {
+  MessageScroller, MessageScrollerButton, MessageScrollerContent, MessageScrollerItem, MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '../ui/message-scroller';
+import { Trace, TraceIcon, TraceLine, TraceTitle } from '../ui/trace';
 import { AgentMark, useChatAgentName } from './agent';
-import { Icon, type IconName } from './icon';
 import { MessageRow } from './message-row';
 
 const NO_MESSAGES: readonly ChatMessage[] = [];
-const suggestions: { icon: IconName; title: string; detail: string; prompt: string }[] = [
-  { icon: 'idea', title: 'Make something of an idea', detail: 'Find a starting point, together.',
+const suggestions: { icon: ReactNode; title: string; prompt: string }[] = [
+  { icon: <LightbulbIcon />, title: 'Make something of an idea',
     prompt: 'Help me think through an idea. Ask me a few questions to get started.' },
-  { icon: 'pencil', title: 'Find the right words', detail: 'A first draft, a fresh perspective.',
+  { icon: <PencilIcon />, title: 'Find the right words',
     prompt: 'Help me write something clearly. First, ask what I am writing and who it is for.' },
-  { icon: 'number', title: 'Work it out', detail: 'A little help with the numbers.',
+  { icon: <HashIcon />, title: 'Work it out',
     prompt: 'Help me work through a calculation step by step. First, ask what I need to figure out.' },
 ];
 
+/** The empty thread as the Chat pattern opens: an Empty state, with the phone's suggestions as Suggestion buttons. */
 function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
   const agentName = useChatAgentName();
   return (
-    <div className="empty">
-      <AgentMark size={56} />
-      <h2 className="empty-title">Where shall we start?</h2>
-      <p className="empty-caption">Bring your questions. We’ll take it from here.</p>
-      <div className="suggestions">
-        {suggestions.map((item) => (
-          <button key={item.title} type="button" className="suggestion" onClick={() => onChoose(item.prompt)}>
-            <span className="suggestion-icon"><Icon name={item.icon} size={18} /></span>
-            <span className="card-identity">
-              <span className="suggestion-title">{item.title}</span>
-              <span className="suggestion-detail">{item.detail}</span>
-            </span>
-            <Icon name="chevron" size={11} />
-          </button>
-        ))}
-      </div>
-      <p className="disclaimer">{agentName} can make mistakes. Check important details.</p>
-    </div>
-  );
-}
-
-/** The rows, the working footer and the empty state in a scroller that lives as long as this list does. */
-function MessageList({ stopping, onChoose }: { stopping: boolean; onChoose: (text: string) => void }) {
-  const ref = useInfiniChatRef();
-  const agentName = useChatAgentName();
-  const messages = useMember(ref.messages) ?? NO_MESSAGES;
-  const controls = useMember(ref.controls);
-  const { scroller, atEnd, scrollToLatest, onScroll } = useTranscriptScroll();
-  const busy = !!controls?.busy;
-  const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
-    : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
-  const showWorking = controls?.compacting
-    || (busy && !messages.some((message) => message.streaming || message.tool?.status === 'running'));
-  return (
-    <div className="transcript">
-      <div className="transcript-scroll" ref={scroller} onScroll={onScroll}>
-        <div className="messages">
-          {messages.length === 0 && <EmptyConversation onChoose={onChoose} />}
-          {messages.map((message) => <MessageRow key={message.id} message={message} stopping={stopping} />)}
-          {messages.length > 0 && (
-            <div className="working">
-              {showWorking && <><span className="spinner" />{working}</>}
-            </div>
-          )}
+    <Empty className="h-full">
+      <EmptyHeader>
+        <EmptyMedia variant="icon"><AgentMark size={32} /></EmptyMedia>
+        <EmptyTitle>Where shall we start?</EmptyTitle>
+        <EmptyDescription>Bring your questions. We’ll take it from here.</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <div className="flex flex-wrap justify-center gap-2">
+          {suggestions.map((item) => (
+            <Button key={item.title} variant="outline" size="sm" onClick={() => onChoose(item.prompt)}>
+              {item.icon}
+              {item.title}
+            </Button>
+          ))}
         </div>
-      </div>
-      {!atEnd && (
-        <button type="button" className="scroll-down" aria-label="Scroll to latest message" onClick={scrollToLatest}>
-          <Icon name="arrowDown" size={18} />
-        </button>
-      )}
-    </div>
+        <EmptyDescription><MessageCircleDashedIcon className="mr-1 inline size-3" />
+          {agentName} can make mistakes. Check important details.</EmptyDescription>
+      </EmptyContent>
+    </Empty>
   );
 }
 
 /**
- * The transcript as the phone's `transcript.tsx` lays it out: the conversation's state, then its message list. Only
- * this subtree subscribes to the messages, so typing in the composer never renders it; `memo` keeps it that way while
- * its two props stay the same.
+ * The thread as the Chat pattern lays it out: one Message Scroller, the person's turns as its anchors, following the
+ * reply while the reader stays at the live edge, opening a saved thread at its last turn, with its own jump button.
+ * Only this subtree subscribes to the messages, so typing in the composer never renders it; `memo` keeps it that way
+ * while its two props stay the same.
  */
 export const Transcript = memo(function Transcript({ stopping, onChoose }: {
   stopping: boolean; onChoose: (text: string) => void;
 }) {
   const ref = useInfiniChatRef();
+  const agentName = useChatAgentName();
   const snapshot = useMember(ref.snapshot)?.view;
+  const messages = useMember(ref.messages) ?? NO_MESSAGES;
+  const controls = useMember(ref.controls);
   const status = snapshot?.status ?? 'loading';
   if (status === 'missing' || status === 'failed') {
     return <p className="placeholder">{snapshot?.error ?? 'This conversation is unavailable.'}</p>;
   }
   if (status === 'loading') return <p className="placeholder">Opening this conversation…</p>;
-  return <MessageList stopping={stopping} onChoose={onChoose} />;
+  if (messages.length === 0) return <EmptyConversation onChoose={onChoose} />;
+  const busy = !!controls?.busy;
+  const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
+    : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
+  const showWorking = !!controls?.compacting
+    || (busy && !messages.some((message) => message.streaming || message.tool?.status === 'running'));
+  return (
+    <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+      <MessageScroller className="transcript">
+        <MessageScrollerViewport>
+          <MessageScrollerContent aria-busy={busy} className="messages gap-6">
+            {messages.map((message) => (
+              <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={message.role === 'user'}>
+                <MessageRow message={message} stopping={stopping} />
+              </MessageScrollerItem>
+            ))}
+            {showWorking && (
+              <MessageScrollerItem messageId="working">
+                <Trace>
+                  <TraceLine status="running">
+                    <TraceIcon><LoaderCircleIcon className="animate-spin" /></TraceIcon>
+                    <TraceTitle>{working}</TraceTitle>
+                  </TraceLine>
+                </Trace>
+              </MessageScrollerItem>
+            )}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
+  );
 });

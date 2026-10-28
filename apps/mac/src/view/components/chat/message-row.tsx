@@ -1,28 +1,29 @@
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
-import { collectSearchSources } from '@pi-agent/infinichat/chat/web-search-presentation';
+import { CheckIcon, CopyIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 
+import { Bubble, BubbleContent } from '../ui/bubble';
+import { Button } from '../ui/button';
+import { Marker, MarkerContent } from '../ui/marker';
+import { Message, MessageAvatar, MessageContent, MessageFooter, MessageHeader } from '../ui/message';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { Trace } from '../ui/trace';
 import { AgentMark, useChatAgentName } from './agent';
-import { Icon } from './icon';
-import { MessageContent } from './message-content';
+import { MessageContent as Markdown } from './message-content';
 import { MessageImages } from './message-images';
-import { ToolCard } from './tool-card';
-import { WebSearchActivity, WebSearchSources } from './web-search';
+import { ErrorRow, ReasoningRow, ReportRow, SearchRows, SourcesRow, ToolRow } from './trace-rows';
 
-/**
- * One transcript row, as the phone's `message-row.tsx` draws it; ordinary chats' "Send as steer" comes with them.
- * `memo`: a streamed delta replaces only the rows it touches, so the others keep their rendered Markdown.
- */
-export const MessageRow = memo(function MessageRow({ message, stopping = false }: {
-  message: ChatMessage; stopping?: boolean;
-}) {
-  const agentName = useChatAgentName();
+/** UniiChat's work message: "[Name]" and the report, without the zoom pointer for the model. */
+const REPORT = /^\[([^\]\r\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\r\n]*"\))?\s*$/;
+
+/** The copy action under a reply, as the Message pattern has it: a ghost icon button that shows a check for 2 s. */
+function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timeout.current), []);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(message.text);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       clearTimeout(timeout.current);
       timeout.current = setTimeout(() => setCopied(false), 2000);
@@ -30,58 +31,99 @@ export const MessageRow = memo(function MessageRow({ message, stopping = false }
       // The row's text can be selected and copied by hand.
     }
   };
-  if (message.role === 'tool' && message.tool) return <ToolCard message={message} />;
-  if (message.role === 'notice') return <p className="notice-row">{message.text}</p>;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Button variant="ghost" size="icon-sm" aria-label="Copy" onClick={() => { void copy(); }} />}>
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </TooltipTrigger>
+      <TooltipContent>{copied ? 'Copied' : 'Copy'}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * One turn of the thread as AI Elements lay it out: the person's text in a bubble on the end side; the agent's reply
+ * with its steps (thinking, tool calls, searches, sources) as Trace lines and its actions in the footer; a notice as
+ * a marker between turns; an agent's report as a subagent run. `memo`: a streamed delta replaces only the rows it
+ * touches, so the others keep their rendered Markdown.
+ */
+export const MessageRow = memo(function MessageRow({ message, stopping = false }: {
+  message: ChatMessage; stopping?: boolean;
+}) {
+  const agentName = useChatAgentName();
+  if (message.role === 'notice') {
+    return <Marker variant="separator"><MarkerContent>{message.text}</MarkerContent></Marker>;
+  }
   if (message.role === 'user') {
+    const queued = message.queued === undefined ? undefined
+      : message.queued.mode === 'steer' ? 'Queued as a steer' : message.queued.mode === 'followUp'
+        ? 'Queued as a follow-up' : 'Queued';
     return (
-      <div className="user-row">
-        <div className="user-bubble">
-          {message.images?.length ? <MessageImages images={message.images} size={140} /> : null}
-          {message.text}
-        </div>
-        {message.queued && (
-          <span className="queued-meta">
-            {message.queued.mode === 'steer' ? 'Queued · steer'
-              : message.queued.mode === 'followUp' ? 'Queued · follow-up' : 'Queued'}
-          </span>
-        )}
-      </div>
+      <Message align="end">
+        <MessageContent>
+          <Bubble align="end" variant="muted">
+            <BubbleContent className="whitespace-pre-wrap">
+              {message.images?.length ? <MessageImages images={message.images} size={140} /> : null}
+              {message.text}
+            </BubbleContent>
+          </Bubble>
+          {queued !== undefined && <MessageFooter>{queued}</MessageFooter>}
+        </MessageContent>
+      </Message>
     );
   }
-  // An agent's report is UniiChat's work message, "[Name]" and its text: the name heads the row and the text is its
-  // body, without the zoom pointer for the model.
-  const report = message.role === 'work'
-    ? /^\[([^\]\r\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\r\n]*"\))?\s*$/.exec(message.text) : null;
-  const author = report?.[1] ?? agentName;
-  const body = report?.[2] ?? message.text;
-  const sources = message.webSearch ? collectSearchSources(message.webSearch) : [];
-  const waiting = message.streaming && !body
-    && !message.webSearch?.calls.some((call) => call.status === 'running');
+  if (message.role === 'tool' && message.tool) {
+    return (
+      <Message>
+        <MessageContent>
+          <Trace><ToolRow message={message} /></Trace>
+        </MessageContent>
+      </Message>
+    );
+  }
+  const report = message.role === 'work' ? REPORT.exec(message.text) : null;
+  const streaming = !!message.streaming;
+  if (report) {
+    return (
+      <Message>
+        <MessageContent>
+          <Trace><ReportRow author={report[1]} body={report[2]} streaming={streaming} /></Trace>
+        </MessageContent>
+      </Message>
+    );
+  }
+  const searching = message.webSearch?.calls.some((call) => call.status === 'running') ?? false;
+  const steps = (message.thinking !== undefined && message.thinking !== '') || message.webSearch !== undefined;
+  const state = streaming ? stopping ? 'Stopping…' : 'Responding' : message.interrupted ? 'Interrupted' : undefined;
   return (
-    <div className="assistant">
-      <div className="assistant-identity">
-        <AgentMark size={24} />
-        <span className="assistant-name">{author}</span>
-        <span>
-          {message.streaming ? stopping ? 'Stopping…' : 'Responding' : message.interrupted ? 'Interrupted' : ''}
-        </span>
-      </div>
-      {message.webSearch && <WebSearchActivity calls={message.webSearch.calls} />}
-      {message.thinking && (
-        <details className="thinking">
-          <summary><Icon name="spark" size={14} /> Thinking</summary>
-          <div className="thinking-text">{message.thinking}</div>
-        </details>
-      )}
-      {body ? <MessageContent text={body} streaming={message.streaming} />
-        : waiting ? <span className="spinner" /> : null}
-      <WebSearchSources sources={sources} />
-      {message.error && <div className="message-error">{message.error}</div>}
-      {message.text && (
-        <button type="button" className="copy-button" onClick={() => { void copy(); }}>
-          <Icon name={copied ? 'check' : 'copy'} size={14} /> {copied ? 'Copied' : 'Copy'}
-        </button>
-      )}
-    </div>
+    <Message>
+      <MessageAvatar><AgentMark size={24} /></MessageAvatar>
+      <MessageContent className="gap-3">
+        <MessageHeader className="gap-2 px-0">
+          {agentName}
+          {state !== undefined && <span className="font-normal">{state}</span>}
+        </MessageHeader>
+        {steps && (
+          <Trace>
+            {message.thinking !== undefined && message.thinking !== '' && (
+              <ReasoningRow text={message.thinking} running={streaming && !message.text} />
+            )}
+            {message.webSearch && <SearchRows calls={message.webSearch.calls} />}
+          </Trace>
+        )}
+        {message.text ? <Markdown text={message.text} streaming={streaming} />
+          : streaming && !searching && !message.thinking ? <ReasoningRow text="" running /> : null}
+        {(message.webSearch || message.error) && (
+          <Trace>
+            <SourcesRow message={message} />
+            {message.error && <ErrorRow text={message.error} />}
+          </Trace>
+        )}
+        {message.text && !streaming && (
+          <MessageFooter className="px-0"><CopyButton text={message.text} /></MessageFooter>
+        )}
+      </MessageContent>
+    </Message>
   );
 });

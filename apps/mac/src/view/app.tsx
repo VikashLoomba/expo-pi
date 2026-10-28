@@ -1,13 +1,19 @@
 import type { Host } from '@earendil-works/chord';
+import { InfinityIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { MacApp, type MacPrincipal } from '../contract';
+import {
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarInset,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider,
+} from './components/ui/sidebar';
+import { TooltipProvider } from './components/ui/tooltip';
 import { useMember, useStatus } from './hooks/use-ref';
 import { AppContext } from './lib/app-context';
 import type { Commands } from './lib/commands';
 import { InfiniChatScreen } from './screens/infinichat';
 
-/** The window: the conversations in a sidebar and the one shown beside it, under a toolbar the traffic lights share. */
+/** The window: the conversations in shadcn's sidebar and the one shown beside it, under the traffic-light toolbar. */
 export function App({ host, commands }: { host: Host<MacPrincipal>; commands: Commands }) {
   const [app] = useState(() => host.hold(MacApp, {}));
   useEffect(() => () => app.release(), [app]);
@@ -17,18 +23,33 @@ export function App({ host, commands }: { host: Host<MacPrincipal>; commands: Co
   const about = useMember(app.about);
   return (
     <AppContext value={app}>
-    <div className="window">
-      <aside className="sidebar">
-        <div className="toolbar" />
-        <nav className="list">
-          <button type="button" className="row-button selected">InfiniChat</button>
-        </nav>
-        <footer className="footer">{about === undefined ? status : `InfiniChat ${about.version}`}</footer>
-      </aside>
-      <main className="detail">
-        <InfiniChatScreen host={host} />
-      </main>
-    </div>
+    <TooltipProvider>
+      <SidebarProvider className="window">
+        <Sidebar collapsible="none" className="h-full">
+          <SidebarHeader className="toolbar" />
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton isActive>
+                      <InfinityIcon />
+                      <span>InfiniChat</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+          <SidebarFooter className="text-xs text-muted-foreground">
+            {about === undefined ? status : `InfiniChat ${about.version}`}
+          </SidebarFooter>
+        </Sidebar>
+        <SidebarInset className="detail">
+          <InfiniChatScreen host={host} />
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
     </AppContext>
   );
 }
