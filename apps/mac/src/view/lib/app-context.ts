@@ -6,6 +6,14 @@ import type { MacApp } from '../../contract';
 /** The window's reference to the app, for the screens that open links. */
 export const AppContext = createContext<Ref<typeof MacApp> | undefined>(undefined);
 
+/** Opens the Settings window through the main process. */
+export function useOpenSettings(): () => void {
+  const app = use(AppContext);
+  return useCallback(() => {
+    void app?.openSettings().catch(() => {});
+  }, [app]);
+}
+
 /** Opens a URL in the default browser through the main process; one function for the reference's lifetime. */
 export function useOpenExternal(): (url: string) => void {
   const app = use(AppContext);

@@ -332,13 +332,21 @@ export class InfiniChatMoves {
 
   /**
    * `directory` gives a machine as the app knows it, `environment` its files and commands, and `device` names this
-   * device in messages, such as "this iPhone". `bundle` is this app's server bundle (`serverBundle`).
+   * device in messages, such as "this iPhone". `bundle` is this app's server bundle (`serverBundle`). `files` is this
+   * device's own InfiniChat; a device that never holds the conversation, as the Mac app, has none, and moves it
+   * between machines only.
    */
   constructor(private readonly home: InfiniChatHomeStore,
     private readonly directory: (machineId: string) => MachineDirectory,
     private readonly environment: (machineId: string) => Promise<ExecutionEnv>,
-    private readonly files: DatabaseFiles, private readonly device: string, private readonly bundle: string,
-    private readonly sides: MoveSides) {}
+    private readonly files: DatabaseFiles | undefined, private readonly device: string,
+    private readonly bundle: string, private readonly sides: MoveSides) {}
+
+  /** This device's files, on the paths that move the conversation to or from this device. */
+  private get ownFiles(): DatabaseFiles {
+    if (this.files === undefined) throw new Error(`${capitalized(this.device)} keeps no InfiniChat of its own.`);
+    return this.files;
+  }
 
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -381,7 +389,7 @@ export class InfiniChatMoves {
   refresh() {
     const home = this.home.getSnapshot();
     const machineId = home.home === 'phone' ? home.copyOn : home.phase === 'there' ? home.machineId : undefined;
-    if (this.closed || this.attempt || this.refreshing || machineId === undefined) return;
+    if (this.closed || this.attempt || this.refreshing || machineId === undefined || this.files === undefined) return;
     const controller = new AbortController();
     this.refreshing = controller;
     this.refreshed = (async () => {
@@ -532,7 +540,7 @@ export class InfiniChatMoves {
       await this.sides.closeLocal();
     }
     signal.throwIfAborted();
-    const files = await localFiles(this.files, this.device);
+    const files = await localFiles(this.ownFiles, this.device);
     const held = remote.getConversation();
     if (!adopted(held, files)) {
       if (held?.active) throw new Error(`InfiniChat on ${name} already has another conversation open.`);
@@ -621,7 +629,7 @@ export class InfiniChatMoves {
     this.home.set({ version: 1, home: 'machine', machineId, phase: 'there' });
     // Under either name this device's copy is never opened while the machine holds the conversation, and the next
     // move back replaces it.
-    await this.files.rename(INFINICHAT_DATABASE, MOVED).catch(() => {});
+    await this.files?.rename(INFINICHAT_DATABASE, MOVED).catch(() => {});
     this.sides.show(remote);
   }
 
@@ -645,8 +653,8 @@ export class InfiniChatMoves {
     await download(await this.copy(machineId, signal), files, (copied) => this.step({ step: 'copying', copied }));
     signal.throwIfAborted();
     this.step({ step: 'opening' }, false);
-    await this.files.rename(INCOMING, INFINICHAT_DATABASE);
-    await this.files.remove(MOVED);
+    await this.ownFiles.rename(INCOMING, INFINICHAT_DATABASE);
+    await this.ownFiles.remove(MOVED);
     // The placed files are the conversation now, and nothing has opened them, so the record names this device before
     // it opens them: a relaunch never downloads over work this device has done. The machine's copy is kept fresh from
     // now.
@@ -670,7 +678,7 @@ export class InfiniChatMoves {
         // the only outcome that never opens the conversation twice.
         if (!this.machineClosed) {
           await remote.connected(signal);
-          if (adopted(remote.getConversation(), await localFiles(this.files, this.device))) {
+          if (adopted(remote.getConversation(), await localFiles(this.ownFiles, this.device))) {
             await this.arrived(machineId, remote);
             this.notice = `InfiniChat had already opened on ${this.name(machineId)}, so the move finished and it `
               + `runs there now. Choose ${capitalized(this.device)} to move it back.`;
@@ -686,7 +694,7 @@ export class InfiniChatMoves {
       await remote.connected(signal);
       if (!remote.getConversation()?.active) await remote.adopt(await remote.relinquish());
       this.home.set({ version: 1, home: 'machine', machineId, phase: 'there' });
-      await this.files.remove(INCOMING);
+      await this.ownFiles.remove(INCOMING);
       this.sides.show(remote);
     }
   }
@@ -726,7 +734,7 @@ export class InfiniChatMoves {
     const machine = await awaitWithContext(this.environment(machineId), withAbortSignal(signal, BACKGROUND_CONTEXT));
     const server = [`js="$HOME/${FOLDER}/server/${this.bundle}/server.js"`, '[ -f "$js" ]',
       `s="$HOME/${FOLDER}/server.json"`, `node=$(${NODE})`, '[ -n "$node" ]'];
-    return { machine, files: this.files, signal, name: this.name(machineId), server };
+    return { machine, files: this.ownFiles, signal, name: this.name(machineId), server };
   }
 
   private name(machineId: string): string {

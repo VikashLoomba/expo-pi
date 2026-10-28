@@ -25,8 +25,12 @@ export const MacApp = remote('infinichat.mac', {
   variants: {
     owner: {
       state: { about: AboutSchema },
-      // Links open in the default browser under the phone's policy (`source-link.ts`): a page can't open them.
-      methods: { openExternal: method(Type.Object({ url: Type.String() })) },
+      methods: {
+        // Links open in the default browser under the phone's policy (`source-link.ts`): a page can't open them.
+        openExternal: method(Type.Object({ url: Type.String() })),
+        // The Settings window, as the menu's Settings… opens it.
+        openSettings: method(),
+      },
     },
   },
 });
@@ -43,8 +47,21 @@ export const ConnectionSchema = Type.Union([Type.Null(), Type.Object({
   notice: Type.Optional(Type.String()),
 })]);
 export type Connection = Static<typeof ConnectionSchema>;
-/** The machine whose InfiniChat the windows show: its ID in the app's list and its name. */
+/** The machine whose InfiniChat the windows show: its endpoint and its name. */
 export const ShownMachineSchema = Type.Union([Type.Null(), Type.Object({ id: Type.String(), name: Type.String() })]);
+/** A move between machines as `InfiniChatMoves` reports it (`move.ts`), while it runs and after a failure. */
+export const MoveStatusSchema = Type.Object({
+  machineId: Type.String(),
+  to: Type.Enum(['machine', 'phone']),
+  from: Type.Optional(Type.String()),
+  step: Type.Enum(['connecting', 'closing', 'copying', 'opening']),
+  copied: Type.Optional(Type.Object({ bytes: Type.Number(), total: Type.Number() })),
+  running: Type.Boolean(),
+  error: Type.Optional(Type.String()),
+  cancellable: Type.Boolean(),
+  undoing: Type.Optional(Type.Boolean()),
+});
+export type MoveStatus = Static<typeof MoveStatusSchema>;
 
 /**
  * InfiniChat as this app shows it, wherever its Harness runs: the cells of the machine's remote object as
@@ -59,6 +76,9 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
       state: {
         snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
         connection: ConnectionSchema, held: Type.Union([Type.Null(), ConversationSchema]), machine: ShownMachineSchema,
+        // The conversation's machines, the move under way, and what the last move wants the user to know.
+        machines: MachinesSchema, move: Type.Union([Type.Null(), MoveStatusSchema]),
+        moveNotice: Type.Union([Type.Null(), Type.String()]),
       },
       methods: {
         accept: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
@@ -66,6 +86,11 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         dismissError: method(),
         dismissNotice: method(),
         reconnect: method(),
+        // Moving the conversation to a listed machine from the one it lives on, as the phone's menu does.
+        chooseMove: method(Type.Object({ machineId: Type.String() })),
+        cancelMove: method(),
+        retryMove: method(),
+        dismissMoveNotice: method(),
         // Photos for the composer, fitted to the shown model's limits by the main process: chosen in the file
         // dialog, or handed over by the page (dropped or pasted), as base64.
         pickPhotos: method(undefined, Type.Array(AttachmentSchema)),

@@ -5,7 +5,7 @@ import { Utils } from 'electrobun/main';
 import { AboutSchema, MacApp, principalKey, type About, type MacPrincipal } from '../contract';
 
 /** The main process's Chord host: its objects, and the links the windows connect through. */
-export function createMacHost(about: About): Host<MacPrincipal> {
+export function createMacHost(about: About, windows: { openSettings(): void }): Host<MacPrincipal> {
   const host = createHost<MacPrincipal>({ name: 'mac', self: { kind: 'host' }, principalKey });
   host.serve(MacApp, (_input, _principal, self) => ({
     variant: 'owner',
@@ -15,6 +15,7 @@ export function createMacHost(about: About): Host<MacPrincipal> {
       const safe = safeSourceUrl(url);
       if (safe !== undefined && !Utils.openExternal(safe)) throw new Error('Could not open link.');
     },
+    openSettings: () => { windows.openSettings(); },
   }));
   return host;
 }

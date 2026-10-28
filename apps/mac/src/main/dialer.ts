@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 
 import { webSocketLink, type Link } from '@earendil-works/chord';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
-import type { InfiniChatClient } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import type { InfiniChatClient, Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
   installServer, machineIdentity, machineSecret, runningServer, savedSecret,
@@ -12,8 +12,9 @@ import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-to
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 import { WebSocket } from 'ws';
 
-import type { MacMachine } from './machines';
+import type { MacMachine, MacMachines } from './machines';
 import { macServerAssets, SERVER_BUNDLE } from './server-assets';
+import { openTunnel, type Tunnel } from './tunnel';
 
 type Target = { port: number; secret: string };
 const random = (count: number) => Promise.resolve(new Uint8Array(randomBytes(count)));
@@ -49,6 +50,9 @@ export function macDialer(machine: MacMachine, client: InfiniChatClient, secrets
         link?.close();
         const socket = new WebSocket(`ws://127.0.0.1:${target.port}`,
           { headers: { authorization: `Bearer ${target.secret}` } });
+        // `ws` emits a failed connection as an error, which would end the process unheard; the close that follows
+        // ends the link, and the client connects again.
+        socket.on('error', () => {});
         link = webSocketLink(socket);
         return link;
       };
@@ -64,6 +68,67 @@ export function macDialer(machine: MacMachine, client: InfiniChatClient, secrets
         };
       } catch (error) {
         link?.close();
+        throw error;
+      }
+    },
+  };
+}
+
+/**
+ * How this app reaches another machine's InfiniChat server, as `phone-dialer.ts` does over the phone's SSH: the
+ * machine's files and commands through the pi-env connection `MacMachines` pools (the install uploads the server
+ * bundle and daemons from this app's assets through it), and the socket through a tunnel of this Mac's own `ssh`
+ * to the server's loopback port. The record comes from the conversation's machines document, read when the dial
+ * starts; the server's device name and description are the machine's own (`machineIdentity`).
+ */
+export function remoteDialer(endpoint: string, record: () => Machine | undefined, machines: MacMachines,
+  client: InfiniChatClient, secrets: CredentialBackend): ServerDialer {
+  return {
+    async dial({ signal, onStage, onInstalled, onDropped }) {
+      const machine = record();
+      if (machine === undefined) throw new Error('This machine is no longer among InfiniChat’s machines.');
+      const environment = await machines.environment(endpoint, signal);
+      const secret = await savedSecret(secrets, endpoint);
+      const identity = await machineIdentity(environment, machine.name, signal);
+      const name = identity.name;
+      const description = machineDescription({ username: machine.username, hostname: identity.hostname });
+      let tunnel: Tunnel | undefined;
+      let link: Link | undefined;
+      const install = async (): Promise<Target> => {
+        const installing = await machineSecret(secrets, random, endpoint);
+        const server = await installServer({ machine: environment, name, description, username: machine.username },
+          macServerAssets, client.id, installing, { signal, onProgress: onStage });
+        onInstalled(server.notice);
+        return server;
+      };
+      // Tunnels to the server's port and opens a new socket over it, closing the previous ones first.
+      const open = async (target: Target): Promise<Link> => {
+        link?.close();
+        await tunnel?.close();
+        tunnel = await openTunnel(machines.target(machine), target.port);
+        tunnel.onDropped(onDropped);
+        const socket = new WebSocket(`ws://127.0.0.1:${tunnel.port}`,
+          { headers: { authorization: `Bearer ${target.secret}` } });
+        socket.on('error', () => {});
+        link = webSocketLink(socket);
+        return link;
+      };
+      const close = async () => {
+        link?.close();
+        await tunnel?.close();
+      };
+      try {
+        const port = secret === undefined ? undefined
+          : await runningServer(environment, name, SERVER_BUNDLE, signal);
+        const target = secret !== undefined && port !== undefined ? { port, secret } : await install();
+        return {
+          link: await open(target),
+          expected: { bundle: SERVER_BUNDLE, device: name, description },
+          reinstall: async () => open(await install()),
+          close,
+        };
+      } catch (error) {
+        await close();
         throw error;
       }
     },

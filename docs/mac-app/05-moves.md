@@ -65,3 +65,30 @@ About 400 lines: tunnel 60, dialer additions 50, moves and following 100, contra
 ## Not in this piece
 
 Scheduled tasks on the holder, settings and providers (6).
+
+## As built
+
+From `6dc6028` on `feat/mac-app-shell` (2026-10-28), one commit. What differs from the plan:
+
+- **The tunnel is a loopback listener**, not a `Duplex` handed to `ws`: each connection to the local port is one
+  `ssh -W 127.0.0.1:<port>` whose stdio is piped to the socket, so `ws` gets an ordinary TCP socket. pi-env's
+  `sshArguments` end with `--` and the host; the forwarding goes before them (the first build put it after, which
+  made the remote shell run `-W` as a command). A connection's `ssh` exiting is the dial's `onDropped`; its last
+  stderr line goes to the log.
+- **`ws` socket errors are handled** in both dialers: a failed connection emitted an unhandled `error`, which ended
+  the Bun process.
+- **This Mac is named by its endpoint everywhere**, as every machine is: `thisMac` carries
+  `machineEndpoint(hostname, 22, user)`, the home record seeds with it, `MacMachines.isSelf` also accepts the
+  document's spelling under this Mac's name, and `macDirectory(machines, id)` gives each machine's record. The
+  `mac` ID is gone; the dev home record on this Mac was removed to reseed.
+- **`InfiniChatMoves` without local files** (deviation 1): `files` is optional, the paths to or from "this device"
+  throw, `arrived` and `refresh` skip the copy; the Mac's `MoveSides` reject `closeLocal` and `openLocal`.
+- **Following the holder** lives in `MacInfiniChat.follow`: when the shown server reports `active: false` with a
+  listed `heldBy`, the home record moves there and the app connects to it; a phone shows as the holder.
+- The machines menu is a dropdown in the conversation header (lucide's server icon), with the check on the holder,
+  Cancel Move while cancellable, and Add Machine… and Manage Machines… opening Settings through `MacApp.openSettings`.
+
+Verified on 2026-10-28: the Mac moved InfiniChat to vikash-system (installing the server there through the Mac's own
+SSH and reaching it through the tunnel) and back, with the subtitle through the steps; the phone followed. The move
+copies the whole file, which docs/infinichat-package piece 9 changes. Not verified: Cancel mid-way, a dropped SSH
+session reconnecting, and following a move the phone makes while the Mac shows the conversation.

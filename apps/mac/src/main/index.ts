@@ -13,7 +13,7 @@ import { macClient } from './identity';
 import { openImages } from './images';
 import { MacInfiniChat } from './infinichat';
 import { listenForWindows } from './listen';
-import { MacMachines, THIS_MAC, thisMac } from './machines';
+import { MacMachines, thisMac } from './machines';
 import { serveInfiniChat } from './serve-infinichat';
 import { serveMachines } from './serve-machines';
 import { readSettings, writeSettings } from './settings';
@@ -84,12 +84,13 @@ async function main(): Promise<void> {
   const mac = thisMac(client.name);
   // The composer's photos and, later, the chats' tools are prepared with it.
   const images = await openImages();
-  const infinichat = new MacInfiniChat(macHome(), (id) => id === THIS_MAC ? mac : undefined, client, secrets,
-    images);
+  const infinichat = new MacInfiniChat(macHome(mac.id), mac, client, secrets, images);
   // The other machines, reached from this Mac over pi-env; the conversation's document lists them.
   const machines = new MacMachines(infinichat.shown, client, secrets, mac, settings);
-  infinichat.useDirectory(machines);
-  const host = createMacHost({ version, userData });
+  infinichat.useMachines(machines);
+  // The Settings window opens from the menu and from the InfiniChat screen; it exists once the windows listen.
+  const ui = { openSettings: () => {} };
+  const host = createMacHost({ version, userData }, ui);
   serveInfiniChat(host, infinichat);
   serveMachines(host, infinichat, machines);
   const windows = await listenForWindows(host);
@@ -145,6 +146,7 @@ async function main(): Promise<void> {
     });
     settingsWindow = window;
   };
+  ui.openSettings = openSettings;
 
   setMenu();
   ApplicationMenu.on('application-menu-clicked', (event) => {

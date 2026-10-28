@@ -4,13 +4,20 @@ import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dia
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import type { Attachment, MacPrincipal } from '../../contract';
+import { CheckIcon, PlusIcon, ServerIcon, SettingsIcon, XIcon } from 'lucide-react';
+
+import type { Attachment, MacPrincipal, MoveStatus } from '../../contract';
 import { ChatAgentContext } from '../components/chat/agent';
 import { Composer } from '../components/chat/composer';
 import { Notice } from '../components/chat/notices';
 import { Transcript } from '../components/chat/transcript';
+import { Button } from '../components/ui/button';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu';
 import { InfiniChatContext, useHeldInfiniChat, useInfiniChatRef } from '../hooks/use-infinichat';
 import { errorText, useMember } from '../hooks/use-ref';
+import { useOpenSettings } from '../lib/app-context';
 
 const TITLE = 'InfiniChat';
 const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its settings to send a message.';
@@ -18,6 +25,17 @@ const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its se
 const connecting = (machine: string, stage: InstallStage | undefined) => stage === 'uploading'
   ? `Installing InfiniChat on ${machine}…`
   : stage === 'starting' ? `Starting InfiniChat on ${machine}…` : `Connecting to ${machine}…`;
+const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
+
+/** The step of a move, as the header's subtitle says it (the phone's `moving`), between machines only here. */
+function moving(move: MoveStatus, machine: string, stage: InstallStage | undefined, from: string): string {
+  if (move.undoing) return move.error === undefined ? 'Cancelling the move…' : 'Couldn’t cancel the move';
+  if (move.error !== undefined) return `Can’t move to ${machine}`;
+  const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
+  return move.step === 'connecting' ? connecting(machine, stage)
+    : move.step === 'closing' ? `Closing on ${from}…`
+      : move.step === 'copying' ? `Copying from ${from} to ${machine}${copied}` : `Opening on ${machine}…`;
+}
 
 /** A draft keeps one request ID for every attempt to send it, so a resend after a failure is admitted once. */
 type Draft = { text: string; images: readonly Attachment[]; requestId: string };
@@ -58,6 +76,10 @@ function InfiniChat() {
   const connection = useMember(ref.connection);
   const held = useMember(ref.held);
   const machine = useMember(ref.machine);
+  const listed = useMember(ref.machines);
+  const move = useMember(ref.move) ?? undefined;
+  const moveNotice = useMember(ref.moveNotice) ?? undefined;
+  const openSettings = useOpenSettings();
   const [draft, setDraft] = useState(emptyDraft);
   const [attaching, setAttaching] = useState(false);
   const [admitting, setAdmitting] = useState(false);
@@ -134,32 +156,79 @@ function InfiniChat() {
   const dismiss = localError ? () => setLocalError(undefined)
     : connectionError || controls?.error ? undefined
       : snapshot?.report ? () => { void ref.dismissError(); } : undefined;
-  const subtitle = connection?.status === 'failed' ? `Can’t connect to ${machineName}`
-    : connection?.status === 'connecting' ? connecting(machineName, connection.stage)
-      : `${machineName}${busy ? ' · Working…' : ''}`;
+  const nameOf = (endpoint: string) => listed?.machines[endpoint]?.name ?? (endpoint === machine?.id ? machineName
+    : 'the machine');
+  // The checkmark is on where the conversation is going during a move, back where it was during a Cancel, and where
+  // it lives otherwise.
+  const chosen = move ? (!move.undoing ? move.machineId : move.from ?? null) : machine?.id ?? null;
+  const subtitle = move ? moving(move, nameOf(move.machineId), connection?.status === 'connecting'
+    ? connection.stage : undefined, move.from === undefined ? machineName : nameOf(move.from))
+    : connection?.status === 'failed' ? `Can’t connect to ${machineName}`
+      : connection?.status === 'connecting' ? connecting(machineName, connection.stage)
+        : `${machineName}${busy ? ' · Working…' : ''}`;
   // The server holds the conversation open only while it is here; its cell says where it went otherwise.
-  const away = held !== null && held !== undefined && !held.active
-    ? held.heldBy ? `InfiniChat is on ${held.heldBy.name}. Move it here from there.`
+  const away = !move && held !== null && held !== undefined && !held.active
+    ? held.heldBy ? `InfiniChat is on ${held.heldBy.name}.`
       : `InfiniChat isn’t on ${machineName} yet. Move it here from your iPhone.` : undefined;
+  const machines = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
   return (
     <ChatAgentContext value={agent}>
       <div className="conversation">
         <header className="toolbar conversation-header">
-          <div className="title">{name}</div>
-          <div className="subtitle">{subtitle}</div>
+          <div className="conversation-heading">
+            <div className="title">{name}</div>
+            <div className="subtitle">{subtitle}</div>
+          </div>
+          <div className="conversation-actions">
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm"
+                aria-label={`InfiniChat runs on ${machineName}`} />}>
+                <ServerIcon />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {machines.map(([endpoint, record]) => (
+                  <DropdownMenuItem key={endpoint} disabled={!!move || endpoint === chosen}
+                    onClick={() => { void ref.chooseMove({ machineId: endpoint }); }}>
+                    {endpoint === chosen ? <CheckIcon /> : <span className="size-4" />}
+                    {record.name}
+                  </DropdownMenuItem>
+                ))}
+                {machines.length === 0 && <DropdownMenuItem disabled>No machines yet</DropdownMenuItem>}
+                {move?.cancellable && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" onClick={() => { void ref.cancelMove(); }}>
+                      <XIcon />Cancel Move
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={openSettings}><PlusIcon />Add Machine…</DropdownMenuItem>
+                <DropdownMenuItem onClick={openSettings}><SettingsIcon />Manage Machines…</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </header>
         {away ? <p className="placeholder">{away}</p> : <Transcript stopping={stopping} onChoose={choosePrompt} />}
         {controls && !configured && <Notice tone="neutral" message={MODELS_REQUIRED} />}
+        {move?.error !== undefined && !messageError && (
+          <Notice message={move.error} action="Try Again" onAction={() => { void ref.retryMove(); }} />
+        )}
         {messageError && (
           <Notice message={messageError} action={retry ? 'Try Again' : dismiss ? 'Dismiss' : undefined}
             onAction={retry ?? dismiss} />
         )}
-        {connection?.notice && !messageError && (
+        {moveNotice && !messageError && (
+          <Notice tone="neutral" message={moveNotice} action="Dismiss"
+            onAction={() => { void ref.dismissMoveNotice(); }} />
+        )}
+        {connection?.notice && !moveNotice && !messageError && (
           <Notice tone="neutral" message={connection.notice} action="Dismiss"
             onAction={() => { void ref.dismissNotice(); }} />
         )}
         <Composer value={draft.text} onChange={changeDraft} onSend={send} onStop={stop} busy={busy}
-          admitting={admitting} disabled={!controls || stopping || !!away || (!busy && !configured)} inputRef={input}
+          admitting={admitting} disabled={!controls || stopping || !!away || !!move || (!busy && !configured)}
+          inputRef={input}
           attachments={draft.images} onAttach={attach} onFiles={attachFiles} onRemoveAttachment={removeImage}
           attaching={attaching} imagesSupported={configured} />
       </div>

@@ -21,9 +21,6 @@ import { PATHS, Utils } from 'electrobun/main';
 import type { Check } from '../contract';
 import { writeSettings, type Settings } from './settings';
 
-/** The ID of this Mac in the app's home record, which names it from the first launch. */
-export const THIS_MAC = 'mac';
-
 /** This Mac as a machine: its name, its host name and the account the app runs as. */
 export interface MacMachine {
   id: string;
@@ -34,7 +31,8 @@ export interface MacMachine {
 }
 
 export const thisMac = (name: string): MacMachine =>
-  ({ id: THIS_MAC, name, hostname: hostname(), port: 22, username: userInfo().username });
+  ({ id: machineEndpoint({ hostname: hostname(), port: 22, username: userInfo().username }), name,
+    hostname: hostname(), port: 22, username: userInfo().username });
 
 const noop = () => {};
 /** The lines of a scan with their fingerprints, as `ServerMachines` reads them (`node/machines.ts`). */
@@ -76,6 +74,8 @@ export class MacMachines {
     return () => { this.listeners.delete(listener); };
   };
   readonly getChecks = () => this.checks;
+  /** The document as the shown side serves it. */
+  readonly shownMachines = () => this.shown.machines.getSnapshot();
   readonly getIdentities = (): Record<string, string> => this.settings.identities ?? {};
   /** This Mac's endpoint among the machines: the record under its name, or the one it would put. */
   readonly getSelf = (): string => {
@@ -248,11 +248,16 @@ export class MacMachines {
     this.publish();
   }
 
+  /** Whether an ID names this Mac: its record's endpoint, or the one its own host name gives before it is listed. */
+  isSelf(id: string): boolean {
+    return id === this.getSelf() || id === machineEndpoint(this.self);
+  }
+
   /**
    * How this Mac's `ssh` reaches the machine: the user's own setup unless an identity file was chosen (pi-env then
    * sets `IdentitiesOnly`), checking the host key against the keys trusted here under its endpoint.
    */
-  private target(machine: Machine): SshTarget {
+  target(machine: Machine): SshTarget {
     const identity = this.getIdentities()[machineEndpoint(machine)];
     return { host: machine.hostname, port: machine.port, user: machine.username, knownHostsFile: this.knownHosts,
       hostKeyAlias: machineEndpoint(machine).toLowerCase(),
@@ -318,11 +323,11 @@ export class MacMachines {
   }
 }
 
-/** This Mac as `RemoteInfiniChat` knows it: its record among the machines, by the name it goes by. */
-export function macDirectory(machines: MacMachines): MachineDirectory {
+/** A machine as `RemoteInfiniChat` and a move know it: this Mac by its own record, another by the document's. */
+export function macDirectory(machines: MacMachines, id: string): MachineDirectory {
   return {
-    id: THIS_MAC,
-    machine: () => machines.record(),
+    id,
+    machine: () => machines.isSelf(id) ? machines.record() : machines.shownMachines()?.machines[id],
     subscribe: machines.subscribe,
   };
 }
