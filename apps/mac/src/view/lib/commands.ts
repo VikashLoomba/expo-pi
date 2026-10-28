@@ -1,4 +1,4 @@
-import type { WindowCommand } from '../rpc';
+import type { WindowCommand } from '../../rpc';
 
 /** The commands the main process sends this window, for the screens that act on them. */
 export interface Commands {

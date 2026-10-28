@@ -2,10 +2,10 @@ import type { Host } from '@earendil-works/chord';
 import { useEffect, useState } from 'react';
 
 import { MacApp, type MacPrincipal } from '../contract';
-import { AppContext } from './app-context';
-import type { Commands } from './commands';
-import { InfiniChat } from './infinichat';
-import { useMember, useStatus } from './use-ref';
+import { useMember, useStatus } from './hooks/use-ref';
+import { AppContext } from './lib/app-context';
+import type { Commands } from './lib/commands';
+import { InfiniChatScreen } from './screens/infinichat';
 
 /** The window: the conversations in a sidebar and the one shown beside it, under a toolbar the traffic lights share. */
 export function App({ host, commands }: { host: Host<MacPrincipal>; commands: Commands }) {
@@ -26,7 +26,7 @@ export function App({ host, commands }: { host: Host<MacPrincipal>; commands: Co
         <footer className="footer">{about === undefined ? status : `InfiniChat ${about.version}`}</footer>
       </aside>
       <main className="detail">
-        <InfiniChat host={host} />
+        <InfiniChatScreen host={host} />
       </main>
     </div>
     </AppContext>

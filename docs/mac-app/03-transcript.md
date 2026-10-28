@@ -83,10 +83,19 @@ differs from the plan:
   glyph until piece 6 adds the avatar.
 - `web-search-presentation.ts` moved into `packages/infinichat/src/chat/` (deviation 2); the phone imports it there.
 - The transcript follows new messages while scrolled near the end and shows a jump button otherwise
-  (`src/view/transcript.tsx`), in place of the phone's FlashList settings.
+  (`src/view/hooks/use-transcript-scroll.ts`: a ResizeObserver on the rows, so streaming text and images that load
+  keep the end in view), in place of the phone's FlashList settings.
+- **The window's files** follow the phone's layout: `components/chat/` (rows, content, composer, notices, cards),
+  `hooks/` (`use-infinichat` holds the reference as context, `use-ref` reads cells, `use-transcript-scroll`),
+  `screens/infinichat.tsx` (owns the draft) and `lib/` (client, commands, app context). The transcript subscribes to
+  the messages itself and is memoized, as the phone's is, so a keystroke in the composer renders only the screen
+  shell and the composer; rows are memoized so a streamed delta replaces only the rows it touches.
+- **The socket adapter forwards `binaryType`.** chord's link sets it to `arraybuffer` on the socket it is given
+  (`link.js:306`); the first adapter dropped the property, so a deflated frame arrived as a `Blob`, the link closed
+  with a protocol error, and a long transcript never hydrated. The window also connects again a second after its link
+  closes, as the phone's client does.
 
-Verified on this Mac: the app builds with the hook, launches, loads the 2.9 MB window bundle with streamdown
-without a console error, and holds its link to the server. Not verified, since the conversation is on vikash-system (the
-server's `heldBy`) and the window shows that notice instead of a transcript: Markdown, tool cards, searches, images,
-copy, links and attachments need the conversation on this Mac, after the phone's Release install from this branch
-and a move here from the phone.
+Verified on this Mac with the conversation moved here from the phone (2026-10-28): the 1,400-message transcript
+hydrates and opens on the newest message, Markdown and tool cards render, the composer stays below the transcript
+while it scrolls, typing is immediate, and the open dialog attaches a photo. Not yet verified: web search cards,
+image messages from the agent, copy, and links, which need such messages in the conversation.

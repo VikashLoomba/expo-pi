@@ -4,7 +4,7 @@ import {
 } from '@pi-agent/infinichat/chat/web-search-presentation';
 import { useState } from 'react';
 
-import { useOpenExternal } from './app-context';
+import { useOpenExternal } from '../../lib/app-context';
 import { Icon } from './icon';
 
 function SearchCall({ call }: { call: WebSearchCall }) {

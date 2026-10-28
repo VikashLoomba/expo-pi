@@ -1,7 +1,7 @@
 import { useMemo, type ComponentProps } from 'react';
 import { Streamdown, type Components } from 'streamdown';
 
-import { useOpenExternal } from './app-context';
+import { useOpenExternal } from '../../lib/app-context';
 
 /**
  * A message's Markdown through streamdown, the web counterpart of the phone's react-native-enriched-markdown and

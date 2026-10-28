@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 
 import type { WindowRPC } from '../rpc';
 import { App } from './app';
-import { connectToMain } from './client';
-import { createCommands } from './commands';
+import { connectToMain } from './lib/client';
+import { createCommands } from './lib/commands';
 
 declare global {
   interface Window {

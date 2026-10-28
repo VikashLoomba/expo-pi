@@ -2,13 +2,15 @@ import { uuidv7 } from '@earendil-works/pi-ai';
 import type { Host } from '@earendil-works/chord';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { MacInfiniChat, type Attachment, type MacPrincipal } from '../contract';
-import { ChatAgentContext } from './agent';
-import { Composer } from './composer';
-import { Transcript } from './transcript';
-import { errorText, useMember } from './use-ref';
+import type { Attachment, MacPrincipal } from '../../contract';
+import { ChatAgentContext } from '../components/chat/agent';
+import { Composer } from '../components/chat/composer';
+import { Notice } from '../components/chat/notices';
+import { Transcript } from '../components/chat/transcript';
+import { InfiniChatContext, useHeldInfiniChat, useInfiniChatRef } from '../hooks/use-infinichat';
+import { errorText, useMember } from '../hooks/use-ref';
 
 const TITLE = 'InfiniChat';
 const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its settings to send a message.';
@@ -34,13 +36,25 @@ function base64Of(file: File): Promise<string> {
   });
 }
 
-/** InfiniChat's one conversation, as the phone's screen shows it (`(infinichat)/index.tsx`). */
-export function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
-  const [ref] = useState(() => host.hold(MacInfiniChat, {}));
-  useEffect(() => () => ref.release(), [ref]);
+/** InfiniChat's one conversation: holds the window's reference and shows it. */
+export function InfiniChatScreen({ host }: { host: Host<MacPrincipal> }) {
+  const ref = useHeldInfiniChat(host);
+  return (
+    <InfiniChatContext value={ref}>
+      <InfiniChat />
+    </InfiniChatContext>
+  );
+}
+
+/**
+ * The screen as the phone's `(infinichat)/index.tsx`: the header, the transcript, what stands in the way, and the
+ * composer whose draft it owns. The transcript subscribes to the messages itself and is memoized, so a keystroke
+ * renders only this component and the composer.
+ */
+function InfiniChat() {
+  const ref = useInfiniChatRef();
   const snapshot = useMember(ref.snapshot);
   const controls = useMember(ref.controls);
-  const messages = useMember(ref.messages);
   const connection = useMember(ref.connection);
   const held = useMember(ref.held);
   const machine = useMember(ref.machine);
@@ -56,64 +70,60 @@ export function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
   const configured = !!controls?.configured;
   const machineName = machine?.name ?? 'this Mac';
 
-  const changeDraft = (text: string) =>
+  const changeDraft = useCallback((text: string) => {
     setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
-  const addImages = (images: readonly Attachment[]) => {
-    if (!images.length) return;
-    setDraft((current) => ({ ...current, images: [...current.images, ...images], requestId: uuidv7() }));
-  };
-  const removeImage = (id: string) => setDraft((current) =>
-    ({ ...current, images: current.images.filter((image) => image.id !== id), requestId: uuidv7() }));
-  const choosePrompt = (text: string) => {
+  }, []);
+  const removeImage = useCallback((id: string) => {
+    setDraft((current) => ({ ...current, images: current.images.filter((image) => image.id !== id),
+      requestId: uuidv7() }));
+  }, []);
+  const choosePrompt = useCallback((text: string) => {
     changeDraft(text);
     input.current?.focus();
-  };
-  const attaching_ = async (work: () => Promise<readonly Attachment[]>) => {
-    if (attaching) return;
+  }, [changeDraft]);
+  const attachWith = useCallback(async (work: () => Promise<readonly Attachment[]>) => {
     setAttaching(true);
     setLocalError(undefined);
     try {
-      addImages(await work());
+      const images = await work();
+      if (images.length) {
+        setDraft((current) => ({ ...current, images: [...current.images, ...images], requestId: uuidv7() }));
+      }
     } catch (cause) {
       setLocalError(errorText(cause, 'The photo could not be attached. Try again.'));
     } finally {
       setAttaching(false);
     }
-  };
-  const attach = () => attaching_(() => ref.pickPhotos());
-  const attachFiles = (files: readonly File[]) => attaching_(async () => {
-    const photos: Attachment[] = [];
-    for (const file of files) {
-      photos.push(await ref.attach({ name: file.name, mimeType: file.type, data: await base64Of(file) }));
-    }
-    return photos;
-  });
-  const send = async () => {
+  }, []);
+  const attach = useCallback(() => { void attachWith(() => ref.pickPhotos()); }, [attachWith, ref]);
+  const attachFiles = useCallback((files: readonly File[]) => {
+    void attachWith(async () => {
+      const photos: Attachment[] = [];
+      for (const file of files) {
+        photos.push(await ref.attach({ name: file.name, mimeType: file.type, data: await base64Of(file) }));
+      }
+      return photos;
+    });
+  }, [attachWith, ref]);
+  const send = useCallback(() => {
     const text = draft.text.trim();
     if ((!text && !draft.images.length) || admitting || !configured) return;
     setAdmitting(true);
     setLocalError(undefined);
-    try {
-      await ref.accept({ content: userInput(text, draft.images), requestId: draft.requestId });
+    void ref.accept({ content: userInput(text, draft.images), requestId: draft.requestId }).then(() => {
       setDraft(emptyDraft());
-    } catch (cause) {
+    }, (cause: unknown) => {
       setLocalError(errorText(cause, 'Your message could not be sent. Try again.'));
-    } finally {
-      setAdmitting(false);
-    }
-  };
-  const stop = async () => {
+    }).finally(() => setAdmitting(false));
+  }, [admitting, configured, draft, ref]);
+  const stop = useCallback(() => {
     if (stopping) return;
     setStopping(true);
     setLocalError(undefined);
-    try {
-      await ref.stop();
-    } catch (cause) {
+    void ref.stop().catch((cause: unknown) => {
       setLocalError(errorText(cause, 'Something went wrong. Please try again.'));
-    } finally {
-      setStopping(false);
-    }
-  };
+    }).finally(() => setStopping(false));
+  }, [ref, stopping]);
 
   const connectionError = connection?.status === 'failed' ? connection.error : undefined;
   const messageError = localError || connectionError || controls?.error || snapshot?.report || snapshot?.view.error;
@@ -138,29 +148,20 @@ export function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
           <div className="title">{name}</div>
           <div className="subtitle">{subtitle}</div>
         </header>
-        {away ? <p className="placeholder">{away}</p>
-          : <Transcript messages={messages ?? []} controls={controls ?? undefined} snapshot={snapshot?.view}
-            stopping={stopping} onChoose={choosePrompt} />}
-        {controls && !configured && <p className="notice">{MODELS_REQUIRED}</p>}
+        {away ? <p className="placeholder">{away}</p> : <Transcript stopping={stopping} onChoose={choosePrompt} />}
+        {controls && !configured && <Notice tone="neutral" message={MODELS_REQUIRED} />}
         {messageError && (
-          <p className="notice notice-error">
-            {messageError}
-            {retry && <button type="button" onClick={retry}>Try Again</button>}
-            {!retry && dismiss && <button type="button" onClick={dismiss}>Dismiss</button>}
-          </p>
+          <Notice message={messageError} action={retry ? 'Try Again' : dismiss ? 'Dismiss' : undefined}
+            onAction={retry ?? dismiss} />
         )}
         {connection?.notice && !messageError && (
-          <p className="notice">
-            {connection.notice}
-            <button type="button" onClick={() => { void ref.dismissNotice(); }}>Dismiss</button>
-          </p>
+          <Notice tone="neutral" message={connection.notice} action="Dismiss"
+            onAction={() => { void ref.dismissNotice(); }} />
         )}
-        <Composer value={draft.text} onChange={changeDraft} onSend={() => { void send(); }}
-          onStop={() => { void stop(); }} busy={busy} admitting={admitting}
-          disabled={!controls || stopping || !!away || (!busy && !configured)} inputRef={input}
-          attachments={draft.images} onAttach={() => { void attach(); }}
-          onFiles={(files) => { void attachFiles(files); }}
-          onRemoveAttachment={removeImage} attaching={attaching} imagesSupported={configured} />
+        <Composer value={draft.text} onChange={changeDraft} onSend={send} onStop={stop} busy={busy}
+          admitting={admitting} disabled={!controls || stopping || !!away || (!busy && !configured)} inputRef={input}
+          attachments={draft.images} onAttach={attach} onFiles={attachFiles} onRemoveAttachment={removeImage}
+          attaching={attaching} imagesSupported={configured} />
       </div>
     </ChatAgentContext>
   );

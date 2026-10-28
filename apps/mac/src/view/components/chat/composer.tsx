@@ -2,7 +2,7 @@ import {
   useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject,
 } from 'react';
 
-import type { Attachment } from '../contract';
+import type { Attachment } from '../../../contract';
 import { useChatAgentName } from './agent';
 import { Icon } from './icon';
 

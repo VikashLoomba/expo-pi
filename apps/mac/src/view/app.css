@@ -63,6 +63,7 @@ body,
 #app {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -91,10 +92,13 @@ button {
   border-right: 1px solid var(--border);
 }
 
+/* The panes are the window's height: content scrolls inside them, never the page. */
 .detail {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* The title bar is hidden and inset: the toolbars sit under the traffic lights and drag the window. */
@@ -150,6 +154,7 @@ button {
   flex-direction: column;
   height: 100%;
   min-width: 0;
+  min-height: 0;
 }
 
 .conversation-header {

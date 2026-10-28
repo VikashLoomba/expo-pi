@@ -1,6 +1,6 @@
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { collectSearchSources } from '@pi-agent/infinichat/chat/web-search-presentation';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 
 import { AgentMark, useChatAgentName } from './agent';
 import { Icon } from './icon';
@@ -9,8 +9,13 @@ import { MessageImages } from './message-images';
 import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
 
-/** One transcript row, as the phone's `message-row.tsx` draws it; ordinary chats' "Send as steer" comes with them. */
-export function MessageRow({ message, stopping = false }: { message: ChatMessage; stopping?: boolean }) {
+/**
+ * One transcript row, as the phone's `message-row.tsx` draws it; ordinary chats' "Send as steer" comes with them.
+ * `memo`: a streamed delta replaces only the rows it touches, so the others keep their rendered Markdown.
+ */
+export const MessageRow = memo(function MessageRow({ message, stopping = false }: {
+  message: ChatMessage; stopping?: boolean;
+}) {
   const agentName = useChatAgentName();
   const [copied, setCopied] = useState(false);
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -79,4 +84,4 @@ export function MessageRow({ message, stopping = false }: { message: ChatMessage
       )}
     </div>
   );
-}
+});
