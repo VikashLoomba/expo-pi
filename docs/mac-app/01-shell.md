@@ -92,3 +92,32 @@ About 450 lines (config ~100, main ~180, contract ~20, view ~150) and ~150 lines
 ## Not in this piece
 
 Any InfiniChat object, the Settings window (piece 4), signing (piece 9).
+
+## As built
+
+From `88ae496` on `feat/mac-app-shell` (2026-10-28), with Electrobun 2.0.5, Hutch 0.28.2, Bun 1.4.4, chord 1.4.0,
+React 19.3.0 and TypeScript 6.0.3. What differs from the plan:
+
+- **TypeScript 6 against the devkit and chord.** The projected `tsconfig.json` sets `baseUrl`, which TypeScript 6
+  deprecates, so `apps/mac/tsconfig.json` sets `ignoreDeprecations: "6.0"`. Its DOM library types `WebSocket.send`
+  with `BufferSource` and its message listeners with `Event`, which chord's `WebSocketLike` (`link.d.ts:84-92`) doesn't
+  match, so `src/view/client.ts` wraps the browser socket in `socketLike`, a narrower `send` and a listener that
+  passes the `data` of message events; no cast. `acceptWebSockets` infers its principal from the callback, so that
+  callback states `MacPrincipal | undefined`.
+- **The RPC schema's empty sides are `Record<never, never>`**, not the docs' `{}`, which the lint rejects.
+- **A socket that offers no subprotocol completes the handshake** (`ws` consults `handleProtocols` only for offered
+  ones) and is then refused by `acceptWebSockets`' `principal`, chord's own refusal (`websocket.d.ts:10-11`); a wrong
+  one fails the handshake. Both checked with a Bun script against the running app.
+- **Hutch bundles the main process** (`app/bun/index.js`, 1.2 MB) with pi-ai's `require` calls rewritten to its own
+  helper; `Resources/main.js` is Hutch's 8 KB loader. The view bundle is 1.7 MB. Photon's `.wasm` lands at
+  `Resources/app/photon/photon_rs_bg.wasm`, which `src/main/images.ts` reads. `build.watch` with `../../packages`
+  was accepted; whether `dev --watch` rebuilds on package edits is unverified.
+- In a dev build `Utils.paths.userData` is `~/Library/Application Support/com.vikashloomba.piagent.mac/dev` and
+  `Updater.getLocalInfo()` reads the version from `version.json`.
+
+Verified on this Mac with `hutch electrobun run --env=dev` and its forwarded console: startup; the window's
+`MacApp` reference going `loading` then `live` with the `about` cell; the frame saved on quit and restored at the
+next launch; a reopen while running (`open` on the running bundle); an Apple-event quit running `before-quit`, the
+close chain and exiting 0; the listener's two refusals. Not verified, since this session has no Accessibility or
+Screen Recording permission: closing the window and reopening from the Dock, `⌘N` and `⌘,` arriving as commands,
+and the Edit menu's roles in a text field. The icon warning stays until piece 9.
