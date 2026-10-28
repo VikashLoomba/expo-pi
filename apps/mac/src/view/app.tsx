@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 
 import { MacApp, type MacPrincipal } from '../contract';
 import type { Commands } from './commands';
+import { InfiniChat } from './infinichat';
 import { useMember, useStatus } from './use-ref';
 
 /** The window: the conversations in a sidebar and the one shown beside it, under a toolbar the traffic lights share. */
@@ -23,8 +24,7 @@ export function App({ host, commands }: { host: Host<MacPrincipal>; commands: Co
         <footer className="footer">{about === undefined ? status : `InfiniChat ${about.version}`}</footer>
       </aside>
       <main className="detail">
-        <div className="toolbar" />
-        <p className="placeholder">Select a conversation</p>
+        <InfiniChat host={host} />
       </main>
     </div>
   );

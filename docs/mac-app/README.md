@@ -7,7 +7,7 @@ changes.
 
 Everything that runs anywhere already lives in `packages/infinichat`; its `src/node` subpath holds the Node
 implementations of the seams "for the server and the Mac app" (`packages/infinichat/eslint.config.js:3`). The main
-process composes those modules the way `apps/mobile/server/main.ts` composes them for a machine, and the way
+process composes those modules the way `packages/infinichat-server/src/main.ts` composes them for a machine, and the way
 `apps/mobile/src/chat/chat-provider.tsx:52-282` composes them for the phone. `apps/mac` adds the seams the package
 leaves to each app, and the screens.
 
@@ -49,7 +49,7 @@ Choices made by me and not objected to: the app is `apps/mac`; the main process 
   application state and native objects; webviews render UI"): storage, SSH, secrets, Harnesses, native menus,
   notifications, the updater.
 - **The screens are Chord clients of the main process only.** The main process serves its objects (InfiniChat as
-  shown, the chats, the account, the machines) on a loopback `ws` server, the way `apps/mobile/server/serve.ts` serves
+  shown, the chats, the account, the machines) on a loopback `ws` server, the way `packages/infinichat-server/src/serve.ts` serves
   the conversation to the phone, and each window connects with `webSocketLink(new WebSocket(...))`. A browser can't
   send the `Authorization` header the InfiniChat server checks, and splitting `RemoteInfiniChat` to route the machine's
   object through the main process (chord guide "Hosts and links": `host.route`) would complicate moves; mirroring the
@@ -102,7 +102,7 @@ design is wrong; stop and revisit it.
    paths refuse without it (~10 lines). The alternative, a `DatabaseFiles` whose every method rejects, keeps the
    package untouched but lies in its types.
 2. **Moves into the package, no edits:** `apps/mobile/src/chat/shown-infinichat.ts` (imports only package types) to
-   `packages/infinichat/src/pi/shown-infinichat.ts`; `apps/mobile/server/sign-in.ts` and `credentials.ts` (Node, no
+   `packages/infinichat/src/pi/shown-infinichat.ts`; the server's `sign-in.ts` and `credentials.ts` (Node, no
    server-only dependency) to `packages/infinichat/src/node/`. The server keeps importing them.
 3. **One server bundle for both apps.** The phone and the Mac must install byte-identical bundles: a client whose
    manifest hash differs reinstalls the server (`client.ts:377-379`), so two builds of the same code would reinstall
@@ -151,7 +151,8 @@ design is wrong; stop and revisit it.
   phone's Release install as the other client, with the phone's database backed up first.
 - Before calling a piece done: `pnpm --filter @pi-agent/mac lint`, `pnpm --filter @pi-agent/mac typecheck`,
   `hutch electrobun build --env=dev`, and the existing gates when the package or the server changed
-  (`npx @expo/agent-cli lint`, `npx @expo/agent-cli typecheck`, the server's typecheck, the bundle `--check`).
+  (`npx @expo/agent-cli lint`, `npx @expo/agent-cli typecheck`, `pnpm --filter @pi-agent/infinichat-server typecheck`
+  and `pnpm --filter @pi-agent/infinichat-server check`).
 
 ## Paths
 

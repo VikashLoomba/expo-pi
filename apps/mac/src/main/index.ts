@@ -1,11 +1,20 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { fileCredentialBackend } from '@pi-agent/infinichat/node/credentials';
 import Electrobun, {
   ApplicationMenu, BrowserView, BrowserWindow, Updater, Utils, type ElectrobunEvent,
 } from 'electrobun/main';
 
 import type { WindowCommand, WindowRPC } from '../rpc';
+import { macHome } from './home';
 import { createMacHost } from './host';
+import { macClient } from './identity';
 import { openImages } from './images';
+import { MacInfiniChat } from './infinichat';
 import { listenForWindows } from './listen';
+import { THIS_MAC, thisMac } from './machines';
+import { serveInfiniChat } from './serve-infinichat';
 import { readSettings, writeSettings } from './settings';
 
 const INITIAL_FRAME = { width: 1100, height: 720 };
@@ -65,7 +74,15 @@ async function main(): Promise<void> {
   const settings = readSettings();
   const { version } = await Updater.getLocalInfo();
   const userData = Utils.paths.userData;
+  // Electrobun's path getters don't create the directory; everything below writes into it.
+  mkdirSync(userData, { recursive: true });
+  const client = await macClient(settings);
+  // The app's secrets for the machines' servers and, later, its own provider credentials, as the server keeps them.
+  const secrets = fileCredentialBackend(join(userData, 'credentials.json'));
+  const mac = thisMac(client.name);
+  const infinichat = new MacInfiniChat(macHome(), (id) => id === THIS_MAC ? mac : undefined, client, secrets);
   const host = createMacHost({ version, userData });
+  serveInfiniChat(host, infinichat);
   const windows = await listenForWindows(host);
   // The chats' tools and the composer prepare images with it (piece 7); opened here to prove the copied resource.
   await openImages();
@@ -116,15 +133,24 @@ async function main(): Promise<void> {
     event.response = { allow: false };
     current?.remember();
     quitting = (async () => {
-      // It disposes its objects and closes the windows' links; then nothing listens.
-      await host.close();
-      await windows.close();
+      // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
+      // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
+      let failure: unknown;
+      for (const step of [() => infinichat.close(), () => host.close(), () => windows.close()]) {
+        try {
+          await step();
+        } catch (error) {
+          failure ??= error;
+        }
+      }
+      if (failure !== undefined) throw failure;
     })().then(() => { Utils.quit(); }, (error: unknown) => {
       console.error(error);
       Utils.quit(1);
     });
   });
   open();
+  infinichat.open();
 }
 
 main().catch((error: unknown) => {

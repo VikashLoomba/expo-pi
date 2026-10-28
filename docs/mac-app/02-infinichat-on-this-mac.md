@@ -86,3 +86,39 @@ About 750 lines: dialer 120, assets 60, identity, home and secrets 60, compositi
 ## Not in this piece
 
 Markdown and tool rendering (3), other machines and moves (4, 5), settings, providers, tasks (6).
+
+## As built
+
+From `be59fc7` on `feat/mac-app-shell` (2026-10-28), pi 1.4.0 (still the latest on npm), two commits. What differs
+from the plan:
+
+- **The server package first (deviation 3).** `packages/infinichat-server` holds the former `apps/mobile/server`
+  as `src/`, both scripts, both generated manifests (`manifest.ts`, `daemon-manifest.ts`) and `assets/` (the bundle
+  and the four pi-env daemons); `exports` are `./*` → `src/*.ts` and `./assets/*`. The phone requires the assets
+  through the package (`require('@pi-agent/infinichat-server/assets/server.bin')`), which Metro resolves: an
+  `expo export --dump-assetmap` lists all five `.bin` files at their new paths. `apps/mobile` lost `ws`, `@types/ws`
+  and `esbuild`. The bundle's hash changed to `ea05156e…`, since esbuild's comment paths are relative to the new
+  root, so **the phone needs a Release install** before it and the Mac connect to the same machine; until then each
+  app reinstalls its own bundle there. Today they don't overlap: InfiniChat is on vikash-system, which the Mac reaches
+  only from piece 5. The gates are `pnpm --filter @pi-agent/infinichat-server typecheck` and `… check`.
+- **`shown-infinichat.ts` moved into the package** with relative imports (deviation 2); the phone imports it from
+  `@pi-agent/infinichat/pi/shown-infinichat`.
+- **The home record starts on this Mac's server.** The package's parser reads a missing record as "this device"
+  (`home.ts:21`), which the app can never be, so `macHome` reads a missing file as
+  `{ home: 'machine', machineId: 'mac', phase: 'there' }`. `THIS_MAC` and the one-record machine list live in
+  `src/main/machines.ts`, which piece 4 grows.
+- **The client ID lives in `settings.json`**, on the app's one `Settings` object, so a later frame write keeps it;
+  the name is `scutil --get ComputerName`.
+- **The composition is a class**, `MacInfiniChat` (`src/main/infinichat.ts`): the phone's `useChatRuntime` without
+  the local side and the React state, plus one store for the current client's connection, machine and `conversation`
+  cell, which `serve-infinichat.ts` mirrors with `self.on`. The contract object is `infinichat.mac.conversation`.
+- **No `onDropped` for this Mac**: with no transport under the link, the link's own close is the only drop.
+
+Verified on this Mac, which already ran the phone's server with an older bundle (`4ed0ba2e…`): at launch the app
+found the mismatch, installed the new bundle to `~/.infinichat/server/ea05156e…`, restarted the LaunchAgent (a new
+pid on a new port in `server.json`), wrote its client file beside the phone's in `~/.infinichat/clients/`, and kept
+its secret as `pi.infinichat.secret.v1.mac` in the app's `credentials.json`; `lsof` shows the app's socket to the
+server established, and `machines.json` gained the Mac's client ID with `[]`, which `RemoteInfiniChat` sends only
+once its reference is live (`client.ts:383-384`). The window should show "InfiniChat is on vikash-system", since the
+server's `conversation` cell says so; that, a sent turn and a reconnection after the server restarts are not verified
+from this session, which can't see the screen, and need the conversation on this Mac.

@@ -12,6 +12,7 @@
     "@earendil-works/pi-durable": "catalog:",
     "@earendil-works/pi-env": "catalog:",
     "@pi-agent/infinichat": "workspace:*",
+    "@pi-agent/infinichat-server": "workspace:*",
     "@silvia-odwyer/photon": "0.3.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",

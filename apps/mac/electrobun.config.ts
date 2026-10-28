@@ -18,6 +18,8 @@ export default {
       // A single-file bundle cannot resolve Photon's package, so the main process reads its own copy
       // (pi-durable `images/node`).
       'node_modules/@silvia-odwyer/photon/photon_rs_bg.wasm': 'photon/photon_rs_bg.wasm',
+      // The server bundle and the pi-env daemons an install uploads, the same files the phone ships.
+      'node_modules/@pi-agent/infinichat-server/assets': 'server',
     },
     watch: ['../../packages/infinichat/src'],
   },

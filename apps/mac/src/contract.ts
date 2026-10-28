@@ -1,5 +1,9 @@
-import { hostNamed, remote } from '@earendil-works/chord';
+import { hostNamed, method, remote } from '@earendil-works/chord';
 import { Type, type Static } from '@earendil-works/pi-ai';
+import {
+  ControlsSchema, ConversationSchema, MessagesSchema, ScheduledSchema, SnapshotSchema,
+} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
 
 /** Who acts on the main process's objects: a window, or the main process's own code. */
 export type MacPrincipal = { kind: 'owner' } | { kind: 'host' };
@@ -18,4 +22,40 @@ export const MacApp = remote('infinichat.mac', {
   input: Type.Object({}),
   host: hostNamed('mac'),
   variants: { owner: { state: { about: AboutSchema } } },
+});
+
+/** This app's connection to the machine shown, as `RemoteInfiniChat` reports it; null before a machine is shown. */
+export const ConnectionSchema = Type.Union([Type.Null(), Type.Object({
+  status: Type.Enum(['connecting', 'connected', 'failed']),
+  stage: Type.Optional(Type.Enum(['connecting', 'checking', 'uploading', 'starting'])),
+  error: Type.Optional(Type.String()),
+  notice: Type.Optional(Type.String()),
+})]);
+export type Connection = Static<typeof ConnectionSchema>;
+/** The machine whose InfiniChat the windows show: its ID in the app's list and its name. */
+export const ShownMachineSchema = Type.Union([Type.Null(), Type.Object({ id: Type.String(), name: Type.String() })]);
+
+/**
+ * InfiniChat as this app shows it, wherever its Harness runs: the cells of the machine's remote object as
+ * `ShownInfiniChat` carries them across moves, the connection to that machine, and the operations of its screen.
+ */
+export const MacInfiniChat = remote('infinichat.mac.conversation', {
+  version: 1,
+  input: Type.Object({}),
+  host: hostNamed('mac'),
+  variants: {
+    owner: {
+      state: {
+        snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
+        connection: ConnectionSchema, held: Type.Union([Type.Null(), ConversationSchema]), machine: ShownMachineSchema,
+      },
+      methods: {
+        accept: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
+        stop: method(),
+        dismissError: method(),
+        dismissNotice: method(),
+        reconnect: method(),
+      },
+    },
+  },
 });

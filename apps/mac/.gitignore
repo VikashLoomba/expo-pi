@@ -1,3 +1,4 @@
 .hutch/
 build/
 artifacts/
+.cottontail-tmp/
