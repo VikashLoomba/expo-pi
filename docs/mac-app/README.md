@@ -102,8 +102,10 @@ design is wrong; stop and revisit it.
    paths refuse without it (~10 lines). The alternative, a `DatabaseFiles` whose every method rejects, keeps the
    package untouched but lies in its types.
 2. **Moves into the package, no edits:** `apps/mobile/src/chat/shown-infinichat.ts` (imports only package types) to
-   `packages/infinichat/src/pi/shown-infinichat.ts`; the server's `sign-in.ts` and `credentials.ts` (Node, no
-   server-only dependency) to `packages/infinichat/src/node/`. The server keeps importing them.
+   `packages/infinichat/src/pi/shown-infinichat.ts`; the server's `sign-in.ts` and its `openAILoginOptions` (Node,
+   no server-only dependency) to `packages/infinichat/src/node/`. The server keeps importing them. Done with piece 2,
+   so the bundle's hash settles before the phone's next install: the storage opener the plan also named is
+   pi-durable's own export, nothing to move.
 3. **One server bundle for both apps.** The phone and the Mac must install byte-identical bundles: a client whose
    manifest hash differs reinstalls the server (`client.ts:377-379`), so two builds of the same code would reinstall
    each other's server at every connect. `apps/mobile/server/`, the two build scripts, the two generated manifests

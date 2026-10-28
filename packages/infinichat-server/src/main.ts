@@ -8,9 +8,10 @@ import { createHost } from '@earendil-works/chord';
 import { processLock } from '@earendil-works/chord/node';
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 import type { SessionEnd } from '@earendil-works/pi-durable';
-import { fileCredentialBackend } from '@pi-agent/infinichat/node/credentials';
+import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/node/credentials';
 import { serverDevices } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
+import { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
 import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
@@ -19,11 +20,9 @@ import { validateOpenAICredential } from '@pi-agent/infinichat/pi/openai-auth/co
 import { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
 import { ServerConversation } from './conversation';
-import { openAILoginOptions } from './credentials';
 import { listen } from './listen';
 import { writeDiff, writePages, writePatch } from './pages';
 import { serveInfiniChat } from './serve';
-import { ServerSignIn } from './sign-in';
 import { restoreTimeZone, setTimeZone } from './state';
 
 const USAGE = ['Usage: node server.js serve --device <name> --description <text>',

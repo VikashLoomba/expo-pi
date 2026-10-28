@@ -1,8 +1,8 @@
 import type { AuthPrompt, LoginOptions, Models } from '@earendil-works/pi-ai';
-import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-controller';
-import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
-import { OPENAI_PROVIDER_ID } from '@pi-agent/infinichat/pi/openai-auth/core';
-import type { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
+import { AuthPromptController } from '../chat/auth-prompt-controller';
+import type { SignInAttempt } from '../pi/infinichat-remote/contract';
+import { OPENAI_PROVIDER_ID } from '../pi/openai-auth/core';
+import type { ProviderCredentialStore } from '../pi/provider-credentials';
 
 type Attempt = Exclude<SignInAttempt, null>;
 
@@ -31,7 +31,7 @@ export class ServerSignIn {
   private latest?: Omit<Attempt, 'prompt'>;
   private snapshot: SignInAttempt = null;
 
-  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`server/credentials.ts`). */
+  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`node/credentials.ts`). */
   constructor(private readonly models: Models, private readonly credentials: ProviderCredentialStore,
     private readonly openAILogin: () => Promise<LoginOptions>) {
     this.prompts.subscribe(() => this.publish());

@@ -112878,6 +112878,7 @@ function registerBunOAuthFlows() {
 
 // ../infinichat/src/node/credentials.ts
 init_define_INFINICHAT_PI();
+import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 var isStringRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "string");
 function parsed(text) {
@@ -112922,6 +112923,26 @@ function fileCredentialBackend(file) {
     })
   };
 }
+var HOST_KEY = "pi.openai.host.v1";
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function openAILoginOptions(backend) {
+  let pending;
+  return () => {
+    pending ??= (async () => {
+      const saved = await backend.getItemAsync(HOST_KEY);
+      if (saved !== null && !UUID.test(saved)) {
+        throw new Error("The saved OpenAI installation ID could not be restored.");
+      }
+      const id = saved ?? randomUUID();
+      if (saved === null) await backend.setItemAsync(HOST_KEY, id);
+      return { getDeviceId: () => id, agentName: "InfiniChat" };
+    })().catch((error) => {
+      pending = void 0;
+      throw error;
+    });
+    return pending;
+  };
+}
 
 // ../infinichat/src/node/devices.ts
 init_define_INFINICHAT_PI();
@@ -112931,7 +112952,7 @@ import { join as join3 } from "node:path";
 // ../../node_modules/.pnpm/@earendil-works+pi-durable@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+sig_d6f27c67b7637e06944e069af6553b0a/node_modules/@earendil-works/pi-durable/dist/env/node.js
 init_define_INFINICHAT_PI();
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
 import { access, appendFile, lstat as lstat3, mkdir as mkdir2, mkdtemp, opendir, open as openFile, readdir as readdir2, readFile as readFile3, realpath, rename as rename2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir, constants as osConstants, tmpdir as tmpdir2 } from "node:os";
@@ -114655,7 +114676,7 @@ Cannot execute bash commands.`, cause));
     const dir = await this.createTempDir("tmp-", context3);
     if (!dir.ok)
       return dir;
-    const filePath = join2(dir.value, `${options?.prefix ?? ""}${randomUUID()}${options?.suffix ?? ""}`);
+    const filePath = join2(dir.value, `${options?.prefix ?? ""}${randomUUID2()}${options?.suffix ?? ""}`);
     try {
       await writeFile2(filePath, "");
       return ok(filePath);
@@ -126279,7 +126300,7 @@ async function listFilesOver(connection, path6, options, context3) {
 
 // ../../node_modules/.pnpm/@earendil-works+pi-env@1.4.0_@aws-sdk+credential-provider-node@3.972.84_@smithy+signatu_a75530819a4020855c999c47f2d305e6/node_modules/@earendil-works/pi-env/dist/remote-env.js
 init_define_INFINICHAT_PI();
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 import { posix, win32 as win322 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
@@ -127063,7 +127084,7 @@ var RemoteExecutionEnv = class {
     let filePath = "";
     try {
       const paths = await remotePath(this.connection);
-      filePath = paths.join(dir.value, `${options?.prefix ?? ""}${randomUUID2()}${options?.suffix ?? ""}`);
+      filePath = paths.join(dir.value, `${options?.prefix ?? ""}${randomUUID3()}${options?.suffix ?? ""}`);
       await this.connection.request("write", { path: filePath, append: false, parents: false }, { payload: new Uint8Array(0) });
       return ok(filePath);
     } catch (error) {
@@ -131153,6 +131174,192 @@ var ServerMachines = class {
   }
 };
 
+// ../infinichat/src/node/sign-in.ts
+init_define_INFINICHAT_PI();
+
+// ../infinichat/src/chat/auth-prompt-controller.ts
+init_define_INFINICHAT_PI();
+var AuthPromptController = class {
+  nextId = 0;
+  snapshot = null;
+  pending;
+  listeners = /* @__PURE__ */ new Set();
+  subscribe = (listener) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  getSnapshot = () => this.snapshot;
+  publish(snapshot) {
+    this.snapshot = snapshot;
+    for (const listener of this.listeners) listener();
+  }
+  prompt(prompt, flowSignal) {
+    flowSignal.throwIfAborted();
+    prompt.signal?.throwIfAborted();
+    if (this.pending) return Promise.reject(new Error("Another sign-in prompt is already open."));
+    const id = ++this.nextId;
+    return new Promise((resolve4, reject) => {
+      const signals = /* @__PURE__ */ new Set([flowSignal, ...prompt.signal ? [prompt.signal] : []]);
+      const finish2 = (action) => {
+        if (this.pending?.id !== id) return;
+        for (const signal of signals) signal.removeEventListener("abort", abort);
+        this.pending = void 0;
+        this.publish(null);
+        action();
+      };
+      const abort = () => finish2(() => reject([...signals].find((signal) => signal.aborted)?.reason));
+      this.pending = { id, resolve: (value) => finish2(() => resolve4(value)), reject: (reason) => finish2(() => reject(reason)) };
+      for (const signal of signals) signal.addEventListener("abort", abort, { once: true });
+      this.publish({ id, prompt });
+    });
+  }
+  submit = (id, value) => {
+    if (this.pending?.id !== id || !value.trim()) return false;
+    if (this.snapshot?.prompt.type === "select" && !this.snapshot.prompt.options.some((option) => option.id === value)) return false;
+    this.pending.resolve(value);
+    return true;
+  };
+  cancel = () => {
+    const error = new Error("Sign-in cancelled.");
+    error.name = "AbortError";
+    this.pending?.reject(error);
+  };
+};
+
+// ../infinichat/src/pi/openai-auth/core.ts
+init_define_INFINICHAT_PI();
+var OPENAI_PROVIDER_ID = "openai";
+var OPENAI_DYNAMIC_CLIENT_ID = "dynamic_agent_client";
+var OPENAI_DIRECT_SCOPE = "chatgpt.tokens.use.direct";
+function validateOpenAICredential(credential) {
+  if (credential.type !== "oauth") return;
+  if (typeof credential.clientId !== "string" || !credential.clientId || credential.clientId === OPENAI_DYNAMIC_CLIENT_ID || /[\s\u0000-\u001f\u007f]/.test(credential.clientId) || !Array.isArray(credential.scopes) || !credential.scopes.every((scope) => typeof scope === "string") || !credential.scopes.includes(OPENAI_DIRECT_SCOPE)) {
+    throw new Error("The saved ChatGPT sign-in is incomplete. Connect ChatGPT again.");
+  }
+}
+
+// ../infinichat/src/node/sign-in.ts
+function shown(prompt) {
+  if (prompt.type === "select") {
+    return { type: prompt.type, message: prompt.message, options: prompt.options.map(({ id, label, description }) => ({ id, label, ...description === void 0 ? {} : { description } })) };
+  }
+  return {
+    type: prompt.type,
+    message: prompt.message,
+    ...prompt.placeholder === void 0 ? {} : { placeholder: prompt.placeholder }
+  };
+}
+var ServerSignIn = class {
+  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`node/credentials.ts`). */
+  constructor(models, credentials, openAILogin) {
+    this.models = models;
+    this.credentials = credentials;
+    this.openAILogin = openAILogin;
+    this.prompts.subscribe(() => this.publish());
+  }
+  models;
+  credentials;
+  openAILogin;
+  listeners = /* @__PURE__ */ new Set();
+  prompts = new AuthPromptController();
+  attempts = 0;
+  running;
+  /** The latest attempt without its prompt, which the controller holds; none before the first. */
+  latest;
+  snapshot = null;
+  subscribe = (listener) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  getSnapshot = () => this.snapshot;
+  /** Starts an attempt, ending one under way, and returns its number. */
+  signIn(providerId) {
+    const provider2 = this.models.getProvider(providerId);
+    if (!provider2?.auth.oauth) throw new Error(`${provider2?.name ?? providerId} has no sign-in.`);
+    this.running?.abort();
+    const controller = new AbortController();
+    this.running = controller;
+    const attempt = ++this.attempts;
+    this.latest = { attempt, providerId, running: true, status: "Starting sign-in\u2026" };
+    this.publish();
+    void this.run(attempt, providerId, controller);
+    return attempt;
+  }
+  /** Answers the pending prompt `promptId`; an answer to another prompt, or an empty one, changes nothing. */
+  answer(promptId, value) {
+    this.prompts.submit(promptId, value);
+  }
+  /** Ends the attempt under way, as the phone's Cancel and the server's close do. */
+  cancel() {
+    this.running?.abort();
+  }
+  async setApiKey(providerId, input) {
+    if (this.running) throw new Error("Finish or cancel sign-in before changing provider credentials.");
+    const key2 = input.trim();
+    if (!key2) throw new Error("Enter an API key.");
+    if (!this.models.getProvider(providerId)?.auth.apiKey?.login) {
+      throw new Error("This provider does not support API key sign-in.");
+    }
+    await this.credentials.modify(providerId, async () => ({ type: "api_key", key: key2 }));
+  }
+  async signOut(providerId) {
+    this.cancel();
+    try {
+      await this.models.logout(providerId);
+    } catch (error) {
+      const name = this.models.getProvider(providerId)?.name ?? providerId;
+      throw new Error(`Could not remove the saved ${name} key. Try again.`, { cause: error });
+    }
+  }
+  async run(attempt, providerId, controller) {
+    const { signal } = controller;
+    const current = () => this.running === controller;
+    const show = (change) => {
+      if (!current() || this.latest === void 0) return;
+      this.latest = { ...this.latest, ...change };
+      this.publish();
+    };
+    try {
+      const options = providerId === OPENAI_PROVIDER_ID ? await this.openAILogin() : void 0;
+      signal.throwIfAborted();
+      await this.models.login(providerId, "oauth", {
+        signal,
+        prompt: (prompt) => {
+          show({ status: prompt.type === "manual_code" ? "Finish sign-in with the browser return URL." : "Complete the next sign-in step." });
+          return this.prompts.prompt(prompt, signal);
+        },
+        notify(event) {
+          if (signal.aborted) return;
+          if (event.type === "auth_url") show({ url: event.url, status: "Continue in your browser to sign in." });
+          else if (event.type === "progress" || event.type === "info") show({ status: "Sign-in in progress\u2026" });
+        }
+      }, options);
+      if (current()) this.latest = { attempt, providerId, running: false };
+    } catch (error) {
+      if (current()) {
+        const setup = providerId === OPENAI_PROVIDER_ID && this.latest?.url === void 0 && error instanceof Error ? error.message : void 0;
+        this.latest = { attempt, providerId, running: false, status: signal.aborted ? "Sign-in cancelled." : setup ?? "Sign-in could not be completed. Please try again." };
+      }
+    } finally {
+      if (current()) {
+        this.running = void 0;
+        this.prompts.cancel();
+        this.publish();
+      }
+    }
+  }
+  publish() {
+    const pending = this.prompts.getSnapshot();
+    const prompt = pending === null ? void 0 : { id: pending.id, prompt: shown(pending.prompt) };
+    this.snapshot = this.latest === void 0 ? null : { ...this.latest, ...prompt === void 0 || !this.latest.running ? {} : { prompt } };
+    for (const listener of [...this.listeners]) listener();
+  }
+};
+
 // ../infinichat/src/node/models.ts
 init_define_INFINICHAT_PI();
 
@@ -131687,18 +131894,6 @@ var InfiniChatService = class _InfiniChatService {
     return this.closePromise;
   }
 };
-
-// ../infinichat/src/pi/openai-auth/core.ts
-init_define_INFINICHAT_PI();
-var OPENAI_PROVIDER_ID = "openai";
-var OPENAI_DYNAMIC_CLIENT_ID = "dynamic_agent_client";
-var OPENAI_DIRECT_SCOPE = "chatgpt.tokens.use.direct";
-function validateOpenAICredential(credential) {
-  if (credential.type !== "oauth") return;
-  if (typeof credential.clientId !== "string" || !credential.clientId || credential.clientId === OPENAI_DYNAMIC_CLIENT_ID || /[\s\u0000-\u001f\u007f]/.test(credential.clientId) || !Array.isArray(credential.scopes) || !credential.scopes.every((scope) => typeof scope === "string") || !credential.scopes.includes(OPENAI_DIRECT_SCOPE)) {
-    throw new Error("The saved ChatGPT sign-in is incomplete. Connect ChatGPT again.");
-  }
-}
 
 // src/conversation.ts
 init_define_INFINICHAT_PI();
@@ -133058,30 +133253,6 @@ var ServerConversation = class {
   };
 };
 
-// src/credentials.ts
-init_define_INFINICHAT_PI();
-import { randomUUID as randomUUID4 } from "node:crypto";
-var HOST_KEY = "pi.openai.host.v1";
-var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-function openAILoginOptions(backend) {
-  let pending;
-  return () => {
-    pending ??= (async () => {
-      const saved = await backend.getItemAsync(HOST_KEY);
-      if (saved !== null && !UUID.test(saved)) {
-        throw new Error("The saved OpenAI installation ID could not be restored.");
-      }
-      const id = saved ?? randomUUID4();
-      if (saved === null) await backend.setItemAsync(HOST_KEY, id);
-      return { getDeviceId: () => id, agentName: "InfiniChat" };
-    })().catch((error) => {
-      pending = void 0;
-      throw error;
-    });
-    return pending;
-  };
-}
-
 // src/listen.ts
 init_define_INFINICHAT_PI();
 import { timingSafeEqual } from "node:crypto";
@@ -133289,180 +133460,6 @@ function serveInfiniChat(host, conversation, options) {
     };
   });
 }
-
-// src/sign-in.ts
-init_define_INFINICHAT_PI();
-
-// ../infinichat/src/chat/auth-prompt-controller.ts
-init_define_INFINICHAT_PI();
-var AuthPromptController = class {
-  nextId = 0;
-  snapshot = null;
-  pending;
-  listeners = /* @__PURE__ */ new Set();
-  subscribe = (listener) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-  getSnapshot = () => this.snapshot;
-  publish(snapshot) {
-    this.snapshot = snapshot;
-    for (const listener of this.listeners) listener();
-  }
-  prompt(prompt, flowSignal) {
-    flowSignal.throwIfAborted();
-    prompt.signal?.throwIfAborted();
-    if (this.pending) return Promise.reject(new Error("Another sign-in prompt is already open."));
-    const id = ++this.nextId;
-    return new Promise((resolve4, reject) => {
-      const signals = /* @__PURE__ */ new Set([flowSignal, ...prompt.signal ? [prompt.signal] : []]);
-      const finish2 = (action) => {
-        if (this.pending?.id !== id) return;
-        for (const signal of signals) signal.removeEventListener("abort", abort);
-        this.pending = void 0;
-        this.publish(null);
-        action();
-      };
-      const abort = () => finish2(() => reject([...signals].find((signal) => signal.aborted)?.reason));
-      this.pending = { id, resolve: (value) => finish2(() => resolve4(value)), reject: (reason) => finish2(() => reject(reason)) };
-      for (const signal of signals) signal.addEventListener("abort", abort, { once: true });
-      this.publish({ id, prompt });
-    });
-  }
-  submit = (id, value) => {
-    if (this.pending?.id !== id || !value.trim()) return false;
-    if (this.snapshot?.prompt.type === "select" && !this.snapshot.prompt.options.some((option) => option.id === value)) return false;
-    this.pending.resolve(value);
-    return true;
-  };
-  cancel = () => {
-    const error = new Error("Sign-in cancelled.");
-    error.name = "AbortError";
-    this.pending?.reject(error);
-  };
-};
-
-// src/sign-in.ts
-function shown(prompt) {
-  if (prompt.type === "select") {
-    return { type: prompt.type, message: prompt.message, options: prompt.options.map(({ id, label, description }) => ({ id, label, ...description === void 0 ? {} : { description } })) };
-  }
-  return {
-    type: prompt.type,
-    message: prompt.message,
-    ...prompt.placeholder === void 0 ? {} : { placeholder: prompt.placeholder }
-  };
-}
-var ServerSignIn = class {
-  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`server/credentials.ts`). */
-  constructor(models, credentials, openAILogin) {
-    this.models = models;
-    this.credentials = credentials;
-    this.openAILogin = openAILogin;
-    this.prompts.subscribe(() => this.publish());
-  }
-  models;
-  credentials;
-  openAILogin;
-  listeners = /* @__PURE__ */ new Set();
-  prompts = new AuthPromptController();
-  attempts = 0;
-  running;
-  /** The latest attempt without its prompt, which the controller holds; none before the first. */
-  latest;
-  snapshot = null;
-  subscribe = (listener) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-  getSnapshot = () => this.snapshot;
-  /** Starts an attempt, ending one under way, and returns its number. */
-  signIn(providerId) {
-    const provider2 = this.models.getProvider(providerId);
-    if (!provider2?.auth.oauth) throw new Error(`${provider2?.name ?? providerId} has no sign-in.`);
-    this.running?.abort();
-    const controller = new AbortController();
-    this.running = controller;
-    const attempt = ++this.attempts;
-    this.latest = { attempt, providerId, running: true, status: "Starting sign-in\u2026" };
-    this.publish();
-    void this.run(attempt, providerId, controller);
-    return attempt;
-  }
-  /** Answers the pending prompt `promptId`; an answer to another prompt, or an empty one, changes nothing. */
-  answer(promptId, value) {
-    this.prompts.submit(promptId, value);
-  }
-  /** Ends the attempt under way, as the phone's Cancel and the server's close do. */
-  cancel() {
-    this.running?.abort();
-  }
-  async setApiKey(providerId, input) {
-    if (this.running) throw new Error("Finish or cancel sign-in before changing provider credentials.");
-    const key2 = input.trim();
-    if (!key2) throw new Error("Enter an API key.");
-    if (!this.models.getProvider(providerId)?.auth.apiKey?.login) {
-      throw new Error("This provider does not support API key sign-in.");
-    }
-    await this.credentials.modify(providerId, async () => ({ type: "api_key", key: key2 }));
-  }
-  async signOut(providerId) {
-    this.cancel();
-    try {
-      await this.models.logout(providerId);
-    } catch (error) {
-      const name = this.models.getProvider(providerId)?.name ?? providerId;
-      throw new Error(`Could not remove the saved ${name} key. Try again.`, { cause: error });
-    }
-  }
-  async run(attempt, providerId, controller) {
-    const { signal } = controller;
-    const current = () => this.running === controller;
-    const show = (change) => {
-      if (!current() || this.latest === void 0) return;
-      this.latest = { ...this.latest, ...change };
-      this.publish();
-    };
-    try {
-      const options = providerId === OPENAI_PROVIDER_ID ? await this.openAILogin() : void 0;
-      signal.throwIfAborted();
-      await this.models.login(providerId, "oauth", {
-        signal,
-        prompt: (prompt) => {
-          show({ status: prompt.type === "manual_code" ? "Finish sign-in with the browser return URL." : "Complete the next sign-in step." });
-          return this.prompts.prompt(prompt, signal);
-        },
-        notify(event) {
-          if (signal.aborted) return;
-          if (event.type === "auth_url") show({ url: event.url, status: "Continue in your browser to sign in." });
-          else if (event.type === "progress" || event.type === "info") show({ status: "Sign-in in progress\u2026" });
-        }
-      }, options);
-      if (current()) this.latest = { attempt, providerId, running: false };
-    } catch (error) {
-      if (current()) {
-        const setup = providerId === OPENAI_PROVIDER_ID && this.latest?.url === void 0 && error instanceof Error ? error.message : void 0;
-        this.latest = { attempt, providerId, running: false, status: signal.aborted ? "Sign-in cancelled." : setup ?? "Sign-in could not be completed. Please try again." };
-      }
-    } finally {
-      if (current()) {
-        this.running = void 0;
-        this.prompts.cancel();
-        this.publish();
-      }
-    }
-  }
-  publish() {
-    const pending = this.prompts.getSnapshot();
-    const prompt = pending === null ? void 0 : { id: pending.id, prompt: shown(pending.prompt) };
-    this.snapshot = this.latest === void 0 ? null : { ...this.latest, ...prompt === void 0 || !this.latest.running ? {} : { prompt } };
-    for (const listener of [...this.listeners]) listener();
-  }
-};
 
 // src/main.ts
 var USAGE = [

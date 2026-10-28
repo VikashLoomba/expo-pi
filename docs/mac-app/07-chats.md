@@ -33,8 +33,9 @@ working directories on this Mac or on a machine.
   folder(id) }), remove: rm -rf folder(id) }, machines: { environment: (id, cwd) => machines.environment(id, cwd) },
   newChat: NEW_CHAT_DEFAULTS, authError, onClosed: reopen after a storage failure })`, with the phone's `open()`
   sequencing (`chat-provider.tsx:184-214`) and `openError`. Chat folders live under `userData/chats/<id>`.
-  `openNodeSqliteStorage` and `NEW_CHAT_DEFAULTS` move into the package (`node/storage.ts`, `pi/new-chat.ts`) so the
-  server, the phone and the Mac share them (deviation 2's list).
+  `openNodeSqliteStorage` is pi-durable's own export (`@earendil-works/pi-durable/storage/sqlite/node`), which the
+  server calls too; `NEW_CHAT_DEFAULTS` moves into the package (`pi/new-chat.ts`) so the phone and the Mac share it
+  (deviation 2's list). Neither touches the server bundle.
 - `src/contract.ts`: `MacChats` (input `{}`: cells `chats`, `openError`; methods `createChat`, `rename`, `delete`,
   `showMenu({ id })` for the row's context menu) and `MacChat` (input `{ id }`: cells `snapshot`, `controls`,
   `messages`, `status`; methods `send`, `cancel`, `steer`, `retryParked`, `updateSettings`, `updateExecution`,
@@ -55,7 +56,7 @@ the service outlives it.
 
 ## Deviations
 
-Moves into the package (storage opener, new-chat defaults). Deviation 1 of docs/infinichat-package piece 6 stands:
+A move into the package (the new-chat defaults). Deviation 1 of docs/infinichat-package piece 6 stands:
 the local environment is a real folder, not a sandbox.
 
 ## Size

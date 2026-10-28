@@ -20,8 +20,9 @@ out; the Providers pane in Settings and the Connect prompts lead there.
 
 ## Builds
 
-- Deviation 2: `sign-in.ts` and `credentials.ts` move to `packages/infinichat/src/node/`; the server imports them from
-  there.
+- Deviation 2, done with piece 2 so the server bundle settled early: `ServerSignIn` is
+  `packages/infinichat/src/node/sign-in.ts` and `openAILoginOptions` joined `node/credentials.ts`; the server imports
+  them from there.
 - `src/main/account.ts` gains `ServerSignIn(models, credentials, openAILoginOptions(backend))` and the relay from
   piece 6 reused for the Mac's own attempts.
 - `src/contract.ts`: `MacAccount` (input `{}`): cells `catalog`, `access`, `signInAttempt`; methods `signIn`,
@@ -41,7 +42,7 @@ success, failure, cancel, another attempt or quit, never with a closed window.
 
 ## Size
 
-About 300 lines: moves 0, account and relay reuse 60, contract and serve 60, pane and wiring 180.
+About 300 lines: account and relay reuse 60, contract and serve 60, pane and wiring 180.
 
 ## Checks
 
