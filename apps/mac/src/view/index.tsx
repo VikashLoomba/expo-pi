@@ -5,6 +5,7 @@ import type { WindowRPC } from '../rpc';
 import { App } from './app';
 import { connectToMain } from './lib/client';
 import { createCommands } from './lib/commands';
+import { SettingsWindow } from './screens/settings';
 
 declare global {
   interface Window {
@@ -23,4 +24,7 @@ const rpc = Electroview.defineRPC<WindowRPC>({
   handlers: { requests: {}, messages: { command: ({ name }) => commands.dispatch(name) } },
 });
 new Electroview({ rpc });
-createRoot(container).render(<App host={connectToMain(bootstrap)} commands={commands} />);
+const host = connectToMain(bootstrap);
+// Which window this page is: the main one, or Settings (`settings.html` says so on its body).
+createRoot(container).render(document.body.dataset.window === 'settings'
+  ? <SettingsWindow host={host} /> : <App host={host} commands={commands} />);

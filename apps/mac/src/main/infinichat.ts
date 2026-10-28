@@ -8,7 +8,7 @@ import { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
 
 import { Attachments } from './attachments';
 import { macDialer } from './dialer';
-import { macDirectory, type MacMachine } from './machines';
+import { macDirectory, type MacMachine, type MacMachines } from './machines';
 
 const MOVING = 'InfiniChat is moving. Send again once the move is done.';
 
@@ -25,11 +25,17 @@ export class MacInfiniChat {
   private current?: { machine: MacMachine; remote: RemoteInfiniChat; stop: () => void };
   private readonly listeners = new Set<() => void>();
   private closed = false;
+  /** The manager of the other machines, which gives this Mac's record among them; set once it exists. */
+  private directory?: MacMachines;
 
   constructor(private readonly home: InfiniChatHomeStore,
     private readonly machines: (id: string) => MacMachine | undefined,
     private readonly client: InfiniChatClient, private readonly secrets: CredentialBackend, images: ImageProcessor) {
     this.attachments = new Attachments(images);
+  }
+
+  useDirectory(directory: MacMachines): void {
+    this.directory = directory;
   }
 
   /** The connection to the machine InfiniChat lives on, and which machine: one store, as the phone's hooks read it. */
@@ -40,6 +46,15 @@ export class MacInfiniChat {
   readonly getConnection = (): RemoteConnection | undefined => this.current?.remote.getConnection();
   readonly getMachine = () => this.current && { id: this.current.machine.id, name: this.current.machine.name };
   readonly getHeld = (): ConversationState | undefined => this.current?.remote.getConversation();
+  /** What the holder's server found of the other machines, and the host keys waiting for a client there. */
+  readonly getReach = () => this.current?.remote.getReach();
+  readonly getPendingHostKeys = () => this.current?.remote.getPendingHostKeys();
+
+  acceptHostKey(endpoint: string, fingerprints: string[]): Promise<void> {
+    const remote = this.current?.remote;
+    if (remote === undefined) throw new Error('InfiniChat is not connected to a machine.');
+    return remote.acceptHostKey(endpoint, fingerprints);
+  }
 
   /** Connects to the machine the home record names and shows its conversation once its view has a snapshot. */
   open(): void {
@@ -97,7 +112,9 @@ export class MacInfiniChat {
     }
     let remote = this.remotes.get(id);
     if (remote === undefined) {
-      remote = new RemoteInfiniChat(macDialer(machine, this.client, this.secrets), macDirectory(machine), this.client);
+      if (this.directory === undefined) throw new Error('The machines are not set up yet.');
+      remote = new RemoteInfiniChat(macDialer(machine, this.client, this.secrets), macDirectory(this.directory),
+        this.client);
       this.remotes.set(id, remote);
     }
     this.current?.stop();

@@ -13,16 +13,18 @@ import { macClient } from './identity';
 import { openImages } from './images';
 import { MacInfiniChat } from './infinichat';
 import { listenForWindows } from './listen';
-import { THIS_MAC, thisMac } from './machines';
+import { MacMachines, THIS_MAC, thisMac } from './machines';
 import { serveInfiniChat } from './serve-infinichat';
+import { serveMachines } from './serve-machines';
 import { readSettings, writeSettings } from './settings';
 
 const INITIAL_FRAME = { width: 1100, height: 720 };
+const SETTINGS_FRAME = { width: 780, height: 560 };
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 /** The action a clicked menu item was given in `setApplicationMenu`; Electrobun types the event as unknown. */
 const clickedAction = (event: unknown): string | undefined =>
   isRecord(event) && isRecord(event.data) && typeof event.data.action === 'string' ? event.data.action : undefined;
-const isCommand = (action: string): action is WindowCommand => action === 'new-chat' || action === 'settings';
+const isCommand = (action: string): action is WindowCommand => action === 'new-chat';
 const windowRpc = () => BrowserView.defineRPC<WindowRPC>({ handlers: { requests: {}, messages: {} } });
 
 interface OpenWindow {
@@ -84,8 +86,12 @@ async function main(): Promise<void> {
   const images = await openImages();
   const infinichat = new MacInfiniChat(macHome(), (id) => id === THIS_MAC ? mac : undefined, client, secrets,
     images);
+  // The other machines, reached from this Mac over pi-env; the conversation's document lists them.
+  const machines = new MacMachines(infinichat.shown, client, secrets, mac, settings);
+  infinichat.useDirectory(machines);
   const host = createMacHost({ version, userData });
   serveInfiniChat(host, infinichat);
+  serveMachines(host, infinichat, machines);
   const windows = await listenForWindows(host);
   console.log(`InfiniChat ${version}: data in ${userData}, windows on 127.0.0.1:${windows.port}`);
 
@@ -120,9 +126,33 @@ async function main(): Promise<void> {
     return opened;
   };
 
+  // One Settings window, its own page over the same bundle (`settings.html`), reused while it is open.
+  let settingsWindow: BrowserWindow | undefined;
+  const openSettings = () => {
+    if (settingsWindow) {
+      settingsWindow.activate();
+      return;
+    }
+    const window = new BrowserWindow({
+      title: 'Settings',
+      url: 'views://app/settings.html',
+      frame: SETTINGS_FRAME,
+      preload: `window.__mac = ${JSON.stringify({ port: windows.port, secret: windows.secret })};`,
+      rpc: windowRpc(),
+    });
+    window.on('close', () => {
+      if (settingsWindow === window) settingsWindow = undefined;
+    });
+    settingsWindow = window;
+  };
+
   setMenu();
   ApplicationMenu.on('application-menu-clicked', (event) => {
     const action = clickedAction(event);
+    if (action === 'settings') {
+      openSettings();
+      return;
+    }
     if (action === undefined || !isCommand(action)) return;
     open().rpc.send.command({ name: action });
   });
@@ -137,7 +167,8 @@ async function main(): Promise<void> {
       // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
       // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
       let failure: unknown;
-      for (const step of [() => infinichat.close(), () => host.close(), () => windows.close()]) {
+      for (const step of [() => infinichat.close(), async () => machines.close(), () => host.close(),
+        () => windows.close()]) {
         try {
           await step();
         } catch (error) {

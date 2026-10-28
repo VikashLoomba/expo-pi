@@ -14,6 +14,8 @@ export default {
     views: { app: { entrypoint: 'src/view/index.tsx' } },
     copy: {
       'src/view/index.html': 'views/app/index.html',
+      // The Settings window's page: the same bundle, told which window it is.
+      'src/view/settings.html': 'views/app/settings.html',
       // Compiled by scripts/pre-build.ts from src/view/app.css.
       'build-css/app.css': 'views/app/app.css',
       // A single-file bundle cannot resolve Photon's package, so the main process reads its own copy

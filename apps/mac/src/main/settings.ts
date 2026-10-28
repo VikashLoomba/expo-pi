@@ -9,6 +9,8 @@ export interface Settings {
   windowFrame?: WindowFrame;
   /** This app's ID as a client of the InfiniChat servers, made once. */
   clientId?: string;
+  /** The identity file chosen for a machine, by endpoint; without one, it is reached with the user's SSH setup. */
+  identities?: Record<string, string>;
 }
 
 const FILE = 'settings.json';
@@ -26,9 +28,14 @@ export function readSettings(): Settings {
   }
   const parsed: unknown = JSON.parse(text);
   if (!isRecord(parsed)) return {};
+  const identities = isRecord(parsed.identities)
+    ? Object.fromEntries(Object.entries(parsed.identities).filter((entry): entry is [string, string] =>
+      typeof entry[1] === 'string'))
+    : undefined;
   return {
     ...(isFrame(parsed.windowFrame) ? { windowFrame: parsed.windowFrame } : {}),
     ...(typeof parsed.clientId === 'string' ? { clientId: parsed.clientId } : {}),
+    ...(identities === undefined ? {} : { identities }),
   };
 }
 

@@ -702,3 +702,177 @@ button {
 .round-button:disabled {
   opacity: 0.4;
 }
+
+/* The Settings window: panes in a source list, each scrolling on its own. */
+.settings {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  height: 100%;
+}
+
+.settings-sources {
+  padding: 10px 8px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+}
+
+.settings-sources .row-button:disabled {
+  color: var(--muted-foreground);
+}
+
+.pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane-scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.pane-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.pane-note {
+  margin: 8px 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.machine-card,
+.machine-form {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.machine-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.machine-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.machine-endpoint {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.machine-meta {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+
+.machine-meta dt {
+  color: var(--muted-foreground);
+}
+
+.machine-meta dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.machine-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  color: var(--muted-foreground);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.button {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: inherit;
+  font: inherit;
+}
+
+.button:disabled {
+  opacity: 0.5;
+}
+
+.button-primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.button-danger {
+  color: var(--danger);
+}
+
+.form-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.field span {
+  color: var(--muted-foreground);
+  text-align: right;
+}
+
+.text-input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: inherit;
+  font: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}

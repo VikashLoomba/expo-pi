@@ -70,3 +70,29 @@ About 420 lines: machines and identities 150, contract and serve 70, Settings wi
 ## Not in this piece
 
 Reaching another machine's InfiniChat and moving (5), "From <machine>" reachability (5).
+
+## As built
+
+From `1141caa` on `feat/mac-app-shell` (2026-10-28), one commit, with pi-env 1.4.0 and Electrobun 2.0.5. What
+differs from the plan:
+
+- **No store of this Mac's own.** `MacMachines` (`src/main/machines.ts`) reads and edits the document through
+  `ShownInfiniChat`, as the phone does, and keeps only the identity files by endpoint in `settings.json` and the
+  checks under way. This Mac's record is found by its name, which the phone's check gave it too; `putSelf` lists it
+  when the document has none. `macDirectory` gives that record to `RemoteInfiniChat`.
+- **pi-env's daemon comes from the app's resources.** `connectSsh` deploys the daemon its package ships, which a
+  Hutch bundle has no package for, so a check runs `detectPlatform` first and passes the bundled
+  `pi-env-<platform>-<arch>.bin` as `binary`. Host keys are trusted on first use as the server does (`scanHostKey`,
+  `acceptHostKey`); a changed key waits for Trust new key.
+- **A check exchanges keys with `runScript`** over the `RemoteExecutionEnv`, as a move's `authorize` does, then
+  `patchMachine`es the name and keys. The removal confirms with `Utils.showMessageBox` in the main process.
+- **The Settings window is its own page**, `settings.html` over the same bundle, told which window it is on its
+  body; `BrowserWindow` reuses the open one. The 'settings' menu action opens it in the main process, so
+  `WindowCommand` keeps only `new-chat`.
+- The pane and form are hand-written DOM with the window's tokens; the owner asked for a component framework with
+  hover states, interactions and animation, which the next piece decides.
+
+Verified on 2026-10-28: ⌘, opens Settings with both machines, this Mac tagged; Check Connection on vikash-system from
+this Mac connected with the user's SSH setup, named it, wrote this app's `known_hosts`, and recorded vikash-system's
+InfiniChat key and this Mac's key authorized there in the document (the phone and the server see both). Not
+verified: an identity file, Trust new key after a changed key, removal, a machine added from the Mac.

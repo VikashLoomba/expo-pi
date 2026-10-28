@@ -1,7 +1,8 @@
 import { hostNamed, method, remote } from '@earendil-works/chord';
 import { Type, type Static } from '@earendil-works/pi-ai';
 import {
-  ControlsSchema, ConversationSchema, MessagesSchema, ScheduledSchema, SnapshotSchema,
+  ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema, ReachSchema,
+  ScheduledSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { ChatImageSchema, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
 
@@ -70,6 +71,58 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         pickPhotos: method(undefined, Type.Array(AttachmentSchema)),
         attach: method(Type.Object({ name: Type.String(), mimeType: Type.String(), data: Type.String() }),
           AttachmentSchema),
+      },
+    },
+  },
+});
+
+/** What a check of a machine from this Mac is doing, found, or ran into; one per endpoint while it matters. */
+export const CheckSchema = Type.Object({
+  stage: Type.Optional(Type.Enum(['connecting', 'checking', 'exchanging'])),
+  result: Type.Optional(Type.Object({ version: Type.String(), os: Type.String(), arch: Type.String(),
+    name: Type.String() })),
+  error: Type.Optional(Type.String()),
+  /** The host key the machine presents, which differs from the one trusted here; only Trust new key goes on. */
+  pendingKey: Type.Optional(Type.Object({
+    keys: Type.Array(Type.Object({ algorithm: Type.String(), fingerprint: Type.String() })), changed: Type.Boolean(),
+  })),
+});
+export type Check = Static<typeof CheckSchema>;
+/** What the Settings window saves of a machine: its endpoint's parts; the machine names itself when checked. */
+export const MachineFormSchema = Type.Object({
+  hostname: Type.String(), port: Type.Number(), username: Type.String(),
+  /** The endpoint the form opened with, whose record a changed endpoint replaces. */
+  previous: Type.Optional(Type.String()),
+});
+
+/**
+ * The conversation's machines as this Mac sees and reaches them: the document the shown side serves, what the
+ * holder's server finds of each (`reach`, `pendingHostKeys`), this Mac's own checks from here over pi-env, the
+ * identity file chosen for each, and this Mac's own endpoint among them.
+ */
+export const MacMachines = remote('infinichat.mac.machines', {
+  version: 1,
+  input: Type.Object({}),
+  host: hostNamed('mac'),
+  variants: {
+    owner: {
+      state: {
+        machines: MachinesSchema,
+        reach: Type.Union([Type.Null(), ReachSchema]),
+        pendingHostKeys: Type.Union([Type.Null(), PendingHostKeysSchema]),
+        checks: Type.Record(Type.String(), CheckSchema),
+        identities: Type.Record(Type.String(), Type.String()),
+        self: Type.String(),
+      },
+      methods: {
+        save: method(MachineFormSchema),
+        remove: method(Type.Object({ endpoint: Type.String() })),
+        check: method(Type.Object({ endpoint: Type.String() })),
+        cancelCheck: method(Type.Object({ endpoint: Type.String() })),
+        trustNewKey: method(Type.Object({ endpoint: Type.String() })),
+        acceptHostKey: method(Type.Object({ endpoint: Type.String(), fingerprints: Type.Array(Type.String()) })),
+        setIdentity: method(Type.Object({ endpoint: Type.String(), path: Type.Union([Type.String(), Type.Null()]) })),
+        pickIdentityFile: method(undefined, Type.Union([Type.String(), Type.Null()])),
       },
     },
   },
