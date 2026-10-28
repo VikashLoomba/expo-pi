@@ -2,3 +2,4 @@
 build/
 artifacts/
 .cottontail-tmp/
+build-css/

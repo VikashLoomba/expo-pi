@@ -80,12 +80,13 @@ async function main(): Promise<void> {
   // The app's secrets for the machines' servers and, later, its own provider credentials, as the server keeps them.
   const secrets = fileCredentialBackend(join(userData, 'credentials.json'));
   const mac = thisMac(client.name);
-  const infinichat = new MacInfiniChat(macHome(), (id) => id === THIS_MAC ? mac : undefined, client, secrets);
+  // The composer's photos and, later, the chats' tools are prepared with it.
+  const images = await openImages();
+  const infinichat = new MacInfiniChat(macHome(), (id) => id === THIS_MAC ? mac : undefined, client, secrets,
+    images);
   const host = createMacHost({ version, userData });
   serveInfiniChat(host, infinichat);
   const windows = await listenForWindows(host);
-  // The chats' tools and the composer prepare images with it (piece 7); opened here to prove the copied resource.
-  await openImages();
   console.log(`InfiniChat ${version}: data in ${userData}, windows on 127.0.0.1:${windows.port}`);
 
   let current: OpenWindow | undefined;

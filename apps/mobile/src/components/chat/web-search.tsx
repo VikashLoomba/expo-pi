@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { ChatIcon } from './icon';
 import { openExternalLink } from './source-link';
-import { safeSourceUrl, searchCallLabel, sourceHost, type SearchSource } from './web-search-presentation';
+import { safeSourceUrl, searchCallLabel, sourceHost, type SearchSource } from '@pi-agent/infinichat/chat/web-search-presentation';
 
 function SearchCall({ call }: { call: WebSearchCall }) {
   const colors = useChatColors();

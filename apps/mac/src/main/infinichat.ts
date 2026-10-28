@@ -1,9 +1,12 @@
+import type { ImageProcessor } from '@earendil-works/pi-durable/tools';
+import { findCatalogModel, type ImageInput } from '@pi-agent/infinichat/pi/model-catalog';
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import type { ConversationState, InfiniChatClient } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatHomeStore } from '@pi-agent/infinichat/pi/infinichat-remote/home';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 import { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
 
+import { Attachments } from './attachments';
 import { macDialer } from './dialer';
 import { macDirectory, type MacMachine } from './machines';
 
@@ -17,6 +20,7 @@ const MOVING = 'InfiniChat is moving. Send again once the move is done.';
  */
 export class MacInfiniChat {
   readonly shown = new ShownInfiniChat(MOVING);
+  private readonly attachments: Attachments;
   private readonly remotes = new Map<string, RemoteInfiniChat>();
   private current?: { machine: MacMachine; remote: RemoteInfiniChat; stop: () => void };
   private readonly listeners = new Set<() => void>();
@@ -24,7 +28,9 @@ export class MacInfiniChat {
 
   constructor(private readonly home: InfiniChatHomeStore,
     private readonly machines: (id: string) => MacMachine | undefined,
-    private readonly client: InfiniChatClient, private readonly secrets: CredentialBackend) {}
+    private readonly client: InfiniChatClient, private readonly secrets: CredentialBackend, images: ImageProcessor) {
+    this.attachments = new Attachments(images);
+  }
 
   /** The connection to the machine InfiniChat lives on, and which machine: one store, as the phone's hooks read it. */
   readonly subscribe = (listener: () => void) => {
@@ -46,6 +52,25 @@ export class MacInfiniChat {
 
   reconnect(): void {
     this.current?.remote.reconnect();
+  }
+
+  /** A dropped or pasted photo, fitted to the shown model. */
+  attach(bytes: Uint8Array, mimeType: string) {
+    return this.attachments.fit(bytes, mimeType, this.imageLimits());
+  }
+
+  pickPhotos() {
+    return this.attachments.pick(this.imageLimits());
+  }
+
+  /** The shown model's image limits (`photo-attachments.ts`), from the machine's catalog and the settings shown. */
+  private imageLimits(): ImageInput {
+    const catalog = this.current?.remote.getCatalog();
+    const controls = this.shown.view().getControls();
+    const model = catalog && controls ? findCatalogModel(catalog, controls.settings.model) : undefined;
+    if (model === undefined) throw new Error('Choose InfiniChat’s model in its settings to attach a photo.');
+    if (model.images === undefined) throw new Error(`${model.name} does not accept images.`);
+    return model.images;
   }
 
   dismissNotice(): void {

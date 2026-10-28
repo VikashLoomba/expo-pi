@@ -71,6 +71,8 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown): vo
       dismissError: () => shown.dismissError(),
       dismissNotice: () => infinichat.dismissNotice(),
       reconnect: () => infinichat.reconnect(),
+      pickPhotos: () => infinichat.pickPhotos(),
+      attach: ({ mimeType, data }) => infinichat.attach(Buffer.from(data, 'base64'), mimeType),
     };
   });
 }

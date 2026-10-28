@@ -12,7 +12,7 @@ import { MessageContent } from './message-content';
 import { MessageImages } from './message-images';
 import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
-import { collectSearchSources } from './web-search-presentation';
+import { collectSearchSources } from '@pi-agent/infinichat/chat/web-search-presentation';
 
 export function MessageRow({ message, stopping = false, onSteerQueued }: {
   message: ChatMessage; stopping?: boolean;

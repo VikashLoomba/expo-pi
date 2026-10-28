@@ -14,7 +14,8 @@ export default {
     views: { app: { entrypoint: 'src/view/index.tsx' } },
     copy: {
       'src/view/index.html': 'views/app/index.html',
-      'src/view/app.css': 'views/app/app.css',
+      // Compiled by scripts/pre-build.ts from src/view/app.css.
+      'build-css/app.css': 'views/app/app.css',
       // A single-file bundle cannot resolve Photon's package, so the main process reads its own copy
       // (pi-durable `images/node`).
       'node_modules/@silvia-odwyer/photon/photon_rs_bg.wasm': 'photon/photon_rs_bg.wasm',
@@ -25,4 +26,5 @@ export default {
   },
   // A Mac app stays open without windows; the Dock reopens one.
   runtime: { exitOnLastWindowClosed: false },
+  scripts: { preBuild: './scripts/pre-build.ts' },
 } satisfies ElectrobunConfig;

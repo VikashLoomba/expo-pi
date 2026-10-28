@@ -31,8 +31,8 @@ the agent's name and avatar, and photos in the composer.
 - `src/view/message-row.tsx`, `tool-card.tsx`, `web-search.tsx`: the phone's components in React DOM, with
   `web-search-presentation.ts` moved to the package (`chat/`) rather than copied (deviation 2's list).
 - `src/view/transcript.tsx`: rows, the footer, the empty state, jump to latest (the phone's
-  `use-transcript-scroll.ts` over a scroll listener), `agent.tsx` with the avatar from `appdata://avatar/<file>` (the window gets
-  `allowedProtocols: { appData: true }`; the file arrives in piece 6).
+  `use-transcript-scroll.ts` over a scroll listener), `agent.tsx` with the avatar from `appdata://avatar/<file>`
+  (the window gets `allowedProtocols: { appData: true }`; the file arrives in piece 6).
 - The composer's attachments: a file input, drop and paste in the page hand bytes to `MacApp.attach({ name, type,
   bytes })`; the main process fits them with the chat tools' `ImageProcessor` and returns the attachment the phone's
   `PhotoAttachment` describes, so `accept` sends the same `UserInput` as the phone. Thumbnails come back as data URLs.
@@ -61,3 +61,32 @@ About 450 lines: rows and content 180, tool and search cards 120, transcript and
 ## Not in this piece
 
 Settings, name and avatar editing (6).
+
+## As built
+
+From `dfee5d9` on `feat/mac-app-shell` (2026-10-28), one commit, with streamdown 2.7.1 and Tailwind 4.3.3. What
+differs from the plan:
+
+- **Tailwind, as streamdown requires.** Its components carry Tailwind utilities and `streamdown/styles.css` holds
+  only the animation keyframes, so the window's stylesheet is a Tailwind input (`@import "tailwindcss"`, a
+  `@source` for streamdown's `dist`, and the palette in shadcn's names mapped through `@theme inline`), compiled by
+  Tailwind's CLI from Hutch's `preBuild` hook (`scripts/pre-build.ts`, 38 ms) into `build-css/app.css`, which
+  `build.copy` places beside the page. Hutch's bundler has no CSS step; this is the one build step beyond it.
+- **Links** go through a `MacApp.openExternal` method (the main process applies the phone's `safeSourceUrl` policy
+  and calls `Utils.openExternal`); streamdown gets an `a` component override and `linkSafety` off, since the main
+  process is the gate. Copy uses the page's own clipboard.
+- **Attachments** are `MacInfiniChat.pickPhotos` (the open dialog, `Utils.openFileDialog`) and `attach` (a dropped
+  or pasted file as base64); both fit the photo with pi-durable's processor (`src/main/attachments.ts`) to the shown
+  model's limits from the machine's catalog and the controls, and return pi-ai's image part with an ID, which the
+  composer shows as a data URL and `accept` sends as the phone does (`userInput`).
+- **Icons** are a dozen inline SVG paths (`src/view/icon.tsx`) in place of SF Symbols; the agent's mark is an ∞
+  glyph until piece 6 adds the avatar.
+- `web-search-presentation.ts` moved into `packages/infinichat/src/chat/` (deviation 2); the phone imports it there.
+- The transcript follows new messages while scrolled near the end and shows a jump button otherwise
+  (`src/view/transcript.tsx`), in place of the phone's FlashList settings.
+
+Verified on this Mac: the app builds with the hook, launches, loads the 2.9 MB window bundle with streamdown
+without a console error, and holds its link to the server. Not verified, since the conversation is on vikash-system (the
+server's `heldBy`) and the window shows that notice instead of a transcript: Markdown, tool cards, searches, images,
+copy, links and attachments need the conversation on this Mac, after the phone's Release install from this branch
+and a move here from the phone.
