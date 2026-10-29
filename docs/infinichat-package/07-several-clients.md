@@ -149,7 +149,8 @@ since the doc names no steps. What differs from the plan:
   decision is not (up to the library's ten-minute cap). `execution/remote/tailscale.ts` gives every SSH connect
   (`channel.ts`, `phone-dialer.ts`) a `tailscaleSignIn`: the package's `TailscaleLogins` finds the URL and opens it
   once in expo-web-browser's in-app browser, which closes by itself once the connection settled. Not
-  `openAuthSessionAsync`: Tailscale's page never redirects back to the app.
+  `openAuthSessionAsync`: Tailscale's page never redirects back to the app. Verified by the owner the same day
+  against vikash-system's real check-mode hold: the sheet came up, they signed in, the connection went on.
 - **A move goes straight from one machine to another** (2026-10-27, the owner: "why does the process need the
   iphone if transferring between machines?"). The phone orchestrates, as it holds the home record and installs the
   target's server, but the bytes don't pass through it. `between` in `move.ts`: the phone's own connection to the
