@@ -75,3 +75,55 @@ directory browser 250.
 ## Not in this piece
 
 Sign-in on the Mac (8).
+
+## As built
+
+From `4bd7ba8` (2026-10-29), one commit, with pi 1.4.0, Electrobun 2.0.5 and shadcn 4.23 (`context-menu` added with
+the CLI). What differs from the plan:
+
+- **Nothing to move for storage.** `openNodeSqliteStorage` is pi-durable's own (`storage/sqlite/node`), which the
+  server already imports directly; the Mac does the same (`src/main/chats.ts`). `NEW_CHAT_DEFAULTS` moved to
+  `packages/infinichat/src/pi/new-chat.ts`; the phone's copy in `apps/mobile/src/pi/models.ts` stays until its
+  import is switched, since `apps/mobile` was outside this piece.
+- **The local root is the host's.** `validateExecution` and `executionSettings` (`execution/document.ts`) take a
+  `LocalRoot`: `/workspace` by default, the phone's sandbox, inside which every local directory lies and which stands
+  for an unset one; `null` on the Mac, where a chat runs in a real folder, so an unset directory is the chat's own
+  folder under `userData/chats/<workspace id>` and any absolute folder may be chosen. `DurableChatService.open({ local:
+  { root } })` hands it to its `ChatView`s and to `updateExecution`. Without it the phone's rule refused every Mac
+  folder, and a chat switched back to This Mac got `/workspace` as its directory.
+- **The thread takes its source from a context** (`components/chat/thread-source.ts`): the view's three cells as
+  `MacInfiniChat` and `MacChat` both serve them, plus the optional `steerQueued`; a reference to either object is a
+  source as it is, so `Transcript` reads `useThreadSource()` and the InfiniChat screen provides its reference.
+  `message-row.tsx` offers Send as steer on a queued follow-up when the source has it. The draft and photo handling of
+  the InfiniChat screen became `hooks/use-draft.ts`, which both screens use.
+- **The row menu is shadcn's `ContextMenu`**, not Electrobun's: Rename needs a text field and Delete a confirmation,
+  both in the window, as piece 10 moved the Machines removal there; `MacChats` has no `showMenu`. The rows are
+  `SidebarMenuButton`s under a `SidebarInput` search, New Chat is the group's `SidebarGroupAction` and `⌘N`, and the
+  Connect a provider card opens Settings (its Providers pane is piece 8). Rename and Delete are the window's dialogs
+  (`chat-actions.tsx`); a shown chat that is deleted sends the window back to InfiniChat, as the phone goes back to
+  its list.
+- **`MacChats`' cell is `report`**, not `openError`: Chord reserves `error` on references. It carries a failed open,
+  else the Harness's latest report, as `MacInfiniChat.snapshot.report` does.
+- **`MacAccount` exists now** with what the chats need of piece 8's object: `catalog`, `access`, `refreshCatalog`,
+  over `src/main/account.ts` (the credential store, `createServerModels`, `authError`). `registerBunOAuthFlows` waits
+  for piece 8 with its caller, `models.login`.
+- **`MacChat` also fits photos** (`pickPhotos`, `attach`) to the chat's model with the same `Attachments` as
+  `MacInfiniChat`, since the composer is the same.
+- **Folder listing and search** are `src/main/folders.ts` over any `ExecutionEnv` (the phone's `owner.ts`), reached
+  through `MacMachines.environment(endpoint, signal, cwd?)`, which gained the chat's working directory. The browser's
+  path helpers are the phone's, in `directory-browser.tsx`.
+- **The settings sheet is a `Dialog`** with `Select`s for provider, model, reasoning effort and environment, the
+  working directory field, Choose Folder… (the open dialog for This Mac; for a machine the directory browser opens in
+  the sheet in place of the button), Refresh Models, Cancel and Save.
+
+Size: about 1,350 lines of our own code (the copied `context-menu.tsx` aside) against the plan's ~800: the thread
+seam, the draft hook and the dialogs that stand in for the phone's system alerts were not planned, and the sheet with
+its browser is ~420 for the plan's 250.
+
+Verified on this Mac (2026-10-29): typecheck and lint of `apps/mac` and `packages/infinichat`, the server's and the
+phone's typechecks, the dev build; the app launches with the chats open (`chats.db` appears in its `dev/` data
+folder) with nothing reported by the main process or the window's console. Not verified, because this session could
+not drive the window (macOS refused it keystrokes and screenshots): creating, renaming and deleting a chat, the
+context menu, the settings sheet and the directory browser, sending with tools on this Mac and on a machine, stop,
+steer, photos, and a parked chat's Resume. A send also needs a provider credential in the app's `credentials.json`,
+which arrives with piece 8.

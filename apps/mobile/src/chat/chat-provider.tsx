@@ -11,6 +11,7 @@ import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
 import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/machines';
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
+import { NEW_CHAT_DEFAULTS } from '@pi-agent/infinichat/pi/new-chat';
 import type { ProviderAccess, ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
@@ -30,7 +31,7 @@ import { phoneMachines, shownMachines } from '../pi/infinichat-remote/phone-mach
 import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
 import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
 import { SERVER_BUNDLE } from '../pi/infinichat-remote/server-assets';
-import { createChatCredentialStore, createChatModels, NEW_CHAT_DEFAULTS } from '../pi/models';
+import { createChatCredentialStore, createChatModels } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
 import { openExpoSqliteStorage } from '../pi/storage';

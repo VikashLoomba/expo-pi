@@ -7,7 +7,9 @@ import Electrobun, {
 } from 'electrobun/main';
 
 import type { WindowCommand, WindowRPC } from '../rpc';
+import { MacAccount } from './account';
 import { MacAvatar } from './avatar';
+import { MacChats } from './chats';
 import { macHome } from './home';
 import { createMacHost } from './host';
 import { macClient } from './identity';
@@ -16,6 +18,7 @@ import { MacInfiniChat } from './infinichat';
 import { listenForWindows } from './listen';
 import { MacMachines, thisMac } from './machines';
 import { ScheduledNotifier } from './notifications';
+import { serveChats } from './serve-chats';
 import { serveInfiniChat } from './serve-infinichat';
 import { serveMachines } from './serve-machines';
 import { readSettings, writeSettings } from './settings';
@@ -95,11 +98,15 @@ async function main(): Promise<void> {
   const avatar = new MacAvatar(settings);
   const relay = new SignInRelay(infinichat);
   const notifier = new ScheduledNotifier(infinichat.shown.scheduled);
+  // This Mac's own providers and chats, whose tools run here in a folder per chat or on a machine.
+  const account = new MacAccount(secrets);
+  const chats = new MacChats(account, machines, images);
   // The Settings window opens from the menu and from the InfiniChat screen; it exists once the windows listen.
   const ui = { openSettings: () => {} };
   const host = createMacHost({ version, userData }, ui);
   serveInfiniChat(host, infinichat, avatar);
   serveMachines(host, infinichat, machines);
+  serveChats(host, chats, account, machines);
   const windows = await listenForWindows(host);
   console.log(`InfiniChat ${version}: data in ${userData}, windows on 127.0.0.1:${windows.port}`);
 
@@ -179,7 +186,7 @@ async function main(): Promise<void> {
       // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
       let failure: unknown;
       for (const step of [async () => { relay.close(); notifier.close(); }, () => infinichat.close(),
-        async () => machines.close(), () => host.close(), () => windows.close()]) {
+        () => chats.close(), async () => machines.close(), () => host.close(), () => windows.close()]) {
         try {
           await step();
         } catch (error) {
@@ -194,6 +201,7 @@ async function main(): Promise<void> {
   });
   open();
   infinichat.open();
+  chats.open();
 }
 
 main().catch((error: unknown) => {

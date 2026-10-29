@@ -1,18 +1,18 @@
-import { uuidv7 } from '@earendil-works/pi-ai';
 import type { Host } from '@earendil-works/chord';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { CheckIcon, ChevronDownIcon, ClockIcon, PlusIcon, ServerIcon, SettingsIcon, XIcon } from 'lucide-react';
 
-import type { Attachment, MacPrincipal, MoveStatus } from '../../contract';
+import type { MacPrincipal, MoveStatus } from '../../contract';
 import { ChatAgentContext } from '../components/chat/agent';
 import { Composer } from '../components/chat/composer';
 import { Notice } from '../components/chat/notices';
 import { Placeholder } from '../components/chat/placeholder';
+import { ThreadSourceContext } from '../components/chat/thread-source';
 import { Transcript } from '../components/chat/transcript';
 import { useSheet } from '../components/infinichat/form-sheet';
 import { ProvidersSheet } from '../components/infinichat/providers-sheet';
@@ -23,6 +23,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
+import { useDraft } from '../hooks/use-draft';
 import { InfiniChatContext, useHeldInfiniChat, useInfiniChatRef } from '../hooks/use-infinichat';
 import { errorText, useMember } from '../hooks/use-ref';
 import { useOpenSettings } from '../lib/app-context';
@@ -46,29 +47,14 @@ function moving(move: MoveStatus, machine: string, stage: InstallStage | undefin
       : move.step === 'copying' ? `Copying from ${from} to ${machine}${copied}` : `Opening on ${machine}…`;
 }
 
-/** A draft keeps one request ID for every attempt to send it, so a resend after a failure is admitted once. */
-type Draft = { text: string; images: readonly Attachment[]; requestId: string };
-const emptyDraft = (): Draft => ({ text: '', images: [], requestId: uuidv7() });
-
-/** A file's bytes as base64, for the main process to fit. */
-function base64Of(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = typeof reader.result === 'string' ? reader.result : '';
-      resolve(url.slice(url.indexOf(',') + 1));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('The photo could not be read.'));
-    reader.readAsDataURL(file);
-  });
-}
-
-/** InfiniChat's one conversation: holds the window's reference and shows it. */
+/** InfiniChat's one conversation: holds the window's reference and shows it, as the thread's source too. */
 export function InfiniChatScreen({ host }: { host: Host<MacPrincipal> }) {
   const ref = useHeldInfiniChat(host);
   return (
     <InfiniChatContext value={ref}>
-      <InfiniChat />
+      <ThreadSourceContext value={ref}>
+        <InfiniChat />
+      </ThreadSourceContext>
     </InfiniChatContext>
   );
 }
@@ -96,12 +82,10 @@ function InfiniChat() {
   const providersSheet = useSheet();
   const scheduledSheet = useSheet();
   const [focusProvider, setFocusProvider] = useState<string>();
-  const [draft, setDraft] = useState(emptyDraft);
-  const [attaching, setAttaching] = useState(false);
+  const { draft, changeDraft, removeImage, choosePrompt, attach, attachFiles, attaching, localError, setLocalError,
+    reset, input } = useDraft(ref);
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const [localError, setLocalError] = useState<string>();
-  const input = useRef<HTMLTextAreaElement>(null);
   const name = controls?.name || TITLE;
   const agent = useMemo(() => ({ name, avatar }), [name, avatar]);
   const busy = !!controls?.busy;
@@ -120,52 +104,15 @@ function InfiniChat() {
     showProviders();
   }, [showProviders]);
 
-  const changeDraft = useCallback((text: string) => {
-    setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
-  }, []);
-  const removeImage = useCallback((id: string) => {
-    setDraft((current) => ({ ...current, images: current.images.filter((image) => image.id !== id),
-      requestId: uuidv7() }));
-  }, []);
-  const choosePrompt = useCallback((text: string) => {
-    changeDraft(text);
-    input.current?.focus();
-  }, [changeDraft]);
-  const attachWith = useCallback(async (work: () => Promise<readonly Attachment[]>) => {
-    setAttaching(true);
-    setLocalError(undefined);
-    try {
-      const images = await work();
-      if (images.length) {
-        setDraft((current) => ({ ...current, images: [...current.images, ...images], requestId: uuidv7() }));
-      }
-    } catch (cause) {
-      setLocalError(errorText(cause, 'The photo could not be attached. Try again.'));
-    } finally {
-      setAttaching(false);
-    }
-  }, []);
-  const attach = useCallback(() => { void attachWith(() => ref.pickPhotos()); }, [attachWith, ref]);
-  const attachFiles = useCallback((files: readonly File[]) => {
-    void attachWith(async () => {
-      const photos: Attachment[] = [];
-      for (const file of files) {
-        photos.push(await ref.attach({ name: file.name, mimeType: file.type, data: await base64Of(file) }));
-      }
-      return photos;
-    });
-  }, [attachWith, ref]);
   const send = useCallback(() => {
     const text = draft.text.trim();
     if ((!text && !draft.images.length) || admitting || !configured || !connected || settingsError) return;
     setAdmitting(true);
     setLocalError(undefined);
-    void ref.accept({ content: userInput(text, draft.images), requestId: draft.requestId }).then(() => {
-      setDraft(emptyDraft());
-    }, (cause: unknown) => {
-      setLocalError(errorText(cause, 'Your message could not be sent. Try again.'));
-    }).finally(() => setAdmitting(false));
-  }, [admitting, configured, connected, draft, ref, settingsError]);
+    void ref.accept({ content: userInput(text, draft.images), requestId: draft.requestId }).then(reset,
+      (cause: unknown) => { setLocalError(errorText(cause, 'Your message could not be sent. Try again.')); },
+    ).finally(() => setAdmitting(false));
+  }, [admitting, configured, connected, draft, ref, reset, setLocalError, settingsError]);
   const stop = useCallback(() => {
     if (stopping) return;
     setStopping(true);
@@ -173,7 +120,7 @@ function InfiniChat() {
     void ref.stop().catch((cause: unknown) => {
       setLocalError(errorText(cause, 'Something went wrong. Please try again.'));
     }).finally(() => setStopping(false));
-  }, [ref, stopping]);
+  }, [ref, setLocalError, stopping]);
 
   const connectionError = connection?.status === 'failed' ? connection.error : undefined;
   const messageError = localError || connectionError || controls?.error || snapshot?.report || snapshot?.view.error;

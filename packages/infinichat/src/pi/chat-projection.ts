@@ -9,7 +9,9 @@ import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-pre
 import type { ChatControls, ChatMessage, ChatSummary } from '../chat/types';
 import type { WebSearchPresentation } from '../chat/web-search-types';
 import type { ChatMetadata } from './chat-metadata';
-import { executionSettings, type ExecutionTargetState } from './execution/document';
+import {
+  DEFAULT_LOCAL_ROOT, executionSettings, type ExecutionTargetState, type LocalRoot,
+} from './execution/document';
 import type { ChatModelSettings } from './model-catalog';
 import type { SearchPresentationsState } from './native-web-search/documents';
 import { isSearchObservationEntry } from './native-web-search/entries';
@@ -76,7 +78,8 @@ function submissionError(submission: SubmissionRecord | undefined, entries: read
   return represented ? undefined : error;
 }
 
-export function projectControls(state: ChatState, entries: readonly EntryRecord[]): ChatControls {
+export function projectControls(state: ChatState, entries: readonly EntryRecord[],
+  localRoot: LocalRoot = DEFAULT_LOCAL_ROOT): ChatControls {
   const failure = state.live?.compactionFailure;
   const error = submissionError(state.submission, entries)
     ?? (failure ? `Could not summarize earlier messages: ${failure.error}` : undefined);
@@ -84,7 +87,7 @@ export function projectControls(state: ChatState, entries: readonly EntryRecord[
     id: state.id,
     title: state.metadata?.title || 'New chat',
     settings: settingsOf(state.agent),
-    execution: executionSettings(state.execution, state.agent),
+    execution: executionSettings(state.execution, state.agent, localRoot),
     busy: state.live?.run !== undefined,
     compacting: (state.live?.compactions?.length ?? 0) > 0,
     // pi-durable waits before retrying a failed request; the failed attempt is not an answer.
