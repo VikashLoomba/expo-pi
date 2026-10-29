@@ -127601,10 +127601,11 @@ var ExecutionTargetDoc = defineDoc({
   checkpointWhen: () => true,
   initial: () => ({ target: { kind: "local" } })
 });
-function executionSettings(state3, agent) {
+var DEFAULT_LOCAL_ROOT = "/workspace";
+function executionSettings(state3, agent, localRoot = DEFAULT_LOCAL_ROOT) {
   const target = state3?.target;
   if (target?.kind === "ssh") return { target: { kind: "ssh", machineId: target.machineId }, cwd: agent?.cwd ?? null };
-  return { target: { kind: "local" }, cwd: agent?.cwd ?? "/workspace" };
+  return { target: { kind: "local" }, cwd: agent?.cwd ?? localRoot };
 }
 
 // ../infinichat/src/chat/file-tool-presentation.ts
@@ -127981,14 +127982,14 @@ function submissionError(submission2, entries) {
   const represented = submission2.reason === "model_error" && placed !== void 0 && entries.some((entry2) => entry2.id > placed && entry2.model?.some((message) => message.role === "assistant" && message.stopReason === "error" && (!message.errorMessage || message.errorMessage === error)));
   return represented ? void 0 : error;
 }
-function projectControls(state3, entries) {
+function projectControls(state3, entries, localRoot = DEFAULT_LOCAL_ROOT) {
   const failure = state3.live?.compactionFailure;
   const error = submissionError(state3.submission, entries) ?? (failure ? `Could not summarize earlier messages: ${failure.error}` : void 0);
   return {
     id: state3.id,
     title: state3.metadata?.title || "New chat",
     settings: settingsOf(state3.agent),
-    execution: executionSettings(state3.execution, state3.agent),
+    execution: executionSettings(state3.execution, state3.agent, localRoot),
     busy: state3.live?.run !== void 0,
     compacting: (state3.live?.compactions?.length ?? 0) > 0,
     // pi-durable waits before retrying a failed request; the failed attempt is not an answer.
@@ -131020,9 +131021,12 @@ var ServerMachines = class {
   };
   getReach = () => this.reach;
   getPending = () => this.pending;
-  /** The machines as devices, under the names and descriptions the clients' device lists give them. */
+  /**
+   * The other machines as devices, under the names and descriptions the clients' device lists give them; this
+   * machine is the list's own first device (`serverDevices`), not one reached over SSH.
+   */
   devices() {
-    return this.machines.map((machine) => ({
+    return this.machines.filter((machine) => machine.name !== this.self).map((machine) => ({
       name: machine.name,
       description: machineDescription(machine),
       environment: async (who) => {
@@ -131050,6 +131054,7 @@ var ServerMachines = class {
     }
     this.publish();
     for (const machine of machines) {
+      if (machine.name === this.self) continue;
       if (this.reach[machineEndpoint(machine)] === void 0) void this.started(machine).catch(noop4);
     }
   }

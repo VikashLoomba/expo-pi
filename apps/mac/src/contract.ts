@@ -160,6 +160,8 @@ export const MacMachines = remote('infinichat.mac.machines', {
         checks: Type.Record(Type.String(), CheckSchema),
         identities: Type.Record(Type.String(), Type.String()),
         self: Type.String(),
+        /** The endpoint of the machine InfiniChat runs on, whose row has nothing to reach from there. */
+        holder: Type.Union([Type.Null(), Type.String()]),
       },
       methods: {
         save: method(MachineFormSchema),

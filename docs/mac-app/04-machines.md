@@ -96,3 +96,12 @@ Verified on 2026-10-28: ⌘, opens Settings with both machines, this Mac tagged;
 this Mac connected with the user's SSH setup, named it, wrote this app's `known_hosts`, and recorded vikash-system's
 InfiniChat key and this Mac's key authorized there in the document (the phone and the server see both). Not
 verified: an identity file, Trust new key after a changed key, removal, a machine added from the Mac.
+
+### Later (2026-10-29): the holder's own row
+
+The owner saw "From InfiniChat: Can't connect … connect to host vikash-system port 22: Connection refused" on
+vikash-system's row while the conversation ran there: the server reached every listed machine over its own SSH,
+itself included, and its own address answers no SSH outside the tailnet. `ServerMachines` now skips the record
+named as itself (a check names a record as `machineIdentity` does, which is the server's device name), in its
+reach and in its device list, where it is the first device already; the Mac's pane marks that row "Runs
+InfiniChat" (a `holder` cell from the shown machine) and shows no reach for it, as the phone's list does.

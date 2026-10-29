@@ -94,9 +94,12 @@ export class ServerMachines {
   readonly getReach = () => this.reach;
   readonly getPending = () => this.pending;
 
-  /** The machines as devices, under the names and descriptions the clients' device lists give them. */
+  /**
+   * The other machines as devices, under the names and descriptions the clients' device lists give them; this
+   * machine is the list's own first device (`serverDevices`), not one reached over SSH.
+   */
   devices(): Device[] {
-    return this.machines.map((machine) => ({
+    return this.machines.filter((machine) => machine.name !== this.self).map((machine) => ({
       name: machine.name,
       description: machineDescription(machine),
       environment: async (who: string) => {
@@ -126,6 +129,9 @@ export class ServerMachines {
     }
     this.publish();
     for (const machine of machines) {
+      // This machine's own record, named as a check names it (`machineIdentity`): nothing to reach over SSH, and
+      // its own address answers no SSH outside the tailnet (owner, 2026-10-29: "Can't connect" on the holder's row).
+      if (machine.name === this.self) continue;
       if (this.reach[endpoint(machine)] === undefined) void this.started(machine).catch(noop);
     }
   }

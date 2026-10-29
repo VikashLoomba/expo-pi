@@ -33,6 +33,7 @@ const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 export function MachinesPane({ machines: api }: { machines: MachinesRef }) {
   const listed = useMember(api.machines);
   const self = useMember(api.self);
+  const holder = useMember(api.holder) ?? null;
   const [editing, setEditing] = useState<{ endpoint?: string }>();
   const [notice, setNotice] = useState<string>();
   const rows = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
@@ -62,6 +63,7 @@ export function MachinesPane({ machines: api }: { machines: MachinesRef }) {
       <ItemGroup>
         {rows.map(([endpoint, machine]) => (
           <MachineRow key={endpoint} api={api} endpoint={endpoint} machine={machine} isSelf={endpoint === self}
+            isHolder={endpoint === holder}
             onEdit={() => setEditing({ endpoint })} act={act} />
         ))}
       </ItemGroup>
@@ -69,8 +71,11 @@ export function MachinesPane({ machines: api }: { machines: MachinesRef }) {
   );
 }
 
-function MachineRow({ api, endpoint, machine, isSelf, onEdit, act }: {
-  api: MachinesRef; endpoint: string; machine: Machine; isSelf: boolean; onEdit: () => void;
+function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
+  api: MachinesRef; endpoint: string; machine: Machine; isSelf: boolean;
+  /** The machine InfiniChat runs on: the reach from InfiniChat is its own, so the row shows none. */
+  isHolder: boolean;
+  onEdit: () => void;
   act: (work: Promise<unknown>, fallback: string) => void;
 }) {
   const checks = useMember(api.checks);
@@ -92,6 +97,7 @@ function MachineRow({ api, endpoint, machine, isSelf, onEdit, act }: {
         <ItemTitle className="machine-title">
           <span className="machine-name">{machine.name}</span>
           {isSelf && <Badge variant="secondary">This Mac</Badge>}
+          {isHolder && <Badge variant="secondary">Runs InfiniChat</Badge>}
         </ItemTitle>
         <ItemDescription><code className="machine-endpoint">{endpoint}</code></ItemDescription>
       </ItemContent>
@@ -136,7 +142,7 @@ function MachineRow({ api, endpoint, machine, isSelf, onEdit, act }: {
             Use your SSH setup
           </button>}
         </dd>
-        {!isSelf && reaches !== undefined && reaches !== null && (
+        {!isSelf && !isHolder && reaches !== undefined && reaches !== null && (
           <>
             <dt>From InfiniChat</dt>
             <dd className={waiting !== undefined || (reach !== undefined && !reach.reachable) ? 'failed' : undefined}>

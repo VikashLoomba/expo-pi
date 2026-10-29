@@ -29,6 +29,8 @@ export function serveMachines(host: Host<MacPrincipal>, infinichat: MacInfiniCha
     const checks = self.state('checks', ChecksSchema, { init: machines.getChecks });
     const identities = self.state('identities', IdentitiesSchema, { init: machines.getIdentities });
     const own = self.state('self', Type.String(), { init: machines.getSelf });
+    const currentHolder = () => infinichat.getMachine()?.id ?? null;
+    const holder = self.state('holder', Type.Union([Type.Null(), Type.String()]), { init: currentHolder });
     self.on('machines', shown.machines, (_change, ctx) => {
       list.replace(ctx, currentMachines(), { diff: true });
       own.replace(ctx, machines.getSelf(), { diff: true });
@@ -37,6 +39,7 @@ export function serveMachines(host: Host<MacPrincipal>, infinichat: MacInfiniCha
     self.on('reach', infinichat, (_change, ctx) => {
       reach.replace(ctx, currentReach(), { diff: true });
       pendingHostKeys.replace(ctx, currentPending(), { diff: true });
+      holder.replace(ctx, currentHolder(), { diff: true });
     });
     self.on('checks', machines, (_change, ctx) => {
       checks.replace(ctx, machines.getChecks(), { diff: true });
@@ -50,6 +53,7 @@ export function serveMachines(host: Host<MacPrincipal>, infinichat: MacInfiniCha
       checks,
       identities,
       self: own,
+      holder,
       save: (form) => machines.save(form),
       remove: ({ endpoint }) => machines.remove(endpoint),
       check: ({ endpoint }) => { machines.check(endpoint); },
