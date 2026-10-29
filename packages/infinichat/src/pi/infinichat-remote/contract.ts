@@ -82,6 +82,18 @@ export const MachinePatchSchema = Type.Partial(Type.Pick(MachineSchema, ['name',
 /** What the server knows a machine by, whichever client lists it: `username@hostname:port`. */
 export const machineEndpoint = ({ username, hostname, port }: { username: string; hostname: string; port: number }) =>
   `${username}@${hostname}:${port}`;
+/**
+ * The parts of an endpoint, for a client that must reach the machine before it can read the document that lists
+ * it, such as the one holding the conversation; undefined for a string that is not an endpoint.
+ */
+export function endpointMachine(endpoint: string): Pick<Machine, 'hostname' | 'port' | 'username'> | undefined {
+  const at = endpoint.indexOf('@');
+  const colon = endpoint.lastIndexOf(':');
+  if (at < 1 || colon < at + 2 || colon === endpoint.length - 1) return undefined;
+  const port = Number(endpoint.slice(colon + 1));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return undefined;
+  return { username: endpoint.slice(0, at), hostname: endpoint.slice(at + 1, colon), port };
+}
 /** Per machine endpoint, whether the server reached it the last time it tried, and pi-env's error when it didn't. */
 export const ReachSchema = Type.Record(Type.String(), Type.Union([
   Type.Object({ reachable: Type.Literal(true) }),

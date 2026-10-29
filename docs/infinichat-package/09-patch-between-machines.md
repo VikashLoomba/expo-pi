@@ -60,3 +60,19 @@ the phone needs a Release install for the same bundle.
 - Move InfiniChat from this Mac to vikash-system and back, with both machines holding a copy from today: each move's
   copy step shows the patch's size, not 92 MB, and finishes in seconds; `incoming` matches what the source named.
 - A target without a copy (its `copy/` removed) falls back to the whole file.
+
+## As built
+
+From `de45841` on `feat/mac-app-shell` (2026-10-28), one commit. What differs from the plan:
+
+- **`transfer.ts` owns the folder names** (`FOLDER`, `DATA`, `INFINICHAT_DATABASE`) with the transport; `move.ts`
+  imports them and re-exports `INFINICHAT_DATABASE`. `Copy.transfer` names the downloaded patch on each side.
+- **The server's patched file was world-readable.** `nodeDatabaseFiles.write` used `writeFile`'s default mode, so the
+  result of `apply` on vikash-system landed 0664; it writes 0600 now, as the whole-file path always did, and the file
+  there was tightened by hand. A second bundle followed.
+- **The pull's signal is the context's**: `Context.abortSignal`, or one that never fires.
+
+Verified on 2026-10-28: a move from this Mac to vikash-system, both holding a copy from earlier that day, finished
+in seconds where the whole file had taken minutes; vikash-system's server was reinstalled from the new bundle by the
+move, `incoming/` was clean afterwards, and the adopted database matched what the Mac named. Not verified: the move
+back with a patch, and the fallback for a target without a copy.

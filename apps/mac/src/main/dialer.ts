@@ -105,7 +105,7 @@ export function remoteDialer(endpoint: string, record: () => Machine | undefined
       const open = async (target: Target): Promise<Link> => {
         link?.close();
         await tunnel?.close();
-        tunnel = await openTunnel(machines.target(machine), target.port);
+        tunnel = await openTunnel(machines.target(machine), target.port, machines.watchTailscale);
         tunnel.onDropped(onDropped);
         const socket = new WebSocket(`ws://127.0.0.1:${tunnel.port}`,
           { headers: { authorization: `Bearer ${target.secret}` } });

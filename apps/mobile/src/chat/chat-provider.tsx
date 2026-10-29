@@ -147,12 +147,43 @@ function useChatRuntime() {
       setInfiniChatClient(client);
       return client;
     };
+    // Let go of the client at once, so a move chosen next gets a new one, and close it in order with storage. The
+    // screens' client is then the one for the machine the home record names, if any.
+    const closeMachine = (machineId: string) => {
+      const closing = state.remotes.get(machineId);
+      state.remotes.delete(machineId);
+      const home = infiniChatHome.getSnapshot();
+      setInfiniChatClient(home.home === 'machine' ? state.remotes.get(home.machineId) : undefined);
+      return queued(async () => {
+        await closing?.close();
+      });
+    };
+    // The conversation went elsewhere while this phone was away, moved by the Mac: the shown server says who holds
+    // it. A machine this phone has credentials for is followed, as the Mac app follows (`MacInfiniChat.follow`); a
+    // phone is shown as the holder, since nothing reaches it.
+    let unfollow = () => {};
+    const follow = (shown: RemoteInfiniChat, machineId: string) => {
+      const held = shown.getConversation();
+      const home = infiniChatHome.getSnapshot();
+      if (held === undefined || held.active || held.heldBy === undefined) return;
+      if (home.home !== 'machine' || home.phase !== 'there' || home.machineId !== machineId) return;
+      const heldBy = held.heldBy.id;
+      if (heldBy === machineId || moves.getSnapshot() !== undefined || remoteHosts.get(heldBy) === undefined) return;
+      infiniChatHome.set({ version: 1, home: 'machine', machineId: heldBy, phase: 'there' });
+      const next = machine(heldBy);
+      showMachine(next);
+      next.reconnect();
+      void closeMachine(machineId);
+    };
     // The machine holds the conversation open: the screens show it, and the notifications follow its tasks, which it
     // starts itself at their time.
     const showMachine = (opened: RemoteInfiniChat) => {
       infiniChat.show(opened);
       notifications.follow({ tasks: opened.scheduled, runsOn: 'machine',
         report: (error) => setOpenError(`InfiniChat: ${errorText(error)}`) });
+      unfollow();
+      const machineId = opened.machineId;
+      unfollow = opened.subscribe(() => follow(opened, machineId));
     };
     // A move borrows the remote owner's connection to the machine, as the chats' tools do, and never closes it.
     const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(machines, machineId),
@@ -172,17 +203,7 @@ function useChatRuntime() {
       }),
       machine,
       show: showMachine,
-      // Let go of the client at once, so a move chosen next gets a new one, and close it in order with storage. The
-      // screens' client is then the one for the machine the home record names, if any.
-      closeMachine: (machineId) => {
-        const closing = state.remotes.get(machineId);
-        state.remotes.delete(machineId);
-        const home = infiniChatHome.getSnapshot();
-        setInfiniChatClient(home.home === 'machine' ? state.remotes.get(home.machineId) : undefined);
-        return queued(async () => {
-          await closing?.close();
-        });
-      },
+      closeMachine,
     });
     setMoves(moves);
     // Returning to the app retries a failed open; an open service ignores the call. While InfiniChat lives on a
@@ -256,6 +277,7 @@ function useChatRuntime() {
     return () => {
       subscription.remove();
       unmounted = true;
+      unfollow();
       // A move stops where it is; its home record carries it on at the next launch.
       void moves.close();
       serialize(async () => {

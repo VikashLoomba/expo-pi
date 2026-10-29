@@ -6,7 +6,7 @@ import {
   RemoteExecutionEnv, scanHostKey, type Connection, type RemotePlatform, type SshTarget,
 } from '@earendil-works/pi-env';
 import {
-  machineEndpoint, type InfiniChatClient, type Machine,
+  endpointMachine, machineEndpoint, type InfiniChatClient, type Machine,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { MachineDirectory } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
@@ -20,6 +20,7 @@ import { PATHS, Utils } from 'electrobun/main';
 
 import type { Check } from '../contract';
 import { writeSettings, type Settings } from './settings';
+import { TailscaleLogins, touchOverSsh } from './tailscale';
 
 /** This Mac as a machine: its name, its host name and the account the app runs as. */
 export interface MacMachine {
@@ -62,6 +63,12 @@ export class MacMachines {
   private readonly listeners = new Set<() => void>();
   private readonly knownHosts: string;
   private closed = false;
+  /** Tailscale SSH's sign-ins, opened once each; a check under way shows that it waits for one. */
+  private readonly logins = new TailscaleLogins(() => {
+    for (const [endpoint, check] of Object.entries(this.checks)) {
+      if (check.stage !== undefined) this.stage(endpoint, 'approving');
+    }
+  });
 
   constructor(private readonly shown: ShownInfiniChat, private readonly client: InfiniChatClient,
     private readonly secrets: CredentialBackend, private readonly self: MacMachine,
@@ -197,9 +204,20 @@ export class MacMachines {
     return path ?? null;
   }
 
-  /** A machine's files and commands over this Mac's own SSH, for a check, a removal and piece 5's moves. */
+  /**
+   * A machine's record: the document's, or what its endpoint says while the document is out of reach, as when the
+   * machine to reach is the one holding the conversation.
+   */
+  known(endpoint: string): Machine | undefined {
+    const listed = this.shown.machines.getSnapshot()?.machines[endpoint];
+    if (listed !== undefined) return listed;
+    const parts = endpointMachine(endpoint);
+    return parts && { name: parts.hostname, ...parts };
+  }
+
+  /** A machine's files and commands over this Mac's own SSH, for a check, a removal and the moves. */
   async environment(endpoint: string, signal: AbortSignal): Promise<RemoteExecutionEnv> {
-    const machine = this.shown.machines.getSnapshot()?.machines[endpoint];
+    const machine = this.known(endpoint);
     if (machine === undefined) throw new Error('That machine is no longer among the machines.');
     const connection = await this.started(machine, signal);
     const info = await connection.info();
@@ -294,13 +312,22 @@ export class MacMachines {
     return opening;
   }
 
-  /** `connectSsh` with the daemon this app ships, trusting the machine's host key on first use. */
+  /** The sign-in Tailscale SSH may ask for, seen in `ssh` output as it comes. */
+  readonly watchTailscale = (text: string): void => { this.logins.watch(text); };
+
+  /**
+   * `connectSsh` with the daemon this app ships, trusting the machine's host key on first use. A touch goes first,
+   * so a Tailscale sign-in opens in the browser and is waited for (`tailscale.ts`).
+   */
   private async open(machine: Machine, signal: AbortSignal): Promise<Connection> {
     const target = this.target(machine);
     const connect = async () => {
+      await touchOverSsh(target, this.logins, signal);
+      signal.throwIfAborted();
       const remote = await detectPlatform(target);
       signal.throwIfAborted();
-      return (await connectSsh({ ...target, binary: this.daemon(remote), loginShell: true })).connection;
+      return (await connectSsh({ ...target, binary: this.daemon(remote), loginShell: true,
+        onLog: this.watchTailscale })).connection;
     };
     try {
       return await connect();
@@ -327,7 +354,7 @@ export class MacMachines {
 export function macDirectory(machines: MacMachines, id: string): MachineDirectory {
   return {
     id,
-    machine: () => machines.isSelf(id) ? machines.record() : machines.shownMachines()?.machines[id],
+    machine: () => machines.isSelf(id) ? machines.record() : machines.known(id),
     subscribe: machines.subscribe,
   };
 }

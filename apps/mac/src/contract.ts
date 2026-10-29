@@ -103,7 +103,7 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
 
 /** What a check of a machine from this Mac is doing, found, or ran into; one per endpoint while it matters. */
 export const CheckSchema = Type.Object({
-  stage: Type.Optional(Type.Enum(['connecting', 'checking', 'exchanging'])),
+  stage: Type.Optional(Type.Enum(['connecting', 'approving', 'checking', 'exchanging'])),
   result: Type.Optional(Type.Object({ version: Type.String(), os: Type.String(), arch: Type.String(),
     name: Type.String() })),
   error: Type.Optional(Type.String()),

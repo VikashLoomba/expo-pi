@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { mkdir, open, rename, rm } from 'node:fs/promises';
+import { mkdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
@@ -11,15 +10,14 @@ import type {
   ConversationFiles, ConversationState, InfiniChatClient,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
+import {
+  copyFrom, DATA, receivePatch, serverLines, type Copy,
+} from '@pi-agent/infinichat/pi/infinichat-remote/transfer';
 
 import { readState, updateState } from './state';
 
 const noop = () => {};
 const DATABASE = 'infinichat.db';
-/** The other machine's InfiniChat folder, in its account's home, as the phone's move.ts names it. */
-const FOLDER = '.infinichat';
-/** The bytes of one read of a pull, as the phone's copies read them (move.ts `CHUNK`). */
-const CHUNK = 4 * 1024 * 1024;
 type ConversationFile = ConversationFiles['db'];
 
 const same = (left: ConversationFile | undefined, right: ConversationFile | undefined) =>
@@ -31,37 +29,8 @@ const ignoreMissing = (error: unknown) => {
 /** Another machine's files through this machine's own SSH, the account's home there and its name, for a pull. */
 export interface PullSource { env: ExecutionEnv; home: string; name: string }
 
-/** Reads the source's file at `path` into `to`, made for this account alone, and describes what arrived. */
-async function copyFrom(source: PullSource, path: string, to: string, context: Context): Promise<ConversationFile> {
-  const failed = (step: string, error: Error) =>
-    new Error(`InfiniChat’s database on ${source.name} could not be ${step}. ${error.message}`);
-  const opened = await source.env.openBinaryReader(path, undefined, context);
-  if (!opened.ok) throw failed('opened', opened.error);
-  const reader = opened.value;
-  const hash = createHash('sha256');
-  let size = 0;
-  try {
-    const info = await reader.info(context);
-    if (!info.ok) throw failed('read', info.error);
-    const file = await open(to, 'w', 0o600);
-    try {
-      while (size < info.value.size) {
-        const read = await reader.read(size, CHUNK, context);
-        if (!read.ok) throw failed('read', read.error);
-        // A file that shrank since it was opened fails the check of what arrived.
-        if (read.value.byteLength === 0) break;
-        await file.write(read.value);
-        hash.update(read.value);
-        size += read.value.byteLength;
-      }
-    } finally {
-      await file.close();
-    }
-  } finally {
-    await reader.close(BACKGROUND_CONTEXT);
-  }
-  return { sha256: hash.digest('hex'), size };
-}
+/** The context's cancellation as the signal the transport takes; one that never fires when it has none. */
+const signalOf = (context: Context): AbortSignal => context.abortSignal ?? new AbortController().signal;
 
 /**
  * InfiniChat's conversation on this machine. One process owns a storage at a time (pi-durable README), so this
@@ -79,7 +48,7 @@ export class ServerConversation {
   private unfollow = noop;
   private readonly data: string;
 
-  constructor(private readonly home: string,
+  constructor(private readonly home: string, private readonly bundle: string,
     private readonly openCore: (storage: Storage) => Promise<InfiniChatService>) {
     this.data = join(home, 'data');
     const { active, adopted, heldBy } = readState(home);
@@ -179,18 +148,35 @@ export class ServerConversation {
   }
 
   /**
-   * Brings the database another machine released into `data/`, read from its `data/` over this machine's own SSH, as
-   * the phone's upload places its copy: written to `incoming/` first, checked against what that machine named, then
-   * placed, with a database already here kept in `released/`. Refused while this machine holds the conversation.
+   * Brings the database another machine released into `data/`, read over this machine's own SSH, as the phone's
+   * download brings it to the phone: as a patch of the pages that changed since the copy this machine kept from the
+   * last time it held the conversation (`archive`), or as the whole file when there is no copy or the patch fails.
+   * Either goes to `incoming/` first and is checked against what that machine named, then placed, with a database
+   * already here kept in `released/`. Refused while this machine holds the conversation.
    */
   pull(source: PullSource, files: ConversationFiles, context: Context): Promise<void> {
     return this.run(async () => {
       if (this.state.active) throw new Error('InfiniChat is already open on this machine.');
       await mkdir(join(this.data, 'incoming'), { recursive: true, mode: 0o700 });
       const incoming = join(this.data, 'incoming', DATABASE);
-      const copied = await copyFrom(source, `${source.home}/${FOLDER}/data/${DATABASE}`, incoming, context);
-      if (!same(copied, files.db)) {
-        throw new Error(`The copy from ${source.name} doesn’t match what InfiniChat left there. Try again.`);
+      const copy: Copy = { machine: source.env, files: nodeDatabaseFiles, signal: signalOf(context),
+        name: source.name, server: serverLines(this.bundle), transfer: join(this.data, 'incoming', 'transfer') };
+      const kept = join(this.home, 'copy', DATABASE);
+      await nodeDatabaseFiles.remove(incoming);
+      let copied = false;
+      if (await nodeDatabaseFiles.describe(kept) !== undefined) {
+        try {
+          await receivePatch(copy, false, kept, incoming, noop);
+          copied = same(await nodeDatabaseFiles.describe(incoming), files.db);
+        } catch {
+          copy.signal.throwIfAborted();
+        }
+      }
+      if (!copied) {
+        await copyFrom(copy, `${source.home}/${DATA}/${DATABASE}`, incoming, noop);
+        if (!same(await nodeDatabaseFiles.describe(incoming), files.db)) {
+          throw new Error(`The copy from ${source.name} doesn’t match what InfiniChat left there. Try again.`);
+        }
       }
       const database = join(this.data, DATABASE);
       if (await this.files()) {

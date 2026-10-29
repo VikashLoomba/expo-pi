@@ -20,7 +20,10 @@ export const MachinesDoc = defineDoc<MachinesState>({
 /** What `patchMachine` may change: what a check finds (the name, the keys) and the host key a client accepted. */
 export type MachinePatch = Partial<Pick<Machine, 'name' | 'publicKey' | 'authorizedKeys' | 'hostKey'>>;
 
-/** Adds or replaces the record at its endpoint. A name another machine has is refused: the device list names devices. */
+/**
+ * Adds or replaces the record at its endpoint. A name another machine has is refused:
+ * the device list names devices.
+ */
 export async function putMachine(harness: Harness, record: Machine, context = BACKGROUND_CONTEXT): Promise<void> {
   const endpoint = machineEndpoint(record);
   await harness.commit(async (tx) => {

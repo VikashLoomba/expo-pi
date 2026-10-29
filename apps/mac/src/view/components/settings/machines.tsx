@@ -20,7 +20,8 @@ import {
 import { Spinner } from '../ui/spinner';
 
 const STAGES: Record<NonNullable<Check['stage']>, string> = {
-  connecting: 'Connecting…', checking: 'Checking the machine…', exchanging: 'Exchanging InfiniChat keys…',
+  connecting: 'Connecting…', approving: 'Approve the SSH sign-in in your browser…',
+  checking: 'Checking the machine…', exchanging: 'Exchanging InfiniChat keys…',
 };
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { createWriteStream, existsSync } from 'node:fs';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { Writable } from 'node:stream';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { gunzip, gzip } from 'node:zlib';
@@ -8,18 +9,18 @@ import { gunzip, gzip } from 'node:zlib';
 import type { DatabaseFiles } from '../pi/infinichat-remote/move';
 
 /**
- * InfiniChat's database files with Node: page diffs with `node:crypto` and `node:zlib`, and the database's own
- * operations with `node:sqlite`. Names are paths, as `node:fs` takes them. A move's `rename`, `remove` and `open` come
- * with their first caller, the Mac app's side of a move; the server's side is its page commands and its conversation.
+ * InfiniChat's database files with Node: page diffs with `node:crypto` and `node:zlib`, the database's own
+ * operations with `node:sqlite`, and a receiver's files with `node:fs`. Names are paths, as `node:fs` takes them.
  */
-export const nodeDatabaseFiles: Omit<DatabaseFiles, 'rename' | 'remove' | 'open'> = {
+export const nodeDatabaseFiles: DatabaseFiles = {
   sha256: async (bytes) => createHash('sha256').update(bytes).digest(),
   gzip: promisify(gzip),
   gunzip: promisify(gunzip),
   read: (path) => readFile(path),
+  // Made for this account alone, as the server's other files are: the result of a patch is the conversation.
   async write(path, bytes) {
     const aside = `${path}.${process.pid}`;
-    await writeFile(aside, bytes);
+    await writeFile(aside, bytes, { mode: 0o600 });
     await rename(aside, path);
   },
   async describe(path) {
@@ -62,4 +63,13 @@ export const nodeDatabaseFiles: Omit<DatabaseFiles, 'rename' | 'remove' | 'open'
       source.close();
     }
   },
+  async rename(from, to) {
+    for (const suffix of ['-wal', '-shm']) await rm(`${to}${suffix}`, { force: true });
+    await rename(from, to);
+    for (const suffix of ['-wal', '-shm']) await rm(`${from}${suffix}`, { force: true });
+  },
+  async remove(path) {
+    for (const suffix of ['', '-wal', '-shm']) await rm(`${path}${suffix}`, { force: true });
+  },
+  open: async (path) => Writable.toWeb(createWriteStream(path, { mode: 0o600 })),
 };

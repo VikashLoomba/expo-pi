@@ -17,7 +17,7 @@ export interface Tunnel {
  * stdio is the socket (OpenSSH's stdio forwarding, which `ClearAllForwardings` leaves alone), under pi-env's own
  * arguments: batch mode, no agent, host keys from the app's file. A connection ends when its `ssh` exits.
  */
-export function openTunnel(target: SshTarget, port: number): Promise<Tunnel> {
+export function openTunnel(target: SshTarget, port: number, onDiagnostics: (text: string) => void): Promise<Tunnel> {
   const children = new Set<ChildProcess>();
   const dropped = new Set<() => void>();
   let closing = false;
@@ -28,7 +28,10 @@ export function openTunnel(target: SshTarget, port: number): Promise<Tunnel> {
       { stdio: ['pipe', 'pipe', 'pipe'] });
     children.add(child);
     let diagnostics = '';
-    child.stderr?.on('data', (chunk: Buffer | string) => { diagnostics += chunk.toString(); });
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      diagnostics += chunk.toString();
+      onDiagnostics(chunk.toString());
+    });
     socket.pipe(child.stdin);
     child.stdout.pipe(socket);
     const end = () => {

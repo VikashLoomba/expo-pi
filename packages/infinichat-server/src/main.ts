@@ -68,8 +68,10 @@ async function serve(device: string, description: string): Promise<number> {
     // closes its remote owner after both Harnesses.
     const machines = new ServerMachines(home, device);
     closes.push(() => machines.close());
+    // The phone installs each bundle in a directory named after its hash.
+    const bundle = basename(dirname(fileURLToPath(import.meta.url)));
     // Open only while this machine holds the conversation; the phone moves it here and back.
-    const conversation = new ServerConversation(home, (storage) => InfiniChatService.open({
+    const conversation = new ServerConversation(home, bundle, (storage) => InfiniChatService.open({
       storage, models, devices: serverDevices(device, description, machines), machine: device,
       onClosed: (end) => {
         if (end.reason === 'failed') stopping.resolve(end);
@@ -88,8 +90,6 @@ async function serve(device: string, description: string): Promise<number> {
     });
     // It disposes its objects, then closes its links.
     closes.push(() => host.close());
-    // The phone installs each bundle in a directory named after its hash.
-    const bundle = basename(dirname(fileURLToPath(import.meta.url)));
     serveInfiniChat(host, conversation, {
       server: { bundle, pi: INFINICHAT_PI, device, description }, setTimeZone: (zone) => setTimeZone(home, zone),
       catalog: buildModelCatalog(models), credentials, signIn, machines,

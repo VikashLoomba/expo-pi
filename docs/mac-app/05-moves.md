@@ -92,3 +92,18 @@ Verified on 2026-10-28: the Mac moved InfiniChat to vikash-system (installing th
 SSH and reaching it through the tunnel) and back, with the subtitle through the steps; the phone followed. The move
 copies the whole file, which docs/infinichat-package piece 9 changes. Not verified: Cancel mid-way, a dropped SSH
 session reconnecting, and following a move the phone makes while the Mac shows the conversation.
+
+### Later the same day
+
+- **The phone follows a move the Mac makes.** Every move was the phone's own until now, so its provider never read
+  `heldBy` from a server that handed the conversation elsewhere; `chat-provider.tsx` now follows a listed machine it
+  has credentials for, as `MacInfiniChat.follow` does.
+- **The Mac dials from the endpoint when the document is out of reach.** The record of the machine holding the
+  conversation lives in the document that machine serves, so `MacMachines.known` falls back to the endpoint's parts
+  (`endpointMachine` in the contract), the way the phone dials from its credential record.
+- **Tailscale SSH's check mode** (owner, 2026-10-29): its sign-in comes as an SSH auth banner, which `ssh` prints to
+  stderr and then waits for (tailscale `ssh/tailssh/tailssh.go`, `HoldAndDelegate`; one sign-in holds for the
+  tailnet's check period). `src/main/tailscale.ts` opens the URL in the default browser once, from a touch
+  (`ssh … true`, stderr watched as it comes) that `MacMachines.open` runs before pi-env's connection, since pi-env
+  reads stderr only after `ssh` exits and gives up after a minute, from pi-env's `onLog` on the daemon's starts, and
+  from the tunnel's stderr; a check under way shows "Approve the SSH sign-in in your browser…" meanwhile.
