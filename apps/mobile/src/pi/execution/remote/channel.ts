@@ -1,9 +1,10 @@
 import {
   connect, isSshError, type SshAuth, type SshConnection, type SshHostKey, type SshShell,
-} from '@osuki-dev/react-native-ssh';
+} from '@automatalabs/react-native-ssh';
 import { BootstrapError } from './bootstrap-errors';
 import { provisionDaemon, quotePosix, type RemotePlatformState, type SshSetupStage } from './provisioning';
 import { exchangeKeys, type KeyExchange } from './ssh-keys';
+import { tailscaleSignIn } from './tailscale';
 
 export type { SshSetupStage } from './provisioning';
 
@@ -107,12 +108,18 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
     const onAbort = () => { void dispose(); };
     signal.addEventListener('abort', onAbort, { once: true });
     try {
-      connection = await connect({
-        host: snapshot.host, port: snapshot.port, username: snapshot.username, auth: snapshot.auth,
-        verifyHostKey: snapshot.verifyHostKey, hostKeyAlgorithms: snapshot.hostKeyAlgorithms,
-        signal, connectTimeoutMs: snapshot.connectTimeoutMs,
-        onDisconnected: () => notifyClosed(new Error('SSH connection lost. Check the Tailscale VPN and remote host.')),
-      });
+      const signIn = tailscaleSignIn();
+      try {
+        connection = await connect({
+          host: snapshot.host, port: snapshot.port, username: snapshot.username, auth: snapshot.auth,
+          verifyHostKey: snapshot.verifyHostKey, hostKeyAlgorithms: snapshot.hostKeyAlgorithms,
+          signal, connectTimeoutMs: snapshot.connectTimeoutMs, onBanner: signIn.onBanner,
+          onDisconnected: () =>
+            notifyClosed(new Error('SSH connection lost. Check the Tailscale VPN and remote host.')),
+        });
+      } finally {
+        signIn.settled();
+      }
       if (signal.aborted || closingRequested) {
         await connection.disconnect().catch(() => undefined);
         throw aborted();

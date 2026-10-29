@@ -1,6 +1,6 @@
 import { webSocketLink, type Link } from '@earendil-works/chord';
 import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
-import { connect, type SshConnection, type SshLocalForward } from '@osuki-dev/react-native-ssh';
+import { connect, type SshConnection, type SshLocalForward } from '@automatalabs/react-native-ssh';
 import type { ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
   installServer, machineIdentity, machineSecret, runningServer, savedSecret,
@@ -10,6 +10,7 @@ import { getRandomBytesAsync } from 'expo-crypto';
 
 import { connectionFailure } from '../execution/remote/channel';
 import { hostKeyPolicy, type RemoteHostAdmission, type RemoteHostRepository } from '../execution/remote/hosts';
+import { tailscaleSignIn } from '../execution/remote/tailscale';
 import type { RemoteExecution } from '../execution/remote/owner';
 import { createCredentialBackend } from '../secure-storage';
 import { phoneClient } from './phone-client';
@@ -36,12 +37,13 @@ function connectAdmitted(hosts: RemoteHostRepository, admission: RemoteHostAdmis
   onDisconnected?: () => void;
 }): Promise<SshConnection> {
   const { host, auth } = admission;
+  const signIn = tailscaleSignIn();
   return connect({
     host: host.hostname, port: host.port, username: host.username, auth, signal: options.signal,
-    ...hostKeyPolicy(hosts, admission), onDisconnected: options.onDisconnected,
+    ...hostKeyPolicy(hosts, admission), onBanner: signIn.onBanner, onDisconnected: options.onDisconnected,
   }).catch((error: unknown) => {
     throw connectionFailure(error);
-  });
+  }).finally(() => signIn.settled());
 }
 
 /**

@@ -1,0 +1,93 @@
+{
+  "name": "@automatalabs/react-native-ssh",
+  "version": "0.4.0",
+  "description": "Native SSH client for React Native and Expo \u2014 russh (Rust) wrapped in Nitro Modules. Connections, shells, exec and keys; bring your own terminal. Fork with an onBanner handler.",
+  "main": "./lib/index.js",
+  "module": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "react-native": "./src/index.ts",
+  "source": "./src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "cpp",
+    "nitrogen",
+    "nitro.json",
+    "*.podspec",
+    "ios/**/*.xcframework/**",
+    "android/build.gradle",
+    "android/gradle.properties",
+    "android/CMakeLists.txt",
+    "android/fix-prefab.gradle",
+    "android/src",
+    "android/rust-libs/**/*.a",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --outdir lib --format esm --target browser --external react-native-nitro-modules --sourcemap=linked",
+    "build:types": "tsc -p tsconfig.build.json",
+    "check:prebuilt": "bash scripts/check-prebuilt.sh",
+    "clean": "rm -rf lib android/build android/.cxx rust/target",
+    "header": "bash scripts/gen-header.sh",
+    "prepack": "bash scripts/check-prebuilt.sh && bun run build",
+    "prepare": "bun run build",
+    "rust:all": "bun run rust:ios && bun run rust:android",
+    "rust:android": "bash scripts/build-rust-android.sh",
+    "rust:ios": "bash scripts/build-rust-ios.sh",
+    "rust:test": "cd rust && cargo test",
+    "specs": "nitrogen --logLevel=\"info\"",
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "nitro",
+    "nitro-modules",
+    "ssh",
+    "ssh-client",
+    "russh",
+    "rust",
+    "ios",
+    "android"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VikashLoomba/react-native-ssh.git"
+  },
+  "author": "osuki-dev",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/VikashLoomba/react-native-ssh/issues"
+  },
+  "homepage": "https://github.com/VikashLoomba/react-native-ssh#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*",
+    "react-native-nitro-modules": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "nitrogen": "0.37.1",
+    "react": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-nitro-modules": "0.37.1",
+    "typescript": "~6.0.3"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "react-native": "./src/index.ts",
+      "import": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  }
+}

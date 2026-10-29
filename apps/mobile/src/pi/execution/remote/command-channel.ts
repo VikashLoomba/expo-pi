@@ -1,4 +1,4 @@
-import type { SshConnection } from '@osuki-dev/react-native-ssh';
+import type { SshConnection } from '@automatalabs/react-native-ssh';
 import { Buffer } from 'buffer';
 import { BootstrapError } from './bootstrap-errors';
 

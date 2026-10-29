@@ -8,6 +8,7 @@ import {
 import {
   endpointMachine, machineEndpoint, type InfiniChatClient, type Machine,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { TailscaleLogins } from '@pi-agent/infinichat/pi/infinichat-remote/tailscale';
 import type { MachineDirectory } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
   forgetSecret, machineIdentity, removeClient, savedSecret,
@@ -20,7 +21,7 @@ import { PATHS, Utils } from 'electrobun/main';
 
 import type { Check } from '../contract';
 import { writeSettings, type Settings } from './settings';
-import { TailscaleLogins, touchOverSsh } from './tailscale';
+import { touchOverSsh } from './tailscale';
 
 /** This Mac as a machine: its name, its host name and the account the app runs as. */
 export interface MacMachine {
@@ -63,8 +64,9 @@ export class MacMachines {
   private readonly listeners = new Set<() => void>();
   private readonly knownHosts: string;
   private closed = false;
-  /** Tailscale SSH's sign-ins, opened once each; a check under way shows that it waits for one. */
-  private readonly logins = new TailscaleLogins(() => {
+  /** Tailscale SSH's sign-ins, opened once each in the default browser; a check under way shows that it waits. */
+  private readonly logins = new TailscaleLogins((url) => {
+    Utils.openExternal(url);
     for (const [endpoint, check] of Object.entries(this.checks)) {
       if (check.stage !== undefined) this.stage(endpoint, 'approving');
     }

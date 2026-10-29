@@ -140,6 +140,16 @@ since the doc names no steps. What differs from the plan:
   `authorizedKeys`). `MachineSchema` carries `authorizedKeys`, so a change re-checks the machine; `ServerMachines`
   passes the key as pi-env's `identityFile` (`IdentitiesOnly`), so personal keys and agents stay out of it. Passwords
   still never leave the phone; a machine running Tailscale SSH needs none of this.
+- **Tailscale SSH's check mode on the phone** (owner, 2026-10-29: "Is it possible to do the same detection on the
+  iOS app to open an oauth browser?"). The sign-in comes as the SSH auth banner (RFC 4252 §5.4), which the phone's
+  SSH library dropped, so the phone now uses the owner's fork `@automatalabs/react-native-ssh` (0.4.0, source in
+  `packages/react-native-ssh`, mirrored at github.com/VikashLoomba/react-native-ssh; iOS archives only, built by its
+  `scripts/build-rust-ios.sh` and not committed): an `onBanner` connection handler, and the time from
+  the banner until authentication completes is not counted against `connectTimeoutMs`, as a host-key or prompt
+  decision is not (up to the library's ten-minute cap). `execution/remote/tailscale.ts` gives every SSH connect
+  (`channel.ts`, `phone-dialer.ts`) a `tailscaleSignIn`: the package's `TailscaleLogins` finds the URL and opens it
+  once in expo-web-browser's in-app browser, which closes by itself once the connection settled. Not
+  `openAuthSessionAsync`: Tailscale's page never redirects back to the app.
 - **A move goes straight from one machine to another** (2026-10-27, the owner: "why does the process need the
   iphone if transferring between machines?"). The phone orchestrates, as it holds the home record and installs the
   target's server, but the bytes don't pass through it. `between` in `move.ts`: the phone's own connection to the

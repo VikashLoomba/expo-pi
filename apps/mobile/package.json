@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@automatalabs/react-native-ssh": "workspace:*",
     "@earendil-works/chord": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/pi-durable": "catalog:",
     "@expo/metro-runtime": "~58.0.15",
     "@expo/ui": "~58.0.22",
-    "@osuki-dev/react-native-ssh": "0.3.0",
     "@pi-agent/infinichat": "workspace:*",
     "@pi-agent/infinichat-server": "workspace:*",
     "@shopify/flash-list": "2.3.2",

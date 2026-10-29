@@ -2,7 +2,10 @@ This is an Expo/React Native app for iOS. Prioritize iOS-native patterns and the
 
 The repository is a pnpm workspace in Expo's monorepo layout: the iOS app is in `apps/mobile`, the Mac app in
 `apps/mac`, the shared InfiniChat code in `packages/infinichat`, and the server the apps install on machines, with its
-build script, generated manifests and the bundled assets both apps ship, in `packages/infinichat-server`. App paths
+build script, generated manifests and the bundled assets both apps ship, in `packages/infinichat-server`. The
+phone's SSH library, `@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
+`packages/react-native-ssh` (Rust engine, C FFI, Nitro module); `pnpm install` builds its `lib/`, and its iOS
+archives are built there by `bash scripts/build-rust-ios.sh` before an iOS build, neither committed. App paths
 in this file (`src/app/`, `app.json`, `package.json`, `ios/`) are relative to `apps/mobile`.
 Install with `pnpm install` from the root; run Expo, EAS and `@expo/agent-cli` commands from `apps/mobile`.
 `@expo/agent-cli` writes its AGENTS.md block and skill links relative to the Expo project, but agents read this

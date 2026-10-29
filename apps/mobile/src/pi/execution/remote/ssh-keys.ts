@@ -1,4 +1,4 @@
-import type { SshConnection } from '@osuki-dev/react-native-ssh';
+import type { SshConnection } from '@automatalabs/react-native-ssh';
 import { isSshKeyBlob, keyBlob, keyExchangeLines } from '@pi-agent/infinichat/pi/infinichat-remote/keys';
 
 import { otherKeys, type MachinesAccess } from '../../infinichat-remote/phone-machines';

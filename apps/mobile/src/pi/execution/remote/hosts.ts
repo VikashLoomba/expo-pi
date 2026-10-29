@@ -1,4 +1,4 @@
-import type { SshHostKey } from '@osuki-dev/react-native-ssh';
+import type { SshHostKey } from '@automatalabs/react-native-ssh';
 import { machineEndpoint } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 

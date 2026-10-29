@@ -103,7 +103,9 @@ session reconnecting, and following a move the phone makes while the Mac shows t
   (`endpointMachine` in the contract), the way the phone dials from its credential record.
 - **Tailscale SSH's check mode** (owner, 2026-10-29): its sign-in comes as an SSH auth banner, which `ssh` prints to
   stderr and then waits for (tailscale `ssh/tailssh/tailssh.go`, `HoldAndDelegate`; one sign-in holds for the
-  tailnet's check period). `src/main/tailscale.ts` opens the URL in the default browser once, from a touch
-  (`ssh … true`, stderr watched as it comes) that `MacMachines.open` runs before pi-env's connection, since pi-env
-  reads stderr only after `ssh` exits and gives up after a minute, from pi-env's `onLog` on the daemon's starts, and
-  from the tunnel's stderr; a check under way shows "Approve the SSH sign-in in your browser…" meanwhile.
+  tailnet's check period). The package's `infinichat-remote/tailscale.ts` finds the URL and opens each once the
+  app's way (`TailscaleLogins`); the Mac opens it in the default browser, from a touch (`ssh … true`, stderr watched
+  as it comes, `src/main/tailscale.ts`) that `MacMachines.open` runs before pi-env's connection, since pi-env reads
+  stderr only after `ssh` exits and gives up after a minute, from pi-env's `onLog` on the daemon's starts, and from
+  the tunnel's stderr; a check under way shows "Approve the SSH sign-in in your browser…" meanwhile. The phone's
+  counterpart is in `docs/infinichat-package/07-several-clients.md` (its SSH library hands the banner over).
