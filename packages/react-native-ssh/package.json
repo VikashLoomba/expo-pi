@@ -1,7 +1,7 @@
 {
   "name": "@automatalabs/react-native-ssh",
   "version": "0.4.0",
-  "description": "Native SSH client for React Native and Expo \u2014 russh (Rust) wrapped in Nitro Modules. Connections, shells, exec and keys; bring your own terminal. Fork with an onBanner handler.",
+  "description": "Native SSH client for React Native and Expo \u2014 russh (Rust) wrapped in Nitro Modules. Connections, shells, exec and keys; bring your own terminal. The owner's fork, with an onBanner handler, kept in this workspace.",
   "main": "./lib/index.js",
   "module": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -53,16 +53,8 @@
     "ios",
     "android"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/VikashLoomba/react-native-ssh.git"
-  },
   "author": "osuki-dev",
   "license": "Apache-2.0",
-  "bugs": {
-    "url": "https://github.com/VikashLoomba/react-native-ssh/issues"
-  },
-  "homepage": "https://github.com/VikashLoomba/react-native-ssh#readme",
   "publishConfig": {
     "access": "public"
   },
