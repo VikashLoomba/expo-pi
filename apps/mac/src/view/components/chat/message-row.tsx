@@ -1,6 +1,7 @@
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
+import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { CheckIcon, CopyIcon } from 'lucide-react';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, use, useEffect, useRef, useState } from 'react';
 
 import { Bubble, BubbleContent } from '../ui/bubble';
 import { Button } from '../ui/button';
@@ -11,6 +12,7 @@ import { Trace, TraceIcon, TraceLine, TraceTitle } from '../ui/trace';
 import { AgentMark, useChatAgentName } from './agent';
 import { MessageContent as Markdown } from './message-content';
 import { MessageImages } from './message-images';
+import { ThreadSourceContext } from './thread-source';
 import { ErrorRow, ReasoningRow, ReportRow, SearchRows, SourcesRow, ToolRow } from './trace-rows';
 import { StatusIcon } from './status-icon';
 
@@ -43,6 +45,33 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** A queued input's note under its bubble, with the phone's Send as steer where the thread's source offers it. */
+function QueuedFooter({ message }: { message: ChatMessage }) {
+  const steerQueued = use(ThreadSourceContext)?.steerQueued;
+  const [steering, setSteering] = useState(false);
+  const [error, setError] = useState<string>();
+  const queued = message.queued;
+  if (queued === undefined) return null;
+  const note = queued.mode === 'steer' ? 'Queued as a steer'
+    : queued.mode === 'followUp' ? 'Queued as a follow-up' : 'Queued';
+  const steer = () => {
+    if (queued.mode !== 'followUp' || steerQueued === undefined || steering) return;
+    setSteering(true);
+    setError(undefined);
+    void steerQueued(queued.submissionId, userInput(message.text, message.images ?? [])).catch((cause: unknown) => {
+      setError(cause instanceof Error && cause.message ? cause.message : 'The message could not be sent as a steer.');
+    }).finally(() => setSteering(false));
+  };
+  return (
+    <MessageFooter className="gap-2">
+      {error ?? note}
+      {queued.mode === 'followUp' && steerQueued !== undefined && (
+        <Button type="button" variant="link" size="xs" disabled={steering} onClick={steer}>Send as steer</Button>
+      )}
+    </MessageFooter>
+  );
+}
+
 /**
  * A message the folded thread shows: the person's text in a bubble on the end side, or the agent's reply with its
  * sources and actions in the footer. The steps around a reply are a run of their own (`StepRows`); `memo`: a
@@ -53,9 +82,6 @@ export const MessageRow = memo(function MessageRow({ message, stopping = false }
 }) {
   const agentName = useChatAgentName();
   if (message.role === 'user') {
-    const queued = message.queued === undefined ? undefined
-      : message.queued.mode === 'steer' ? 'Queued as a steer' : message.queued.mode === 'followUp'
-        ? 'Queued as a follow-up' : 'Queued';
     return (
       <Message align="end">
         <MessageContent>
@@ -65,7 +91,7 @@ export const MessageRow = memo(function MessageRow({ message, stopping = false }
               {message.text}
             </BubbleContent>
           </Bubble>
-          {queued !== undefined && <MessageFooter>{queued}</MessageFooter>}
+          <QueuedFooter message={message} />
         </MessageContent>
       </Message>
     );

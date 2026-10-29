@@ -4,7 +4,6 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { HashIcon, LightbulbIcon, MessageCircleDashedIcon, PencilIcon } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { useInfiniChatRef } from '../../hooks/use-infinichat';
 import { useMember } from '../../hooks/use-ref';
 import { Button } from '../ui/button';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../ui/empty';
@@ -13,6 +12,7 @@ import {
 } from '../ui/message-scroller';
 import { AgentMark, useChatAgentName } from './agent';
 import { Placeholder } from './placeholder';
+import { useThreadSource } from './thread-source';
 import { TurnRow } from './turn-row';
 
 const NO_MESSAGES: readonly ChatMessage[] = [];
@@ -125,12 +125,13 @@ function Thread({ turns, stopping, busy, working }: {
 
 /**
  * Only this subtree subscribes to the messages, so typing in the composer never renders it; `memo` keeps it that
- * way while its two props stay the same.
+ * way while its two props stay the same. The messages come from whichever conversation the screen serves as the
+ * thread's source: InfiniChat's, or one of this Mac's chats.
  */
 export const Transcript = memo(function Transcript({ stopping, onChoose }: {
   stopping: boolean; onChoose: (text: string) => void;
 }) {
-  const ref = useInfiniChatRef();
+  const ref = useThreadSource();
   const agentName = useChatAgentName();
   const snapshot = useMember(ref.snapshot)?.view;
   const messages = useMember(ref.messages) ?? NO_MESSAGES;

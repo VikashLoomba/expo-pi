@@ -1,9 +1,12 @@
 import { hostNamed, method, remote } from '@earendil-works/chord';
 import { Type, type Static } from '@earendil-works/pi-ai';
+import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
+import { ChatExecutionSettingsSchema } from '@pi-agent/infinichat/pi/execution/document';
 import {
-  ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema, ReachSchema,
-  ScheduledSchema, SnapshotSchema,
+  AccessSchema, ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema,
+  ReachSchema, ScheduledSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { ChatModelSettingsSchema, ModelCatalogSchema } from '@pi-agent/infinichat/pi/model-catalog';
 import { ChatImageSchema, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
 
 /** Who acts on the main process's objects: a window, or the main process's own code. */
@@ -149,6 +152,97 @@ export const MacMachines = remote('infinichat.mac.machines', {
         setIdentity: method(Type.Object({ endpoint: Type.String(), path: Type.Union([Type.String(), Type.Null()]) })),
         pickIdentityFile: method(undefined, Type.Union([Type.String(), Type.Null()])),
       },
+    },
+  },
+});
+
+// ---- The Mac's own chats (piece 7) ----
+
+/** A chat as the sidebar lists it: pi-durable's conversation ID as a number, resolved again on the main side. */
+export const ChatSummarySchema = Type.Object({
+  id: Type.Number(), title: Type.String(), preview: Type.String(), updatedAt: Type.Number(),
+});
+export type ChatSummaryRecord = Static<typeof ChatSummarySchema>;
+/** One folder of a machine as the directory browser shows it, and what a search below one found. */
+export const FolderSchema = Type.Object({ home: Type.String(), path: Type.String(), names: Type.Array(Type.String()) });
+export const FolderSearchSchema = Type.Object({ matches: Type.Array(Type.String()), stoppedEarly: Type.Boolean() });
+
+/**
+ * This Mac's chats as the sidebar reads them: the list as `DurableChatService` keeps it (null until the service
+ * opens), a failed open or the Harness's latest report, and the list's operations.
+ */
+export const MacChats = remote('infinichat.mac.chats', {
+  version: 1,
+  input: Type.Object({}),
+  host: hostNamed('mac'),
+  variants: {
+    owner: {
+      state: {
+        chats: Type.Union([Type.Null(), Type.Array(ChatSummarySchema)]),
+        // Named `report`, as `MacInfiniChat`'s is: a reference itself has `error`, which Chord reserves.
+        report: Type.Union([Type.Null(), Type.String()]),
+      },
+      methods: {
+        createChat: method(undefined, Type.Object({ id: Type.String() })),
+        rename: method(Type.Object({ id: Type.String(), title: Type.String() })),
+        delete: method(Type.Object({ id: Type.String() })),
+        dismissError: method(),
+      },
+    },
+  },
+});
+
+/**
+ * One chat while a window shows it: its view's cells, as the phone's `useChatView` reads them, and its screen's and
+ * settings sheet's operations. The object attaches the view at its first hold and releases it with its last.
+ */
+export const MacChat = remote('infinichat.mac.chat', {
+  version: 1,
+  input: Type.Object({ id: Type.String() }),
+  host: hostNamed('mac'),
+  variants: {
+    owner: {
+      state: {
+        snapshot: SnapshotSchema, controls: Type.Union([ChatControlsSchema, Type.Null()]), messages: MessagesSchema,
+      },
+      methods: {
+        send: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
+        cancel: method(),
+        // A queued follow-up sent again as a steer, from its row.
+        steer: method(Type.Object({ submissionId: Type.Number(), content: UserInputSchema })),
+        // The chat's parked tasks, which its controls list, run again.
+        retryParked: method(),
+        updateSettings: method(Type.Object({ settings: ChatModelSettingsSchema })),
+        updateExecution: method(Type.Object({
+          execution: ChatExecutionSettingsSchema, settings: Type.Optional(ChatModelSettingsSchema),
+        })),
+        // The directory browser over a machine, and the open dialog for a folder on this Mac.
+        listFolder: method(Type.Object({ machineId: Type.String(), path: Type.Union([Type.String(), Type.Null()]) }),
+          FolderSchema),
+        searchFolders: method(Type.Object({ machineId: Type.String(), root: Type.String(), query: Type.String() }),
+          FolderSearchSchema),
+        chooseLocalFolder: method(undefined, Type.Union([Type.String(), Type.Null()])),
+        // Photos fitted to the chat's model, as `MacInfiniChat` fits them to InfiniChat's.
+        pickPhotos: method(undefined, Type.Array(AttachmentSchema)),
+        attach: method(Type.Object({ name: Type.String(), mimeType: Type.String(), data: Type.String() }),
+          AttachmentSchema),
+      },
+    },
+  },
+});
+
+/**
+ * This Mac's own providers: the catalog its chats choose from and each provider's access, as the machine's server
+ * sends its own to the phone. Piece 8 adds the sign-ins.
+ */
+export const MacAccount = remote('infinichat.mac.account', {
+  version: 1,
+  input: Type.Object({}),
+  host: hostNamed('mac'),
+  variants: {
+    owner: {
+      state: { catalog: ModelCatalogSchema, access: AccessSchema },
+      methods: { refreshCatalog: method() },
     },
   },
 });

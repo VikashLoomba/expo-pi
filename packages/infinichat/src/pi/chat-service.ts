@@ -12,7 +12,9 @@ import type { ChatSummary } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { oneLine, settingsOf, summarizeChat } from './chat-projection';
 import { ChatView } from './chat-view';
-import { ExecutionTargetDoc, validateExecution, type ChatExecutionSettings } from './execution/document';
+import {
+  DEFAULT_LOCAL_ROOT, ExecutionTargetDoc, validateExecution, type ChatExecutionSettings, type LocalRoot,
+} from './execution/document';
 import { requireModelAuth } from './model-auth';
 import {
   assertModelSettings, buildModelCatalog, getDefaultModelSettings, getModelSettingsError,
@@ -62,6 +64,7 @@ export class DurableChatService {
     private readonly options: {
       now: () => number;
       newChat: NewChatDefaults;
+      localRoot: LocalRoot;
       authError?: (providerId: string) => string | undefined;
     },
   ) {}
@@ -72,11 +75,13 @@ export class DurableChatService {
     images: ImageProcessor;
     /**
      * A chat's own environment on this device, built at each use, and removing it with the chat; without it the tools
-     * of a chat on this device fail with Pi's ordinary error result.
+     * of a chat on this device fail with Pi's ordinary error result. `root` is where its working directory may be
+     * (`LocalRoot`): the phone's sandbox root unless given.
      */
     local?: {
       environment(workspaceId: string, cwd: string | undefined): ExecutionEnv;
       remove(workspaceId: string): void;
+      root?: LocalRoot;
     };
     /** A chat on a configured machine. The service borrows it; its owner closes it after the service. */
     machines: { environment(machineId: string, cwd: string | undefined): Promise<ExecutionEnv> };
@@ -127,6 +132,8 @@ export class DurableChatService {
     nativeSearch.attach(harness);
     service = new DurableChatService(harness, options.storage, options.models, local, {
       now, newChat: options.newChat ?? { models: {} }, authError: options.authError,
+      // `??` would turn a host's `null` into the phone's root.
+      localRoot: local?.root === undefined ? DEFAULT_LOCAL_ROOT : local.root,
     });
     try { await service.loadChats(); }
     catch (error) {
@@ -215,7 +222,7 @@ export class DurableChatService {
 
   /** A chat's committed state while subscribed; `transcript` adds its messages, including pre-compaction history. */
   chat(id: ConversationId, options: { transcript?: boolean } = {}): ChatView {
-    return new ChatView(this.harness, id, options.transcript ?? false);
+    return new ChatView(this.harness, id, options.transcript ?? false, this.options.localRoot);
   }
 
   /**
@@ -288,7 +295,7 @@ export class DurableChatService {
   async updateExecution(id: ConversationId, settings: ChatExecutionSettings,
     modelSettings?: ChatModelSettings): Promise<void> {
     const selected = structuredClone(settings);
-    validateExecution(selected);
+    validateExecution(selected, this.options.localRoot);
     const selectedModel = modelSettings
       && { model: { ...modelSettings.model }, thinkingLevel: modelSettings.thinkingLevel };
     if (selectedModel) assertModelSettings(buildModelCatalog(this.models), selectedModel);

@@ -9,7 +9,9 @@ import type {
 import type { ChatControls, ChatMessage } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { projectControls, projectMessages, readConversationView, type ChatState } from './chat-projection';
-import { ExecutionTargetDoc, type ExecutionTargetState } from './execution/document';
+import {
+  DEFAULT_LOCAL_ROOT, ExecutionTargetDoc, type ExecutionTargetState, type LocalRoot,
+} from './execution/document';
 import { SearchPresentationsDoc, type SearchPresentationsState } from './native-web-search/durable';
 
 const context = BACKGROUND_CONTEXT;
@@ -60,6 +62,7 @@ export class ChatView implements ChatViewSource {
     private readonly harness: Harness,
     readonly id: ConversationId,
     private readonly transcript: boolean,
+    private readonly localRoot: LocalRoot = DEFAULT_LOCAL_ROOT,
   ) {}
 
   readonly subscribe = (listener: () => void) => {
@@ -237,7 +240,7 @@ export class ChatView implements ChatViewSource {
     }
     const entries = this.transcript
       ? [...this.entries.values()].sort((left, right) => left.id - right.id) : view.entries;
-    this.controls = projectControls(state, entries);
+    this.controls = projectControls(state, entries, this.localRoot);
     if (this.transcript) this.messages = projectMessages(state, entries);
     this.publish({ status: 'ready' });
   }

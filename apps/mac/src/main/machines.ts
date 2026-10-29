@@ -217,13 +217,16 @@ export class MacMachines {
     return parts && { name: parts.hostname, ...parts };
   }
 
-  /** A machine's files and commands over this Mac's own SSH, for a check, a removal and the moves. */
-  async environment(endpoint: string, signal: AbortSignal): Promise<RemoteExecutionEnv> {
+  /**
+   * A machine's files and commands over this Mac's own SSH, for a check, a removal, the moves and a chat's tools,
+   * in the account's home there unless a chat chose a working directory (the phone's `owner.ts`).
+   */
+  async environment(endpoint: string, signal: AbortSignal, cwd?: string): Promise<RemoteExecutionEnv> {
     const machine = this.known(endpoint);
     if (machine === undefined) throw new Error('That machine is no longer among the machines.');
     const connection = await this.started(machine, signal);
     const info = await connection.info();
-    return new RemoteExecutionEnv({ connection, id: `pi-env:${endpoint}`, cwd: info.home });
+    return new RemoteExecutionEnv({ connection, id: `pi-env:${endpoint}`, cwd: cwd ?? info.home });
   }
 
   /** At quit, after the InfiniChat clients: stops each machine's daemon, also one still connecting. */
