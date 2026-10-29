@@ -57,8 +57,9 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
 }
 
 /**
- * The thread as the Chat pattern lays it out, folded by turn (owner, 2026-10-29): the newest turn open in full, the
- * earlier ones each a summary line that opens on a click, and a new turn the only open one again. The rows are
+ * The thread as the Chat pattern lays it out, folded by turn (owner, 2026-10-29): the person's messages and the
+ * agent's replies as they are, the steps between them folded in every turn but the newest, which opens in full; a
+ * click on a run's summary opens its turn's steps, and a new turn folds the rest again. The rows are
  * virtualized the way the Message Scroller docs show for a transcript past "hundreds to low thousands of turns":
  * the viewport is the scroll element and a virtualizer owns the rows, measured as they render. The thread opens on
  * the newest turn's start, and a new turn settles there too, as `scrollAnchor` does for a MessageScrollerItem; the
@@ -133,7 +134,6 @@ export const Transcript = memo(function Transcript({ stopping, onChoose }: {
   const agentName = useChatAgentName();
   const snapshot = useMember(ref.snapshot)?.view;
   const messages = useMember(ref.messages) ?? NO_MESSAGES;
-  const memory = useMember(ref.memory) ?? undefined;
   const controls = useMember(ref.controls);
   const status = snapshot?.status ?? 'loading';
   const busy = !!controls?.busy;
@@ -141,7 +141,7 @@ export const Transcript = memo(function Transcript({ stopping, onChoose }: {
     : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
   const showWorking = !!controls?.compacting
     || (busy && !messages.some((message) => message.streaming || message.tool?.status === 'running'));
-  const turns = useMemo(() => turnsOf(messages, memory), [messages, memory]);
+  const turns = useMemo(() => turnsOf(messages), [messages]);
   if (status === 'missing' || status === 'failed') {
     return <Placeholder>{snapshot?.error ?? 'This conversation is unavailable.'}</Placeholder>;
   }

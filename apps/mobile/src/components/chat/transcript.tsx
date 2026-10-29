@@ -1,6 +1,5 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
 import { turnsOf, type Turn } from '@pi-agent/infinichat/chat/turns';
-import type { MemoryView } from '@pi-agent/infinichat/chat/types';
 import type { ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { FlashList } from '@shopify/flash-list';
 import { GlassView } from 'expo-glass-effect';
@@ -82,16 +81,16 @@ function ChatScrollView({ composerHeight, onEndVisible, ...props }: ScrollViewPr
 /**
  * Only this subtree subscribes to text deltas. `memo` stays because the chat screen that renders it is not compiled
  * by React Compiler (it contains `try … finally`). The composer floats over the transcript and moves with the
- * keyboard. The thread is folded by turn (owner, 2026-10-29): the newest turn open, the earlier ones a header each
- * that opens on a tap, and a new turn the only open one again; `memory` gives each turn the model's lines for it.
+ * keyboard. The thread is folded by turn (owner, 2026-10-29): the person's messages and the agent's replies as they
+ * are, the steps between them folded in every turn but the newest, a tap on a run's summary opening its turn's
+ * steps, and a new turn folding the rest again.
  */
 export const ChatTranscript = memo(function ChatTranscript({
-  view, ready, stopping, onChoose, onSteerQueued, composer, memory,
+  view, ready, stopping, onChoose, onSteerQueued, composer,
 }: {
   view: ChatViewSource | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
   onSteerQueued?: (submissionId: number, content: UserMessage['content']) => void;
   composer: ReactNode;
-  memory?: MemoryView;
 }) {
   const colors = useChatColors();
   const agentName = useChatAgentName();
@@ -100,7 +99,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   const busy = !!controls?.busy;
   const status = useChatStatus(view);
   const error = useChatError(view);
-  const turns = useMemo(() => turnsOf(messages, memory), [messages, memory]);
+  const turns = useMemo(() => turnsOf(messages), [messages]);
   // The turns open: the newest alone whenever a new one begins, plus the ones the reader opened since.
   const newest = turns.at(-1)?.id;
   const [opened, setOpened] = useState<{ newest: string | undefined; open: readonly string[] }>(

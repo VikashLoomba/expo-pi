@@ -1,62 +1,68 @@
-import type { Turn } from '@pi-agent/infinichat/chat/turns';
-import { BotIcon, BrainIcon, UserIcon } from 'lucide-react';
+import { blocksOf, type Turn } from '@pi-agent/infinichat/chat/turns';
+import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { memo } from 'react';
 
+import { Message, MessageContent } from '../ui/message';
 import {
-  Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceIcon, TraceLine,
-  TraceTitle,
+  Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle,
 } from '../ui/trace';
-import { TranscriptRow } from './message-row';
-import { rowsOf } from './rows';
+import { MessageRow, StepRows, WorkingRow } from './message-row';
+import { StatusIcon } from './status-icon';
 
-/** One line of a message, as the summary line shows the input that opened a turn. */
-const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+const running = (row: ChatMessage): boolean => row.tool?.status === 'running'
+  || (!!row.streaming && !row.text) || (row.webSearch?.calls.some((call) => call.status === 'running') ?? false);
 
 /**
- * A turn of the thread as the Chain of Thought pattern folds an agent's steps: a summary line that expands into what
- * happened. The line is the input that opened the turn; under it, the lines the model holds for the turn right now,
- * its memory of it; inside, the turn in full: the message, the steps and the reply.
+ * The steps between a person's message and the agent's reply, as the Chain of Thought pattern folds them: a
+ * summary line that opens into the steps. The run opens and closes with its turn; `keepMounted` keeps each step's
+ * own open state while the summary is closed, as the pattern says.
+ */
+function StepsRun({ rows, open, onOpenChange, stopping }: {
+  rows: readonly ChatMessage[]; open: boolean; onOpenChange: (open: boolean) => void; stopping: boolean;
+}) {
+  const status = rows.some(running) ? 'running'
+    : rows.some((row) => row.tool?.status === 'error') ? 'error' : undefined;
+  const count = rows.length;
+  return (
+    <Message>
+      <MessageContent>
+        <Trace>
+          <TraceCollapsible open={open} onOpenChange={onOpenChange}>
+            <TraceCollapsibleTrigger>
+              <TraceLine status={status}>
+                <TraceIcon><StatusIcon status={status} /></TraceIcon>
+                <TraceTitle>
+                  {status === 'running' ? 'Working' : 'Worked'} in {count} {count === 1 ? 'step' : 'steps'}
+                </TraceTitle>
+              </TraceLine>
+            </TraceCollapsibleTrigger>
+            <TraceCollapsibleContent keepMounted>
+              <Trace>
+                {rows.map((row) => <StepRows key={row.id} message={row} stopping={stopping} />)}
+              </Trace>
+            </TraceCollapsibleContent>
+          </TraceCollapsible>
+        </Trace>
+      </MessageContent>
+    </Message>
+  );
+}
+
+/**
+ * A turn of the thread, folded (owner, 2026-10-29): the person's messages and the agent's replies as they are, the
+ * steps between them a run each that opens on a click; the newest turn open, so its work shows as it happens.
  */
 export const TurnRow = memo(function TurnRow({ turn, open, onOpenChange, stopping, working }: {
   turn: Turn; open: boolean; onOpenChange: (open: boolean) => void; stopping: boolean;
   /** The working line, in the newest turn while the agent is busy without a row of its own. */
   working?: string;
 }) {
-  const opener = turn.opener;
-  const title = opener === undefined ? 'Earlier'
-    : oneLine(opener.text) || (opener.images?.length ? 'Photo' : 'Message');
-  const steps = turn.rows.filter((row) => row.role === 'tool').length;
-  const rows = rowsOf(turn.rows, working);
   return (
-    <Trace>
-      <TraceCollapsible open={open} onOpenChange={onOpenChange}>
-        <TraceCollapsibleTrigger>
-          <TraceLine>
-            <TraceIcon>{opener?.role === 'work' ? <BotIcon /> : <UserIcon />}</TraceIcon>
-            <TraceTitle>{title}</TraceTitle>
-            {steps > 0 && <TraceDescription>{steps} {steps === 1 ? 'step' : 'steps'}</TraceDescription>}
-          </TraceLine>
-        </TraceCollapsibleTrigger>
-        {turn.lines.length > 0 && (
-          <TraceLine className="items-start text-muted-foreground">
-            <TraceIcon><BrainIcon /></TraceIcon>
-            <div className="flex min-w-0 flex-col gap-1">
-              {turn.lines.map((line, index) => (
-                <p key={index} className="m-0">
-                  {line.text}
-                  {line.shared > 1 && <span className="text-muted-foreground/70"> · covers {line.shared} turns</span>}
-                </p>
-              ))}
-            </div>
-          </TraceLine>
-        )}
-        {/* The turn itself, not a step's detail: no indent, no rule, the thread's own text colour. */}
-        <TraceCollapsibleContent className="mr-0 ml-0 border-l-0 pr-0 pl-0 text-foreground">
-          <div className="flex flex-col gap-6 pt-3">
-            {rows.map((row) => <TranscriptRow key={row.id} row={row} stopping={stopping} />)}
-          </div>
-        </TraceCollapsibleContent>
-      </TraceCollapsible>
-    </Trace>
+    <div className="flex flex-col gap-6">
+      {blocksOf(turn.rows).map((block) => block.kind === 'message'
+        ? <MessageRow key={block.row.id} message={block.row} stopping={stopping} />
+        : <StepsRun key={block.id} rows={block.rows} open={open} onOpenChange={onOpenChange} stopping={stopping} />)}
+      {working !== undefined && <WorkingRow text={working} />}
+    </div>
   );
 });

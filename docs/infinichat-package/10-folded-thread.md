@@ -12,63 +12,52 @@ turns would be collapsed, and the user could open them if they want to to fill i
 wanted to see previous turns. Then when I send a new message, the last turn transcript collapses in the UI and the
 user would only see the latest turns. These changes are only meant to change the visual UI."
 
-Asked through the question tool:
+Asked through the question tool, then revised on sight:
 
-- A collapsed turn shows **the person's message and the model's memory line**, now, in one piece.
-- On a send, **everything but the new turn collapses**, hand-opened turns too.
-- A steer **stays inside the open turn**. The owner asked why that needed a schema addition: the rows are a fixed
-  shape shared over the link, the admission record on the server already says `fresh` or not, and a placed steer
-  looks like any user message afterwards, so one optional field carries it.
-- The memory line is **the view's current line**, shown on every turn it covers with "covers N turns", not the
-  reply's own leaf.
-- **Both apps in one piece.**
+- First: a collapsed turn shows the person's message and the model's memory line, both apps in one piece, a steer
+  stays inside the open turn, and a send collapses everything but the new turn, hand-opened turns too. The owner
+  asked why a steer needed a schema addition: the rows are a fixed shape shared over the link, the admission record
+  on the server already says `fresh` or not, and a placed steer looks like any user message afterwards, so one
+  optional field carries it.
+- On sight, the memory lines were a wall of `tool:` and `echo:` leaves ("what is all this? … why is it all in
+  thinking blocks?"), and once trimmed to the reply's line still "looks bad". **Final: "just collapse the transcript
+  turns and show agent responses and user messages."** The memory lines and their plumbing are gone.
 
-## What the model sees, and what the thread shows
+## What the thread shows
 
-A fresh turn's prompt is the saved view, one line per node of the memory tree, then the person's new message; the
-model zooms into a line when it needs what the line stands for. The thread now folds the same way: a turn is the
-input that opened it (OptChat's fresh turn: the person's message, or an agent's report delivered on its own) and
-everything until the next, steers included. The newest turn is open in full; each earlier one is a summary line,
-the opener's text, and under it the lines the model holds for the turn's messages right now. Nothing changes in the
-prompt; this is the thread's presentation.
+A turn is the input that opened it (OptChat's fresh turn: the person's message, or an agent's report delivered on its
+own) and everything until the next, steers included. The person's messages and the agent's replies show as they
+are, in every turn. The steps between a message and a reply (thinking, searches, tool calls, reports, notices) are a
+run under a summary line, "Worked in 7 steps", that opens as the Chain of Thought pattern opens an agent's steps.
+The newest turn's runs are open, so the work shows as it happens; every earlier turn's are closed; a click or tap
+on a run's summary opens its turn's runs; a new turn closes the rest again. Nothing changes in the prompt.
 
 ## As built
 
 - **Rows** (`chat/types.ts`): `fresh` on a placed input, true for a turn of its own and false for a steer, from its
-  admission; `memory`, the input's index in the model's memory. `MemoryViewSchema`: the saved view's lines, each
-  with the `first` message and `count` it stands for, and `count`, the messages logged, where the last range ends.
-- **The view** (`infinichat-view.ts`): attaches `MemoryDoc` beside the app and config documents; reads the nodes of
-  the main view's refs once each (immutable) and the logged messages for their `source`, so a delivery's row gets
-  its index from `input:<requestId>`; publishes `getMemory()`. The projection's user rows for deliveries carry the
-  two fields; a work delivery's row stays the agent's.
-- **The host** (`infinichat-service.ts`): `InfiniChatHost.memory`, a store over the view; `RemoteInfiniChat`
-  mirrors the server's `memory` cell in a store of its own, as the scheduled tasks; `ShownInfiniChat` carries it
-  across moves; the server serves it (`serve.ts`, contract version 5) and follows the core's; the Mac serves it to
-  its windows (`serve-infinichat.ts`); the phone reads it with `useInfiniChatMemory`.
-- **Turns** (`chat/turns.ts`, shared): `turnsOf(messages, memory)` groups rows into turns and gives each the view's
-  lines overlapping its range, from its opener's index to the next turn's, with `shared`, the turns a line covers.
-  Only the lines standing for the turn as a whole: merged lines, and of the leaves the reply's (`unii`), a report's
-  and a note's. The owner's first look ("what is all this? … why is it all in thinking blocks?") was a recent turn's
-  every `tool:` and `echo:` leaf drawn as a Trace line with a brain icon; the view now says each leaf's `kind`, the
-  steps' leaves stay out, and the lines are one muted block under the title.
-- **The Mac** (`turn-row.tsx`, `transcript.tsx`): a turn is a virtualized row, a `Trace` with a `TraceCollapsible`
-  as the Chain of Thought pattern folds steps: the trigger line is the opener (person or agent icon, the text in one
-  line, the step count), the memory lines follow with a brain icon and "covers N turns", the content is the turn's
-  rows (`rowsOf`, tool runs in one Trace, the working line in the newest). The thread opens on the newest turn's
-  start and settles a new one there; the open set is the newest alone whenever a new turn begins, plus the ones
-  the reader opened since (state adjusted during render, no effect).
-- **The phone** (`turn-item.tsx`, `transcript.tsx`): the same, as a FlashList of turns: a header with a chevron, the
-  opener's line and the memory lines, the rows under it when open; `extraData` is the open set. The regular chat
-  screen shares the component, so its threads fold by the person's messages too, without memory lines. The
-  InfiniChat screen passes `useInfiniChatMemory()`.
+  admission (`infinichat-view.ts`, the delivery rows). Contract version 5.
+- **Turns** (`chat/turns.ts`, shared): `turnsOf(messages)` groups rows into turns; `blocksOf(rows)` lays a turn out
+  as message blocks (the person's rows, the agent's rows with text or an error) and step runs (every other row; a
+  reply with thinking or searches is in the run before it as well, for those).
+- **The Mac** (`turn-row.tsx`, `message-row.tsx`, `transcript.tsx`): a turn is a virtualized row of blocks. A
+  `MessageRow` is the bubble or the reply with its sources, error and copy action; a `StepsRun` is a `Trace` with a
+  `TraceCollapsible` whose trigger is the summary line with `StatusIcon` (running while a step runs, error when a
+  tool failed) and whose content, `keepMounted` as the pattern says, is the run's `StepRows`: `ToolRow`,
+  `ReportRow`, a notice `Marker`, or a reply's `ReasoningRow` and `SearchRows`. The working line is the newest
+  turn's last row. The open set is the newest turn alone whenever a new turn begins, plus the turns the reader
+  opened since; the thread opens on the newest turn's start and settles a new one there.
+- **The phone** (`turn-item.tsx`, `message-row.tsx`, `transcript.tsx`): the same as a FlashList of turns; a run's
+  summary is a pressable line with a spinner while it works, its steps the existing `MessageRow`s under a hairline
+  rule; a reply shown by itself hides its thinking and searches (`hideSteps`), which are in the run. The regular chat
+  screen shares the component, so its threads fold by turn too.
 
 ## Size
 
-About 420 lines over the package, the server and the two apps; the Mac and phone turn components are 60 and 55.
+About 250 lines over the package and the two apps; the Mac and phone turn components are 70 and 60.
 
 ## Checks
 
-Verified on this Mac: the four typechecks and lints; the server bundle rebuilt (`a4823b9a…`), which both apps
-install on their machines on the next connect. To verify by the owner on the Mac and the iPhone: the newest turn
-open on opening, earlier turns folded with their memory lines, a click or tap opening one, a send folding the rest,
-a steer staying in the open turn, and the lines of an old turn merged across neighbours with "covers N turns".
+Verified on this Mac: the typechecks and lints; the server bundle rebuilt, which both apps install on their machines
+on the next connect. To verify by the owner on the Mac and the iPhone: the newest turn open with its steps, earlier
+turns' steps folded under their summaries, a click or tap opening a turn's steps, a send folding the rest, a steer
+staying in the open turn.

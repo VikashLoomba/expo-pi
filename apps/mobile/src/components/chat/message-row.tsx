@@ -14,9 +14,11 @@ import { ToolCard } from './tool-card';
 import { WebSearchActivity, WebSearchSources } from './web-search';
 import { collectSearchSources } from '@pi-agent/infinichat/chat/web-search-presentation';
 
-export function MessageRow({ message, stopping = false, onSteerQueued }: {
+export function MessageRow({ message, stopping = false, onSteerQueued, hideSteps = false }: {
   message: ChatMessage; stopping?: boolean;
   onSteerQueued?: (submissionId: number, content: UserMessage['content']) => void;
+  /** A reply shown by itself: its thinking and searches are in the steps run before it. */
+  hideSteps?: boolean;
 }) {
   const colors = useChatColors();
   const agentName = useChatAgentName();
@@ -76,8 +78,9 @@ export function MessageRow({ message, stopping = false, onSteerQueued }: {
         {message.streaming ? stopping ? 'Stopping…' : 'Responding' : message.interrupted ? 'Interrupted' : ' '}
       </Text>
     </View>
-    {message.webSearch ? <WebSearchActivity calls={message.webSearch.calls} messageId={message.id} /> : null}
-    {message.thinking ? <View>
+    {!hideSteps && message.webSearch
+      ? <WebSearchActivity calls={message.webSearch.calls} messageId={message.id} /> : null}
+    {!hideSteps && message.thinking ? <View>
       <Pressable testID={`thinking-${message.id}`} accessibilityRole="button" accessibilityState={{ expanded: thinkingExpanded }} onPress={() => setThinkingExpanded(!thinkingExpanded)} style={styles.thinkingHeader}>
         <ChatIcon name="spark" color={colors.muted} size={14} />
         <Text style={[styles.thinkingLabel, { color: colors.secondary }]}>Thinking</Text>

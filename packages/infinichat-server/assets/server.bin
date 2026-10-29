@@ -127870,19 +127870,7 @@ var ChatMessageSchema = typebox_exports.Object({
    * A placed input: true opened a logical turn of its own (OptChat's fresh turn), false steered the turn under way.
    * The transcript folds a thread by these.
    */
-  fresh: typebox_exports.Optional(typebox_exports.Boolean()),
-  /** The index of this input in the model's memory, once it is logged there. */
-  memory: typebox_exports.Optional(typebox_exports.Number())
-});
-var MemoryViewSchema = typebox_exports.Object({
-  count: typebox_exports.Number(),
-  lines: typebox_exports.Array(typebox_exports.Object({
-    first: typebox_exports.Number(),
-    count: typebox_exports.Number(),
-    text: typebox_exports.String(),
-    /** A line standing for one message: that message's kind, once the view has read it. */
-    kind: typebox_exports.Optional(typebox_exports.Enum(["user", "unii", "tool", "echo", "work", "note"]))
-  }))
+  fresh: typebox_exports.Optional(typebox_exports.Boolean())
 });
 var ChatControlsSchema = typebox_exports.Object({
   id: typebox_exports.Number(),
@@ -130363,15 +130351,6 @@ var InfiniChatView = class {
   metadata;
   app;
   config;
-  memoryDoc;
-  /** The saved view's lines by node key, and each logged message's index by source; both immutable once read. */
-  nodes = /* @__PURE__ */ new Map();
-  sources = /* @__PURE__ */ new Map();
-  kinds = /* @__PURE__ */ new Map();
-  indexed = 0;
-  readingNodes = false;
-  readingSources = false;
-  memory;
   /** pi-durable's live tasks, for the agents at work, as the keep-alive counts them. */
   tasks;
   loaded = false;
@@ -130400,8 +130379,6 @@ var InfiniChatView = class {
   getSnapshot = () => this.snapshot;
   getControls = () => this.controls;
   getMessages = () => this.messages;
-  /** The model's memory as it stands; undefined until its lines are read. */
-  getMemory = () => this.memory;
   async connect() {
     const connection = ++this.connection;
     const current = () => connection === this.connection;
@@ -130419,31 +130396,27 @@ var InfiniChatView = class {
       }
       this.view = view;
       this.unsubscribeView = view.subscribe(this.schedule);
-      const [metadata, app, config, memory, tasks] = await Promise.all([
+      const [metadata, app, config, tasks] = await Promise.all([
         this.harness.documentState(ChatMetadataDoc, this.id, context2),
         this.harness.documentState(AppDoc, this.id, context2),
         this.harness.documentState(ConfigDoc, this.id, context2),
-        this.harness.documentState(MemoryDoc, this.id, context2),
         this.harness.taskGraph(context2)
       ]);
       if (!current()) {
         metadata?.dispose();
         app?.dispose();
         config?.dispose();
-        memory?.dispose();
         tasks.dispose();
         return;
       }
       this.metadata = metadata;
       this.app = app;
       this.config = config;
-      this.memoryDoc = memory;
       this.tasks = tasks;
       this.unsubscribeDocs = [
         metadata?.subscribe(this.schedule) ?? noop3,
         app?.subscribe(this.schedule) ?? noop3,
         config?.subscribe(this.schedule) ?? noop3,
-        memory?.subscribe(this.schedule) ?? noop3,
         tasks.subscribe(this.schedule)
       ];
       if (!metadata?.value) {
@@ -130480,71 +130453,8 @@ var InfiniChatView = class {
     this.app = void 0;
     this.config?.dispose();
     this.config = void 0;
-    this.memoryDoc?.dispose();
-    this.memoryDoc = void 0;
     this.tasks?.dispose();
     this.tasks = void 0;
-  }
-  /** Reads the lines of the saved view's nodes not read yet; resolves whether any was added. */
-  async readNodes(refs) {
-    const unread = refs.filter((ref) => !this.nodes.has(key(ref)));
-    if (!unread.length || this.readingNodes) return false;
-    this.readingNodes = true;
-    try {
-      const added = await Promise.all(unread.map(async (ref) => {
-        const node = await this.harness.snapshot(NodeDoc, this.id, key(ref), context2);
-        if (!node?.value) return false;
-        this.nodes.set(key(ref), node.value.text);
-        return true;
-      }));
-      return added.includes(true);
-    } finally {
-      this.readingNodes = false;
-    }
-  }
-  /** Reads the messages logged since the last read, for their sources; resolves whether any was added. */
-  async readSources(count) {
-    if (this.indexed >= count || this.readingSources) return false;
-    this.readingSources = true;
-    try {
-      let added = false;
-      while (this.indexed < count) {
-        const message = await this.harness.snapshot(MessageDoc, this.id, String(this.indexed), context2);
-        if (!message) break;
-        this.sources.set(message.source, this.indexed);
-        this.kinds.set(this.indexed++, message.kind);
-        added = true;
-      }
-      return added;
-    } finally {
-      this.readingSources = false;
-    }
-  }
-  /**
-   * The saved view as the model sees it, from the memory document's refs and the nodes' lines; the lines missing are
-   * read, and the view published once they are.
-   */
-  memoryView(failCurrent) {
-    const state3 = this.memoryDoc?.value;
-    if (!state3) return void 0;
-    const refs = state3.main.refs;
-    if (refs.some((ref) => !this.nodes.has(key(ref)))) {
-      this.readNodes(refs).then((added) => {
-        if (added) this.schedule();
-      }, failCurrent);
-    }
-    if (this.indexed < state3.nextMessage) {
-      this.readSources(state3.nextMessage).then((added) => {
-        if (added) this.schedule();
-      }, failCurrent);
-    }
-    const lines2 = refs.flatMap((ref) => {
-      const text = this.nodes.get(key(ref));
-      if (text === void 0) return [];
-      const kind = ref[0] === 0 ? this.kinds.get(first(ref)) : void 0;
-      return [{ first: first(ref), count: end(ref) - first(ref), text, ...kind === void 0 ? {} : { kind } }];
-    });
-    return { count: state3.nextMessage, lines: lines2 };
   }
   /**
    * The view holds only the active context, which each fresh turn resets. Read the whole history once, newest
@@ -130664,18 +130574,12 @@ var InfiniChatView = class {
       configured: docs.agent?.model !== void 0 && summary !== null,
       ...error ? { error } : {}
     };
-    this.memory = this.memoryView(failCurrent);
     const deliveries = new Map(shown2.flatMap((entry2) => DeliveryEntry.is(entry2) ? [[`${entry2.id}-0`, entry2.data]] : []));
     const messages = projectMessages(state3, shown2).map((message) => {
       const delivery = deliveries.get(message.id);
       if (delivery === void 0) return message;
-      const original = this.originals.get(delivery.requestId);
-      const index3 = this.sources.get(`input:${delivery.requestId}`);
-      const placed = {
-        ...message,
-        ...original === void 0 ? {} : { fresh: original.fresh },
-        ...index3 === void 0 ? {} : { memory: index3 }
-      };
+      const fresh = this.originals.get(delivery.requestId)?.fresh;
+      const placed = fresh === void 0 ? message : { ...message, fresh };
       return delivery.kind === "work" ? workRow(placed) : placed;
     });
     if (this.stopped && lastRequest !== void 0) messages.push(stoppedNotice(`stopped-${lastRequest}`));
@@ -130922,7 +130826,6 @@ var SnapshotSchema = typebox_exports.Object({ view: ChatViewSnapshotSchema, repo
 var ControlsSchema = typebox_exports.Union([InfiniChatControlsSchema, typebox_exports.Null()]);
 var MessagesSchema = typebox_exports.ReadonlyObject(typebox_exports.Array(ChatMessageSchema));
 var ScheduledSchema = typebox_exports.Union([typebox_exports.ReadonlyObject(typebox_exports.Array(ScheduledTaskSchema)), typebox_exports.Null()]);
-var MemorySchema = typebox_exports.Union([MemoryViewSchema, typebox_exports.Null()]);
 var ServerSchema = typebox_exports.Object({
   bundle: typebox_exports.String(),
   pi: typebox_exports.Object({ durable: typebox_exports.String(), ai: typebox_exports.String(), chord: typebox_exports.String() }),
@@ -130998,7 +130901,6 @@ var InfiniChatRemote = remote("infinichat.remote", {
         controls: ControlsSchema,
         messages: MessagesSchema,
         scheduled: ScheduledSchema,
-        memory: MemorySchema,
         server: ServerSchema,
         conversation: ConversationSchema,
         catalog: ModelCatalogSchema,
@@ -132000,11 +131902,6 @@ var InfiniChatService = class _InfiniChatService {
     };
   };
   getSnapshot = () => this.snapshot;
-  /** The model's memory as the view reads it; subscribing attaches the view, as the screens that show it do. */
-  memory = {
-    subscribe: (listener) => this.view().subscribe(listener),
-    getSnapshot: () => this.view().getMemory()
-  };
   /** Clears the Harness's latest report once the user dismisses it; the next report sets it again. */
   dismissError() {
     if (this.snapshot.error === void 0) return;
@@ -133645,7 +133542,6 @@ var ServerConversation = class {
         core.view().subscribe(this.notify),
         core.subscribe(this.notify),
         core.scheduled.subscribe(this.notify),
-        core.memory.subscribe(this.notify),
         core.machines.subscribe(this.notify)
       ];
       this.unfollow = () => {
@@ -133738,13 +133634,11 @@ function serveInfiniChat(host, conversation, options) {
     const currentControls = () => conversation.current?.view().getControls() ?? null;
     const currentMessages = () => conversation.current?.view().getMessages() ?? [];
     const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? null;
-    const currentMemory = () => conversation.current?.memory.getSnapshot() ?? null;
     const currentMachines = () => conversation.current?.machines.getSnapshot() ?? null;
     const snapshot = self2.state("snapshot", SnapshotSchema, { init: currentSnapshot });
     const controls = self2.state("controls", ControlsSchema, { init: currentControls });
     const messages = self2.state("messages", MessagesSchema, { init: currentMessages });
     const scheduled = self2.state("scheduled", ScheduledSchema, { init: currentScheduled });
-    const memory = self2.state("memory", MemorySchema, { init: currentMemory });
     const machineList = self2.state("machines", MachinesSchema, { init: currentMachines });
     const held2 = self2.state("conversation", ConversationSchema, { init: conversation.getState });
     const server = self2.state("server", ServerSchema, { init: () => options.server });
@@ -133763,7 +133657,6 @@ function serveInfiniChat(host, conversation, options) {
       messages.replace(ctx2, currentMessages(), { diff: true });
       controls.replace(ctx2, currentControls(), { diff: true });
       scheduled.replace(ctx2, currentScheduled(), { diff: true });
-      memory.replace(ctx2, currentMemory(), { diff: true });
       machineList.replace(ctx2, currentMachines(), { diff: true });
       held2.replace(ctx2, conversation.getState(), { diff: true });
       snapshot.replace(ctx2, currentSnapshot(), { diff: true });
@@ -133774,7 +133667,6 @@ function serveInfiniChat(host, conversation, options) {
       controls,
       messages,
       scheduled,
-      memory,
       machines: machineList,
       conversation: held2,
       server,

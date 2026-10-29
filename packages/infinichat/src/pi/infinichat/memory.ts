@@ -15,8 +15,8 @@ const TEXT_LIMIT = 30000;
 /** Newlines as spaces, as UniiChat's `flat` writes a line and a merge's input. */
 export const flat = (text: string): string => text.replace(/\s*\n\s*/g, ' ');
 
-export type Kind = 'user' | 'unii' | 'tool' | 'echo' | 'work' | 'note';
-export type CanonicalMessage = {
+type Kind = 'user' | 'unii' | 'tool' | 'echo' | 'work' | 'note';
+type CanonicalMessage = {
   i: number;
   kind: Kind;
   text: string;
@@ -51,7 +51,7 @@ export const NodeDoc = defineDocFamily<{ value: BuiltNode | null }, BuiltNode | 
   initial: (value) => ({ value }),
 });
 type View = { refs: NodeRef[]; reducing: boolean };
-export type MemoryState = {
+type MemoryState = {
   nextMessage: number;
   frontier: number;
   viewThrough: number;

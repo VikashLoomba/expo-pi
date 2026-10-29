@@ -1,7 +1,7 @@
 import { createHost, isChordError, type Ctx, type Link, type Ref } from '@earendil-works/chord';
 import type { UserMessage } from '@earendil-works/pi-ai';
 
-import type { ChatMessage, MemoryView } from '../../chat/types';
+import type { ChatMessage } from '../../chat/types';
 import type { ChatViewSnapshot, ChatViewSource } from '../chat-view';
 import type { ScheduledTask } from '../infinichat-scheduled';
 import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
@@ -53,7 +53,6 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
   private readonly listeners = new Set<() => void>();
   private readonly scheduledListeners = new Set<() => void>();
-  private readonly memoryListeners = new Set<() => void>();
   private ref?: InfiniChatRef;
   private session?: Session;
   /** The attempt under way, which `close` cancels. */
@@ -64,8 +63,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private notice?: string;
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
-    scheduled: readonly ScheduledTask[] | undefined; memory: MemoryView | undefined; catalog: ModelCatalog;
-    access: MachineAccess;
+    scheduled: readonly ScheduledTask[] | undefined; catalog: ModelCatalog; access: MachineAccess;
     signIn: SignInAttempt; conversation: ConversationState; machines: MachinesState | undefined; reach: Reach;
     pendingHostKeys: PendingHostKeys;
   };
@@ -102,14 +100,6 @@ export class RemoteInfiniChat implements InfiniChatHost {
       return () => { this.scheduledListeners.delete(listener); };
     },
     getSnapshot: () => this.values?.scheduled,
-  };
-  /** The model's memory as the machine's view reads it; undefined until connected and while it is away. */
-  readonly memory = {
-    subscribe: (listener: () => void) => {
-      this.memoryListeners.add(listener);
-      return () => { this.memoryListeners.delete(listener); };
-    },
-    getSnapshot: () => this.values?.memory,
   };
   /** The conversation's machines document as the machine serves it; undefined until connected and while it is away. */
   readonly machines = {
@@ -455,7 +445,6 @@ export class RemoteInfiniChat implements InfiniChatHost {
     ref.controls.subscribe(this.refresh);
     ref.messages.subscribe(this.refresh);
     ref.scheduled.subscribe(this.refresh);
-    ref.memory.subscribe(this.refresh);
     ref.access.subscribe(this.refresh);
     ref.signInAttempt.subscribe(this.refresh);
     ref.conversation.subscribe(this.refresh);
@@ -480,16 +469,13 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const rescheduled = scheduled !== this.values?.scheduled;
     const machines = ref.machines.value ?? undefined;
     const relisted = machines !== this.values?.machines;
-    const memory = ref.memory.value ?? undefined;
-    const remembered = memory !== this.values?.memory;
-    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled, memory,
+    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled,
       catalog: ref.catalog.value, access: ref.access.value, signIn: ref.signInAttempt.value,
       conversation: ref.conversation.value, machines, reach: ref.reach.value,
       pendingHostKeys: ref.pendingHostKeys.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };
     this.notify();
     if (rescheduled) for (const listener of [...this.scheduledListeners]) listener();
-    if (remembered) for (const listener of [...this.memoryListeners]) listener();
     if (relisted) for (const listener of [...this.machineListeners]) listener();
   };
 

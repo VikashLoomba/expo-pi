@@ -2,7 +2,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
 import type { ConversationId, Storage } from '@earendil-works/pi-durable';
 import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-controller';
-import type { ChatControls, ChatMessage, MemoryView } from '@pi-agent/infinichat/chat/types';
+import type { ChatControls, ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { chatTasks, DurableChatService, type ChatServiceSnapshot } from '@pi-agent/infinichat/pi/chat-service';
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
@@ -545,13 +545,6 @@ export function useChatError(view: ChatViewSource | undefined): string | undefin
 export function useInfiniChatView(): ChatViewSource<InfiniChatControls> {
   const { infiniChat } = useChatApp();
   return useMemo(() => infiniChat.view(), [infiniChat]);
-}
-
-/** The model's memory of the conversation as it stands, from the side the screens show; undefined until read. */
-export function useInfiniChatMemory(): MemoryView | undefined {
-  const { infiniChat } = useChatApp();
-  return useSyncExternalStore(infiniChat.memory.subscribe, infiniChat.memory.getSnapshot,
-    infiniChat.memory.getSnapshot);
 }
 
 /** The conversation's machines document, as the side the screens show serves it; undefined until read. */

@@ -1,5 +1,5 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
-import type { ChatMessage, MemoryView } from '../chat/types';
+import type { ChatMessage } from '../chat/types';
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
 import type { ScheduledTask } from './infinichat-scheduled';
 import type {
@@ -34,7 +34,6 @@ export class ShownInfiniChat implements InfiniChatHost {
   private controls?: InfiniChatControls;
   private messages = NO_MESSAGES;
   private tasks?: readonly ScheduledTask[];
-  private memoryView?: MemoryView;
   private machineList?: MachinesState;
   private report = NO_REPORT;
 
@@ -53,7 +52,6 @@ export class ShownInfiniChat implements InfiniChatHost {
     };
   };
   readonly scheduled = { subscribe: this.subscribe, getSnapshot: () => this.tasks };
-  readonly memory = { subscribe: this.subscribe, getSnapshot: () => this.memoryView };
   readonly machines = { subscribe: this.subscribe, getSnapshot: () => this.machineList };
   private readonly shown: ChatViewSource<InfiniChatControls> = {
     subscribe: this.subscribe,
@@ -156,14 +154,13 @@ export class ShownInfiniChat implements InfiniChatHost {
       this.controls = view.getControls();
       this.messages = view.getMessages();
       this.tasks = host.scheduled.getSnapshot();
-      this.memoryView = host.memory.getSnapshot();
       this.machineList = host.machines.getSnapshot();
       this.report = host.getSnapshot();
       this.notify();
     };
     const stops = waiting ? [view.subscribe(update)]
       : [view.subscribe(update), host.subscribe(update), host.scheduled.subscribe(update),
-        host.memory.subscribe(update), host.machines.subscribe(update)];
+        host.machines.subscribe(update)];
     this.unfollow = () => {
       for (const stop of stops) stop();
     };
