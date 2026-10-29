@@ -9,7 +9,7 @@ import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstanc
 
 import {
   useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatAvatar, useInfiniChatConnection, useInfiniChatError,
-  useInfiniChatView, useMachines,
+  useInfiniChatMemory, useInfiniChatView, useMachines,
 } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { ChatAgentContext } from '@/components/chat/agent';
@@ -67,6 +67,7 @@ export default function InfiniChatScreen() {
   // While the screens show a machine's InfiniChat, its models and sign-ins are that machine's.
   const { catalog, providerAccess, machine: shown } = useInfiniChatAccount();
   const view = useInfiniChatView();
+  const memory = useInfiniChatMemory();
   const conversation = useChatControls(view);
   const avatar = useInfiniChatAvatar();
   const agentName = conversation?.name || TITLE;
@@ -255,7 +256,7 @@ export default function InfiniChatScreen() {
       <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks"
         onPress={() => router.push('/infinichat-schedule')} />
     </Stack.Toolbar>
-    <ChatAgentContext value={agent}><ChatTranscript view={view} ready stopping={stopping} onChoose={choosePrompt}
+    <ChatAgentContext value={agent}><ChatTranscript view={view} ready stopping={stopping} onChoose={choosePrompt} memory={memory}
       composer={<>
       {conversation && !configured && <View style={styles.banner}>
         <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}

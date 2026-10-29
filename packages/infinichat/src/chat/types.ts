@@ -46,8 +46,26 @@ export const ChatMessageSchema = Type.Object({
     Type.Object({ submissionId: Type.Number(), mode: Type.Enum(['followUp', 'steer']) }),
     Type.Object({ mode: Type.Literal('pending') }),
   ])),
+  /**
+   * A placed input: true opened a logical turn of its own (OptChat's fresh turn), false steered the turn under way.
+   * The transcript folds a thread by these.
+   */
+  fresh: Type.Optional(Type.Boolean()),
+  /** The index of this input in the model's memory, once it is logged there. */
+  memory: Type.Optional(Type.Number()),
 });
 export type ChatMessage = Static<typeof ChatMessageSchema>;
+
+/**
+ * The model's memory of the chat as it stands: the lines of its saved view, oldest first, each standing for `count`
+ * messages from `first` on, as the prompt's `id+n|text`. `count` is how many messages are logged, where the last
+ * line's range ends.
+ */
+export const MemoryViewSchema = Type.Object({
+  count: Type.Number(),
+  lines: Type.Array(Type.Object({ first: Type.Number(), count: Type.Number(), text: Type.String() })),
+});
+export type MemoryView = Static<typeof MemoryViewSchema>;
 
 /** What the header, composer and settings need; it does not change while text streams. */
 export const ChatControlsSchema = Type.Object({

@@ -8,6 +8,7 @@ import {
 import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
 import type { ChatViewSource } from './chat-view';
+import type { MemoryView } from '../chat/types';
 import { ScheduledTasks, type ScheduledTask } from './infinichat-scheduled';
 import type { Machine } from './infinichat-remote/contract';
 import {
@@ -61,6 +62,8 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   dismissError(): void;
   /** The scheduled tasks still waiting, soonest first; undefined until they are first read. */
   readonly scheduled: Store<readonly ScheduledTask[] | undefined>;
+  /** The model's memory of the chat as it stands (`MemoryView`); undefined until read. */
+  readonly memory: Store<MemoryView | undefined>;
 }
 
 const TITLE = 'InfiniChat';
@@ -155,6 +158,11 @@ export class InfiniChatService implements InfiniChatHost {
     return () => { this.listeners.delete(listener); };
   };
   readonly getSnapshot = () => this.snapshot;
+  /** The model's memory as the view reads it; subscribing attaches the view, as the screens that show it do. */
+  readonly memory = {
+    subscribe: (listener: () => void) => this.view().subscribe(listener),
+    getSnapshot: () => this.view().getMemory(),
+  };
 
   /** Clears the Harness's latest report once the user dismisses it; the next report sets it again. */
   dismissError() {

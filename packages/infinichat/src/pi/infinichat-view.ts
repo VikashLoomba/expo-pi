@@ -7,7 +7,7 @@ import {
   type EntryRecord, type Harness, type InboxItem, type InboxState, type SettledSubmissionRecord, type TaskGraph,
 } from '@earendil-works/pi-durable';
 
-import { ChatControlsSchema, type ChatMessage } from '../chat/types';
+import { ChatControlsSchema, type ChatMessage, type MemoryView } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import {
   projectControls, projectMessages, queuedRow, readConversationView, stoppedNotice, type ChatState,
@@ -15,6 +15,7 @@ import {
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
 import { AGENT_TASK } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, type Admission, type AppState } from './infinichat/app';
+import { MemoryDoc, MessageDoc, NodeDoc, end, first, key, type MemoryState, type NodeRef } from './infinichat/memory';
 import { ConfigDoc, type OptChatConfig } from './infinichat/summary';
 import { ChatModelSettingsSchema } from './model-catalog';
 
@@ -96,6 +97,14 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   private metadata?: DocumentState<ChatMetadata>;
   private app?: DocumentState<AppState>;
   private config?: DocumentState<OptChatConfig>;
+  private memoryDoc?: DocumentState<MemoryState>;
+  /** The saved view's lines by node key, and each logged message's index by source; both immutable once read. */
+  private readonly nodes = new Map<string, string>();
+  private readonly sources = new Map<string, number>();
+  private indexed = 0;
+  private readingNodes = false;
+  private readingSources = false;
+  private memory?: MemoryView;
   /** pi-durable's live tasks, for the agents at work, as the keep-alive counts them. */
   private tasks?: AttachedReplicatedState<TaskGraph>;
   private loaded = false;
@@ -132,6 +141,8 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   readonly getSnapshot = () => this.snapshot;
   readonly getControls = () => this.controls;
   readonly getMessages = () => this.messages;
+  /** The model's memory as it stands; undefined until its lines are read. */
+  readonly getMemory = () => this.memory;
 
   private async connect() {
     const connection = ++this.connection;
@@ -150,25 +161,29 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       }
       this.view = view;
       this.unsubscribeView = view.subscribe(this.schedule);
-      const [metadata, app, config, tasks] = await Promise.all([
+      const [metadata, app, config, memory, tasks] = await Promise.all([
         this.harness.documentState(ChatMetadataDoc, this.id, context),
         this.harness.documentState(AppDoc, this.id, context),
         this.harness.documentState(ConfigDoc, this.id, context),
+        this.harness.documentState(MemoryDoc, this.id, context),
         this.harness.taskGraph(context),
       ]);
       if (!current()) {
         metadata?.dispose();
         app?.dispose();
         config?.dispose();
+        memory?.dispose();
         tasks.dispose();
         return;
       }
       this.metadata = metadata;
       this.app = app;
       this.config = config;
+      this.memoryDoc = memory;
       this.tasks = tasks;
       this.unsubscribeDocs = [metadata?.subscribe(this.schedule) ?? noop, app?.subscribe(this.schedule) ?? noop,
-        config?.subscribe(this.schedule) ?? noop, tasks.subscribe(this.schedule)];
+        config?.subscribe(this.schedule) ?? noop, memory?.subscribe(this.schedule) ?? noop,
+        tasks.subscribe(this.schedule)];
       if (!metadata?.value) {
         this.publish({ status: 'missing' });
         return;
@@ -207,8 +222,71 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
     this.app = undefined;
     this.config?.dispose();
     this.config = undefined;
+    this.memoryDoc?.dispose();
+    this.memoryDoc = undefined;
     this.tasks?.dispose();
     this.tasks = undefined;
+  }
+
+  /** Reads the lines of the saved view's nodes not read yet; resolves whether any was added. */
+  private async readNodes(refs: readonly NodeRef[]): Promise<boolean> {
+    const unread = refs.filter((ref) => !this.nodes.has(key(ref)));
+    if (!unread.length || this.readingNodes) return false;
+    this.readingNodes = true;
+    try {
+      const added = await Promise.all(unread.map(async (ref) => {
+        const node = await this.harness.snapshot(NodeDoc, this.id, key(ref), context);
+        if (!node?.value) return false;
+        this.nodes.set(key(ref), node.value.text);
+        return true;
+      }));
+      return added.includes(true);
+    } finally {
+      this.readingNodes = false;
+    }
+  }
+
+  /** Reads the messages logged since the last read, for their sources; resolves whether any was added. */
+  private async readSources(count: number): Promise<boolean> {
+    if (this.indexed >= count || this.readingSources) return false;
+    this.readingSources = true;
+    try {
+      let added = false;
+      while (this.indexed < count) {
+        const message = await this.harness.snapshot(MessageDoc, this.id, String(this.indexed), context);
+        if (!message) break;
+        this.sources.set(message.source, this.indexed++);
+        added = true;
+      }
+      return added;
+    } finally {
+      this.readingSources = false;
+    }
+  }
+
+  /**
+   * The saved view as the model sees it, from the memory document's refs and the nodes' lines; the lines missing are
+   * read, and the view published once they are.
+   */
+  private memoryView(failCurrent: (error: unknown) => void): MemoryView | undefined {
+    const state = this.memoryDoc?.value;
+    if (!state) return undefined;
+    const refs = state.main.refs;
+    if (refs.some((ref) => !this.nodes.has(key(ref)))) {
+      this.readNodes(refs).then((added) => {
+        if (added) this.schedule();
+      }, failCurrent);
+    }
+    if (this.indexed < state.nextMessage) {
+      this.readSources(state.nextMessage).then((added) => {
+        if (added) this.schedule();
+      }, failCurrent);
+    }
+    const lines = refs.flatMap((ref) => {
+      const text = this.nodes.get(key(ref));
+      return text === undefined ? [] : [{ first: first(ref), count: end(ref) - first(ref), text }];
+    });
+    return { count: state.nextMessage, lines };
   }
 
   /**
@@ -332,11 +410,20 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       configured: docs.agent?.model !== undefined && summary !== null,
       ...(error ? { error } : {}),
     };
-    // An agent's report is UniiChat's work message; its delivery row is the agent's, not the user's.
-    const workRows = new Set(shown.flatMap((entry) =>
-      DeliveryEntry.is(entry) && entry.data.kind === 'work' ? [`${entry.id}-0`] : []));
-    const messages = projectMessages(state, shown).map((message) =>
-      workRows.has(message.id) ? workRow(message) : message);
+    this.memory = this.memoryView(failCurrent);
+    // An agent's report is UniiChat's work message; its delivery row is the agent's, not the user's. Each delivery's
+    // row says whether its input opened a turn, and where the memory logged it.
+    const deliveries = new Map<string, { requestId: string; kind: Admission['kind'] }>(shown.flatMap((entry) =>
+      DeliveryEntry.is(entry) ? [[`${entry.id}-0`, entry.data]] : []));
+    const messages = projectMessages(state, shown).map((message) => {
+      const delivery = deliveries.get(message.id);
+      if (delivery === undefined) return message;
+      const original = this.originals.get(delivery.requestId);
+      const index = this.sources.get(`input:${delivery.requestId}`);
+      const placed = { ...message, ...(original === undefined ? {} : { fresh: original.fresh }),
+        ...(index === undefined ? {} : { memory: index }) };
+      return delivery.kind === 'work' ? workRow(placed) : placed;
+    });
     if (this.stopped && lastRequest !== undefined) messages.push(stoppedNotice(`stopped-${lastRequest}`));
     for (const requestId of pending) {
       const original = this.originals.get(requestId);

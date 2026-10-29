@@ -5,7 +5,7 @@ import type { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import {
   AccessSchema, ControlsSchema, ConversationSchema, InfiniChatRemote, MessagesSchema, PendingHostKeysSchema,
   MachinesSchema, ReachSchema, ScheduledSchema, ServerSchema, SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal,
-  type InfiniChatServer,
+  type InfiniChatServer, MemorySchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { ModelCatalogSchema, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
@@ -52,11 +52,13 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
     const currentControls = () => conversation.current?.view().getControls() ?? null;
     const currentMessages = () => conversation.current?.view().getMessages() ?? [];
     const currentScheduled = () => conversation.current?.scheduled.getSnapshot() ?? null;
+    const currentMemory = () => conversation.current?.memory.getSnapshot() ?? null;
     const currentMachines = () => conversation.current?.machines.getSnapshot() ?? null;
     const snapshot = self.state('snapshot', SnapshotSchema, { init: currentSnapshot });
     const controls = self.state('controls', ControlsSchema, { init: currentControls });
     const messages = self.state('messages', MessagesSchema, { init: currentMessages });
     const scheduled = self.state('scheduled', ScheduledSchema, { init: currentScheduled });
+    const memory = self.state('memory', MemorySchema, { init: currentMemory });
     const machineList = self.state('machines', MachinesSchema, { init: currentMachines });
     const held = self.state('conversation', ConversationSchema, { init: conversation.getState });
     const server = self.state('server', ServerSchema, { init: () => options.server });
@@ -83,6 +85,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       messages.replace(ctx, currentMessages(), { diff: true });
       controls.replace(ctx, currentControls(), { diff: true });
       scheduled.replace(ctx, currentScheduled(), { diff: true });
+      memory.replace(ctx, currentMemory(), { diff: true });
       machineList.replace(ctx, currentMachines(), { diff: true });
       held.replace(ctx, conversation.getState(), { diff: true });
       snapshot.replace(ctx, currentSnapshot(), { diff: true });
@@ -93,6 +96,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       controls,
       messages,
       scheduled,
+      memory,
       machines: machineList,
       conversation: held,
       server,

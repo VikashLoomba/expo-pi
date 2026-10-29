@@ -1,6 +1,6 @@
 import type { Host } from '@earendil-works/chord';
 import {
-  ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, ScheduledSchema, SnapshotSchema,
+  ControlsSchema, ConversationSchema, MachinesSchema, MemorySchema, MessagesSchema, ScheduledSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { Type } from '@earendil-works/pi-ai';
 
@@ -41,6 +41,7 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown): vo
     };
     const currentControls = () => view.getControls() ?? null;
     const currentScheduled = () => shown.scheduled.getSnapshot() ?? null;
+    const currentMemory = () => shown.memory.getSnapshot() ?? null;
     const currentHeld = () => infinichat.getHeld() ?? null;
     const currentMachine = () => infinichat.getMachine() ?? null;
     const currentMachines = () => shown.machines.getSnapshot() ?? null;
@@ -50,6 +51,7 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown): vo
     const controls = self.state('controls', ControlsSchema, { init: currentControls });
     const messages = self.state('messages', MessagesSchema, { init: () => view.getMessages() });
     const scheduled = self.state('scheduled', ScheduledSchema, { init: currentScheduled });
+    const memory = self.state('memory', MemorySchema, { init: currentMemory });
     const link = self.state('connection', ConnectionSchema, { init: () => connection(infinichat) });
     const held = self.state('held', HeldSchema, { init: currentHeld });
     const machine = self.state('machine', ShownMachineSchema, { init: currentMachine });
@@ -60,6 +62,7 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown): vo
       messages.replace(ctx, view.getMessages(), { diff: true });
       controls.replace(ctx, currentControls(), { diff: true });
       scheduled.replace(ctx, currentScheduled(), { diff: true });
+      memory.replace(ctx, currentMemory(), { diff: true });
       snapshot.replace(ctx, currentSnapshot(), { diff: true });
     });
     self.on('connection', infinichat, (_change, ctx) => {
@@ -80,6 +83,7 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown): vo
       controls,
       messages,
       scheduled,
+      memory,
       connection: link,
       held,
       machine,

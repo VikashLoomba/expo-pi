@@ -1,7 +1,7 @@
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 
 /**
- * A row of the thread. A run of tool calls is one row with one Trace, as the chatbot template groups an agent's
+ * A row inside a turn. A run of tool calls is one row with one Trace, as the chatbot template groups an agent's
  * steps between its text; every other message is its own row; the working line is the last row while the agent is
  * busy without a streaming row of its own.
  */
@@ -22,10 +22,4 @@ export function rowsOf(messages: readonly ChatMessage[], working: string | undef
   }
   if (working !== undefined) rows.push({ kind: 'working', id: 'working', text: working });
   return rows;
-}
-
-/** The id of the person's turn when it is the newest message, so the thread can settle it near the top. */
-export function newestTurn(rows: readonly Row[]): string | undefined {
-  const last = rows.at(-1)?.kind === 'working' ? rows.at(-2) : rows.at(-1);
-  return last?.kind === 'message' && last.message.role === 'user' ? last.id : undefined;
 }

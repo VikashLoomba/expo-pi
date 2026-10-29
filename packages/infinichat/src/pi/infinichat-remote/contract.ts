@@ -1,7 +1,7 @@
 import { hostNamed, method, remote } from '@earendil-works/chord';
 import { Type, type Static } from '@earendil-works/pi-ai';
 
-import { ChatMessageSchema } from '../../chat/types';
+import { ChatMessageSchema, MemoryViewSchema } from '../../chat/types';
 import { ChatViewSnapshotSchema } from '../chat-view';
 import { ScheduledTaskSchema } from '../infinichat-scheduled';
 import { InfiniChatControlsSchema } from '../infinichat-view';
@@ -25,6 +25,8 @@ export const MessagesSchema = Type.ReadonlyObject(Type.Array(ChatMessageSchema))
  * hasn't read them yet, so the phone never takes an empty list it was not given for its notifications.
  */
 export const ScheduledSchema = Type.Union([Type.ReadonlyObject(Type.Array(ScheduledTaskSchema)), Type.Null()]);
+/** The model's memory of the chat as it stands; null while this machine doesn't hold the conversation or hasn't read it. */
+export const MemorySchema = Type.Union([MemoryViewSchema, Type.Null()]);
 /**
  * Which server answers: `bundle` names its bundle (the first 32 hex digits of its SHA-256), built with these pi
  * versions, running as the device `--device` named. The phone reinstalls when `bundle` differs from its manifest, and
@@ -144,13 +146,14 @@ export type SignInAttempt = Static<typeof SignInAttemptSchema>;
  * and the operations of its screens.
  */
 export const InfiniChatRemote = remote('infinichat.remote', {
-  version: 4,
+  version: 5,
   input: Type.Object({}),
   host: hostNamed('infinichat-server'),
   variants: {
     owner: {
       state: {
         snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
+        memory: MemorySchema,
         server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
         // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:237`).
         signInAttempt: SignInAttemptSchema,

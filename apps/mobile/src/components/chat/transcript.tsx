@@ -1,11 +1,12 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
-import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
+import { turnsOf, type Turn } from '@pi-agent/infinichat/chat/turns';
+import type { MemoryView } from '@pi-agent/infinichat/chat/types';
 import type { ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { FlashList } from '@shopify/flash-list';
 import { GlassView } from 'expo-glass-effect';
 import { router } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { memo, useCallback, useState, type ReactNode, type Ref } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode, type Ref } from 'react';
 import {
   ActivityIndicator, PlatformColor, Pressable, StyleSheet, Text, View, type ScrollViewProps,
 } from 'react-native';
@@ -19,7 +20,7 @@ import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { useTranscriptScroll } from '@/hooks/use-transcript-scroll';
 import { ChatIcon, type ChatIconName } from './icon';
-import { MessageRow } from './message-row';
+import { TurnItem } from './turn-item';
 import { AgentMark, useChatAgentName } from './agent';
 import { ActionButton } from './primitives';
 
@@ -49,7 +50,8 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
   </View>;
 }
 
-const keyExtractor = (message: ChatMessage) => message.id;
+const keyExtractor = (turn: Turn) => turn.id;
+const NO_TURNS: readonly string[] = [];
 
 /**
  * FlashList's chat setting, as its docs give it: the list opens on the newest message; near it, new and streaming
@@ -80,14 +82,16 @@ function ChatScrollView({ composerHeight, onEndVisible, ...props }: ScrollViewPr
 /**
  * Only this subtree subscribes to text deltas. `memo` stays because the chat screen that renders it is not compiled
  * by React Compiler (it contains `try … finally`). The composer floats over the transcript and moves with the
- * keyboard.
+ * keyboard. The thread is folded by turn (owner, 2026-10-29): the newest turn open, the earlier ones a header each
+ * that opens on a tap, and a new turn the only open one again; `memory` gives each turn the model's lines for it.
  */
 export const ChatTranscript = memo(function ChatTranscript({
-  view, ready, stopping, onChoose, onSteerQueued, composer,
+  view, ready, stopping, onChoose, onSteerQueued, composer, memory,
 }: {
   view: ChatViewSource | undefined; ready: boolean; stopping: boolean; onChoose: (text: string) => void;
   onSteerQueued?: (submissionId: number, content: UserMessage['content']) => void;
   composer: ReactNode;
+  memory?: MemoryView;
 }) {
   const colors = useChatColors();
   const agentName = useChatAgentName();
@@ -96,8 +100,19 @@ export const ChatTranscript = memo(function ChatTranscript({
   const busy = !!controls?.busy;
   const status = useChatStatus(view);
   const error = useChatError(view);
-  const renderMessage = ({ item }: { item: ChatMessage }) =>
-    <MessageRow message={item} stopping={stopping && !!item.streaming} onSteerQueued={onSteerQueued} />;
+  const turns = useMemo(() => turnsOf(messages, memory), [messages, memory]);
+  // The turns open: the newest alone whenever a new one begins, plus the ones the reader opened since.
+  const newest = turns.at(-1)?.id;
+  const [opened, setOpened] = useState<{ newest: string | undefined; open: readonly string[] }>(
+    () => ({ newest, open: newest === undefined ? NO_TURNS : [newest] }));
+  if (opened.newest !== newest) setOpened({ newest, open: newest === undefined ? NO_TURNS : [newest] });
+  const toggle = (id: string) => setOpened((current) => ({
+    ...current,
+    open: current.open.includes(id) ? current.open.filter((other) => other !== id) : [...current.open, id],
+  }));
+  const renderTurn = ({ item }: { item: Turn }) =>
+    <TurnItem turn={item} open={opened.open.includes(item.id)} onToggle={() => toggle(item.id)} stopping={stopping}
+      onSteerQueued={onSteerQueued} />;
   const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
     : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
   const { listRef, onEndVisible, scrollToLatest, showScrollDown } = useTranscriptScroll();
@@ -121,8 +136,8 @@ export const ChatTranscript = memo(function ChatTranscript({
       <Text style={[styles.loadingText, { color: colors.muted }]}>Opening this conversation…</Text></View>
     : undefined;
   return <View style={styles.transcript}>
-    {placeholder ?? <FlashList ref={listRef} testID="message-list" data={messages} keyExtractor={keyExtractor}
-      renderItem={renderMessage} extraData={stopping} renderScrollComponent={renderScrollComponent}
+    {placeholder ?? <FlashList ref={listRef} testID="message-list" data={turns} keyExtractor={keyExtractor}
+      renderItem={renderTurn} extraData={opened.open} renderScrollComponent={renderScrollComponent}
       maintainVisibleContentPosition={chatPosition}
       keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" scrollEventThrottle={16}
       contentContainerStyle={[styles.messages, !messages.length && styles.grow]}

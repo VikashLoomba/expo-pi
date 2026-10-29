@@ -75,6 +75,7 @@ comes after them. Each piece leaves the iOS app and the server working.
 | 7 | [Several clients](07-several-clients.md) | The server's single-client code fixed: a credential per client, the server's own machine list, the holder recorded on the machines | ~150 lines |
 | 8 | [The machines document](08-machines-document.md) | The machine list as a session document of InfiniChat's storage, served by the holder and edited through it; clients keep credentials only | ~220 package, ~350 phone |
 | 9 | [Page patches between machines](09-patch-between-machines.md) | A move between machines patches the target's kept copy, as the phone's moves do, instead of copying the whole file | ~150 moved, ~50 changed |
+| 10 | [The thread folded by turn](10-folded-thread.md) | The newest turn open, earlier ones a line each with the model's memory lines; both apps. |
 
 A piece that grows to several times its size means its design is wrong; stop and revisit it.
 

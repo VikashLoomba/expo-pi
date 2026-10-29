@@ -2,7 +2,7 @@ import { hostNamed, method, remote } from '@earendil-works/chord';
 import { Type, type Static } from '@earendil-works/pi-ai';
 import {
   ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema, ReachSchema,
-  ScheduledSchema, SnapshotSchema,
+  ScheduledSchema, SnapshotSchema, MemorySchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { ChatImageSchema, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
 
@@ -75,7 +75,7 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
     owner: {
       state: {
         snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
-        connection: ConnectionSchema, held: Type.Union([Type.Null(), ConversationSchema]), machine: ShownMachineSchema,
+        memory: MemorySchema, connection: ConnectionSchema, held: Type.Union([Type.Null(), ConversationSchema]), machine: ShownMachineSchema,
         // The conversation's machines, the move under way, and what the last move wants the user to know.
         machines: MachinesSchema, move: Type.Union([Type.Null(), MoveStatusSchema]),
         moveNotice: Type.Union([Type.Null(), Type.String()]),

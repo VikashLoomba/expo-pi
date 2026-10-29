@@ -16,7 +16,7 @@ const TEXT_LIMIT = 30000;
 export const flat = (text: string): string => text.replace(/\s*\n\s*/g, ' ');
 
 type Kind = 'user' | 'unii' | 'tool' | 'echo' | 'work' | 'note';
-type CanonicalMessage = {
+export type CanonicalMessage = {
   i: number;
   kind: Kind;
   text: string;
@@ -51,7 +51,7 @@ export const NodeDoc = defineDocFamily<{ value: BuiltNode | null }, BuiltNode | 
   initial: (value) => ({ value }),
 });
 type View = { refs: NodeRef[]; reducing: boolean };
-type MemoryState = {
+export type MemoryState = {
   nextMessage: number;
   frontier: number;
   viewThrough: number;

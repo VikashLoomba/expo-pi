@@ -242,7 +242,8 @@ export class ServerConversation {
     const core = this.core;
     if (core) {
       const stops = [core.view().subscribe(this.notify), core.subscribe(this.notify),
-        core.scheduled.subscribe(this.notify), core.machines.subscribe(this.notify)];
+        core.scheduled.subscribe(this.notify), core.memory.subscribe(this.notify),
+        core.machines.subscribe(this.notify)];
       this.unfollow = () => {
         for (const stop of stops) stop();
       };
