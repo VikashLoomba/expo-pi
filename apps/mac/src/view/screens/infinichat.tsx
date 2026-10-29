@@ -10,6 +10,7 @@ import type { Attachment, MacPrincipal, MoveStatus } from '../../contract';
 import { ChatAgentContext } from '../components/chat/agent';
 import { Composer } from '../components/chat/composer';
 import { Notice } from '../components/chat/notices';
+import { Placeholder } from '../components/chat/placeholder';
 import { Transcript } from '../components/chat/transcript';
 import { Button } from '../components/ui/button';
 import {
@@ -173,13 +174,13 @@ function InfiniChat() {
   const machines = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
   return (
     <ChatAgentContext value={agent}>
-      <div className="conversation">
-        <header className="toolbar conversation-header">
-          <div className="conversation-heading">
-            <div className="title">{name}</div>
-            <div className="subtitle">{subtitle}</div>
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        <header className="toolbar grid grid-cols-[1fr_auto_1fr] items-center border-b px-3">
+          <div className="col-start-2 flex flex-col items-center">
+            <div className="font-semibold">{name}</div>
+            <div className="text-[11px] text-muted-foreground">{subtitle}</div>
           </div>
-          <div className="conversation-actions">
+          <div className="col-start-3 justify-self-end [-webkit-app-region:no-drag] [app-region:no-drag]">
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm"
                 aria-label={`InfiniChat runs on ${machineName}`} />}>
@@ -209,7 +210,8 @@ function InfiniChat() {
             </DropdownMenu>
           </div>
         </header>
-        {away ? <p className="placeholder">{away}</p> : <Transcript stopping={stopping} onChoose={choosePrompt} />}
+        {away ? <Placeholder>{away}</Placeholder> : <Transcript stopping={stopping} onChoose={choosePrompt} />}
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-6 pb-6">
         {controls && !configured && <Notice tone="neutral" message={MODELS_REQUIRED} />}
         {move?.error !== undefined && !messageError && (
           <Notice message={move.error} action="Try Again" onAction={() => { void ref.retryMove(); }} />
@@ -231,6 +233,7 @@ function InfiniChat() {
           inputRef={input}
           attachments={draft.images} onAttach={attach} onFiles={attachFiles} onRemoveAttachment={removeImage}
           attaching={attaching} imagesSupported={configured} />
+        </div>
       </div>
     </ChatAgentContext>
   );

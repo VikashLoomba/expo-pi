@@ -1,9 +1,6 @@
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { collectSearchSources, type SearchSource } from '@pi-agent/infinichat/chat/web-search-presentation';
-import {
-  ArrowUpRightIcon, BotIcon, CircleCheckIcon, FileTextIcon, GlobeIcon, LoaderCircleIcon, SearchIcon, TerminalIcon,
-  TriangleAlertIcon,
-} from 'lucide-react';
+import { ArrowUpRightIcon, BotIcon, GlobeIcon } from 'lucide-react';
 import { useState } from 'react';
 
 import { useOpenExternal } from '../../lib/app-context';
@@ -14,6 +11,7 @@ import {
 } from '../ui/trace';
 import { MessageContent } from './message-content';
 import { MessageImages } from './message-images';
+import { StatusIcon } from './status-icon';
 
 type WebSearchCall = NonNullable<ChatMessage['webSearch']>['calls'][number];
 
@@ -35,7 +33,7 @@ export function ReasoningRow({ text, running }: { text: string; running: boolean
   const [open, setOpen] = useState<boolean>();
   const line = (
     <TraceLine status={running ? 'running' : undefined}>
-      <TraceIcon>{running ? <LoaderCircleIcon className="animate-spin" /> : <CircleCheckIcon />}</TraceIcon>
+      <TraceIcon><StatusIcon status={running ? 'running' : undefined} /></TraceIcon>
       <TraceTitle>{running ? 'Thinking' : 'Thought'}</TraceTitle>
     </TraceLine>
   );
@@ -55,11 +53,10 @@ export function ToolRow({ message }: { message: ChatMessage }) {
   const file = tool.file;
   const name = tool.name.replace(/_/g, ' ');
   const what = file ? `${name} ${file.path}` : name;
-  const icon = file ? <FileTextIcon /> : <TerminalIcon />;
   if (tool.status === 'running') {
     return (
       <TraceLine status="running">
-        <TraceIcon>{icon}</TraceIcon>
+        <TraceIcon><StatusIcon status="running" /></TraceIcon>
         <TraceTitle>Running {what}</TraceTitle>
       </TraceLine>
     );
@@ -69,7 +66,7 @@ export function ToolRow({ message }: { message: ChatMessage }) {
     <TraceCollapsible defaultOpen={failed}>
       <TraceCollapsibleTrigger>
         <TraceLine status={failed ? 'error' : undefined}>
-          <TraceIcon>{icon}</TraceIcon>
+          <TraceIcon><StatusIcon status={failed ? 'error' : undefined} /></TraceIcon>
           <TraceTitle>{failed ? 'Failed to run' : 'Ran'} {what}</TraceTitle>
           {file?.summary && <TraceDescription>{file.summary}</TraceDescription>}
         </TraceLine>
@@ -99,7 +96,7 @@ function SearchRow({ call }: { call: WebSearchCall }) {
     : call.status === 'interrupted' ? 'Stopped searching for' : 'Searched for';
   return (
     <TraceLine status={running ? 'running' : failed ? 'error' : undefined}>
-      <TraceIcon>{running ? <LoaderCircleIcon className="animate-spin" /> : <SearchIcon />}</TraceIcon>
+      <TraceIcon><StatusIcon status={running ? 'running' : failed ? 'error' : undefined} /></TraceIcon>
       <TraceTitle>{verb} {what}</TraceTitle>
     </TraceLine>
   );
@@ -146,7 +143,7 @@ export function ReportRow({ author, body, streaming }: { author: string; body: s
     <TraceCollapsible defaultOpen>
       <TraceCollapsibleTrigger>
         <TraceLine status={streaming ? 'running' : undefined}>
-          <TraceIcon>{streaming ? <LoaderCircleIcon className="animate-spin" /> : <BotIcon />}</TraceIcon>
+          <TraceIcon>{streaming ? <StatusIcon status="running" /> : <BotIcon />}</TraceIcon>
           <TraceTitle>{streaming ? `${author} is working` : `${author} reported`}</TraceTitle>
         </TraceLine>
       </TraceCollapsibleTrigger>
@@ -161,7 +158,7 @@ export function ReportRow({ author, body, streaming }: { author: string; body: s
 export function ErrorRow({ text }: { text: string }) {
   return (
     <TraceLine status="error">
-      <TraceIcon><TriangleAlertIcon /></TraceIcon>
+      <TraceIcon><StatusIcon status="error" /></TraceIcon>
       <TraceTitle>{text}</TraceTitle>
     </TraceLine>
   );

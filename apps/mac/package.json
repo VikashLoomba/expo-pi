@@ -16,6 +16,8 @@
     "@pi-agent/infinichat-server": "workspace:*",
     "@shadcn/react": "^0.3.1",
     "@silvia-odwyer/photon": "0.3.3",
+    "@streamdown/code": "^2.0.0",
+    "@tanstack/react-virtual": "^3.14.24",
     "class-variance-authority": "0.7.1",
     "cn": "0.5.0",
     "lucide-react": "1.63.0",

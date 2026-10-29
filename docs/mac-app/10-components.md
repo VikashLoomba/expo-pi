@@ -106,3 +106,44 @@ From `3d1d6f0` on `feat/mac-app-shell` (2026-10-28), one commit, with shadcn 4.2
 Verified on 2026-10-28 by the owner ("looks good"): the thread, the turns, the lines, code blocks, the composer with
 chips and tooltips, both sidebars and the Machines rows, in both appearances. Not verified: a running tool's and a
 search's lines while they stream, a photo chip's image, and the jump button after a long scroll.
+
+## The chatbot template (owner, 2026-10-29)
+
+The owner, on a slow scroll through a 4,139-row thread and my calling virtualization a deviation: "AI Elements
+doesn't prescribe us to do what we are doing… Look at the official shadcn example
+https://github.com/shadcn-ui/chatbot-template. They use patterns we should be using." The template (`4106041`,
+"move chat UI to Trace and AI Elements") and the Message Scroller docs are the reference for this window's chat.
+
+What the docs say: the primitive is comfortable "for hundreds to low thousands of turns"; virtualization is
+"intentionally left outside" it, with a `@tanstack/react-virtual` transcript whose viewport is
+`MessageScrollerViewport`; loading earlier messages keeps the reader's row through `preserveScrollOnPrepend`.
+`autoScroll` and `defaultScrollPosition="last-anchor"` are the documented choices for a thread that follows the
+reply and reopens a saved thread, so they were right.
+
+Owner choices: Streamdown stays ("I don't care to change our Streamdown implementation, unless there are specific
+enhancements that would make our product better"); the rows are virtualized; the style stays `base-nova` (the
+template is `base-rhea`). Not adopted: shadcn/typeset, since Streamdown's elements carry their own utilities and
+typeset's `@layer components` rules would lose to them.
+
+As built, after the template:
+
+- **`transcript.tsx`**: the thread's rows come from `rows.ts` (`rowsOf`): a run of tool calls is one row with one
+  `Trace`, as the template's `groupParts` groups a turn's steps; the working line is the last row. `Thread` virtualizes
+  them with `useVirtualizer` as the docs show (`estimateSize` 86, `overscan` 8, `measureElement`, rows absolutely
+  placed in a block of `getTotalSize()`), inside `MessageScrollerProvider autoScroll defaultScrollPosition="end"`
+  with the jump button. The person's newest turn settles near the top through `scrollToIndex(…, { align: 'start' })`,
+  as `scrollAnchor` did for a MessageScrollerItem; the turn the thread opened on stays where it opened.
+- **`message-row.tsx`**: `TranscriptRow` by kind; `StepsRow`, `WorkingRow`; `status-icon.tsx` is the template's
+  `StatusIcon` on every step line (`trace-rows.tsx`).
+- **`message-content.tsx`**: Streamdown highlights code through its own `@streamdown/code` plugin (an enhancement; the
+  blocks were plain before), with utilities instead of a `.markdown` class. The shiki hook and highlighter copied
+  from the template were unused and are gone.
+- **`composer.tsx`**: Enter is ignored while an IME composition is open (`isComposing`), as the template's form.
+- **`notices.tsx`** and the Machines pane: shadcn's `Alert` (`destructive` for errors, `AlertAction` for the one
+  action), in the template's footer column (`mx-auto w-full max-w-2xl px-6 pb-6`) with the composer.
+- **Layout**: the screen, header, placeholder (`placeholder.tsx`), images and composer use utilities; `app.css`
+  keeps only what the platform needs (`.toolbar` drag region, the window frame) and the Settings pane's classes.
+
+Verified on this Mac: typecheck, lint, the window builds and opens. Not verified: the thread's feel on the owner's
+4,139-row conversation, opening at the end, the newest turn settling near the top, streaming into virtualized
+rows. The owner reports issues themselves (no probes: "Can you please stop doing probes").

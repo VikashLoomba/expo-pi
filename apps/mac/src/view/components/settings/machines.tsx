@@ -9,6 +9,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '../ui/alert-dialog';
+import { Alert, AlertDescription } from '../ui/alert';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../ui/card';
@@ -50,7 +51,7 @@ export function MachinesPane({ machines: api }: { machines: MachinesRef }) {
       {listed === null && <p className="pane-note">
         InfiniChat isn’t open on this Mac or reachable, so its machines can’t be read or changed right now.
       </p>}
-      {notice !== undefined && <p className="notice notice-error">{notice}</p>}
+      {notice !== undefined && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
       {editing !== undefined && (
         <MachineForm api={api} endpoint={editing.endpoint} onDone={() => setEditing(undefined)}
           initial={editing.endpoint === undefined ? undefined : listed?.machines[editing.endpoint]} />
@@ -216,7 +217,7 @@ function MachineForm({ api, initial, endpoint, onDone }: {
         <CardTitle>{initial === undefined ? 'Add Machine' : `Edit ${initial.name}`}</CardTitle>
       </CardHeader>
       <CardContent>
-        {error !== undefined && <p className="notice notice-error">{error}</p>}
+        {error !== undefined && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldLabel htmlFor="machine-hostname">Hostname</FieldLabel>

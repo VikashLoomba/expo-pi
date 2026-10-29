@@ -42,7 +42,7 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
     if (canSend) onSend();
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       form.current?.requestSubmit();
     }
@@ -61,10 +61,11 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
     if (files.length && canAttach) onFiles(files);
   };
   return (
-    <form ref={form} className="composer" onSubmit={submit}
+    <form ref={form} onSubmit={submit}
       onDragOver={(event) => { event.preventDefault(); setDropping(canAttach); }}
       onDragLeave={() => setDropping(false)} onDrop={onDrop}>
-      <InputGroup data-dropping={dropping || undefined} className="composer-group">
+      <InputGroup data-dropping={dropping || undefined}
+        className="h-auto min-h-14 flex-col items-stretch select-text data-[dropping]:bg-primary/10">
         {attachments.length > 0 && (
           <InputGroupAddon align="block-start" className="flex-wrap">
             {attachments.map((photo, index) => (

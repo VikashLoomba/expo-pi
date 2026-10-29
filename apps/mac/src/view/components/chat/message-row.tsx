@@ -7,10 +7,12 @@ import { Button } from '../ui/button';
 import { Marker, MarkerContent } from '../ui/marker';
 import { Message, MessageAvatar, MessageContent, MessageFooter, MessageHeader } from '../ui/message';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
-import { Trace } from '../ui/trace';
+import { Trace, TraceIcon, TraceLine, TraceTitle } from '../ui/trace';
 import { AgentMark, useChatAgentName } from './agent';
 import { MessageContent as Markdown } from './message-content';
 import { MessageImages } from './message-images';
+import type { Row } from './rows';
+import { StatusIcon } from './status-icon';
 import { ErrorRow, ReasoningRow, ReportRow, SearchRows, SourcesRow, ToolRow } from './trace-rows';
 
 /** UniiChat's work message: "[Name]" and the report, without the zoom pointer for the model. */
@@ -42,9 +44,43 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** A run of tool calls as one Trace, as the chatbot template groups the steps of a turn. */
+const StepsRow = memo(function StepsRow({ messages }: { messages: readonly ChatMessage[] }) {
+  return (
+    <Message>
+      <MessageContent>
+        <Trace>{messages.map((message) => <ToolRow key={message.id} message={message} />)}</Trace>
+      </MessageContent>
+    </Message>
+  );
+});
+
+/** The agent at work without a row of its own yet, as the template's "Thinking" item. */
+function WorkingRow({ text }: { text: string }) {
+  return (
+    <Message>
+      <MessageContent>
+        <Trace>
+          <TraceLine status="running">
+            <TraceIcon><StatusIcon status="running" /></TraceIcon>
+            <TraceTitle>{text}</TraceTitle>
+          </TraceLine>
+        </Trace>
+      </MessageContent>
+    </Message>
+  );
+}
+
+/** One row of the thread, by kind. */
+export function TranscriptRow({ row, stopping }: { row: Row; stopping: boolean }) {
+  if (row.kind === 'steps') return <StepsRow messages={row.messages} />;
+  if (row.kind === 'working') return <WorkingRow text={row.text} />;
+  return <MessageRow message={row.message} stopping={stopping} />;
+}
+
 /**
  * One turn of the thread as AI Elements lay it out: the person's text in a bubble on the end side; the agent's reply
- * with its steps (thinking, tool calls, searches, sources) as Trace lines and its actions in the footer; a notice as
+ * with its steps (thinking, searches, sources) as Trace lines and its actions in the footer; a notice as
  * a marker between turns; an agent's report as a subagent run. `memo`: a streamed delta replaces only the rows it
  * touches, so the others keep their rendered Markdown.
  */
@@ -69,15 +105,6 @@ export const MessageRow = memo(function MessageRow({ message, stopping = false }
             </BubbleContent>
           </Bubble>
           {queued !== undefined && <MessageFooter>{queued}</MessageFooter>}
-        </MessageContent>
-      </Message>
-    );
-  }
-  if (message.role === 'tool' && message.tool) {
-    return (
-      <Message>
-        <MessageContent>
-          <Trace><ToolRow message={message} /></Trace>
         </MessageContent>
       </Message>
     );

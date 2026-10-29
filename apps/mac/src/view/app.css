@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 /* streamdown's components carry Tailwind utilities; the animation keyframes are its own stylesheet. */
 @source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
 @import "../../node_modules/streamdown/styles.css";
 
 /* A Mac app follows the system appearance: shadcn's `dark` variant is the media query here, not a class. */
@@ -77,7 +78,6 @@
   --sidebar-accent-foreground: #1d1d1f;
   --sidebar-border: #d2d2d7;
   --sidebar-ring: #007aff;
-  --primary-soft: rgba(0, 122, 255, 0.12);
   --danger: var(--destructive);
   --selected: var(--sidebar-accent);
   --toolbar-height: 52px;
@@ -112,7 +112,6 @@
     --sidebar-accent-foreground: #f5f5f7;
     --sidebar-border: #3a3a3c;
     --sidebar-ring: #0a84ff;
-    --primary-soft: rgba(10, 132, 255, 0.2);
   }
 }
 
@@ -168,138 +167,6 @@ button,
   height: var(--toolbar-height);
   -webkit-app-region: drag;
   app-region: drag;
-}
-
-.placeholder {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 15px;
-}
-
-/* The conversation: its header under the traffic-light toolbar, the thread, the composer. */
-.conversation {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-}
-
-.conversation-header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.conversation-heading {
-  grid-column: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.conversation-actions {
-  grid-column: 3;
-  justify-self: end;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
-
-.title {
-  font-weight: 600;
-}
-
-.subtitle {
-  color: var(--muted-foreground);
-  font-size: 11px;
-}
-
-.transcript {
-  flex: 1;
-  min-height: 0;
-  -webkit-user-select: text;
-  user-select: text;
-}
-
-.messages {
-  margin: 0 auto;
-  width: 100%;
-  max-width: 760px;
-  padding: 16px 24px;
-}
-
-.images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.images img {
-  border-radius: 10px;
-  object-fit: cover;
-}
-
-/* streamdown's Markdown, with the composer's text size. */
-.markdown {
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.markdown > :first-child {
-  margin-top: 0;
-}
-
-.markdown > :last-child {
-  margin-bottom: 0;
-}
-
-/* The composer: the Prompt Input under the thread; dropping a photo tints it. */
-.composer {
-  flex: none;
-  padding: 8px 24px 16px;
-}
-
-.composer-group {
-  margin: 0 auto;
-  max-width: 760px;
-  min-height: 56px;
-  height: auto;
-  align-items: stretch;
-  flex-direction: column;
-  -webkit-user-select: text;
-  user-select: text;
-}
-
-.composer-group[data-dropping] {
-  background: var(--primary-soft);
-}
-
-/* A line above the composer that says what stands in the way. */
-.notice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0 auto 8px;
-  max-width: 760px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--card);
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-.notice-error {
-  color: var(--danger);
-}
-
-.notice-action {
-  margin-left: auto;
 }
 
 /* The Settings window's Machines pane. */

@@ -1,15 +1,18 @@
+import { Alert, AlertAction, AlertDescription } from '../ui/alert';
 import { Button } from '../ui/button';
 
-/** A line above the composer that says what stands in the way, with the one action that helps, as the phone's. */
+/** What stands in the way, above the composer as the chatbot template's Alert, with the one action that helps. */
 export function Notice({ message, tone = 'error', action, onAction }: {
   message: string; tone?: 'error' | 'neutral'; action?: string; onAction?: () => void;
 }) {
   return (
-    <p className={tone === 'error' ? 'notice notice-error' : 'notice'}>
-      {message}
-      {action && <Button type="button" variant="link" size="xs" className="notice-action" onClick={onAction}>
-        {action}
-      </Button>}
-    </p>
+    <Alert variant={tone === 'error' ? 'destructive' : 'default'}>
+      <AlertDescription>{message}</AlertDescription>
+      {action && (
+        <AlertAction>
+          <Button type="button" variant="link" size="xs" onClick={onAction}>{action}</Button>
+        </AlertAction>
+      )}
+    </Alert>
   );
 }
