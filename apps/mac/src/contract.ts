@@ -1,9 +1,11 @@
 import { hostNamed, method, remote } from '@earendil-works/chord';
 import { Type, type Static } from '@earendil-works/pi-ai';
 import {
-  ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema, ReachSchema,
-  ScheduledSchema, SnapshotSchema,
+  AccessSchema, ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema,
+  ReachSchema, ScheduledSchema, SignInAttemptSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { ScheduledInputSchema } from '@pi-agent/infinichat/pi/infinichat/schedule';
+import { ChatModelSettingsSchema, ModelCatalogSchema } from '@pi-agent/infinichat/pi/model-catalog';
 import { ChatImageSchema, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
 
 /** Who acts on the main process's objects: a window, or the main process's own code. */
@@ -79,6 +81,10 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         // The conversation's machines, the move under way, and what the last move wants the user to know.
         machines: MachinesSchema, move: Type.Union([Type.Null(), MoveStatusSchema]),
         moveNotice: Type.Union([Type.Null(), Type.String()]),
+        // Piece 6: the holder machine's providers and models and its sign-in under way, as `RemoteInfiniChat` reads
+        // them, and this Mac's own avatar file as the page loads it (`appdata://avatar/<file>`).
+        catalog: ModelCatalogSchema, access: AccessSchema, signInAttempt: SignInAttemptSchema,
+        avatar: Type.Union([Type.Null(), Type.String()]),
       },
       methods: {
         accept: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
@@ -96,6 +102,20 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         pickPhotos: method(undefined, Type.Array(AttachmentSchema)),
         attach: method(Type.Object({ name: Type.String(), mimeType: Type.String(), data: Type.String() }),
           AttachmentSchema),
+        // Piece 6: the settings and scheduled tasks sheets, through the side shown, and the avatar: a file chosen in
+        // the open dialog becomes it at once (its URL comes back; null when nothing was chosen).
+        updateSettings: method(Type.Object({ main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema,
+          instructions: Type.String(), name: Type.String() })),
+        cancelScheduled: method(Type.Object({ id: Type.Number(), replacement: Type.Optional(ScheduledInputSchema) }),
+          Type.Boolean()),
+        setAvatar: method(undefined, Type.Union([Type.Null(), Type.String()])),
+        clearAvatar: method(),
+        // The providers sheet's operations on the holder machine's credential store, forwarded to its object.
+        signIn: method(Type.Object({ providerId: Type.String() }), Type.Number()),
+        answer: method(Type.Object({ promptId: Type.Number(), value: Type.String() })),
+        cancelSignIn: method(),
+        setApiKey: method(Type.Object({ providerId: Type.String(), key: Type.String() })),
+        signOut: method(Type.Object({ providerId: Type.String() })),
       },
     },
   },

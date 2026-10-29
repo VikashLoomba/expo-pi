@@ -79,6 +79,37 @@ export class MacInfiniChat {
     return remote.acceptHostKey(endpoint, fingerprints);
   }
 
+  // Piece 6: the holder machine's providers and models, read and acted on as the phone's `useInfiniChatAccount`.
+  readonly getCatalog = () => this.current?.remote.getCatalog();
+  readonly getAccess = () => this.current?.remote.getAccess();
+  readonly getSignIn = () => this.current?.remote.getSignIn();
+
+  signIn(providerId: string): Promise<number> {
+    return this.connected().signIn(providerId);
+  }
+
+  answer(promptId: number, value: string): Promise<void> {
+    return this.connected().answer(promptId, value);
+  }
+
+  cancelSignIn(): Promise<void> {
+    return this.connected().cancelSignIn();
+  }
+
+  setApiKey(providerId: string, key: string): Promise<void> {
+    return this.connected().setApiKey(providerId, key);
+  }
+
+  signOut(providerId: string): Promise<void> {
+    return this.connected().signOut(providerId);
+  }
+
+  private connected(): RemoteInfiniChat {
+    const remote = this.current?.remote;
+    if (remote === undefined) throw new Error('InfiniChat is not connected to a machine.');
+    return remote;
+  }
+
   /**
    * Connects to the machine the home record names and shows its conversation once its view has a snapshot, or
    * carries on a move the app quit during.

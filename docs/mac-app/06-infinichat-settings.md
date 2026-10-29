@@ -58,3 +58,55 @@ About 500 lines: contract and serve 70, avatar, relay and notifier 130, sheets 3
   signs in; an API key saves; sign out works; cancel mid-attempt.
 - A task scheduled by the agent appears in the sheet and fires a Mac notification at its minute while the app runs;
   editing its time re-arms it; deleting removes it on the machine and the phone's list.
+
+## As built
+
+From `4bd7ba8` (2026-10-29), one commit, with Electrobun 2.0.5 (Hutch 0.28.2), chord 1.4.0, pi 1.4.0, shadcn 4.23
+(style `base-nova`) and Base UI 1.9. What differs from the plan:
+
+- **The sheets are shadcn dialogs, not `<dialog>` elements.** `components/infinichat/form-sheet.tsx` is one
+  `FormSheet` over Dialog with the owner's form-sheet rules: Cancel leads and Save trails, Enter saves, and closing a
+  sheet with unsaved changes by Escape, a click outside or Cancel asks in an AlertDialog ("Discard changes?") first.
+  `settings-sheet.tsx`, `providers-sheet.tsx` and `scheduled-sheet.tsx` build on it; `useSheet` keys each sheet by
+  its opening, so it mounts with the values of that moment and keeps them until Save or Cancel, as the phone's draft
+  provider does. The files live under `src/view/components/` with the other screens' parts, not at `src/view/`.
+- **The model choice is a Combobox** (`combobox`, added with the CLI) in `components/chat/model-section.tsx`, the
+  phone's `ModelSection` for piece 7's chat settings too: provider and effort are Selects, the model a combobox
+  searched by name and ID, in place of the phone's pushed list with its search bar.
+- **The avatar applies as it is chosen**, not at Save: `setAvatar` opens the file dialog, copies the file to
+  `userData/avatar/<uuid>.<ext>`, names it in `settings.json` and returns its `appdata://avatar/<file>` URL;
+  `clearAvatar` removes it; the main window allows `appData`. The phone keeps the avatar in its draft because Image
+  Playground hands it a temporary file; a chosen file is already the user's own. `.agent-mark img` fits it to the
+  mark, which the chatbot rework had left without image rules.
+- **No Refresh models.** The machine's catalog is a fixed cell of its server (`serve.ts:26`); the phone's button
+  refreshes the phone's own registry, which InfiniChat on a machine never reads.
+- **Sign-in is offered for ChatGPT only**, as the phone's registry offers it (`providerOAuth`): the catalog carries no
+  auth information, so `providers/provider-sections.tsx` knows ChatGPT's name and label itself; the other providers
+  take API keys. `ProviderSections` reads a `ProviderAccount` (the contract's account cells and methods), which piece
+  8's `MacAccount` satisfies as well.
+- **The relay follows the attempt as state**, not as the phone's promise chain: `SignInRelay` subscribes to the
+  composition, opens an attempt's URL once in the default browser, binds the receiver on `127.0.0.1:1455` when that
+  URL is ChatGPT's authorization URL (it carries the state the callback must return with), checks the callback with
+  the package's `validateOpenAICallback`, answers the `manual_code` prompt once it shows, and closes the receiver with
+  the attempt. A refused callback or an occupied port is logged and leaves the prompt to the sheet's paste field and
+  its Open in browser. A closed window changes nothing.
+- **The notifier follows `ShownInfiniChat.scheduled`**, subscribed at launch so the shown side's list is followed
+  whether or not a window holds it; a timer due the moment its task starts still fires.
+- **The screen** gained what the phone's has around these sheets: the header title opens the settings sheet, a
+  clock button the scheduled tasks, the Connect notice ("Connect <provider> on <machine> to send a message", with
+  Providers) and the saved-settings error with Settings; sending waits for the main model's provider to be
+  connected, as on the phone. No "Restoring your connection…" while the holder connects: the subtitle says so.
+
+Size: about 1,150 lines (contract and serve 60, the composition 30, avatar, relay and notifier 240, the sheets, the
+model section and the provider list 750, the screen 70), twice the plan's 500. The phone's own equivalents
+(`infinichat-settings/*`, `settings-controls.tsx`, `settings-drafts.tsx`, `provider-section.tsx`, `auth-prompt.tsx`,
+`infinichat-providers.tsx`, `infinichat-schedule/*`, `infinichat-notifications.ts`, `infinichat-avatar.ts`,
+`openai-auth/browser.ts`, the native receiver and the account flow in `chat-provider.tsx`) are about 1,700.
+
+Verified on this Mac (2026-10-29): typecheck, lint and the dev build; the app starts with the relay and the notifier
+composed, serves the new cells and opens its window without an error of its own. Not verified, since this session
+cannot see or drive the window: the sheets themselves, the avatar through `appdata://`, saving settings and the phone
+showing them, a ChatGPT sign-in through the relay (it needs the owner's account), an API key, sign out, a task's
+notification at its minute (Notification Center may refuse an unsigned dev build), and editing or deleting a task on
+the machine. The window's console reports a duplicate React key (`0`) from the transcript at startup, which predates
+this piece.

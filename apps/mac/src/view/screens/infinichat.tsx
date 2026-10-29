@@ -1,10 +1,12 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
 import type { Host } from '@earendil-works/chord';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
+import { getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
+import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { CheckIcon, PlusIcon, ServerIcon, SettingsIcon, XIcon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ClockIcon, PlusIcon, ServerIcon, SettingsIcon, XIcon } from 'lucide-react';
 
 import type { Attachment, MacPrincipal, MoveStatus } from '../../contract';
 import { ChatAgentContext } from '../components/chat/agent';
@@ -12,16 +14,22 @@ import { Composer } from '../components/chat/composer';
 import { Notice } from '../components/chat/notices';
 import { Placeholder } from '../components/chat/placeholder';
 import { Transcript } from '../components/chat/transcript';
+import { useSheet } from '../components/infinichat/form-sheet';
+import { ProvidersSheet } from '../components/infinichat/providers-sheet';
+import { ScheduledSheet } from '../components/infinichat/scheduled-sheet';
+import { SettingsSheet } from '../components/infinichat/settings-sheet';
 import { Button } from '../components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
 import { InfiniChatContext, useHeldInfiniChat, useInfiniChatRef } from '../hooks/use-infinichat';
 import { errorText, useMember } from '../hooks/use-ref';
 import { useOpenSettings } from '../lib/app-context';
 
 const TITLE = 'InfiniChat';
 const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its settings to send a message.';
+const NOT_READY: ProviderAccess = { ready: false, connected: false };
 
 const connecting = (machine: string, stage: InstallStage | undefined) => stage === 'uploading'
   ? `Installing InfiniChat on ${machine}…`
@@ -80,7 +88,14 @@ function InfiniChat() {
   const listed = useMember(ref.machines);
   const move = useMember(ref.move) ?? undefined;
   const moveNotice = useMember(ref.moveNotice) ?? undefined;
+  const avatar = useMember(ref.avatar) ?? undefined;
+  const catalog = useMember(ref.catalog);
+  const accesses = useMember(ref.access);
   const openSettings = useOpenSettings();
+  const settingsSheet = useSheet();
+  const providersSheet = useSheet();
+  const scheduledSheet = useSheet();
+  const [focusProvider, setFocusProvider] = useState<string>();
   const [draft, setDraft] = useState(emptyDraft);
   const [attaching, setAttaching] = useState(false);
   const [admitting, setAdmitting] = useState(false);
@@ -88,10 +103,22 @@ function InfiniChat() {
   const [localError, setLocalError] = useState<string>();
   const input = useRef<HTMLTextAreaElement>(null);
   const name = controls?.name || TITLE;
-  const agent = useMemo(() => ({ name, avatar: undefined }), [name]);
+  const agent = useMemo(() => ({ name, avatar }), [name, avatar]);
   const busy = !!controls?.busy;
   const configured = !!controls?.configured;
   const machineName = machine?.name ?? 'this Mac';
+  // The models and sign-ins are the shown machine's, as on the phone; the main model's provider must be connected.
+  const providerId = controls?.settings.model.provider;
+  const access = (providerId !== undefined && accesses?.[providerId]) || NOT_READY;
+  const settingsError = controls && configured && catalog ? getModelSettingsError(catalog, controls.settings)
+    : undefined;
+  const connected = !configured || access.connected;
+  const providerLabel = catalog?.find((entry) => entry.id === providerId)?.name || providerId || 'your provider';
+  const showProviders = providersSheet.show;
+  const openProviders = useCallback((provider?: string) => {
+    setFocusProvider(provider);
+    showProviders();
+  }, [showProviders]);
 
   const changeDraft = useCallback((text: string) => {
     setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
@@ -130,7 +157,7 @@ function InfiniChat() {
   }, [attachWith, ref]);
   const send = useCallback(() => {
     const text = draft.text.trim();
-    if ((!text && !draft.images.length) || admitting || !configured) return;
+    if ((!text && !draft.images.length) || admitting || !configured || !connected || settingsError) return;
     setAdmitting(true);
     setLocalError(undefined);
     void ref.accept({ content: userInput(text, draft.images), requestId: draft.requestId }).then(() => {
@@ -138,7 +165,7 @@ function InfiniChat() {
     }, (cause: unknown) => {
       setLocalError(errorText(cause, 'Your message could not be sent. Try again.'));
     }).finally(() => setAdmitting(false));
-  }, [admitting, configured, draft, ref]);
+  }, [admitting, configured, connected, draft, ref, settingsError]);
   const stop = useCallback(() => {
     if (stopping) return;
     setStopping(true);
@@ -176,11 +203,23 @@ function InfiniChat() {
     <ChatAgentContext value={agent}>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
         <header className="toolbar grid grid-cols-[1fr_auto_1fr] items-center border-b px-3">
-          <div className="col-start-2 flex flex-col items-center">
-            <div className="font-semibold">{name}</div>
-            <div className="text-[11px] text-muted-foreground">{subtitle}</div>
-          </div>
-          <div className="col-start-3 justify-self-end [-webkit-app-region:no-drag] [app-region:no-drag]">
+          <Button type="button" variant="ghost" size="sm" disabled={!controls} onClick={settingsSheet.show}
+            aria-label={`${name} settings. ${subtitle}`}
+            className="col-start-2 h-auto min-w-0 flex-col gap-0 px-3 py-1 [-webkit-app-region:no-drag]
+              [app-region:no-drag]">
+            <span className="font-semibold">{name}</span>
+            <span className="flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
+              {subtitle}<ChevronDownIcon className="size-3" />
+            </span>
+          </Button>
+          <div className="col-start-3 flex gap-1 justify-self-end [-webkit-app-region:no-drag] [app-region:no-drag]">
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Scheduled tasks"
+                onClick={scheduledSheet.show} />}>
+                <ClockIcon />
+              </TooltipTrigger>
+              <TooltipContent>Scheduled tasks</TooltipContent>
+            </Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm"
                 aria-label={`InfiniChat runs on ${machineName}`} />}>
@@ -212,7 +251,17 @@ function InfiniChat() {
         </header>
         {away ? <Placeholder>{away}</Placeholder> : <Transcript stopping={stopping} onChoose={choosePrompt} />}
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-6 pb-6">
-        {controls && !configured && <Notice tone="neutral" message={MODELS_REQUIRED} />}
+        {controls && !configured && (
+          <Notice tone="neutral" message={MODELS_REQUIRED} action="Settings" onAction={settingsSheet.show} />
+        )}
+        {settingsError !== undefined && (
+          <Notice message={settingsError} action="Settings" onAction={settingsSheet.show} />
+        )}
+        {configured && settingsError === undefined && access.ready && !access.connected && !away && (
+          <Notice tone={access.error === undefined ? 'neutral' : 'error'}
+            message={access.error ?? `Connect ${providerLabel} on ${machineName} to send a message`}
+            action="Providers" onAction={() => openProviders(providerId)} />
+        )}
         {move?.error !== undefined && !messageError && (
           <Notice message={move.error} action="Try Again" onAction={() => { void ref.retryMove(); }} />
         )}
@@ -229,11 +278,17 @@ function InfiniChat() {
             onAction={() => { void ref.dismissNotice(); }} />
         )}
         <Composer value={draft.text} onChange={changeDraft} onSend={send} onStop={stop} busy={busy}
-          admitting={admitting} disabled={!controls || stopping || !!away || !!move || (!busy && !configured)}
+          admitting={admitting} disabled={!controls || stopping || !!away || !!move
+            || (!busy && (!configured || !connected || settingsError !== undefined))}
           inputRef={input}
           attachments={draft.images} onAttach={attach} onFiles={attachFiles} onRemoveAttachment={removeImage}
           attaching={attaching} imagesSupported={configured} />
         </div>
+        <SettingsSheet key={settingsSheet.session} open={settingsSheet.open} onClose={settingsSheet.hide}
+          onOpenProviders={openProviders} />
+        <ProvidersSheet key={providersSheet.session} open={providersSheet.open} onClose={providersSheet.hide}
+          focus={focusProvider} />
+        <ScheduledSheet key={scheduledSheet.session} open={scheduledSheet.open} onClose={scheduledSheet.hide} />
       </div>
     </ChatAgentContext>
   );

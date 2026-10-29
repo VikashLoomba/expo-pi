@@ -11,6 +11,8 @@ export interface Settings {
   clientId?: string;
   /** The identity file chosen for a machine, by endpoint; without one, it is reached with the user's SSH setup. */
   identities?: Record<string, string>;
+  /** InfiniChat's avatar: the name of the image file under `userData/avatar`, this Mac's alone. */
+  avatar?: string;
 }
 
 const FILE = 'settings.json';
@@ -36,6 +38,7 @@ export function readSettings(): Settings {
     ...(isFrame(parsed.windowFrame) ? { windowFrame: parsed.windowFrame } : {}),
     ...(typeof parsed.clientId === 'string' ? { clientId: parsed.clientId } : {}),
     ...(identities === undefined ? {} : { identities }),
+    ...(typeof parsed.avatar === 'string' ? { avatar: parsed.avatar } : {}),
   };
 }
 

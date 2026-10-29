@@ -262,3 +262,11 @@ button,
 .machine-form {
   margin-bottom: 12px;
 }
+
+/* The avatar fills InfiniChat's mark, which the transcript and the settings sheet size inline. */
+.agent-mark img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}

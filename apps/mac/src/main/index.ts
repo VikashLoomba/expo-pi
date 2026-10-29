@@ -7,6 +7,7 @@ import Electrobun, {
 } from 'electrobun/main';
 
 import type { WindowCommand, WindowRPC } from '../rpc';
+import { MacAvatar } from './avatar';
 import { macHome } from './home';
 import { createMacHost } from './host';
 import { macClient } from './identity';
@@ -14,9 +15,11 @@ import { openImages } from './images';
 import { MacInfiniChat } from './infinichat';
 import { listenForWindows } from './listen';
 import { MacMachines, thisMac } from './machines';
+import { ScheduledNotifier } from './notifications';
 import { serveInfiniChat } from './serve-infinichat';
 import { serveMachines } from './serve-machines';
 import { readSettings, writeSettings } from './settings';
+import { SignInRelay } from './sign-in-relay';
 
 const INITIAL_FRAME = { width: 1100, height: 720 };
 const SETTINGS_FRAME = { width: 780, height: 560 };
@@ -88,10 +91,14 @@ async function main(): Promise<void> {
   // The other machines, reached from this Mac over pi-env; the conversation's document lists them.
   const machines = new MacMachines(infinichat.shown, client, secrets, mac, settings);
   infinichat.useMachines(machines);
+  // This Mac's avatar file, the browser side of a sign-in on the holder, and the scheduled tasks' notifications.
+  const avatar = new MacAvatar(settings);
+  const relay = new SignInRelay(infinichat);
+  const notifier = new ScheduledNotifier(infinichat.shown.scheduled);
   // The Settings window opens from the menu and from the InfiniChat screen; it exists once the windows listen.
   const ui = { openSettings: () => {} };
   const host = createMacHost({ version, userData }, ui);
-  serveInfiniChat(host, infinichat);
+  serveInfiniChat(host, infinichat, avatar);
   serveMachines(host, infinichat, machines);
   const windows = await listenForWindows(host);
   console.log(`InfiniChat ${version}: data in ${userData}, windows on 127.0.0.1:${windows.port}`);
@@ -109,6 +116,8 @@ async function main(): Promise<void> {
       frame: settings.windowFrame ?? INITIAL_FRAME,
       titleBarStyle: 'hiddenInset',
       preload: `window.__mac = ${JSON.stringify({ port: windows.port, secret: windows.secret })};`,
+      // The avatar is a file under the user data, which the page loads as `appdata://` (Electrobun "Paths").
+      allowedProtocols: { views: true, appData: true },
       rpc,
     });
     const opened: OpenWindow = {
@@ -169,8 +178,8 @@ async function main(): Promise<void> {
       // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
       // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
       let failure: unknown;
-      for (const step of [() => infinichat.close(), async () => machines.close(), () => host.close(),
-        () => windows.close()]) {
+      for (const step of [async () => { relay.close(); notifier.close(); }, () => infinichat.close(),
+        async () => machines.close(), () => host.close(), () => windows.close()]) {
         try {
           await step();
         } catch (error) {
