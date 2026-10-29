@@ -47,6 +47,10 @@ prompt; this is the thread's presentation.
   its windows (`serve-infinichat.ts`); the phone reads it with `useInfiniChatMemory`.
 - **Turns** (`chat/turns.ts`, shared): `turnsOf(messages, memory)` groups rows into turns and gives each the view's
   lines overlapping its range, from its opener's index to the next turn's, with `shared`, the turns a line covers.
+  Only the lines standing for the turn as a whole: merged lines, and of the leaves the reply's (`unii`), a report's
+  and a note's. The owner's first look ("what is all this? … why is it all in thinking blocks?") was a recent turn's
+  every `tool:` and `echo:` leaf drawn as a Trace line with a brain icon; the view now says each leaf's `kind`, the
+  steps' leaves stay out, and the lines are one muted block under the title.
 - **The Mac** (`turn-row.tsx`, `transcript.tsx`): a turn is a virtualized row, a `Trace` with a `TraceCollapsible`
   as the Chain of Thought pattern folds steps: the trigger line is the opener (person or agent icon, the text in one
   line, the step count), the memory lines follow with a brain icon and "covers N turns", the content is the turn's

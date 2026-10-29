@@ -15,7 +15,7 @@ const TEXT_LIMIT = 30000;
 /** Newlines as spaces, as UniiChat's `flat` writes a line and a merge's input. */
 export const flat = (text: string): string => text.replace(/\s*\n\s*/g, ' ');
 
-type Kind = 'user' | 'unii' | 'tool' | 'echo' | 'work' | 'note';
+export type Kind = 'user' | 'unii' | 'tool' | 'echo' | 'work' | 'note';
 export type CanonicalMessage = {
   i: number;
   kind: Kind;

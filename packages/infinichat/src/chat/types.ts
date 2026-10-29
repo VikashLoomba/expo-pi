@@ -63,7 +63,13 @@ export type ChatMessage = Static<typeof ChatMessageSchema>;
  */
 export const MemoryViewSchema = Type.Object({
   count: Type.Number(),
-  lines: Type.Array(Type.Object({ first: Type.Number(), count: Type.Number(), text: Type.String() })),
+  lines: Type.Array(Type.Object({
+    first: Type.Number(),
+    count: Type.Number(),
+    text: Type.String(),
+    /** A line standing for one message: that message's kind, once the view has read it. */
+    kind: Type.Optional(Type.Enum(['user', 'unii', 'tool', 'echo', 'work', 'note'])),
+  })),
 });
 export type MemoryView = Static<typeof MemoryViewSchema>;
 

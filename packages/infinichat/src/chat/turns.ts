@@ -9,7 +9,8 @@ export interface MemoryLine {
 /**
  * A turn of the thread: the input that opened it (OptChat's fresh turn: the person's message, or an agent's report
  * delivered on its own) and everything until the next, steers included. Its memory lines are what the model holds
- * for its messages right now: one line per message while it is recent, a line merged with its neighbours' once old.
+ * for the turn as a whole: the lines merged over its messages once it is old, and while it is recent, the reply's
+ * own line and a report's; a step's line (a tool call, its result) stays out, since the steps are in the turn.
  */
 export interface Turn {
   id: string;
@@ -40,10 +41,12 @@ export function turnsOf(messages: readonly ChatMessage[], memory: MemoryView | u
   });
   const overlaps = (line: MemoryView['lines'][number], range: { first: number; end: number }) =>
     line.first < range.end && line.first + line.count > range.first;
+  const shown = (line: MemoryView['lines'][number]) =>
+    line.count > 1 || line.kind === undefined || line.kind === 'unii' || line.kind === 'work' || line.kind === 'note';
   return turns.map((turn, index) => {
     const range = ranges[index];
     const lines = range === undefined || memory === undefined ? [] : memory.lines.flatMap((line) =>
-      overlaps(line, range)
+      shown(line) && overlaps(line, range)
         ? [{ text: line.text, shared: ranges.filter((other) => other !== undefined && overlaps(line, other)).length }]
         : []);
     return { ...turn, lines };

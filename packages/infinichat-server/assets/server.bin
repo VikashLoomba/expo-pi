@@ -127876,7 +127876,13 @@ var ChatMessageSchema = typebox_exports.Object({
 });
 var MemoryViewSchema = typebox_exports.Object({
   count: typebox_exports.Number(),
-  lines: typebox_exports.Array(typebox_exports.Object({ first: typebox_exports.Number(), count: typebox_exports.Number(), text: typebox_exports.String() }))
+  lines: typebox_exports.Array(typebox_exports.Object({
+    first: typebox_exports.Number(),
+    count: typebox_exports.Number(),
+    text: typebox_exports.String(),
+    /** A line standing for one message: that message's kind, once the view has read it. */
+    kind: typebox_exports.Optional(typebox_exports.Enum(["user", "unii", "tool", "echo", "work", "note"]))
+  }))
 });
 var ChatControlsSchema = typebox_exports.Object({
   id: typebox_exports.Number(),
@@ -130361,6 +130367,7 @@ var InfiniChatView = class {
   /** The saved view's lines by node key, and each logged message's index by source; both immutable once read. */
   nodes = /* @__PURE__ */ new Map();
   sources = /* @__PURE__ */ new Map();
+  kinds = /* @__PURE__ */ new Map();
   indexed = 0;
   readingNodes = false;
   readingSources = false;
@@ -130504,7 +130511,8 @@ var InfiniChatView = class {
       while (this.indexed < count) {
         const message = await this.harness.snapshot(MessageDoc, this.id, String(this.indexed), context2);
         if (!message) break;
-        this.sources.set(message.source, this.indexed++);
+        this.sources.set(message.source, this.indexed);
+        this.kinds.set(this.indexed++, message.kind);
         added = true;
       }
       return added;
@@ -130532,7 +130540,9 @@ var InfiniChatView = class {
     }
     const lines2 = refs.flatMap((ref) => {
       const text = this.nodes.get(key(ref));
-      return text === void 0 ? [] : [{ first: first(ref), count: end(ref) - first(ref), text }];
+      if (text === void 0) return [];
+      const kind = ref[0] === 0 ? this.kinds.get(first(ref)) : void 0;
+      return [{ first: first(ref), count: end(ref) - first(ref), text, ...kind === void 0 ? {} : { kind } }];
     });
     return { count: state3.nextMessage, lines: lines2 };
   }

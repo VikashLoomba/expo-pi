@@ -37,13 +37,19 @@ export const TurnRow = memo(function TurnRow({ turn, open, onOpenChange, stoppin
             {steps > 0 && <TraceDescription>{steps} {steps === 1 ? 'step' : 'steps'}</TraceDescription>}
           </TraceLine>
         </TraceCollapsibleTrigger>
-        {turn.lines.map((line, index) => (
-          <TraceLine key={index} className="text-muted-foreground">
+        {turn.lines.length > 0 && (
+          <TraceLine className="items-start text-muted-foreground">
             <TraceIcon><BrainIcon /></TraceIcon>
-            <TraceTitle className="whitespace-normal">{line.text}</TraceTitle>
-            {line.shared > 1 && <TraceDescription>covers {line.shared} turns</TraceDescription>}
+            <div className="flex min-w-0 flex-col gap-1">
+              {turn.lines.map((line, index) => (
+                <p key={index} className="m-0">
+                  {line.text}
+                  {line.shared > 1 && <span className="text-muted-foreground/70"> · covers {line.shared} turns</span>}
+                </p>
+              ))}
+            </div>
           </TraceLine>
-        ))}
+        )}
         {/* The turn itself, not a step's detail: no indent, no rule, the thread's own text colour. */}
         <TraceCollapsibleContent className="mr-0 ml-0 border-l-0 pr-0 pl-0 text-foreground">
           <div className="flex flex-col gap-6 pt-3">

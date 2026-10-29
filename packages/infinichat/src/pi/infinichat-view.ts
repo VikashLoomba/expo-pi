@@ -15,7 +15,9 @@ import {
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
 import { AGENT_TASK } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, type Admission, type AppState } from './infinichat/app';
-import { MemoryDoc, MessageDoc, NodeDoc, end, first, key, type MemoryState, type NodeRef } from './infinichat/memory';
+import {
+  MemoryDoc, MessageDoc, NodeDoc, end, first, key, type Kind, type MemoryState, type NodeRef,
+} from './infinichat/memory';
 import { ConfigDoc, type OptChatConfig } from './infinichat/summary';
 import { ChatModelSettingsSchema } from './model-catalog';
 
@@ -101,6 +103,7 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   /** The saved view's lines by node key, and each logged message's index by source; both immutable once read. */
   private readonly nodes = new Map<string, string>();
   private readonly sources = new Map<string, number>();
+  private readonly kinds = new Map<number, Kind>();
   private indexed = 0;
   private readingNodes = false;
   private readingSources = false;
@@ -255,7 +258,8 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       while (this.indexed < count) {
         const message = await this.harness.snapshot(MessageDoc, this.id, String(this.indexed), context);
         if (!message) break;
-        this.sources.set(message.source, this.indexed++);
+        this.sources.set(message.source, this.indexed);
+        this.kinds.set(this.indexed++, message.kind);
         added = true;
       }
       return added;
@@ -284,7 +288,9 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
     }
     const lines = refs.flatMap((ref) => {
       const text = this.nodes.get(key(ref));
-      return text === undefined ? [] : [{ first: first(ref), count: end(ref) - first(ref), text }];
+      if (text === undefined) return [];
+      const kind = ref[0] === 0 ? this.kinds.get(first(ref)) : undefined;
+      return [{ first: first(ref), count: end(ref) - first(ref), text, ...(kind === undefined ? {} : { kind }) }];
     });
     return { count: state.nextMessage, lines };
   }
