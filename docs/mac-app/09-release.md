@@ -81,3 +81,16 @@ Electrobun's three), signs the DMG, writes `stable-macos-arm64-update.json` and 
 found"). Not yet done: notarization, which needs the owner's App Store Connect or Apple ID credentials; the first
 release, which needs this commit on GitHub; the Gatekeeper check of the downloaded DMG; and the 1.0.0 → 1.0.1 update.
 Electrobun writes `CFBundleVersion` but no `CFBundleShortVersionString`.
+
+### The first install (2026-10-30)
+
+- An app copied into /Applications with `ditto` keeps its quarantine without Finder's move, so macOS runs it
+  translocated from a read-only copy, and Electrobun's first-run installer failed ("Installation failed"). Dragged in
+  Finder, it is not translocated. The check above means Finder's drag.
+- Launch Services then opened the release build left in `build/stable-macos-arm64` (1.0.1) for "InfiniChat" instead of
+  the installed 1.0.0, and Electrobun recorded that copy as the installation (`.electrobun-uninstall.json`
+  `app_bundle_path`). `hutch release` now deletes its stable build output once the release is published.
+- A fresh install's home is this Mac, whose server only says the conversation is `heldBy` vikash-system; `follow()`
+  followed a holder only when a machines list named it, and only the holder serves that document. It now follows any
+  holder `MacMachines.known` can reach by its endpoint, as the dialer already does; a phone holder is still only shown.
+  Shipped as 1.0.2, the first update the installed app takes.

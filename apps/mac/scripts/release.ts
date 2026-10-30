@@ -43,3 +43,6 @@ run(['hutch', 'electrobun', 'build', '--env=stable'],
 const artifacts = readdirSync(join(root, 'artifacts')).map((name) => join('artifacts', name));
 run(['gh', 'release', 'create', tag, '--target', commit, '--title', `InfiniChat for Mac ${pkg.version}`, '--notes', '',
   ...artifacts]);
+// The built app is published; left here, Launch Services opens it for "InfiniChat" in place of the installed one, and
+// it then records itself as the installation (2026-10-30).
+rmSync(join(root, 'build', 'stable-macos-arm64'), { recursive: true, force: true });

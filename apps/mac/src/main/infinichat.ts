@@ -211,9 +211,9 @@ export class MacInfiniChat {
   }
 
   /**
-   * The conversation went elsewhere while this app was away: the shown server says who holds it. A listed machine is
-   * followed, as the phone's `RemoteInfiniChat` is told where it went; a phone is shown as the holder, since nothing
-   * reaches it.
+   * The conversation went elsewhere while this app was away, or this is a fresh install whose home is this Mac: the
+   * shown server says who holds it. A machine is followed by its endpoint even when no list names it, since only the
+   * holder serves the machines document (`MacMachines.known`); a phone is shown as the holder, since nothing reaches it.
    */
   private follow(): void {
     const current = this.current;
@@ -223,8 +223,7 @@ export class MacInfiniChat {
     if (home.home !== 'machine' || home.phase !== 'there' || home.machineId !== current.id) return;
     const heldBy = held.heldBy.id;
     if (this.following === heldBy || this.moves.getSnapshot() !== undefined) return;
-    const listed = this.manager().isSelf(heldBy) || this.manager().shownMachines()?.machines[heldBy] !== undefined;
-    if (!listed) return;
+    if (!this.manager().isSelf(heldBy) && this.manager().known(heldBy) === undefined) return;
     this.following = heldBy;
     this.home.set({ version: 1, home: 'machine', machineId: heldBy, phase: 'there' });
     const remote = this.machine(heldBy);
