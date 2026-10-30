@@ -4,7 +4,7 @@ import { useState } from 'react';
 import type { ChatSummaryRecord } from '../../../contract';
 import type { ChatsRef } from '../../hooks/use-chats';
 import { useMember } from '../../hooks/use-ref';
-import { useOpenSettings } from '../../lib/app-context';
+import { providersPane, useOpenSettings } from '../../lib/app-context';
 import { Alert, AlertAction, AlertDescription } from '../ui/alert';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
@@ -29,7 +29,9 @@ function ConnectCard() {
         <CardDescription>Use ChatGPT or an API key to send messages. Your chats stay on this Mac.</CardDescription>
       </CardHeader>
       <CardContent>
-        <Button type="button" variant="outline" size="xs" onClick={openSettings}>Open Settings…</Button>
+        <Button type="button" variant="outline" size="xs" onClick={() => openSettings(providersPane())}>
+          Open Settings…
+        </Button>
       </CardContent>
     </Card>
   );

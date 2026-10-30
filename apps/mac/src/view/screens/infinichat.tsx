@@ -78,6 +78,7 @@ function InfiniChat() {
   const catalog = useMember(ref.catalog);
   const accesses = useMember(ref.access);
   const openSettings = useOpenSettings();
+  const openMachines = () => openSettings({ pane: 'machines' });
   const settingsSheet = useSheet();
   const providersSheet = useSheet();
   const scheduledSheet = useSheet();
@@ -190,8 +191,8 @@ function InfiniChat() {
                   </>
                 )}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={openSettings}><PlusIcon />Add Machine…</DropdownMenuItem>
-                <DropdownMenuItem onClick={openSettings}><SettingsIcon />Manage Machines…</DropdownMenuItem>
+                <DropdownMenuItem onClick={openMachines}><PlusIcon />Add Machine…</DropdownMenuItem>
+                <DropdownMenuItem onClick={openMachines}><SettingsIcon />Manage Machines…</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

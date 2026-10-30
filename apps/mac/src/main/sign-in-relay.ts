@@ -1,13 +1,18 @@
 import { createServer, type Server } from 'node:http';
 
+import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import {
   OPENAI_DISCOVERY, OPENAI_REDIRECT_URI, validateOpenAICallback,
 } from '@pi-agent/infinichat/pi/openai-auth/core';
 import { Utils } from 'electrobun/main';
 
-import type { MacInfiniChat } from './infinichat';
-
 const CALLBACK = new URL(OPENAI_REDIRECT_URI);
+
+/** A sign-in attempt kept as state: the holder machine's, as `MacInfiniChat` mirrors it, or this Mac's own. */
+export interface SignInSource {
+  subscribe(listener: () => void): () => void;
+  getSignIn(): SignInAttempt | undefined;
+}
 
 /** The page the browser lands on, as the phone's receiver answers it (`OAuthCallbackHTTP.swift`). */
 function page(success: boolean): string {
@@ -34,12 +39,14 @@ function stateOf(url: string): string | undefined {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /**
- * This Mac's part of a sign-in on the holder machine, the counterpart of the phone's flow in `useInfiniChatAccount`:
- * the attempt runs on the machine through pi-ai, which has no browser there and asks for the browser's return URL as
- * a `manual_code` prompt. Here the attempt's URL opens in the default browser once, and a receiver on ChatGPT's
- * loopback redirect catches the callback and answers that prompt, so nothing is pasted. The receiver listens only
- * while the attempt runs and closes with it; a callback that fails its check leaves the prompt for the providers
- * sheet to answer by hand. It follows the shown machine's attempt as state, so a closed window changes nothing.
+ * This Mac's part of a sign-in, the counterpart of the phone's flow in `useInfiniChatAccount`: the attempt's URL
+ * opens in the default browser once. For an attempt on the holder machine, which runs there through pi-ai with no
+ * browser and asks for the browser's return URL as a `manual_code` prompt, a receiver on ChatGPT's loopback redirect
+ * catches the callback and `answer` hands it to that prompt, so nothing is pasted. The receiver listens only while
+ * the attempt runs and closes with it; a callback that fails its check leaves the prompt for the providers sheet to
+ * answer by hand. An attempt that runs on this Mac has no `answer`: pi-ai's own flow listens for the callback here
+ * (`openai-chatgpt.js` `startCallbackServer`), so only the browser is this relay's part. It follows the attempt as
+ * state, so a closed window changes nothing.
  */
 export class SignInRelay {
   private readonly stop: () => void;
@@ -47,8 +54,9 @@ export class SignInRelay {
   private opened?: number;
   private receiver?: { attempt: number; server: Server; callback?: string; answered?: number };
 
-  constructor(private readonly infinichat: MacInfiniChat) {
-    this.stop = infinichat.subscribe(() => this.sync());
+  constructor(private readonly source: SignInSource,
+    private readonly answer?: (promptId: number, value: string) => Promise<void>) {
+    this.stop = source.subscribe(() => this.sync());
     this.sync();
   }
 
@@ -58,7 +66,7 @@ export class SignInRelay {
   }
 
   private sync(): void {
-    const shown = this.infinichat.getSignIn() ?? null;
+    const shown = this.source.getSignIn() ?? null;
     if (shown === null || !shown.running) {
       this.release();
       return;
@@ -67,15 +75,15 @@ export class SignInRelay {
     if (shown.url !== undefined && this.opened !== shown.attempt) {
       this.opened = shown.attempt;
       Utils.openExternal(shown.url);
-      const state = stateOf(shown.url);
+      const state = this.answer === undefined ? undefined : stateOf(shown.url);
       if (state !== undefined) this.listen(shown.attempt, state);
     }
     const receiver = this.receiver;
     const prompt = shown.prompt;
-    if (receiver?.callback === undefined || prompt === undefined || prompt.prompt.type !== 'manual_code'
-      || receiver.answered === prompt.id) return;
+    if (this.answer === undefined || receiver?.callback === undefined || prompt === undefined
+      || prompt.prompt.type !== 'manual_code' || receiver.answered === prompt.id) return;
     receiver.answered = prompt.id;
-    void this.infinichat.answer(prompt.id, receiver.callback).catch((error: unknown) => {
+    void this.answer(prompt.id, receiver.callback).catch((error: unknown) => {
       console.warn(`The sign-in callback could not be handed to the machine: ${message(error)}`);
     });
   }

@@ -12,7 +12,7 @@ import type { MacPrincipal } from '../../../contract';
 import { useAccountRef, type ChatRef } from '../../hooks/use-chats';
 import { useHeldMachines } from '../../hooks/use-machines';
 import { errorText, useMember } from '../../hooks/use-ref';
-import { useOpenSettings } from '../../lib/app-context';
+import { providersPane, useOpenSettings } from '../../lib/app-context';
 import { Alert, AlertAction, AlertDescription } from '../ui/alert';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -197,7 +197,8 @@ function ChatSettingsForm({ host, chat, initial, onDone }: {
                 + 'message. You can save your choice now.'}
             </AlertDescription>
             <AlertAction>
-              <Button type="button" variant="link" size="xs" onClick={openSettings}>Open Settings…</Button>
+              <Button type="button" variant="link" size="xs"
+                onClick={() => openSettings(providersPane(settings.model.provider))}>Open Settings…</Button>
             </AlertAction>
           </Alert>
         )}

@@ -19,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/toolti
 import { useAccountRef, useHeldChat, type ChatRef } from '../hooks/use-chats';
 import { useDraft } from '../hooks/use-draft';
 import { errorText, useMember } from '../hooks/use-ref';
-import { useOpenSettings } from '../lib/app-context';
+import { providersPane, useOpenSettings } from '../lib/app-context';
 
 const NO_CATALOG: ModelCatalog = [];
 const NO_ACCESS: ProviderAccess = { ready: false, connected: false };
@@ -116,6 +116,7 @@ function Chat({ host, chat: ref, settingsOpen, onSettingsOpenChange, onRename, o
   const messageError = localError || controls?.error || access.error;
   const accountStatus = !access.ready ? 'Restoring your connection…'
     : `Connect ${provider?.name || providerId || 'your provider'} to send a message.`;
+  const openProviders = () => openSettings(providersPane(providerId));
   const openSheet = () => onSettingsOpenChange(true);
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -154,11 +155,11 @@ function Chat({ host, chat: ref, settingsOpen, onSettingsOpenChange, onRename, o
         {controls?.parked && <Notice tone="neutral" message={PARKED} action="Resume" onAction={resume} />}
         {messageError && messageError !== settingsError && (
           <Notice message={messageError} action={localError ? 'Dismiss' : access.error ? 'Open Settings' : undefined}
-            onAction={localError ? () => setLocalError(undefined) : access.error ? openSettings : undefined} />
+            onAction={localError ? () => setLocalError(undefined) : access.error ? openProviders : undefined} />
         )}
         {controls && !access.connected && !access.error && (
           <Notice tone="neutral" message={accountStatus} action={access.ready ? 'Open Settings' : undefined}
-            onAction={openSettings} />
+            onAction={openProviders} />
         )}
         <Composer value={draft.text} onChange={changeDraft} onSend={send} onStop={stop} busy={busy}
           admitting={admitting} inputRef={input}

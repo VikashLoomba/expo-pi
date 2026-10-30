@@ -2,10 +2,13 @@ import { createHost, type Host } from '@earendil-works/chord';
 import { safeSourceUrl } from '@pi-agent/infinichat/chat/web-search-url';
 import { Utils } from 'electrobun/main';
 
-import { AboutSchema, MacApp, principalKey, type About, type MacPrincipal } from '../contract';
+import {
+  AboutSchema, MacApp, principalKey, type About, type MacPrincipal, type SettingsTarget,
+} from '../contract';
 
 /** The main process's Chord host: its objects, and the links the windows connect through. */
-export function createMacHost(about: About, windows: { openSettings(): void }): Host<MacPrincipal> {
+export function createMacHost(about: About,
+  windows: { openSettings(target?: SettingsTarget): void }): Host<MacPrincipal> {
   const host = createHost<MacPrincipal>({ name: 'mac', self: { kind: 'host' }, principalKey });
   host.serve(MacApp, (_input, _principal, self) => ({
     variant: 'owner',
@@ -15,7 +18,7 @@ export function createMacHost(about: About, windows: { openSettings(): void }): 
       const safe = safeSourceUrl(url);
       if (safe !== undefined && !Utils.openExternal(safe)) throw new Error('Could not open link.');
     },
-    openSettings: () => { windows.openSettings(); },
+    openSettings: ({ target }) => { windows.openSettings(target); },
   }));
   return host;
 }

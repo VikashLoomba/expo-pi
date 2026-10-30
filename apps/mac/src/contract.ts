@@ -17,6 +17,11 @@ export const principalKey = (principal: MacPrincipal) => principal.kind;
 /** What the app is: its version and where it keeps its data, for the sidebar's footer. */
 export const AboutSchema = Type.Object({ version: Type.String(), userData: Type.String() });
 export type About = Static<typeof AboutSchema>;
+/** A Settings pane to show and, for Providers, the provider to list first, as the phone's `account.tsx?provider=`. */
+export const SettingsTargetSchema = Type.Object({
+  pane: Type.Enum(['machines', 'providers']), provider: Type.Optional(Type.String()),
+});
+export type SettingsTarget = Static<typeof SettingsTargetSchema>;
 
 /**
  * The Mac app as its main process serves it to its windows. Every window acts as the owner, so all of them share one
@@ -32,8 +37,8 @@ export const MacApp = remote('infinichat.mac', {
       methods: {
         // Links open in the default browser under the phone's policy (`source-link.ts`): a page can't open them.
         openExternal: method(Type.Object({ url: Type.String() })),
-        // The Settings window, as the menu's Settings… opens it.
-        openSettings: method(),
+        // The Settings window, as the menu's Settings… opens it: where it was, or at the pane a notice leads to.
+        openSettings: method(Type.Object({ target: Type.Optional(SettingsTargetSchema) })),
       },
     },
   },
@@ -253,8 +258,9 @@ export const MacChat = remote('infinichat.mac.chat', {
 });
 
 /**
- * This Mac's own providers: the catalog its chats choose from and each provider's access, as the machine's server
- * sends its own to the phone. Piece 8 adds the sign-ins.
+ * This Mac's own providers: the catalog its chats choose from, each provider's access and the sign-in under way, as
+ * the machine's server sends its own to the phone. The cells and methods are `MacInfiniChat`'s account ones, so the
+ * Providers pane and the providers sheet share their list.
  */
 export const MacAccount = remote('infinichat.mac.account', {
   version: 1,
@@ -262,8 +268,15 @@ export const MacAccount = remote('infinichat.mac.account', {
   host: hostNamed('mac'),
   variants: {
     owner: {
-      state: { catalog: ModelCatalogSchema, access: AccessSchema },
-      methods: { refreshCatalog: method() },
+      state: { catalog: ModelCatalogSchema, access: AccessSchema, signInAttempt: SignInAttemptSchema },
+      methods: {
+        refreshCatalog: method(),
+        signIn: method(Type.Object({ providerId: Type.String() }), Type.Number()),
+        answer: method(Type.Object({ promptId: Type.Number(), value: Type.String() })),
+        cancelSignIn: method(),
+        setApiKey: method(Type.Object({ providerId: Type.String(), key: Type.String() })),
+        signOut: method(Type.Object({ providerId: Type.String() })),
+      },
     },
   },
 });

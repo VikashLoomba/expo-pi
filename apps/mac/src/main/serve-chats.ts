@@ -2,7 +2,9 @@ import type { Host } from '@earendil-works/chord';
 import { Type } from '@earendil-works/pi-ai';
 import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
 import type { DurableChatService } from '@pi-agent/infinichat/pi/chat-service';
-import { AccessSchema, MessagesSchema, SnapshotSchema } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import {
+  AccessSchema, MessagesSchema, SignInAttemptSchema, SnapshotSchema,
+} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { findCatalogModel, ModelCatalogSchema, type ImageInput } from '@pi-agent/infinichat/pi/model-catalog';
 import { Utils } from 'electrobun/main';
 
@@ -111,17 +113,27 @@ export function serveChats(host: Host<MacPrincipal>, chats: Chats, account: Acco
   host.serve(MacAccount, (_input, _principal, self) => {
     const catalog = self.state('catalog', ModelCatalogSchema, { init: account.getCatalog });
     const access = self.state('access', AccessSchema, { init: () => account.credentials.getSnapshot().providers });
+    const signInAttempt = self.state('signInAttempt', SignInAttemptSchema, { init: account.signIn.getSnapshot });
     self.on('catalog', account, (_change, ctx) => {
       catalog.replace(ctx, account.getCatalog(), { diff: true });
     });
     self.on('access', account.credentials, (_change, ctx) => {
       access.replace(ctx, account.credentials.getSnapshot().providers, { diff: true });
     });
+    self.on('signIn', account.signIn, (_change, ctx) => {
+      signInAttempt.replace(ctx, account.signIn.getSnapshot(), { diff: true });
+    });
     return {
       variant: 'owner',
       catalog,
       access,
+      signInAttempt,
       refreshCatalog: () => account.refreshCatalog(),
+      signIn: ({ providerId }) => account.signIn.signIn(providerId),
+      answer: ({ promptId, value }) => { account.signIn.answer(promptId, value); },
+      cancelSignIn: () => { account.signIn.cancel(); },
+      setApiKey: ({ providerId, key }) => account.signIn.setApiKey(providerId, key),
+      signOut: ({ providerId }) => account.signIn.signOut(providerId),
     };
   });
 }

@@ -6,6 +6,7 @@ import Electrobun, {
   ApplicationMenu, BrowserView, BrowserWindow, Updater, Utils, type ElectrobunEvent,
 } from 'electrobun/main';
 
+import type { SettingsTarget } from '../contract';
 import type { WindowCommand, WindowRPC } from '../rpc';
 import { MacAccount } from './account';
 import { MacAvatar } from './avatar';
@@ -96,13 +97,15 @@ async function main(): Promise<void> {
   infinichat.useMachines(machines);
   // This Mac's avatar file, the browser side of a sign-in on the holder, and the scheduled tasks' notifications.
   const avatar = new MacAvatar(settings);
-  const relay = new SignInRelay(infinichat);
+  const relay = new SignInRelay(infinichat, (promptId, value) => infinichat.answer(promptId, value));
   const notifier = new ScheduledNotifier(infinichat.shown.scheduled);
-  // This Mac's own providers and chats, whose tools run here in a folder per chat or on a machine.
+  // This Mac's own providers and chats, whose tools run here in a folder per chat or on a machine. Its own sign-in
+  // runs here too, so its browser opens here and pi-ai's flow catches the callback itself.
   const account = new MacAccount(secrets);
+  const own = new SignInRelay({ subscribe: account.signIn.subscribe, getSignIn: account.signIn.getSnapshot });
   const chats = new MacChats(account, machines, images);
-  // The Settings window opens from the menu and from the InfiniChat screen; it exists once the windows listen.
-  const ui = { openSettings: () => {} };
+  // The Settings window opens from the menu and from the screens' notices; it exists once the windows listen.
+  const ui = { openSettings: (_target?: SettingsTarget) => {} };
   const host = createMacHost({ version, userData }, ui);
   serveInfiniChat(host, infinichat, avatar);
   serveMachines(host, infinichat, machines);
@@ -143,24 +146,30 @@ async function main(): Promise<void> {
     return opened;
   };
 
-  // One Settings window, its own page over the same bundle (`settings.html`), reused while it is open.
-  let settingsWindow: BrowserWindow | undefined;
-  const openSettings = () => {
+  // One Settings window, its own page over the same bundle (`settings.html`), reused while it is open. A target
+  // pane reaches a new window with its bootstrap and an open one as a command.
+  let settingsWindow: { window: BrowserWindow; rpc: ReturnType<typeof windowRpc> } | undefined;
+  const openSettings = (target?: SettingsTarget) => {
     if (settingsWindow) {
-      settingsWindow.activate();
+      settingsWindow.window.activate();
+      if (target !== undefined) settingsWindow.rpc.send.show(target);
       return;
     }
+    const rpc = windowRpc();
+    const bootstrap = {
+      port: windows.port, secret: windows.secret, ...(target === undefined ? {} : { settings: target }),
+    };
     const window = new BrowserWindow({
       title: 'Settings',
       url: 'views://app/settings.html',
       frame: SETTINGS_FRAME,
-      preload: `window.__mac = ${JSON.stringify({ port: windows.port, secret: windows.secret })};`,
-      rpc: windowRpc(),
+      preload: `window.__mac = ${JSON.stringify(bootstrap)};`,
+      rpc,
     });
     window.on('close', () => {
-      if (settingsWindow === window) settingsWindow = undefined;
+      if (settingsWindow?.window === window) settingsWindow = undefined;
     });
-    settingsWindow = window;
+    settingsWindow = { window, rpc };
   };
   ui.openSettings = openSettings;
 
@@ -185,8 +194,9 @@ async function main(): Promise<void> {
       // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
       // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
       let failure: unknown;
-      for (const step of [async () => { relay.close(); notifier.close(); }, () => infinichat.close(),
-        () => chats.close(), async () => machines.close(), () => host.close(), () => windows.close()]) {
+      for (const step of [async () => { relay.close(); own.close(); notifier.close(); }, () => infinichat.close(),
+        () => chats.close(), async () => machines.close(), () => host.close(), async () => account.close(),
+        () => windows.close()]) {
         try {
           await step();
         } catch (error) {
