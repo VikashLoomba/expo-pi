@@ -55,6 +55,7 @@ export function macDialer(machine: MacMachine, client: InfiniChatClient, secrets
         const target = secret !== undefined && running !== undefined ? { ...running, secret } : await install();
         return {
           link: open(target),
+          name,
           version: target.version,
           install: async () => open(await install()),
           requestUpdate: () => requestUpdate(environment, name, signal),
@@ -113,6 +114,7 @@ export function remoteDialer(endpoint: string, record: () => Machine | undefined
         const target = secret !== undefined && running !== undefined ? { ...running, secret } : await install();
         return {
           link: await open(target),
+          name,
           version: target.version,
           install: async () => open(await install()),
           requestUpdate: () => requestUpdate(environment, name, signal),

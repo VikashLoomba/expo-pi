@@ -24,6 +24,8 @@ export interface ServerDialer {
 /** A dialed server, whose link and transport belong to the dialer until `close`. */
 export interface DialedServer {
   link: Link;
+  /** The machine's name as this app lists it, for messages before its machines document arrives. */
+  name: string;
   /** The server's release (`release.ts`). */
   version: string;
   /**

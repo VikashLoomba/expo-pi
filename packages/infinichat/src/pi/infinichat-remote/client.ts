@@ -439,13 +439,13 @@ export class RemoteInfiniChat implements InfiniChatHost {
         } catch (error) {
           if (!isChordError(error, 'upgrade_required')) throw error;
           if (compareVersions(server.version, this.version) >= 0) {
-            throw new Error(`InfiniChat on ${this.name} is newer than this app. Update this app to use it.`);
+            throw new Error(`InfiniChat on ${server.name} is newer than this app. Update this app to use it.`);
           }
           await server.requestUpdate();
-          throw new Error(`InfiniChat on ${this.name} is updating to work with this app. Try again in a moment.`);
+          throw new Error(`InfiniChat on ${server.name} is updating to work with this app. Try again in a moment.`);
         }
         if (opened) break;
-        if (installed) throw new Error(`InfiniChat on ${this.name} did not accept this app. Try again.`);
+        if (installed) throw new Error(`InfiniChat on ${server.name} did not accept this app. Try again.`);
         link = await server.install();
       }
       session.live = true;

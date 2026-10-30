@@ -105,6 +105,7 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
         const target = secret !== undefined && running !== undefined ? { ...running, secret } : await install();
         return {
           link: await open(target),
+          name,
           version: target.version,
           install: async () => open(await install()),
           requestUpdate: async () => requestUpdate(await machine(), name, signal),
