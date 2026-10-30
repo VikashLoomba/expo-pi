@@ -114,3 +114,60 @@ the doc names no steps. `git` records both moves as renames. What differs from t
 - **The keep-alive controller imports neither predicate:** it never called them. It keeps `ChatOfTask`; the provider
   imports `chatTasks` from `chat-service.ts`, and `infinichat-phone.ts` imports `infiniChatTasks` from
   `infinichat-service.ts`.
+
+## Later (2026-10-30): web search in InfiniChat and the Mac's chats
+
+The owner found that an OpenAI model in InfiniChat never searched the web. It never had: a request gets OpenAI's
+hosted `web_search` tool only when the provider carries `withNativeWebSearch` and a Harness's bridge binds the
+request's signal (`native-web-search/durable.ts`). Only the chat service installed the bridge, and
+`createServerModels` left the decorator out (`docs/server-harness-toggle/01-core-on-node.md`), so neither
+InfiniChat's server nor the Mac's own chats, which use the same models, ever searched.
+
+- `registerChatProviders` registers OpenAI as `withNativeWebSearch(openaiProvider())` on every host, so
+  `createServerModels` carries it as the phone's `createChatModels` did; the Mac's chats search from it, since their
+  service already installs the bridge. The phone now replaces only the sign-ins of the providers it registered.
+- `openOptChat` takes the host's `extensions`; `InfiniChatService` installs the bridge through it and attaches it
+  after the Harness opens, as `chat-service.ts` does. Summaries call `completeSimple` with an unbound signal, so
+  they never search, as UniiChat's compactions offer no tools.
+- `InfiniChatView` reads `SearchPresentationsDoc`, so the projection shows the searches and sources the chats show;
+  both apps draw them, folded into the turn's steps. The service creates the document in a commit right after it
+  opens: pi-durable's `documentState` resolves `undefined` for a document that doesn't exist yet
+  (`session/session.js:666-668`), and the server's view stays attached for as long as the server runs, so the first
+  build, which left the document to the bridge's first search, showed no search at all (owner's test, 2026-10-30).
+  A chat creates its document in its creating commit for the same reason (`chat-service.ts`).
+- **Memory logs each search** (owner, 2026-10-30, over keeping the reply only): `projectEntries` turns a
+  `SearchObservationEntry` into a `tool` line, `web_search` with the action, and an `echo` with the results the
+  model read, as it logs a function call and its result. pi-durable places a write with `model` at the next
+  boundary (README "Busy Conversations"), so the search follows the reply that made it.
+
+Size: about 30 lines of code, against the chat service's 3 lines for the bridge and the chat view's 10 for the
+document.
+
+## Later (2026-10-30): the model lists from pi.dev
+
+The owner found OpenAI's list out of date. Each provider's list is the catalog pi-ai generates from models.dev when it
+is released (`dist/providers/data/<id>.json`), and none of the six is dynamic in pi-ai 1.4.0 (README "Dynamic
+Providers": "Static built-in providers are no-ops for `refresh()`"), so every Refresh models did nothing and the
+server's catalog was fixed. pi 1.4.0 (2026-10-21) is the latest release; GPT-6.1 Terra came out on 2026-10-26. pi's own
+agent overlays the catalog pi.dev publishes per provider and pi version (coding-agent
+`src/core/remote-catalog-provider.ts`, `withRemoteCatalog`, the same at v1.4.0 and on main); pi-ai has the seams
+(`refreshModels`, `context.publish`) but not the fetch. On 2026-10-30 pi.dev added `gpt-6.1-terra`, `chat-latest` and
+`gpt-5.6-cyber` to OpenAI's 42, one Google model and nine OpenRouter ones; Anthropic, xAI and DeepSeek matched.
+
+- `pi/pi-catalog.ts`'s `withPiCatalog` makes a provider dynamic as `withRemoteCatalog` does: its `refreshModels` reads
+  `pi.dev/api/models/providers/<id>?types=chat&pi-version=<pi-ai's>` (the protocol's explicit version, so no
+  User-Agent is needed), keeps the chat entries, and overlays them by id on pi-ai's. Entries are checked as pi-ai's
+  Radius provider checks its gateway's (`isRadiusGatewayModel`), with no cast. Each request waits at most pi's 4 s.
+- **In memory only** (owner: fetch it when needed rather than save a file): pi-ai's default store is in memory
+  (`dist/models.js:48`), so each start fetches again. The server awaits `models.refresh()` before InfiniChat opens, so
+  work it resumes finds a model pi-ai doesn't ship; the phone fetches at launch and after a sign-in, the Mac's account
+  when it opens. pi-ai refreshes only a provider with a credential, so the others keep pi-ai's list.
+- The contract gains `refreshCatalog` (an added method keeps the version, chord `docs/guide.md:148`); the server
+  replaces `catalog` with it, and the phone's InfiniChat settings call it, where they refreshed the phone's own list.
+- Deviations from the agent's wrapper: no comparison of pi.dev's Last-Modified with the shipped catalog's date, whose
+  only source, `providers/all`, would bring every provider's catalog into the phone's bundle; no retry; only chat
+  models. A fetch that fails keeps the models the provider had.
+
+Checked on this Mac with Bun against the package: the server's models went from 42 OpenAI models to 45 in 371 ms,
+`getModel('openai', 'gpt-6.1-terra')` resolved, and Anthropic without a credential kept its 17. Server bundle,
+with the search document fix: 8,383,970 bytes, SHA-256 `9612d0d8…c02212`.

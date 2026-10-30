@@ -212,6 +212,11 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.signOut({ providerId }, ctx));
   }
 
+  /** Fetches pi.dev's newer models for the machine's providers; the catalog follows. */
+  refreshCatalog(): Promise<void> {
+    return this.call((ref, ctx) => ref.refreshCatalog(ctx));
+  }
+
   /** Trusts the host keys with these fingerprints that the machine at `endpoint` presented to this machine. */
   acceptHostKey(endpoint: string, fingerprints: string[]): Promise<void> {
     return this.call((ref, ctx) => ref.acceptHostKey({ endpoint, fingerprints }, ctx));

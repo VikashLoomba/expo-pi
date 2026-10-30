@@ -38,8 +38,8 @@ function dismissSettings() {
 export default function InfiniChatSettingsScreen() {
   const colors = useChatColors();
   const { view, initial, draft, setDraft } = useInfiniChatSettingsDraft();
-  const { infiniChat: service, infiniChatAvatar, refreshCatalog } = useChatApp();
-  const { catalog, providerAccess, machine } = useInfiniChatAccount();
+  const { infiniChat: service, infiniChatAvatar } = useChatApp();
+  const { catalog, providerAccess, machine, refreshCatalog } = useInfiniChatAccount();
   const conversation = useChatControls(view);
   const instructions = useNativeState(draft.instructions);
   const name = useNativeState(draft.name);

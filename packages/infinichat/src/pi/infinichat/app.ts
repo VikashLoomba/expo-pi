@@ -10,6 +10,7 @@ import {
 } from '@earendil-works/pi-durable';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
+import { SearchObservationEntry } from '../native-web-search/entries';
 import {
   AgentAnchor, AgentDirectoryDoc, agentTask, agentTools, agentWork, agentsAtWork, takeAgentReports,
 } from './agents';
@@ -381,6 +382,13 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
           images: [],
           source: `${entry.id}:${index++}`,
         });
+      } else if (message.role === 'user' && SearchObservationEntry.is(entry)) {
+        // OpenAI's hosted web search, logged as a tool call and its result (owner, 2026-10-30). pi-durable places the
+        // findings at the boundary after the reply that searched, so they follow it.
+        await appendMessage(tx, root, { kind: 'tool', text: `web_search ${JSON.stringify(entry.data.action)}`, date,
+          images: [], source: `${entry.id}:${index++}` });
+        await appendMessage(tx, root, { kind: 'echo', text: textOf(message.content), date, images: [],
+          source: `${entry.id}:${index++}` });
       }
       // The delivery's user message is the envelope; its original was logged above.
     }
@@ -633,6 +641,8 @@ export type OptChatOptions = {
   callEnv?: (call: ToolHookCall, target: EnvTarget, context: Context) =>
     ExecutionEnv | undefined | Promise<ExecutionEnv | undefined>;
   nativeContracts?: NativeContracts;
+  /** The host's own extensions, such as OpenAI's web search bridge. */
+  extensions?: readonly Extension[];
   /** What changes between turns, such as the devices: read as a turn or a subagent starts, it follows the view. */
   turnState?: () => Promise<string>;
   onReport?: HarnessOptions['onReport'];
@@ -703,6 +713,7 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     const target: EnvTarget = { conversationId, cwd: stored?.cwd, read: harness };
     return options.callEnv ? options.callEnv(call, target, ctx) : options.env?.(target, ctx);
   }, options.nativeContracts));
+  for (const extension of options.extensions ?? []) registry.install(extension);
   const opened = await Harness.open(storage, {
     models: options.models,
     registry,

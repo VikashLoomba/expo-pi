@@ -15,6 +15,7 @@ The topic pages note each difference where they cover it.
 - **Logging an input:** when pi-durable places it, so a stop withdraws an input not yet placed; UniiChat logs a message as it arrives. See [turns and coordinator](04-turns-and-coordinator.md).
 - **Recall pages:** by page number; UniiChat’s zoom takes a character offset `at`. See [tools and recall](05-tools-and-recall.md).
 - **Summary model:** no default, by the owner’s decision; UniiChat defaults to `haiku-5.5` at high effort.
+- **Web search:** the app gives an OpenAI model OpenAI’s hosted search and logs each search in memory as a tool call and its result, after the reply that made it; UniiChat has no web search.
 - UniiChat’s imports, computer tasks, goals and billing are outside this port; the prompt drops the `ai` kind of imported chats.
 
 ## Pinned sources

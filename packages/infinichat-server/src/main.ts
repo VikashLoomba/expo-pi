@@ -15,7 +15,6 @@ import { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
 import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
-import { buildModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 import { validateOpenAICredential } from '@pi-agent/infinichat/pi/openai-auth/core';
 import { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
@@ -61,6 +60,9 @@ async function serve(device: string, description: string): Promise<number> {
     credentials.registerProviders(models.getProviders().map((provider) => provider.id));
     // A provider whose credential cannot be read reports it in its own access state.
     await credentials.restore().catch(() => {});
+    // pi.dev's newer models before InfiniChat opens, so work it resumes finds a model pi-ai doesn't ship
+    // (`chat-providers.ts`); each fetch waits at most pi's own 4 s, and a provider whose fetch fails keeps pi-ai's.
+    await models.refresh();
     const signIn = new ServerSignIn(models, credentials, openAILoginOptions(backend));
     // Ends an attempt still under way, after the host has closed the links that could start another.
     closes.push(() => signIn.cancel());
@@ -92,7 +94,7 @@ async function serve(device: string, description: string): Promise<number> {
     closes.push(() => host.close());
     serveInfiniChat(host, conversation, {
       server: { bundle, pi: INFINICHAT_PI, device, description }, setTimeZone: (zone) => setTimeZone(home, zone),
-      catalog: buildModelCatalog(models), credentials, signIn, machines,
+      models, credentials, signIn, machines,
     });
     const server = await listen(host, home, bundle);
     // Stops accepting first; the host closes the connections already accepted.

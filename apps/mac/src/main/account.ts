@@ -16,8 +16,8 @@ registerBunOAuthFlows();
 /**
  * This Mac's own providers for its chats: pi-ai's models over the app's credential store, composed as the server
  * composes them for a machine (`infinichat-server/src/main.ts`), with the same sign-in kept as state for the
- * Providers pane. The catalog is read once and again after a refresh; the store's access states say which providers
- * can send.
+ * Providers pane. The catalog is read once, again once pi.dev's newer models arrive at launch (`chat-providers.ts`),
+ * and after each refresh; the store's access states say which providers can send.
  */
 export class MacAccount {
   readonly credentials: ProviderCredentialStore;
@@ -35,6 +35,8 @@ export class MacAccount {
     this.signIn = new ServerSignIn(this.models, this.credentials, openAILoginOptions(secrets));
     // A provider whose credential cannot be read reports it in its own access state.
     void this.credentials.restore().catch(() => {});
+    // A provider whose fetch fails keeps the models it has; Refresh Models tries again and says so.
+    void this.refreshCatalog().catch(() => {});
   }
 
   /** Ends a sign-in still under way, after the host has closed the links that could start another. */

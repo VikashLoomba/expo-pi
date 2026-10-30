@@ -1,5 +1,6 @@
 import type { Ctx, Host } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
+import type { Models } from '@earendil-works/pi-ai';
 import type { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import type { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import {
@@ -7,7 +8,7 @@ import {
   MachinesSchema, ReachSchema, ScheduledSchema, ServerSchema, SignInAttemptSchema, SnapshotSchema, type InfiniChatPrincipal,
   type InfiniChatServer,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
-import { ModelCatalogSchema, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
+import { buildModelCatalog, ModelCatalogSchema } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
 import type { ServerConversation } from './conversation';
@@ -23,20 +24,20 @@ const LOADING = { status: 'loading' } as const;
  * and the operations refuse. `conversation` says whether it holds it, or which phone it went to, and `adopt`,
  * `relinquish` and `archive` move it. `server` says which server answers, and `setTimeZone` applies the phone's zone.
  * The account cells mirror this machine's credential store and its sign-in, which outlive the object, so a client that
- * reconnects finds them again; `catalog` is fixed, because none of the registered providers refreshes its models (pi-ai
- * `refreshModels`). `reach` and `pendingHostKeys` mirror what this machine found of the other machines its tools use,
+ * reconnects finds them again; `catalog` is the machine's models, as fetched from pi.dev at start and again on
+ * `refreshCatalog`. `reach` and `pendingHostKeys` mirror what this machine found of the other machines its tools use,
  * which each client lists with `setMachines` and any client trusts with `acceptHostKey`. Every client acts as the
  * owner, so all of them share this one object.
  */
 export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: ServerConversation, options: {
   server: InfiniChatServer;
   setTimeZone(zone: string): void;
-  catalog: ModelCatalog;
+  models: Models;
   credentials: ProviderCredentialStore;
   signIn: ServerSignIn;
   machines: ServerMachines;
 }) {
-  const { credentials, signIn, machines } = options;
+  const { models, credentials, signIn, machines } = options;
   const core = () => {
     const open = conversation.current;
     if (!open) throw new Error(`InfiniChat isn’t open on ${options.server.device}.`);
@@ -60,7 +61,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
     const machineList = self.state('machines', MachinesSchema, { init: currentMachines });
     const held = self.state('conversation', ConversationSchema, { init: conversation.getState });
     const server = self.state('server', ServerSchema, { init: () => options.server });
-    const catalog = self.state('catalog', ModelCatalogSchema, { init: () => options.catalog });
+    const catalog = self.state('catalog', ModelCatalogSchema, { init: () => buildModelCatalog(models) });
     const access = self.state('access', AccessSchema, { init: () => credentials.getSnapshot().providers });
     const signInAttempt = self.state('signInAttempt', SignInAttemptSchema, { init: () => signIn.getSnapshot() });
     self.on('access', credentials, (_change, ctx) => access.replace(ctx, credentials.getSnapshot().providers));
@@ -112,6 +113,13 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
       cancelSignIn: () => signIn.cancel(),
       setApiKey: ({ providerId, key }) => signIn.setApiKey(providerId, key),
       signOut: ({ providerId }) => signIn.signOut(providerId),
+      refreshCatalog: async (ctx) => {
+        const result = await models.refresh();
+        catalog.replace(ctx, buildModelCatalog(models), { diff: true });
+        if (result.errors.size) {
+          throw new Error('Some provider models could not be refreshed. Existing models are still available.');
+        }
+      },
       // The move goes on when the caller goes away: a dropped link never leaves it half done.
       adopt: (files) => conversation.adopt(files),
       relinquish: ({ to }) => conversation.relinquish(to),

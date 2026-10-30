@@ -17,6 +17,7 @@ import { AGENT_TASK } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, type Admission, type AppState } from './infinichat/app';
 import { ConfigDoc, type OptChatConfig } from './infinichat/summary';
 import { ChatModelSettingsSchema } from './model-catalog';
+import { SearchPresentationsDoc, type SearchPresentationsState } from './native-web-search/durable';
 
 const context = BACKGROUND_CONTEXT;
 const noop = () => {};
@@ -81,10 +82,10 @@ function shownInbox(inbox: InboxState | undefined, originals: ReadonlyMap<string
 
 /**
  * InfiniChat's one conversation while something shows it, as `ChatView` shows a chat: the first subscriber attaches
- * pi-durable's conversation view, the chat metadata document and OptChat's application and summary-model documents,
- * and reads the whole history once; the last one to leave disposes them. OptChat accepts an input before its
- * coordinator submits it, so the view follows the latest accepted request rather than a submission, and shows
- * accepted inputs from `AppDoc.pending` as queued rows.
+ * pi-durable's conversation view, the chat metadata and web search documents and OptChat's application and
+ * summary-model documents, and reads the whole history once; the last one to leave disposes them. OptChat accepts an
+ * input before its coordinator submits it, so the view follows the latest accepted request rather than a submission,
+ * and shows accepted inputs from `AppDoc.pending` as queued rows.
  */
 export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   private readonly listeners = new Set<() => void>();
@@ -96,6 +97,8 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
   private metadata?: DocumentState<ChatMetadata>;
   private app?: DocumentState<AppState>;
   private config?: DocumentState<OptChatConfig>;
+  /** OpenAI's hosted searches by response, as `ChatView` reads them. */
+  private search?: DocumentState<SearchPresentationsState>;
   /** pi-durable's live tasks, for the agents at work, as the keep-alive counts them. */
   private tasks?: AttachedReplicatedState<TaskGraph>;
   private loaded = false;
@@ -150,25 +153,29 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       }
       this.view = view;
       this.unsubscribeView = view.subscribe(this.schedule);
-      const [metadata, app, config, tasks] = await Promise.all([
+      const [metadata, app, config, search, tasks] = await Promise.all([
         this.harness.documentState(ChatMetadataDoc, this.id, context),
         this.harness.documentState(AppDoc, this.id, context),
         this.harness.documentState(ConfigDoc, this.id, context),
+        this.harness.documentState(SearchPresentationsDoc, this.id, context),
         this.harness.taskGraph(context),
       ]);
       if (!current()) {
         metadata?.dispose();
         app?.dispose();
         config?.dispose();
+        search?.dispose();
         tasks.dispose();
         return;
       }
       this.metadata = metadata;
       this.app = app;
       this.config = config;
+      this.search = search;
       this.tasks = tasks;
       this.unsubscribeDocs = [metadata?.subscribe(this.schedule) ?? noop, app?.subscribe(this.schedule) ?? noop,
-        config?.subscribe(this.schedule) ?? noop, tasks.subscribe(this.schedule)];
+        config?.subscribe(this.schedule) ?? noop, search?.subscribe(this.schedule) ?? noop,
+        tasks.subscribe(this.schedule)];
       if (!metadata?.value) {
         this.publish({ status: 'missing' });
         return;
@@ -207,6 +214,8 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
     this.app = undefined;
     this.config?.dispose();
     this.config = undefined;
+    this.search?.dispose();
+    this.search = undefined;
     this.tasks?.dispose();
     this.tasks = undefined;
   }
@@ -316,7 +325,7 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
     }
     const shown = shownEntries(entries, this.originals);
     const state: ChatState = { id: this.id, ...docs, inbox: shownInbox(docs.inbox, this.originals), metadata,
-      submission: this.submission };
+      search: this.search?.value ?? undefined, submission: this.submission };
     const controls = projectControls(state, shown);
     const error = controls.error ?? this.answerError;
     const summary = this.config?.value?.summary ?? null;

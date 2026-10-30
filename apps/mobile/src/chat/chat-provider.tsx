@@ -421,9 +421,15 @@ function useChatController() {
   const infiniChatMoveNotice = useSyncExternalStore(moves?.subscribe ?? subscribeNothing, getMoveNotice, getMoveNotice);
   const credentialState = useSyncExternalStore(credentials.subscribe, credentials.getSnapshot, credentials.getSnapshot);
   const [catalog, setCatalog] = useState(() => buildModelCatalog(models));
+  // pi.dev's newer models (`chat-providers.ts`), for the providers with a credential: once per launch, and for a
+  // provider once it is signed in. A provider whose fetch fails keeps the models it has.
+  const fetchModels = useCallback(() => {
+    void models.refresh().then(() => setCatalog(buildModelCatalog(models)));
+  }, [models]);
+  useEffect(fetchModels, [fetchModels]);
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
   const signOutPending = disconnectingProvider !== undefined;
-  const onSignedIn = () => setCatalog(buildModelCatalog(models));
+  const onSignedIn = fetchModels;
   const { setAuthNotice, ...signIn } = useProviderSignIn({ models, credentials, signOutPending, onSignedIn });
   const { signingIn, cancelSignIn } = signIn;
 
@@ -599,7 +605,9 @@ const notReady: ProviderAccess = { ready: false, connected: false };
  * as on the account screen; for ChatGPT the phone's receiver and browser catch the callback and answer the machine's
  * `manual_code` prompt with it. The phone's own account is never touched then. `machine` names the machine.
  */
-export function useInfiniChatAccount(): ProviderAccount & { catalog: ModelCatalog; machine?: string } {
+export function useInfiniChatAccount(): ProviderAccount & {
+  catalog: ModelCatalog; machine?: string; refreshCatalog(): Promise<void>;
+} {
   const app = useChatApp();
   const { providerOAuth } = app;
   const remote = useShownMachine();
@@ -698,6 +706,8 @@ export function useInfiniChatAccount(): ProviderAccount & { catalog: ModelCatalo
   return {
     catalog,
     machine: listed?.machines[remote.machineId]?.name ?? 'the machine',
+    // The machine fetches pi.dev's newer models for its own providers.
+    refreshCatalog: () => remote.refreshCatalog(),
     providerAccess: (providerId) => {
       const state = access?.[providerId] ?? notReady;
       return signOutPending ? { ...state, ready: false, connected: false } : state;

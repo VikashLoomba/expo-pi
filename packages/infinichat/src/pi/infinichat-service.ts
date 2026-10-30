@@ -21,6 +21,7 @@ import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
 import { BuildNode, ConfigDoc } from './infinichat/summary';
 import { requireModelAuth } from './model-auth';
 import { assertModelSettings, buildModelCatalog, type ChatModelSettings } from './model-catalog';
+import { createNativeWebSearchBridge, SearchPresentationsDoc } from './native-web-search/durable';
 import { imagesOf, textOf } from './user-input';
 import { WorkspaceDoc } from './workspace/document';
 
@@ -109,12 +110,15 @@ export class InfiniChatService implements InfiniChatHost {
     onClosed?: (end: SessionEnd) => void;
   }): Promise<InfiniChatService> {
     let service: InfiniChatService | undefined;
+    // OpenAI's hosted web search, bound to each generation request as the chats bind it (`chat-service.ts`).
+    const nativeSearch = createNativeWebSearchBridge((error) => service?.report(error));
     const chat = await openOptChat(options.storage, {
       models: options.models,
       name: TITLE,
       hasDeviceTools: true,
       ...options.devices,
       nativeContracts: { bash: 'bash', read: 'read' },
+      extensions: [nativeSearch.extension],
       onReport: (error) => service?.report(error),
       // The chat view shows a conversation only with its metadata document; the phone device reads the workspace.
       init: async (tx, id) => {
@@ -123,6 +127,13 @@ export class InfiniChatService implements InfiniChatHost {
         metadata.createdAt = Date.now();
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
       },
+    }, BACKGROUND_CONTEXT);
+    nativeSearch.attach(chat.harness);
+    // pi-durable's `documentState` finds no document that doesn't exist yet, and a view stays attached without it, so
+    // the searches document exists before any view, as a chat's does from its creating commit (`chat-service.ts`). A
+    // conversation from before web search gets it here once; a new document is adopted even unmodified.
+    await chat.root.commit(async (tx) => {
+      await tx.doc(SearchPresentationsDoc, chat.root.id);
     }, BACKGROUND_CONTEXT);
     const scheduled = new ScheduledTasks(chat.harness, (error) => service?.report(error));
     const machines = new MachineList(chat.harness);

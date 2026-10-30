@@ -175,6 +175,9 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         cancelSignIn: method(),
         setApiKey: method(Type.Object({ providerId: Type.String(), key: Type.String() })),
         signOut: method(Type.Object({ providerId: Type.String() })),
+        // Fetches pi.dev's newer models for the machine's providers into `catalog` (`chat-providers.ts`); it rejects
+        // when a provider's fetch failed, and that provider keeps the models it had.
+        refreshCatalog: method(),
         // Moving the conversation, as upstream's session sync hands a session over: one side closes its Harness, the
         // files are copied, the other side opens them. `adopt` opens the files in `data/` when they match, and is
         // refused while active; it clears `heldBy`. `relinquish` (Chord reserves `release`) records the phone it
