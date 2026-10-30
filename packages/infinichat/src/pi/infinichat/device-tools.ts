@@ -8,7 +8,7 @@ import {
   createBashTool, createEditTool, createReadTool, createWriteTool, type ImageProcessor,
 } from '@earendil-works/pi-durable/tools';
 
-import type { OptChatOptions } from './app';
+import type { OptChatExtensionOptions } from './app';
 
 /**
  * UniiChat's work dirs: a device's tools run in <work>/<who>, `main` for the main agent and its name for a subagent.
@@ -28,7 +28,7 @@ export type Device = {
 };
 
 /** What InfiniChat's tools need from the host it runs on. */
-export type InfiniChatDevices = Required<Pick<OptChatOptions, 'tools' | 'callEnv' | 'turnState'>>;
+export type InfiniChatDevices = Required<Pick<OptChatExtensionOptions, 'tools' | 'callEnv' | 'turnState'>>;
 
 const deviceParameter = Type.String({ description: 'The device to run on, from the list at the start of the message' });
 

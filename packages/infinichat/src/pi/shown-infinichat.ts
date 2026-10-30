@@ -101,6 +101,10 @@ export class ShownInfiniChat implements InfiniChatHost {
     return this.current().cancelScheduled(id, replacement);
   }
 
+  reloadPlugins(): Promise<string> {
+    return this.current().reloadPlugins();
+  }
+
   putMachine(record: Machine): Promise<void> {
     return this.current().putMachine(record);
   }

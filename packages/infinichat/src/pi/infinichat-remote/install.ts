@@ -6,7 +6,7 @@ import type { InstallStage } from './dialer';
 import {
   discard, fileFailure, HASH, MARKER, PRINT_MARKER, quotePosix, runScript, temporary, type Step,
 } from './machine';
-import { DAEMON_TARGETS, latestServerRelease, releaseFile } from './release';
+import { latestServerRelease, PLUGIN_FILE, releaseFile, runtimeFile } from './release';
 
 export interface InstalledServer {
   /** The server's port on the machine's loopback, where the app's tunnel goes. */
@@ -64,17 +64,20 @@ const PID = `sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$s"`;
 /** The Node that runs the server, from `server.json` at `$s`, which move.ts runs the server's page commands with. */
 export const NODE = `sed -n 's/.*"node":"\\([^"]*\\)".*/\\1/p' "$s"`;
 /**
- * The server a machine runs, under its home: each release in a folder named after its version, `current` naming the
- * one the service starts, and `bin/` with the pi-env daemons the server deploys to the other machines its tools use.
- * pi-env takes the one for each system it detects from `bin/` beside its package (`packagedDaemon`,
- * `src/ssh.ts:356-360` at v1.4.0); in the single-file bundle that is `bin/` beside the release folders.
+ * The server a machine runs, under its home: each runtime in a folder named after its key (`release.ts`), holding
+ * its Chord host (`main.js`), the packages that host and every plugin share (`node_modules`, pi-env's daemons among
+ * them), InfiniChat's server plugin (`plugins/infinichat/server.js`) and the release it came with (`release.json`);
+ * `current` names the one the service starts.
  */
 export const SERVER = '.infinichat/server';
-/** The server the service starts. */
-export const CURRENT = `${SERVER}/current/server.js`;
+/** The host the service starts. */
+export const CURRENT = `${SERVER}/current/main.js`;
 /** `fetch <url> <file>`, with whichever of curl and wget the machine has. */
 const FETCH = 'fetch() { if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$2" "$1"; '
   + 'else wget -q -O "$2" "$1"; fi; }';
+
+/** InfiniChat's server plugin within a runtime folder; the host loads it from there and reloads it in place. */
+export const PLUGIN = 'plugins/infinichat/server.js';
 
 /** Fixed messages: remote output never reaches one. */
 function messages(name: string) {
@@ -278,7 +281,7 @@ function serverInfo(line: string | undefined): { port: number; version: string }
  * Lets this app use InfiniChat on a configured machine: writes `secret`, the app's for this machine (`machineSecret`),
  * as the file of `client`, the app's client ID, beside other clients', and starts the server as that account's
  * service when it isn't running. A machine with no server first downloads the newest release (`release.ts`), each file
- * verified before it is renamed into place, as pi-env deploys its daemon. It never replaces a server, which updates
+ * verified before it is moved into place, as pi-env deploys its daemon. It never replaces a server, which updates
  * itself. It works through the machine's `ExecutionEnv`, which the app borrows and never closes; the service manager
  * owns the server, and the environment's connection never does.
  */
@@ -295,33 +298,13 @@ export async function installServer({ machine, name, username }: InstallTarget, 
   options.onProgress?.('checking');
   const [state] = await run([HASH, PRINT_MARKER, `if [ -f "$HOME/${CURRENT}" ]; then echo present`,
     'elif ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then echo nofetch',
+    'elif ! command -v tar >/dev/null 2>&1; then echo notar',
     'elif [ "$(hash /dev/null)" = none ]; then echo nohash',
     'else echo missing; fi'], { failure: message.check });
   if (state === 'nofetch') throw new Error(`${name} needs curl or wget to download InfiniChat.`);
+  if (state === 'notar') throw new Error(`${name} needs tar to unpack InfiniChat.`);
   if (state === 'nohash') throw new Error(`${name} needs sha256sum, shasum or openssl to verify InfiniChat.`);
   if (state !== 'present' && state !== 'missing') throw new Error(message.check);
-  if (state === 'missing') {
-    options.onProgress?.('installing');
-    const release = await latestServerRelease(signal);
-    if (release === undefined) throw new Error('No InfiniChat server has been released yet.');
-    const { version } = release;
-    const files = [{ name: 'server.js', sha256: release.sha256, path: `${SERVER}/${version}/server.js` },
-      ...DAEMON_TARGETS.map((target) => ({ name: `pi-env-${target}`, sha256: release.daemons[target],
-        path: `${SERVER}/bin/pi-env-${target}/pi-env` }))];
-    // Each file not already there is downloaded beside its final name under umask 077, verified, and renamed into
-    // place, readable by the account alone; `current` then names the release.
-    await run([HASH, FETCH, 'umask 077', ...files.flatMap((file) => [
-      `f="$HOME/${file.path}"`,
-      `if [ -L "$f" ] || [ ! -f "$f" ] || [ "$(hash "$f")" != ${file.sha256} ]; then`,
-      '  mkdir -p "$(dirname "$f")"; t="$f.$$"',
-      `  if fetch ${quotePosix(releaseFile(version, file.name))} "$t" && [ "$(hash "$t")" = ${file.sha256} ]; then`,
-      '    chmod 600 "$t"; mv -f "$t" "$f"',
-      '  else rm -f "$t"; exit 1; fi',
-      'fi']),
-    `ln -sfn ${quotePosix(version)} "$HOME/${SERVER}/current"`, PRINT_MARKER],
-    { failure: message.download, timeout: DOWNLOAD_TIMEOUT, timedOut: message.download });
-  }
-  options.onProgress?.('starting');
   /**
    * Runs `lines` with `$t` naming a file of `content`, written first: never onto a command line other accounts can
    * read. It goes into ~/.infinichat, which the download made under umask 077, as the server makes it (0700).
@@ -336,6 +319,28 @@ export async function installServer({ machine, name, username }: InstallTarget, 
       discard(machine, input);
     }
   };
+  if (state === 'missing') {
+    options.onProgress?.('installing');
+    const release = await latestServerRelease(signal);
+    if (release === undefined) throw new Error('No InfiniChat server has been released yet.');
+    const { version, runtime, plugin } = release;
+    // Each download goes beside its final name under umask 077 and is verified before it is moved into place,
+    // readable by the account alone: the runtime unpacked into a folder of its own, then the plugin and the release's
+    // description; `current` then names the runtime.
+    const download = (url: string, sha256: string) => [
+      `  if fetch ${quotePosix(url)} "$t" && [ "$(hash "$t")" = ${sha256} ]; then :; else rm -f "$t"; exit 1; fi`];
+    await run([HASH, FETCH, 'umask 077', `d="$HOME/${SERVER}/${runtime.key}"`, 'mkdir -p "$(dirname "$d")"',
+      'if [ ! -f "$d/main.js" ]; then', '  t="$d.$$.tar.gz"',
+      ...download(releaseFile(version, runtimeFile(runtime.key)), runtime.sha256),
+      '  rm -rf "$d" "$d.$$"; mkdir "$d.$$"; tar -xzf "$t" -C "$d.$$"; rm -f "$t"; mv "$d.$$" "$d"', 'fi',
+      `f="$d/${PLUGIN}"`, 'mkdir -p "$(dirname "$f")"', 't="$f.$$"',
+      ...download(releaseFile(version, PLUGIN_FILE), plugin.sha256), 'mv -f "$t" "$f"', PRINT_MARKER],
+    { failure: message.download, timeout: DOWNLOAD_TIMEOUT, timedOut: message.download });
+    await runWith('release', JSON.stringify(release), [`d="$HOME/${SERVER}/${runtime.key}"`,
+      'mv -f "$t" "$d/release.json"', `ln -sfn ${quotePosix(runtime.key)} "$HOME/${SERVER}/current"`, PRINT_MARKER],
+    { failure: message.files });
+  }
+  options.onProgress?.('starting');
   // The server reads the clients' files at each connection, so a new secret needs no restart, and the other clients'
   // files stay as they are.
   await runWith('secret', secret, ['umask 077', `d="$HOME/${CLIENTS}"`, 'mkdir -p "$d"', `f="$d/"${quotePosix(client)}`,

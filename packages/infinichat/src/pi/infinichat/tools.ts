@@ -2,7 +2,7 @@ import type { Context } from '@earendil-works/chord';
 import { Type, type ImageContent, type TextContent } from '@earendil-works/pi-ai';
 import {
   GenerationTask, ToolTask, defineExtension, defineTool, hook, wrapTool,
-  type ConversationId, type ToolHookCall, type ToolRegistration,
+  type ConversationId, type HookApi, type ToolHookCall, type ToolRegistration,
 } from '@earendil-works/pi-durable';
 import { getOrThrow, type ExecutionEnv } from '@earendil-works/pi-durable/env';
 
@@ -144,7 +144,7 @@ function spillPath(value: unknown): string | undefined {
 }
 
 /** Environment selection is host plumbing, not OptChat behavior. `environment`
- * resolves the environment a completed call ran in: the conversation's, or the
+ * resolves the environment a completed call ran in, through the hook's reader: the conversation's, or the
  * device the call's arguments name. Completed streaming tools must return full
  * output or a native spill contract explicitly registered by the host. Native
  * bash spill text is decoded from the raw stdout/stderr byte sequence, not
@@ -152,8 +152,7 @@ function spillPath(value: unknown): string | undefined {
  * return full explicit text; discarded stream bytes cannot be reconstructed. */
 export function toolPolicy(
   tools: readonly ToolRegistration[],
-  environment: (call: ToolHookCall, conversationId: ConversationId, context: Context) =>
-    Promise<ExecutionEnv | undefined>,
+  environment: (call: ToolHookCall, api: HookApi, context: Context) => Promise<ExecutionEnv | undefined>,
   nativeContracts: NativeContracts = {},
 ) {
   return defineExtension({
@@ -170,7 +169,7 @@ export function toolPolicy(
           if (contract === 'read') return undefined;
           const path = contract === 'bash' ? spillPath(result.structuredOutput)
             : contract === 'codemode' ? spillPath(result.details) : undefined;
-          const env = path === undefined ? undefined : await environment(call, api.conversationId, context);
+          const env = path === undefined ? undefined : await environment(call, api, context);
           if (path !== undefined && !env) {
             throw new Error('Native spill output requires the conversation execution environment');
           }

@@ -15,18 +15,20 @@ export type {
  * chat a stream belongs to. Only generation requests bind: compaction runs a CompactionTask whose hooks never
  * fire here, and every other Models call carries an unbound signal, so only chat requests get the hosted tool.
  */
-export function createNativeWebSearchBridge(report: (error: unknown) => void) {
-  let harness: Harness | undefined;
-
+export function createNativeWebSearchBridge(report: (error: unknown) => void, current: () => Harness | undefined) {
+  /** The Harness running the request: a hook fires only inside it, so it is open whenever a writer is used. */
+  const opened = () => {
+    const harness = current();
+    if (!harness) throw new Error('Native search persistence has no open Harness.');
+    return harness;
+  };
   const writerFor = (conversationId: ConversationId): NativeWebSearchWriter => ({
     async commit(change, signal) {
-      if (!harness) throw new Error('Native search persistence has not been attached.');
-      await harness.commit(change, withAbortSignal(signal, BACKGROUND_CONTEXT));
+      await opened().commit(change, withAbortSignal(signal, BACKGROUND_CONTEXT));
     },
     async submit(entry, requestId, signal) {
-      if (!harness) throw new Error('Native search persistence has not been attached.');
       const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
-      const conversation = await harness.conversation(conversationId, context);
+      const conversation = await opened().conversation(conversationId, context);
       if (!conversation) throw new Error('Conversation not found.');
       await conversation.submit({ type: 'write', entry, requestId }, context);
     },
@@ -44,11 +46,5 @@ export function createNativeWebSearchBridge(report: (error: unknown) => void) {
     })],
   });
 
-  return {
-    extension,
-    attach(value: Harness) {
-      if (harness && harness !== value) throw new Error('Native search bridge already belongs to another Harness.');
-      harness = value;
-    },
-  };
+  return extension;
 }

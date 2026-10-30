@@ -1,19 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Publishes the server as a release of this repository on GitHub, tagged `server/v<version>` and never marked latest:
-// `latest/download` serves the Mac app's updates (apps/mac/electrobun.config.ts). Each machine's server updates itself
-// to the newest release, and an app sets one up from it on a machine that has none
-// (packages/infinichat/src/pi/infinichat-remote/release.ts). Run `pnpm release` here after committing the version in
-// package.json and the build it gives, and pushing that commit, which the tag names.
+// `latest/download` serves the Mac app's updates (apps/mac/electrobun.config.ts). A release is a runtime, the Chord
+// host (dist/main.js) with the packages it and every plugin share, installed exactly as runtime/package-lock.json
+// locks them and named by a hash of the two, and InfiniChat's server plugin (dist/plugins/infinichat/server.js). Each
+// machine's server updates itself to the newest release and restarts into it, downloading only the plugin while its
+// runtime is the same (packages/infinichat-server/src/update.ts). Run `pnpm release` here after committing the version
+// in package.json and pushing that commit, which the tag names.
 const root = fileURLToPath(new URL('../', import.meta.url));
-const targets = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'];
 const read = (command, args) => execFileSync(command, args, { cwd: root, encoding: 'utf8' }).trim();
-const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: 'inherit' });
+const run = (command, args, options = {}) => execFileSync(command, args, { cwd: root, stdio: 'inherit', ...options });
 const sha256 = async (path) => createHash('sha256').update(await readFile(path)).digest('hex');
 
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -26,23 +27,33 @@ run('git', ['fetch', '--quiet', 'origin']);
 if (!read('git', ['branch', '--remotes', '--contains', commit])) {
   throw new Error(`Push ${commit.slice(0, 7)} to GitHub first: the release's tag ${tag} names it.`);
 }
-// The committed build and daemons are the release: both checks fail when they don't match the sources and pins.
 run('node', ['scripts/build.mjs', '--check']);
-run('node', ['scripts/sync-daemons.mjs', '--check']);
+run('node', ['scripts/build.mjs']);
 
 const folder = await mkdtemp(join(tmpdir(), 'infinichat-server-release-'));
 try {
-  const files = [join(folder, 'server.js'), ...targets.map((target) => join(folder, `pi-env-${target}`))];
-  await copyFile(join(root, 'assets/server.bin'), files[0]);
-  for (const target of targets) {
-    await copyFile(join(root, `assets/pi-env/pi-env-${target}.bin`), join(folder, `pi-env-${target}`));
+  const stage = join(folder, 'runtime');
+  await mkdir(stage);
+  for (const file of ['package.json', 'package-lock.json']) {
+    await copyFile(join(root, 'runtime', file), join(stage, file));
   }
-  const daemons = Object.fromEntries(await Promise.all(targets.map(async (target) =>
-    [target, await sha256(join(folder, `pi-env-${target}`))])));
-  const manifest = join(folder, 'manifest.json');
-  await writeFile(manifest, JSON.stringify({ version, sha256: await sha256(files[0]), daemons }, null, 2));
+  await copyFile(join(root, 'dist/main.js'), join(stage, 'main.js'));
+  // The packages as locked, without install scripts, as the workspace builds none of them either.
+  run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: stage });
+  const key = createHash('sha256').update(await readFile(join(stage, 'package-lock.json')))
+    .update(await readFile(join(stage, 'main.js'))).digest('hex').slice(0, 32);
+  const runtime = join(folder, `runtime-${key}.tar.gz`);
+  // Without macOS's metadata, which Linux's tar would only warn about.
+  run('tar', ['--no-mac-metadata', '--no-xattrs', '--no-acls', '-czf', runtime, '-C', stage, '.'],
+    { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  const plugin = join(folder, 'infinichat.js');
+  await copyFile(join(root, 'dist/plugins/infinichat/server.js'), plugin);
+  const release = join(folder, 'release.json');
+  await writeFile(release, JSON.stringify({
+    version, runtime: { key, sha256: await sha256(runtime) }, plugin: { sha256: await sha256(plugin) },
+  }, null, 2));
   run('gh', ['release', 'create', tag, '--target', commit, '--title', `InfiniChat server ${version}`, '--notes', '',
-    '--latest=false', ...files, manifest]);
+    '--latest=false', runtime, plugin, release]);
 } finally {
   await rm(folder, { recursive: true, force: true });
 }

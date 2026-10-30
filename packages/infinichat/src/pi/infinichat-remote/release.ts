@@ -4,30 +4,35 @@ import { Check } from 'typebox/value';
 /**
  * InfiniChat's server releases: the GitHub releases of this repository tagged `server/v<version>`, which
  * `packages/infinichat-server/scripts/release.mjs` publishes, never marked latest, so `latest/download` keeps serving
- * the Mac app's updates. A server updates itself to the newest one, and an app sets one up from it on a machine that
- * has none; nothing else installs a server.
+ * the Mac app's updates. A release is a runtime, the Chord host (`main.js`) and the packages it and every plugin
+ * share (`node_modules`), and InfiniChat's server plugin. A server updates itself to the newest one and restarts into
+ * it, downloading only the plugin while the runtime stays the same; an app sets one up on a machine that has none.
  */
 const REPOSITORY = 'VikashLoomba/expo-pi';
 const TAG = /^server\/v(\d+\.\d+\.\d+)$/;
 /** pi's own wait for a catalog fetch, as `pi-catalog.ts` bounds each. */
 const ATTEMPT_MS = 4_000;
 
-/** The systems a release carries a pi-env daemon for, as pi-env's package names them. */
-export const DAEMON_TARGETS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'] as const;
-export type DaemonTarget = typeof DAEMON_TARGETS[number];
-
 const Hash = Type.String({ pattern: '^[0-9a-f]{64}$' });
-/** A release's `manifest.json`: its version, and the SHA-256 of `server.js` and of each `pi-env-<target>`. */
-const ServerReleaseSchema = Type.Object({
+/**
+ * A release's `release.json`: its version; its runtime, named by `key`, a hash of what it holds, so releases that
+ * share one share its folder; and the SHA-256 of each file.
+ */
+export const ServerReleaseSchema = Type.Object({
   version: Type.String(),
-  sha256: Hash,
-  daemons: Type.Object({ 'darwin-arm64': Hash, 'darwin-x64': Hash, 'linux-arm64': Hash, 'linux-x64': Hash }),
+  runtime: Type.Object({ key: Type.String({ pattern: '^[0-9a-f]{32}$' }), sha256: Hash }),
+  plugin: Type.Object({ sha256: Hash }),
 });
 export type ServerRelease = Static<typeof ServerReleaseSchema>;
 /** The fields of GitHub's release list this reads. */
 const ReleasesSchema = Type.Array(Type.Object({
   tag_name: Type.String(), draft: Type.Boolean(), prerelease: Type.Boolean(),
 }));
+
+/** The release's description, its runtime's tarball, and InfiniChat's server plugin, as one module. */
+export const RELEASE_FILE = 'release.json';
+export const runtimeFile = (key: string) => `runtime-${key}.tar.gz`;
+export const PLUGIN_FILE = 'infinichat.js';
 
 /** A release file's address; GitHub serves a tag's slash as it is. */
 export const releaseFile = (version: string, name: string) =>
@@ -63,9 +68,9 @@ export async function latestServerRelease(signal: AbortSignal): Promise<ServerRe
     if (version !== undefined && (newest === undefined || compareVersions(version, newest) > 0)) newest = version;
   }
   if (newest === undefined) return undefined;
-  const manifest = await json(releaseFile(newest, 'manifest.json'), signal);
-  if (!Check(ServerReleaseSchema, manifest) || manifest.version !== newest) {
-    throw new Error(`InfiniChat’s server release ${newest} has no valid manifest.`);
+  const release = await json(releaseFile(newest, RELEASE_FILE), signal);
+  if (!Check(ServerReleaseSchema, release) || release.version !== newest) {
+    throw new Error(`InfiniChat’s server release ${newest} has no valid description.`);
   }
-  return manifest;
+  return release;
 }

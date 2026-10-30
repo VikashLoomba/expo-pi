@@ -11,16 +11,14 @@ import type { ServerMachines } from './machines';
 /**
  * This machine, under the name and with the description the phone's device list gives it, so the model's memory of
  * the device stays true when the conversation moves, then the other configured machines, reached over SSH from here.
- * Its tools run in the work dir the phone uses for machines.
+ * Both are read at each use: a server plugin builds its tools before the objects that know them are open. Its tools
+ * run in the work dir the phone uses for machines.
  */
-export function serverDevices(name: string, description: string, machines: ServerMachines) {
+export function serverDevices(self: () => { name: string; description: string }, machines: () => ServerMachines) {
   const work = join(homedir(), MACHINE_WORK);
-  const device = {
-    name,
-    description,
-    environment: async (who: string) => new NodeExecutionEnv({ cwd: join(work, who) }),
-  };
-  // A single-file bundle cannot resolve Photon's package, so it carries its own copy of the WebAssembly, as
-  // pi-durable's `images/node` says; images are then prepared on this thread.
-  return infiniChatDevices(async () => [device, ...machines.devices()], createPhotonImages(photon));
+  const environment = async (who: string) => new NodeExecutionEnv({ cwd: join(work, who) });
+  // The plugin carries Photon's WebAssembly itself, so images are prepared on this thread without resolving its
+  // package at run time, as pi-durable's `images` documents.
+  return infiniChatDevices(async () => [{ ...self(), environment }, ...machines().devices()],
+    createPhotonImages(photon));
 }

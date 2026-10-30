@@ -161,6 +161,9 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         dismissError: method(),
         // The phone's IANA zone, sent on every connect, so the times the agent reads match the phone's clock.
         setTimeZone: method(Type.Object({ zone: Type.String() })),
+        // The user's `/reload-plugins`: loads the plugins added to the machine's plugins folder and reloads the
+        // others with Chord's hot reload, without restarting the server, and says what it did.
+        reloadPlugins: method(undefined, Type.String()),
         // The account screen's operations on the machine's credential store. `signIn` starts an attempt and returns
         // its number; the attempt runs on the server, and its prompts are answered by separate calls.
         signIn: method(Type.Object({ providerId: Type.String() }), Type.Number()),

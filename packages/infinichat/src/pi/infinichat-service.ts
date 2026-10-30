@@ -2,7 +2,7 @@ import type { Context } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
-  AgentDoc, configure, type Harness, type SessionEnd, type Storage, type TaskGraphNode,
+  AgentDoc, configure, type Harness, type RegistryReader, type SessionEnd, type Storage, type TaskGraphNode,
 } from '@earendil-works/pi-durable';
 
 import { ChatMetadataDoc } from './chat-metadata';
@@ -15,7 +15,7 @@ import {
 } from './infinichat-remote/machines';
 import { InfiniChatView, type InfiniChatControls } from './infinichat-view';
 import { AGENT_TASK } from './infinichat/agents';
-import { openOptChat, type OptChat } from './infinichat/app';
+import { openOptChat, optChatParts, type OptChat, type OptChatParts } from './infinichat/app';
 import type { InfiniChatDevices } from './infinichat/device-tools';
 import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
 import { BuildNode, ConfigDoc } from './infinichat/summary';
@@ -61,6 +61,8 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   stop(): Promise<void>;
   updateSettings(settings: InfiniChatSettings): Promise<void>;
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean>;
+  /** The user's `/reload-plugins` (`chat/commands.ts`): what reloading the machine's plugins did. */
+  reloadPlugins(): Promise<string>;
   dismissError(): void;
   /** The scheduled tasks still waiting, soonest first; undefined until they are first read. */
   readonly scheduled: Store<readonly ScheduledTask[] | undefined>;
@@ -68,6 +70,22 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
 
 const TITLE = 'InfiniChat';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+/**
+ * InfiniChat's extensions, from the host's devices: OptChat's, and OpenAI's hosted web search, bound to each
+ * generation request as the chats bind it (`chat-service.ts`). `harness` and `report` reach the open service, which a
+ * host's registry may hold the extensions before and after.
+ */
+export function infiniChatExtensions(devices: InfiniChatDevices, harness: () => Harness | undefined,
+  report: (error: unknown) => void): OptChatParts {
+  return optChatParts({
+    name: TITLE,
+    hasDeviceTools: true,
+    ...devices,
+    nativeContracts: { bash: 'bash', read: 'read' },
+    extensions: [createNativeWebSearchBridge(report, harness)],
+  });
+}
 
 const INFINICHAT = 'infinichat';
 const infiniChatWork = new Set([BuildNode.definition.name, AGENT_TASK]);
@@ -102,8 +120,9 @@ export class InfiniChatService implements InfiniChatHost {
     private readonly machine?: string,
   ) {}
 
+  /** `parts` are `infiniChatExtensions`, which the Harness reads from `registry` with the host's own. */
   static async open(options: {
-    storage: Storage; models: Models; devices: InfiniChatDevices;
+    storage: Storage; models: Models; parts: OptChatParts; registry: RegistryReader;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */
     authError?: (providerId: string) => string | undefined;
     /** The machine this runs on, named where a message sends the user to sign in; none on the phone. */
@@ -112,15 +131,10 @@ export class InfiniChatService implements InfiniChatHost {
     onClosed?: (end: SessionEnd) => void;
   }): Promise<InfiniChatService> {
     let service: InfiniChatService | undefined;
-    // OpenAI's hosted web search, bound to each generation request as the chats bind it (`chat-service.ts`).
-    const nativeSearch = createNativeWebSearchBridge((error) => service?.report(error));
     const chat = await openOptChat(options.storage, {
       models: options.models,
-      name: TITLE,
-      hasDeviceTools: true,
-      ...options.devices,
-      nativeContracts: { bash: 'bash', read: 'read' },
-      extensions: [nativeSearch.extension],
+      registry: options.registry,
+      parts: options.parts,
       onReport: (error) => service?.report(error),
       // The chat view shows a conversation only with its metadata document; the phone device reads the workspace.
       init: async (tx, id) => {
@@ -130,7 +144,6 @@ export class InfiniChatService implements InfiniChatHost {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
       },
     }, BACKGROUND_CONTEXT);
-    nativeSearch.attach(chat.harness);
     // pi-durable's `documentState` finds no document that doesn't exist yet, and a view stays attached without it, so
     // the searches document exists before any view, as a chat's does from its creating commit (`chat-service.ts`). A
     // conversation from before web search gets it here once; a new document is adopted even unmodified.
@@ -168,6 +181,11 @@ export class InfiniChatService implements InfiniChatHost {
     return () => { this.listeners.delete(listener); };
   };
   readonly getSnapshot = () => this.snapshot;
+
+  /** Plugins load into a machine's server host; a conversation held here runs only the code its app shipped with. */
+  async reloadPlugins(): Promise<string> {
+    throw new Error('Plugins run on a machine’s InfiniChat server. Move InfiniChat to a machine to use them.');
+  }
 
   /** Clears the Harness's latest report once the user dismisses it; the next report sets it again. */
   dismissError() {

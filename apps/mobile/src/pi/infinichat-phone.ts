@@ -1,6 +1,8 @@
 import type { Models } from '@earendil-works/pi-ai';
-import type { SessionEnd, Storage } from '@earendil-works/pi-durable';
-import { InfiniChatService, infiniChatTasks } from '@pi-agent/infinichat/pi/infinichat-service';
+import { createRegistry, type SessionEnd, type Storage } from '@earendil-works/pi-durable';
+import {
+  InfiniChatService, infiniChatExtensions, infiniChatTasks,
+} from '@pi-agent/infinichat/pi/infinichat-service';
 import { infiniChatDevices } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
 import type { KeepAliveController } from '../keep-alive/controller';
@@ -31,10 +33,16 @@ export async function openPhoneInfiniChat(options: {
   // The machines are the service's own document; the list reads it once the service is open.
   let service: InfiniChatService | undefined;
   const devices = createDevices(options.workspaces, options.remote, () => service?.machines.getSnapshot());
+  const parts = infiniChatExtensions(infiniChatDevices(devices, createExpoImages()), () => service?.harness,
+    (error) => service?.report(error));
+  // The phone's code ships inside the app, so its registry is fixed: nothing reloads it, unlike a machine's server.
+  const registry = createRegistry();
+  for (const extension of parts.extensions) registry.install(extension);
   service = await InfiniChatService.open({
     storage: options.storage,
     models: options.models,
-    devices: infiniChatDevices(devices, createExpoImages()),
+    parts,
+    registry,
     authError: options.authError,
     onClosed: options.onClosed,
   });

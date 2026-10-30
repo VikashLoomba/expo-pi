@@ -97,8 +97,8 @@ export class DurableChatService {
     const registry = createRegistry();
     // With a processor, `read` turns photos upright and shrinks them to the model's limits (pi-durable "Images").
     registry.install(createCodingTools({ images: options.images }));
-    const nativeSearch = createNativeWebSearchBridge((error) => service?.report(error));
-    registry.install(nativeSearch.extension);
+    let harness: Harness | undefined;
+    registry.install(createNativeWebSearchBridge((error) => service?.report(error), () => harness));
     registry.install(defineExtension({
       name: 'mobile-chat',
       sections: [section('assistant',
@@ -109,7 +109,7 @@ export class DurableChatService {
     }));
     const now = options.now ?? Date.now;
     let service: DurableChatService | undefined;
-    const harness = await Harness.open(options.storage, {
+    harness = await Harness.open(options.storage, {
       models: options.models, registry, now,
       // Each use reads the chat's committed selection, like pi's sandbox-per-conversation example.
       env: async ({ conversationId, cwd, read }, envContext) => {
@@ -129,7 +129,6 @@ export class DurableChatService {
         if (info.type !== 'task_parked') service?.report(error);
       },
     }, context);
-    nativeSearch.attach(harness);
     service = new DurableChatService(harness, options.storage, options.models, local, {
       now, newChat: options.newChat ?? { models: {} }, authError: options.authError,
       // `??` would turn a host's `null` into the phone's root.

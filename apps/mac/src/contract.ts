@@ -104,6 +104,8 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         cancelMove: method(),
         retryMove: method(),
         dismissMoveNotice: method(),
+        // The composer's `/reload-plugins`: what reloading the plugins on the machine shown did.
+        reloadPlugins: method(undefined, Type.String()),
         // Photos for the composer, fitted to the shown model's limits by the main process: chosen in the file
         // dialog, or handed over by the page (dropped or pasted), as base64.
         pickPhotos: method(undefined, Type.Array(AttachmentSchema)),

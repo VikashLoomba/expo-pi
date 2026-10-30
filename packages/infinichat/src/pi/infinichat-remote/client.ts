@@ -294,6 +294,10 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.cancelScheduled(replacement === undefined ? { id } : { id, replacement }, ctx));
   }
 
+  reloadPlugins(): Promise<string> {
+    return this.call((ref, ctx) => ref.reloadPlugins(ctx));
+  }
+
   /** The report stays until the server clears it, so a dismissal that fails can be repeated. */
   dismissError(): void {
     void this.call((ref, ctx) => ref.dismissError(ctx)).catch(() => {});

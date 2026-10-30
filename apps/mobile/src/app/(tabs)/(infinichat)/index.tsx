@@ -1,4 +1,5 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
+import { draftCommand, INFINICHAT_COMMANDS } from '@pi-agent/infinichat/chat/commands';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import { findCatalogModel, getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
@@ -102,6 +103,8 @@ export default function InfiniChatScreen() {
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [localError, setLocalError] = useState<string>();
+  /** What the last command the user ran said, until dismissed. */
+  const [commandResult, setCommandResult] = useState<string>();
   const input = useRef<TextInputInstance>(null);
   const busy = !!conversation?.busy;
   const configured = !!conversation?.configured;
@@ -137,9 +140,27 @@ export default function InfiniChatScreen() {
       setAttaching(false);
     }
   };
+  /** `/reload-plugins` reloads the plugins of the machine InfiniChat runs on; nothing reaches the agent. */
+  const runCommand = async () => {
+    setAdmitting(true);
+    setLocalError(undefined);
+    setCommandResult(undefined);
+    try {
+      setCommandResult(await service.reloadPlugins());
+      setDraft(emptyDraft());
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'The plugins could not be reloaded. Try again.');
+    } finally {
+      setAdmitting(false);
+    }
+  };
   const sendMessage = async () => {
     const text = draft.text.trim();
     if ((!text && !draft.images.length) || admitting) return;
+    if (!draft.images.length && draftCommand(text, INFINICHAT_COMMANDS)) {
+      await runCommand();
+      return;
+    }
     if (!configured || settingsError || !access.ready || !access.connected) return;
     if (draft.images.length && !model?.images) {
       setLocalError(`${model?.name || 'This model'} does not accept images. `
@@ -274,6 +295,10 @@ export default function InfiniChatScreen() {
         <InlineNotice testID="infinichat-move-notice" tone="neutral" message={moveNotice}
           action="Dismiss" onAction={() => moves?.dismissNotice()} />
       </View>}
+      {commandResult && !messageError && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-command-result" tone="neutral" message={commandResult}
+          action="Dismiss" onAction={() => setCommandResult(undefined)} />
+      </View>}
       {connection?.notice && !moveNotice && !messageError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-machine-notice" tone="neutral" message={connection.notice}
           action="Dismiss" onAction={connection.dismissNotice} />
@@ -285,7 +310,7 @@ export default function InfiniChatScreen() {
           || (!busy && (!configured || !access.ready || !!settingsError))}
         accountStatus={accountStatus} inputRef={input}
         attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}
-        attaching={attaching} imagesSupported={!!model?.images} />
+        attaching={attaching} imagesSupported={!!model?.images} commands={INFINICHAT_COMMANDS} />
     </>} /></ChatAgentContext>
   </View>;
 }

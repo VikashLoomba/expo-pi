@@ -29,7 +29,8 @@ async function authorized(request: IncomingMessage, clients: string): Promise<bo
  * checked wait; links send plain frames, because `acceptWebSockets` deflates large ones, which the phone's Hermes
  * cannot inflate. `version` tells the clients which release answers.
  */
-export async function listen(host: Host<InfiniChatPrincipal>, home: string, version: string): Promise<WebSocketServer> {
+export async function listen(host: Host<InfiniChatPrincipal>, home: string, version: string,
+): Promise<WebSocketServer> {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   server.on('connection', (socket, request) => {
     const link = webSocketLink(socket, { compress: false, acceptPacked: false });
@@ -48,7 +49,8 @@ export async function listen(host: Host<InfiniChatPrincipal>, home: string, vers
   // (packages/infinichat/src/pi/infinichat-remote/install.ts) match this exact JSON.stringify form. `node` is the Node
   // the phone runs the server's page commands with (move.ts).
   const temporary = join(home, `server.json.${process.pid}`);
-  await writeFile(temporary, JSON.stringify({ pid: process.pid, port: address.port, version, node: process.execPath }));
+  await writeFile(temporary,
+    JSON.stringify({ pid: process.pid, port: address.port, version, node: process.execPath }));
   await rename(temporary, join(home, 'server.json'));
   console.log(`InfiniChat listening on 127.0.0.1:${address.port}`);
   return server;

@@ -120,6 +120,7 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown, ava
       cancelMove: () => { infinichat.moves.cancel(); },
       retryMove: () => { infinichat.moves.retry(); },
       dismissMoveNotice: () => { infinichat.moves.dismissNotice(); },
+      reloadPlugins: () => shown.reloadPlugins(),
       pickPhotos: () => infinichat.pickPhotos(),
       attach: ({ mimeType, data }) => infinichat.attach(Buffer.from(data, 'base64'), mimeType),
       updateSettings: (settings) => shown.updateSettings(settings),

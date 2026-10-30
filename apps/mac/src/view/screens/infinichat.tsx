@@ -1,4 +1,5 @@
 import type { Host } from '@earendil-works/chord';
+import { INFINICHAT_COMMANDS, type ChatCommand } from '@pi-agent/infinichat/chat/commands';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
@@ -87,6 +88,8 @@ function InfiniChat() {
     reset, input } = useDraft(ref);
   const [admitting, setAdmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  /** What the last command the composer ran said, until dismissed. */
+  const [commandResult, setCommandResult] = useState<{ text: string; failed: boolean }>();
   const name = controls?.name || TITLE;
   const agent = useMemo(() => ({ name, avatar }), [name, avatar]);
   const busy = !!controls?.busy;
@@ -114,6 +117,18 @@ function InfiniChat() {
       (cause: unknown) => { setLocalError(errorText(cause, 'Your message could not be sent. Try again.')); },
     ).finally(() => setAdmitting(false));
   }, [admitting, configured, connected, draft, ref, reset, setLocalError, settingsError]);
+  // Commands run here, never reaching the agent; a failed one keeps its draft, so sending it again retries.
+  const runCommand = useCallback((command: ChatCommand) => {
+    if (admitting || command.name !== 'reload-plugins') return;
+    setAdmitting(true);
+    setCommandResult(undefined);
+    void ref.reloadPlugins().then((text) => {
+      setCommandResult({ text, failed: false });
+      reset();
+    }, (cause: unknown) => {
+      setCommandResult({ text: errorText(cause, 'The plugins could not be reloaded. Try again.'), failed: true });
+    }).finally(() => setAdmitting(false));
+  }, [admitting, ref, reset]);
   const stop = useCallback(() => {
     if (stopping) return;
     setStopping(true);
@@ -225,12 +240,16 @@ function InfiniChat() {
           <Notice tone="neutral" message={connection.notice} action="Dismiss"
             onAction={() => { void ref.dismissNotice(); }} />
         )}
+        {commandResult && (
+          <Notice tone={commandResult.failed ? 'error' : 'neutral'} message={commandResult.text} action="Dismiss"
+            onAction={() => setCommandResult(undefined)} />
+        )}
         <Composer value={draft.text} onChange={changeDraft} onSend={send} onStop={stop} busy={busy}
           admitting={admitting} disabled={!controls || stopping || !!away || !!move
             || (!busy && (!configured || !connected || settingsError !== undefined))}
           inputRef={input}
           attachments={draft.images} onAttach={attach} onFiles={attachFiles} onRemoveAttachment={removeImage}
-          attaching={attaching} imagesSupported={configured} />
+          attaching={attaching} imagesSupported={configured} commands={INFINICHAT_COMMANDS} onCommand={runCommand} />
         </div>
         <SettingsSheet key={settingsSheet.session} open={settingsSheet.open} onClose={settingsSheet.hide}
           onOpenProviders={openProviders} />

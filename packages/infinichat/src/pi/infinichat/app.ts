@@ -3,10 +3,10 @@ import { awaitWithContext, withAbortSignal } from '@earendil-works/chord/context
 import type { ImageContent, Models } from '@earendil-works/pi-ai';
 import {
   AgentDoc as NativeAgentDoc, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID, ResetEntry,
-  configure, createRegistry, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask, section,
+  configure, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask, section,
   type Conversation, type ConversationId, type ConversationInit, type EntryId, type EnvTarget, type Extension,
-  type HarnessOptions, type Storage, type Submission, type SubmissionRecord, type TaskId, type ToolHookCall,
-  type ToolRegistration, type Tx, type UserInput,
+  type HarnessOptions, type RegistryReader, type Storage, type Submission, type SubmissionRecord, type TaskId,
+  type ToolHookCall, type ToolRegistration, type Tx, type UserInput,
 } from '@earendil-works/pi-durable';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
@@ -630,8 +630,8 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
   },
 });
 
-export type OptChatOptions = {
-  models: Models;
+/** What OptChat's extensions are built from: host capabilities, none of them the Harness they run in. */
+export type OptChatExtensionOptions = {
   /** The agent's name until the user names it in `ConfigDoc`. */
   name?: string;
   hasDeviceTools?: boolean;
@@ -645,6 +645,25 @@ export type OptChatOptions = {
   extensions?: readonly Extension[];
   /** What changes between turns, such as the devices: read as a turn or a subagent starts, it follows the view. */
   turnState?: () => Promise<string>;
+};
+
+/**
+ * OptChat's extensions, which a host installs in the registry its Harness reads, and the definitions the Harness
+ * starts their tasks with. A task runs the code its registry holds under the definition's name.
+ */
+export type OptChatParts = {
+  readonly name: string;
+  readonly extensions: readonly Extension[];
+  readonly coordinator: ReturnType<typeof coordinatorTask>;
+  readonly scheduled: ReturnType<typeof scheduledTask>;
+};
+
+export type OptChatOptions = {
+  models: Models;
+  /** Where the Harness reads `parts.extensions` and the host's others, which may arrive after it opens. */
+  registry: RegistryReader;
+  parts: OptChatParts;
+  env?: HarnessOptions['env'];
   onReport?: HarnessOptions['onReport'];
   /** Runs in the root conversation's creating commit after OptChat's own documents, for the host's documents. */
   init?: ConversationInit;
@@ -678,8 +697,11 @@ export type OptChat = {
   close(): Promise<void>;
 };
 
-export async function openOptChat(storage: Storage, options: OptChatOptions, context: Context): Promise<OptChat> {
-  const registry = createRegistry();
+/**
+ * OptChat's extensions from host capabilities alone, so a registry can hold them before or without a Harness: the
+ * tool policy reads each call's agent through the hook's own reader.
+ */
+export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
   const name = options.name ?? 'OptChat';
   const hasDeviceTools = options.hasDeviceTools ?? false;
   const turnState = async () => (await options.turnState?.()) ?? '';
@@ -702,21 +724,24 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       (await read.snapshot(ConfigDoc, conversationId, sectionContext))?.name ?? name, hasDeviceTools), { tag: false })],
     tools: agentCalls,
   });
-  registry.install(defineExtension({
-    name: 'optchat', tools, tasks: [coordinator, BuildNode, agents, AgentAnchor, scheduled],
-  }));
-  registry.install(master);
-  let harness: Harness | undefined;
-  registry.install(toolPolicy([...tools, ...agentCalls], async (call, conversationId, ctx) => {
-    if (!harness) throw new Error('OptChat is still opening');
-    const stored = await harness.snapshot(NativeAgentDoc, conversationId, ctx);
-    const target: EnvTarget = { conversationId, cwd: stored?.cwd, read: harness };
+  const policy = toolPolicy([...tools, ...agentCalls], async (call, api, ctx) => {
+    const { conversationId } = api;
+    const stored = await api.snapshot(NativeAgentDoc, conversationId, ctx);
+    const target: EnvTarget = { conversationId, cwd: stored?.cwd, read: api };
     return options.callEnv ? options.callEnv(call, target, ctx) : options.env?.(target, ctx);
-  }, options.nativeContracts));
-  for (const extension of options.extensions ?? []) registry.install(extension);
+  }, options.nativeContracts);
+  const extensions = [
+    defineExtension({ name: 'optchat', tools, tasks: [coordinator, BuildNode, agents, AgentAnchor, scheduled] }),
+    master, policy, ...(options.extensions ?? []),
+  ];
+  return { name, extensions, coordinator, scheduled };
+}
+
+export async function openOptChat(storage: Storage, options: OptChatOptions, context: Context): Promise<OptChat> {
+  const { name, coordinator, scheduled } = options.parts;
   const opened = await Harness.open(storage, {
     models: options.models,
-    registry,
+    registry: options.registry,
     env: options.env,
     onReport: options.onReport,
     settings: {
@@ -731,7 +756,6 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       restartLimit: Infinity,
     },
   }, context);
-  harness = opened;
   const root = await opened.root(context, {
     init: async (tx, id) => {
       await tx.doc(MemoryDoc, id);

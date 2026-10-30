@@ -1,4 +1,5 @@
 import { Button, Host, Menu } from '@expo/ui/swift-ui';
+import { commandSuggestions, draftCommand, type ChatCommand } from '@pi-agent/infinichat/chat/commands';
 import {
   buttonBorderShape, buttonStyle, controlSize, disabled as disable, labelStyle, tint,
 } from '@expo/ui/swift-ui/modifiers';
@@ -14,9 +15,13 @@ import { useChatColors } from '@/hooks/use-chat-colors';
 import { useChatAgentName } from './agent';
 import { ChatIcon } from './icon';
 
-/** The message field and its controls, floating as Liquid Glass over the transcript. */
+/**
+ * The message field and its controls, floating as Liquid Glass over the transcript. With `commands`, typing `/` lists
+ * them above the field, narrowing as the name is typed; tapping one fills it in, and sending a draft that names one
+ * whole is the screen's to run (`draftCommand`), which needs no provider.
+ */
 export function Composer({ value, onChange, onSend, onStop, onConnect, busy, admitting, disabled, connected, accountStatus,
-  inputRef, attachments, onAttach, onRemoveAttachment, attaching, imagesSupported }: {
+  inputRef, attachments, onAttach, onRemoveAttachment, attaching, imagesSupported, commands = [] }: {
   value: string; onChange: (text: string) => void; onSend: () => void; onStop: () => void; onConnect: () => void;
   busy: boolean; admitting: boolean; disabled: boolean; connected: boolean; accountStatus?: string;
   inputRef: RefObject<TextInputInstance | null>;
@@ -27,10 +32,16 @@ export function Composer({ value, onChange, onSend, onStop, onConnect, busy, adm
   attaching: boolean;
   /** The chat's model takes images; without it the attach control is unavailable. */
   imagesSupported: boolean;
+  commands?: readonly ChatCommand[];
 }) {
   const colors = useChatColors();
   const agentName = useChatAgentName();
-  const canSend = connected && !disabled && !admitting && !attaching && (!!value.trim() || attachments.length > 0);
+  const named = draftCommand(value, commands);
+  // A draft that already names a command whole has nothing left to complete.
+  const suggestions = named === undefined ? commandSuggestions(value, commands) : [];
+  const command = attachments.length === 0 ? named : undefined;
+  const canSend = !admitting && (command !== undefined
+    || (connected && !disabled && !attaching && (!!value.trim() || attachments.length > 0)));
   const canAttach = imagesSupported && !disabled && !admitting && !attaching;
   return <View style={styles.container}>
     {!connected && <GlassView isInteractive style={styles.signIn}>
@@ -41,6 +52,17 @@ export function Composer({ value, onChange, onSend, onStop, onConnect, busy, adm
         </Text>
         <ChatIcon name="chevron" color={colors.accent} size={10} />
       </Pressable>
+    </GlassView>}
+    {suggestions.length > 0 && <GlassView style={styles.commands}>
+      {suggestions.map((suggestion) => <Pressable key={suggestion.name} testID={`command-${suggestion.name}`}
+        accessibilityRole="button" accessibilityLabel={`/${suggestion.name}, ${suggestion.description}`}
+        onPress={() => onChange(`/${suggestion.name}`)}
+        style={({ pressed }) => [styles.command, { opacity: pressed ? 0.6 : 1 }]}>
+        <Text style={[styles.commandName, { color: PlatformColor('label') }]}>/{suggestion.name}</Text>
+        <Text style={[styles.commandDescription, { color: PlatformColor('secondaryLabel') }]} numberOfLines={2}>
+          {suggestion.description}
+        </Text>
+      </Pressable>)}
     </GlassView>}
     {attachments.length > 0 && <ScrollView horizontal keyboardShouldPersistTaps="handled"
       showsHorizontalScrollIndicator={false} contentContainerStyle={styles.attachments}>
@@ -106,6 +128,10 @@ const styles = StyleSheet.create({
   input: { flex: 1, minHeight: 36, maxHeight: 145, paddingVertical: 7, fontSize: 16, lineHeight: 22 },
   send: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   signIn: { alignSelf: 'center', borderRadius: 18 },
+  commands: { borderRadius: 22, paddingVertical: 6 },
+  command: { paddingHorizontal: 16, paddingVertical: 8, gap: 2 },
+  commandName: { fontSize: 15, fontWeight: '600' },
+  commandDescription: { fontSize: 13 },
   signInButton: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 14 },
   signInText: { fontSize: 12, fontWeight: '500' },
 });
