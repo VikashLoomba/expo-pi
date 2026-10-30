@@ -29,8 +29,11 @@ A turn is the input that opened it (OptChat's fresh turn: the person's message, 
 own) and everything until the next, steers included. The person's messages and the agent's replies show as they
 are, in every turn. The steps between a message and a reply (thinking, searches, tool calls, reports, notices) are a
 run under a summary line, "Worked in 7 steps", that opens as the Chain of Thought pattern opens an agent's steps.
-The newest turn's runs are open, so the work shows as it happens; every earlier turn's are closed; a click or tap
-on a run's summary opens its turn's runs; a new turn closes the rest again. Nothing changes in the prompt.
+Every run is closed, the newest turn's too, until a click or tap on its summary opens its turn's runs; the summary
+line says when a run is working; a new turn closes the rest again. Nothing changes in the prompt. (First built with
+the newest turn's runs open; the owner asked the same day that nothing open on its own, so on the Mac the thinking
+row no longer opens while it streams, a failed tool no longer opens on its error, and an agent's report is closed
+too.)
 
 ## As built
 
@@ -44,8 +47,8 @@ on a run's summary opens its turn's runs; a new turn closes the rest again. Noth
   `TraceCollapsible` whose trigger is the summary line with `StatusIcon` (running while a step runs, error when a
   tool failed) and whose content, `keepMounted` as the pattern says, is the run's `StepRows`: `ToolRow`,
   `ReportRow`, a notice `Marker`, or a reply's `ReasoningRow` and `SearchRows`. The working line is the newest
-  turn's last row. The open set is the newest turn alone whenever a new turn begins, plus the turns the reader
-  opened since; the thread opens on the newest turn's start and settles a new one there.
+  turn's last row. The open set is empty whenever a new turn begins, plus the turns the reader opened since; the
+  thread opens on the newest turn's start and settles a new one there.
 - **The phone** (`turn-item.tsx`, `message-row.tsx`, `transcript.tsx`): the same as a FlashList of turns; a run's
   summary is a pressable line with a spinner while it works, its steps the existing `MessageRow`s under a hairline
   rule; a reply shown by itself hides its thinking and searches (`hideSteps`), which are in the run. The regular chat
@@ -58,6 +61,6 @@ About 250 lines over the package and the two apps; the Mac and phone turn compon
 ## Checks
 
 Verified on this Mac: the typechecks and lints; the server bundle rebuilt, which both apps install on their machines
-on the next connect. To verify by the owner on the Mac and the iPhone: the newest turn open with its steps, earlier
-turns' steps folded under their summaries, a click or tap opening a turn's steps, a send folding the rest, a steer
-staying in the open turn.
+on the next connect. To verify by the owner on the Mac and the iPhone: every turn's steps folded under their
+summaries, the newest included, a click or tap opening a turn's steps, a send folding the rest, a steer staying in
+the open turn.

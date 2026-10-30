@@ -37,7 +37,7 @@ function StepsRun({ rows, open, onToggle, stopping, onSteerQueued }: {
 
 /**
  * A turn of the thread, folded (owner, 2026-10-29): the person's messages and the agent's replies as they are, the
- * steps between them a run each that opens on a tap; the newest turn open, so its work shows as it happens. The
+ * steps between them a run each that opens on a tap and on nothing else; the summary line says when it works. The
  * Mac's `turn-row.tsx` is its counterpart.
  */
 export function TurnItem({ turn, open, onToggle, stopping, onSteerQueued }: {

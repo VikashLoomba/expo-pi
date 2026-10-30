@@ -1,7 +1,6 @@
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { collectSearchSources, type SearchSource } from '@pi-agent/infinichat/chat/web-search-presentation';
 import { ArrowUpRightIcon, BotIcon, GlobeIcon } from 'lucide-react';
-import { useState } from 'react';
 
 import { useOpenExternal } from '../../lib/app-context';
 import { CodeBlock, CodeBlockContent, CodeBlockHeader, CodeBlockTitle } from '../ui/code-block';
@@ -26,11 +25,10 @@ function Output({ title, text }: { title?: string; text: string }) {
 }
 
 /**
- * The model's thinking as the Reasoning pattern shows it: open while it streams, closed once done, unless the reader
- * chose; a plain line until any text arrives.
+ * The model's thinking as the Reasoning pattern shows it, except that it stays closed while it streams until the
+ * reader opens it (owner, 2026-10-29: nothing opens on its own); a plain line until any text arrives.
  */
 export function ReasoningRow({ text, running }: { text: string; running: boolean }) {
-  const [open, setOpen] = useState<boolean>();
   const line = (
     <TraceLine status={running ? 'running' : undefined}>
       <TraceIcon><StatusIcon status={running ? 'running' : undefined} /></TraceIcon>
@@ -39,14 +37,17 @@ export function ReasoningRow({ text, running }: { text: string; running: boolean
   );
   if (!text) return line;
   return (
-    <TraceCollapsible open={open ?? running} onOpenChange={setOpen}>
+    <TraceCollapsible>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
       <TraceCollapsibleContent className="whitespace-pre-wrap">{text}</TraceCollapsibleContent>
     </TraceCollapsible>
   );
 }
 
-/** A tool call as the Tool pattern shows it: a running or failed line, a collapsible once it has a result. */
+/**
+ * A tool call as the Tool pattern shows it: a running line, a collapsible once it has a result, a failed one closed
+ * too, its line saying so.
+ */
 export function ToolRow({ message }: { message: ChatMessage }) {
   const tool = message.tool;
   if (!tool) return null;
@@ -63,7 +64,7 @@ export function ToolRow({ message }: { message: ChatMessage }) {
   }
   const failed = tool.status === 'error';
   return (
-    <TraceCollapsible defaultOpen={failed}>
+    <TraceCollapsible>
       <TraceCollapsibleTrigger>
         <TraceLine status={failed ? 'error' : undefined}>
           <TraceIcon><StatusIcon status={failed ? 'error' : undefined} /></TraceIcon>
@@ -137,10 +138,10 @@ export function SourcesRow({ message }: { message: ChatMessage }) {
   );
 }
 
-/** An agent's report, as the Subagent pattern shows a run: the agent's name on the line, its report inside. */
+/** An agent's report, as the Subagent pattern shows a run: the agent's name on the line, its report inside, closed. */
 export function ReportRow({ author, body, streaming }: { author: string; body: string; streaming: boolean }) {
   return (
-    <TraceCollapsible defaultOpen>
+    <TraceCollapsible>
       <TraceCollapsibleTrigger>
         <TraceLine status={streaming ? 'running' : undefined}>
           <TraceIcon>{streaming ? <StatusIcon status="running" /> : <BotIcon />}</TraceIcon>

@@ -82,7 +82,7 @@ function ChatScrollView({ composerHeight, onEndVisible, ...props }: ScrollViewPr
  * Only this subtree subscribes to text deltas. `memo` stays because the chat screen that renders it is not compiled
  * by React Compiler (it contains `try … finally`). The composer floats over the transcript and moves with the
  * keyboard. The thread is folded by turn (owner, 2026-10-29): the person's messages and the agent's replies as they
- * are, the steps between them folded in every turn but the newest, a tap on a run's summary opening its turn's
+ * are, the steps between them folded in every turn, the newest too, a tap on a run's summary opening its turn's
  * steps, and a new turn folding the rest again.
  */
 export const ChatTranscript = memo(function ChatTranscript({
@@ -100,11 +100,11 @@ export const ChatTranscript = memo(function ChatTranscript({
   const status = useChatStatus(view);
   const error = useChatError(view);
   const turns = useMemo(() => turnsOf(messages), [messages]);
-  // The turns open: the newest alone whenever a new one begins, plus the ones the reader opened since.
+  // The turns open: the ones the reader opened since the newest turn began; a new turn closes them all again.
   const newest = turns.at(-1)?.id;
   const [opened, setOpened] = useState<{ newest: string | undefined; open: readonly string[] }>(
-    () => ({ newest, open: newest === undefined ? NO_TURNS : [newest] }));
-  if (opened.newest !== newest) setOpened({ newest, open: newest === undefined ? NO_TURNS : [newest] });
+    () => ({ newest, open: NO_TURNS }));
+  if (opened.newest !== newest) setOpened({ newest, open: NO_TURNS });
   const toggle = (id: string) => setOpened((current) => ({
     ...current,
     open: current.open.includes(id) ? current.open.filter((other) => other !== id) : [...current.open, id],

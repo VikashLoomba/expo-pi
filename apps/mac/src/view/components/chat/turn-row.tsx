@@ -14,8 +14,9 @@ const running = (row: ChatMessage): boolean => row.tool?.status === 'running'
 
 /**
  * The steps between a person's message and the agent's reply, as the Chain of Thought pattern folds them: a
- * summary line that opens into the steps. The run opens and closes with its turn; `keepMounted` keeps each step's
- * own open state while the summary is closed, as the pattern says.
+ * summary line that opens into the steps. The run opens and closes with its turn, and only on a click, the newest
+ * turn's too (owner, 2026-10-29); `keepMounted` keeps each step's own open state while the summary is closed, as the
+ * pattern says.
  */
 function StepsRun({ rows, open, onOpenChange, stopping }: {
   rows: readonly ChatMessage[]; open: boolean; onOpenChange: (open: boolean) => void; stopping: boolean;
@@ -50,7 +51,7 @@ function StepsRun({ rows, open, onOpenChange, stopping }: {
 
 /**
  * A turn of the thread, folded (owner, 2026-10-29): the person's messages and the agent's replies as they are, the
- * steps between them a run each that opens on a click; the newest turn open, so its work shows as it happens.
+ * steps between them a run each that opens on a click and on nothing else; the summary line says when it works.
  */
 export const TurnRow = memo(function TurnRow({ turn, open, onOpenChange, stopping, working }: {
   turn: Turn; open: boolean; onOpenChange: (open: boolean) => void; stopping: boolean;
