@@ -6,7 +6,7 @@ Sources: UniiChat’s [agents](https://github.com/VictorTaelin/UniiChat/blob/050
 
 Subagents are optional and used only when the user requests them. The master has UniiChat’s two agent tools. `spawn(tasks, effort)` starts one subagent per task, in parallel, and answers at once with their names. A name is UniiChat’s: a common adjective and noun from its `Names.ts` lists, capitalized and joined, such as FireAnt, drawn again while taken. `effort` is the thinking level the subagents work at, by default the main agent’s. `tell(name, message)` sends an agent one more message: an agent with a call under way is told through that call, reading it between its tool calls, and the call’s report answers it; an idle one goes on from its chat in a call of its own and replies; a name that isn’t an agent’s answers `No agent <name> to tell.` Both tools are in the `optchat.master` extension, which a subagent’s conversation goes without, so a subagent starts no agents. A third, `schedule_task(task, run_after)`, is this port’s own and starts no agent: at `run_after` the task reaches the main agent itself as a work message, through a waiting background task the host mirrors as a local notification; see [the host](08-host-and-lifecycle.md#expo-host). A call’s answer is kept by the call’s task ID in the agent-call record, so a native replay of the call answers alike without starting anything twice.
 
-Each call of an agent, UniiChat’s [`Tools.run`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L557-L572), is one native background task, shaped after [pi-durable’s background-subagent example](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/test/examples/23-subagent-background.ts#L74-L127), and the call alone sends to the agent’s conversation. The agent’s document names the call under way and keeps what the agent is told meanwhile: `spawn` starts a call per task, and `tell` starts one for an idle agent, else adds the message to the call’s. The call’s `prepare` phase waits until the main memory has summarized the messages before the call, as UniiChat calls an agent anew, reads the host’s turn state outside its commit, reporting a failure and going on without it, and in one commit creates a new agent’s conversation or resets an idle one’s context, then freezes the call’s message: the main view, the turn state, then the agent’s log, its lines numbered `i|kind: text` as `zoom(name)` shows them, ending with a `user:` line for its message and one for each told before the call began. A new agent’s conversation is owned by an anchor, a background task that ends at once, as the example’s is, so it outlives the call that created it and only a stop reaches its work. It is configured as the example configures one: a copy of the root’s agent without the `optchat.master` extension, so without the master’s prompt or the agent tools, with the subagents’ prompt followed by the user’s instructions, its name as its working directory, the folder a host’s device tools run it in, and the spawn’s effort as its thinking level. A message’s entry keeps its own words, so the agent’s log shows them without the view and devices sent with them. A call task that ended without clearing its place, as one that faulted would, holds no call: `tell` reads its task’s state and starts a new call, which takes along what the ended one was told, first.
+Each call of an agent, UniiChat’s [`Tools.run`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L557-L572), is one native background task, shaped after [pi-durable’s background-subagent example](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/test/examples/23-subagent-background.ts#L74-L127), and the call alone sends to the agent’s conversation. The agent’s document names the call under way and keeps what the agent is told meanwhile: `spawn` starts a call per task, and `tell` starts one for an idle agent, else adds the message to the call’s. The call’s `prepare` phase waits until the main memory has summarized the messages before the call, as UniiChat calls an agent anew, reads the host’s turn state outside its commit, reporting a failure and going on without it, and in one commit creates a new agent’s conversation or resets an idle one’s context, then freezes the call’s message: the main view, the turn state, then the agent’s log, its lines numbered `i|kind: text` as `zoom(name)` shows them, ending with a `user:` line for its message and one for each told before the call began. A new agent’s conversation is owned by an anchor, a background task that ends at once, as the example’s is, so it outlives the call that created it and only a stop reaches its work. It is set up as the example sets one up: a copy of the root’s agent without the `optchat.master` extension, so without the master’s prompt or the agent tools. Every call then configures it with the settings as the call starts, as UniiChat’s [`Tools.ask`](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L579-L598) reads them: the host’s subagent model, UniiChat’s `agents`, the `subagents` of `ConfigDoc`, else the main agent’s current model; the spawn’s effort, else the subagent selection’s, else the main agent’s; the subagents’ prompt followed by the user’s current instructions; and its name as its working directory, the folder a host’s device tools run it in. A message’s entry keeps its own words, so the agent’s log shows them without the view and devices sent with them. A call task that ended without clearing its place, as one that faulted would, holds no call: `tell` reads its task’s state and starts a new call, which takes along what the ended one was told, first.
 
 The call’s `deliver` phase submits that message and watches the agent’s document and its conversation. What the agent is told while the call delivers goes in as a steer, each under the call’s request ID and its place, so the agent reads it between its tool calls. What was steered to a run that failed is withdrawn by pi-durable (`afterFailedRun: "withdraw"`), so it ends with the call; a run whose task faulted keeps its queue (pi-durable’s spec), so once the conversation rests the call withdraws it with an abort, and it ends with the call too. When the conversation rests and nothing more is told, the call reports at once, in the commit that ends it.
 
@@ -60,6 +60,7 @@ import {
 
 import { MemoryDoc, renderMain } from "./memory.mjs";
 import { agentName } from "./names.mjs";
+import { ConfigDoc } from "./summary.mjs";
 
 /** What a subagent's conversation is set up from. */
 export type SubagentSetup = {
@@ -408,9 +409,7 @@ export const agentTask = (setup: SubagentSetup) =>
           const view = await renderMain(tx, root, cutoff);
           if (child === null) {
             // Native task ownership copies pi.agent from the root conversation. As pi-durable's subagent example sets
-            // one up, it goes without the master's extension, so without the master's prompt and the agent tools, and
-            // its own prompt leads the user's instructions. Its working directory, its name, is the folder a host's
-            // device tools run it in.
+            // one up, it goes without the master's extension, so without the master's prompt and the agent tools.
             const anchor = await tx.createTask(AgentAnchor, null, {
               conversationId: root,
               ownership: { kind: "conversation" },
@@ -419,22 +418,28 @@ export const agentTask = (setup: SubagentSetup) =>
             const created = await tx.createConversation({
               ownership: { kind: "task", taskId: anchor },
             });
-            const instructions = (await tx.doc(AgentDoc, root)).instructions;
             await configure(tx, created.id, {
               extensions: { remove: [setup.master()] },
-              instructions: instructions
-                ? `${setup.prompt}\n\n${instructions}`
-                : setup.prompt,
-              cwd: name,
-              ...(agent.effort ? { thinkingLevel: agent.effort } : {}),
             });
             agent.conversationId = created.id;
             child = created.id;
           } else {
-            if ((await tx.doc(AgentDoc, child)).cwd === undefined)
-              await configure(tx, child, { cwd: name });
             await tx.appendEntry(ResetEntry, child, { head: "self" });
           }
+          // Each call runs on the settings as it starts, as UniiChat's `Tools.ask` reads them: the subagent model,
+          // else the main agent's, at the spawn's effort over either, and its own prompt leading the user's
+          // instructions. Its working directory, its name, is the folder a host's device tools run it in.
+          const main = await tx.doc(AgentDoc, root);
+          const { subagents } = await tx.doc(ConfigDoc, root);
+          await configure(tx, child, {
+            model: subagents?.model ?? main.model,
+            thinkingLevel:
+              agent.effort ?? subagents?.thinkingLevel ?? main.thinkingLevel,
+            instructions: main.instructions
+              ? `${setup.prompt}\n\n${main.instructions}`
+              : setup.prompt,
+            cwd: name,
+          });
           // What it was told before the call began joins its log.
           const words = [message, ...agent.waiting];
           agent.waiting = [];

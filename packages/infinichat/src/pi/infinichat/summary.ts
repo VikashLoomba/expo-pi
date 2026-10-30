@@ -12,30 +12,36 @@ import {
   type NodeRef,
 } from './memory';
 
-/** The summary model and effort the host selected. Builds wait while it is `null`. */
-export type SummarySelection = { model: ModelRef; thinkingLevel: ModelThinkingLevel };
+/** A model and effort the host selected. */
+export type ModelSelection = { model: ModelRef; thinkingLevel: ModelThinkingLevel };
 export type OptChatConfig = {
-  summary: SummarySelection | null;
+  /** Builds wait while it is `null`. */
+  summary: ModelSelection | null;
   /** The agent's name the user chose, or `null` for the host's. */
   name: string | null;
+  /** What subagents run on, UniiChat's `agents`: `null` for the main agent's model and effort. */
+  subagents: ModelSelection | null;
 };
 export const ConfigDoc = defineDoc<OptChatConfig>({
   kind: 'optchat.config',
-  version: 2,
+  version: 3,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   checkpointWhen: () => true,
-  // Version 1 had no name, so the conversation went by the host's.
-  migrate: (value) => ({ ...(value as Omit<OptChatConfig, 'name'>), name: null }),
-  initial: () => ({ summary: null, name: null }),
+  // Version 1 had no name, so the conversation went by the host's; versions 1 and 2 ran subagents on the main model.
+  migrate: (value, fromVersion) => {
+    const older = value as Omit<OptChatConfig, 'subagents'>;
+    return { ...older, ...(fromVersion < 2 ? { name: null } : {}), subagents: null };
+  },
+  initial: () => ({ summary: null, name: null, subagents: null }),
 });
 
 type BuildScratch = {
   source: string;
   task: string;
   view: string;
-  selection: SummarySelection | null;
+  selection: ModelSelection | null;
   /** The last line, when it was too long: the next try adds only a note of its size and where the limit cuts it. */
   last: string | null;
   shortest: string | null;

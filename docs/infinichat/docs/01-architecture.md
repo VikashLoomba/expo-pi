@@ -25,7 +25,7 @@ Sources: [native concepts](https://github.com/earendil-works/pi/blob/4a080252f06
 
 `openOptChat(storage, options, context)` assembles the native registry, documents, tasks, hooks and root conversation. It returns `accept`, `waitForAnswer`, `abort`, `close`, `root` and `harness`. Use a stable unique `requestId` for an input and reuse it if its acknowledgement is lost. `waitForAnswer` is a host/UI wait for that input’s answer, across the resubmissions a failed run can cause, not a tool for the main agent to poll its subagents. `abort` is the user’s stop: it ends the turn and every agent at work.
 
-The host passes its own pi-ai `Models`. It selects the root conversation’s main model and thinking level with pi-durable’s `configure`, and the summary model and thinking level as the `summary` of `ConfigDoc`, in one commit; summary builds wait until that selection is set, and the host accepts no input before the main model is. `turnState` supplies what changes between turns, such as the devices open now; a turn reads it as it starts, and a message to a subagent as it is sent. `init` runs in the root conversation’s creating commit after OptChat’s own documents, for the host’s documents. See the [complete hosts](08-host-and-lifecycle.md).
+The host passes its own pi-ai `Models`. It selects the root conversation’s main model and thinking level with pi-durable’s `configure`, the summary model and thinking level as the `summary` of `ConfigDoc`, and optionally the subagents’ as its `subagents`, which otherwise run on the main model, in one commit; summary builds wait until that selection is set, and the host accepts no input before the main model is. `turnState` supplies what changes between turns, such as the devices open now; a turn reads it as it starts, and a message to a subagent as it is sent. `init` runs in the root conversation’s creating commit after OptChat’s own documents, for the host’s documents. See the [complete hosts](08-host-and-lifecycle.md).
 
 <!-- implementation:start -->
 
@@ -44,7 +44,7 @@ export {
   type OptChat,
   type OptChatOptions,
 } from "./app.mjs";
-export { ConfigDoc, type SummarySelection } from "./summary.mjs";
+export { ConfigDoc, type ModelSelection, type OptChatConfig } from "./summary.mjs";
 export { MemoryDoc, MessageDoc, NodeDoc } from "./memory.mjs";
 export { PrivateAgentDoc, AgentDirectoryDoc } from "./agents.mjs";
 ```

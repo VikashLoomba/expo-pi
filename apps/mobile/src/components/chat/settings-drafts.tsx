@@ -46,10 +46,24 @@ export function useChatSettingsDraft(): ChatSettingsDraft {
   return draft;
 }
 
-/** The main model answers and works; the summary model writes the memory's summaries in the background. */
-export type InfiniChatRole = 'main' | 'summary';
+/**
+ * The main model answers and works; the summary model writes the memory's summaries in the background; subagents
+ * run on the main model unless they have their own.
+ */
+export type InfiniChatRole = 'main' | 'summary' | 'subagents';
 /** The settings the conversation keeps, and the avatar, which stays on this phone. */
 export type InfiniChatSettingsDraftValues = InfiniChatSettings & { avatar: string | undefined };
+
+/** A role's model as the draft has it: subagents without their own show the main model they run on. */
+export function roleSettings(draft: InfiniChatSettingsDraftValues, role: InfiniChatRole): ChatModelSettings {
+  return role === 'subagents' ? draft.subagents ?? draft.main : draft[role];
+}
+
+export function withRoleSettings(draft: InfiniChatSettingsDraftValues, role: InfiniChatRole,
+  settings: ChatModelSettings): InfiniChatSettingsDraftValues {
+  if (role === 'main') return { ...draft, main: settings };
+  return role === 'summary' ? { ...draft, summary: settings } : { ...draft, subagents: settings };
+}
 
 type InfiniChatSettingsDraft = {
   view: ChatViewSource<InfiniChatControls> | undefined;

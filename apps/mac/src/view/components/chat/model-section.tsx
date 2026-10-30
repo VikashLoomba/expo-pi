@@ -2,6 +2,7 @@ import {
   createModelSettings, findCatalogModel, type ChatModelSettings, type ModelCatalog, type ModelOption,
   type ModelThinkingLevel,
 } from '@pi-agent/infinichat/pi/model-catalog';
+import type { ReactNode } from 'react';
 
 import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '../ui/combobox';
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '../ui/field';
@@ -21,10 +22,11 @@ const modelText = (model: ModelOption) => `${model.name} ${model.id}`.toLocaleLo
 /**
  * One model choice as a form section, the phone's `ModelSection`: the provider and reasoning effort are menus, and
  * the model, which can be one of hundreds, a searchable combobox. Choosing another provider clears the model.
+ * `children` lead the rows, such as the switch that makes the choice the section's own.
  */
-export function ModelSection({ title, caption, error, catalog, settings, disabled, onChange }: {
+export function ModelSection({ title, caption, error, catalog, settings, disabled, onChange, children }: {
   title: string; caption?: string; error?: string; catalog: ModelCatalog; settings: ChatModelSettings;
-  disabled: boolean; onChange: (settings: ChatModelSettings) => void;
+  disabled: boolean; onChange: (settings: ChatModelSettings) => void; children?: ReactNode;
 }) {
   const provider = catalog.find((entry) => entry.id === settings.model.provider);
   const model = findCatalogModel(catalog, settings.model);
@@ -38,6 +40,7 @@ export function ModelSection({ title, caption, error, catalog, settings, disable
     <FieldSet>
       <FieldLegend>{title}</FieldLegend>
       <FieldGroup>
+        {children}
         <Field orientation="horizontal">
           <FieldLabel>Provider</FieldLabel>
           <Select items={catalog.map((entry) => ({ value: entry.id, label: entry.name }))}

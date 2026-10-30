@@ -128529,6 +128529,272 @@ function agentName(taken) {
   }
 }
 
+// ../infinichat/src/pi/infinichat/summary.ts
+init_define_INFINICHAT_PI();
+var ConfigDoc = defineDoc({
+  kind: "optchat.config",
+  version: 3,
+  scope: "conversation",
+  history: "latest",
+  fork: "current",
+  checkpointWhen: () => true,
+  // Version 1 had no name, so the conversation went by the host's; versions 1 and 2 ran subagents on the main model.
+  migrate: (value, fromVersion) => {
+    const older = value;
+    return { ...older, ...fromVersion < 2 ? { name: null } : {}, subagents: null };
+  },
+  initial: () => ({ summary: null, name: null, subagents: null })
+});
+var BuildScratchDoc = defineDoc({
+  kind: "optchat.build-scratch",
+  version: 2,
+  scope: "task",
+  checkpointWhen: () => true,
+  // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
+  migrate: (value) => {
+    const { replies, ...scratch } = value;
+    return { ...scratch, last: replies.at(-1)?.text ?? null };
+  },
+  initial: () => ({ source: "", task: "", view: "", selection: null, last: null, shortest: null })
+});
+function prefixUtf8(text, budget) {
+  let out = "";
+  let n = 0;
+  for (const ch of text) {
+    const k = bytes(ch);
+    if (n + k > budget) break;
+    out += ch;
+    n += k;
+  }
+  return out;
+}
+function tooLong(line) {
+  return `Too long: your last line for this <input> was ${bytes(line)} bytes,
+over the 512-byte limit. Write the whole line again, cutting just
+enough of the least valuable items to fit before this cut:
+${prefixUtf8(line, 512)}| \u2190 LIMIT`;
+}
+var replyText = (reply) => reply.content.filter((block) => block.type === "text").map((block) => block.text).join("").replace(/\r\n|\r|\n/g, " ").trim();
+var unanswerable = (reply, text) => reply.stopReason === "length" || reply.stopReason === "error" && reply.rawStopReason !== void 0 || reply.content.some((block) => block.type === "toolCall") || reply.stopReason !== "error" && reply.stopReason !== "aborted" && !text;
+async function freeze(tx, root, ref) {
+  let source;
+  let task;
+  const ruler = "-".repeat(512);
+  if (ref[0] === 0) {
+    const m2 = await readMessage(tx, root, ref[1]);
+    source = shownMessage(m2);
+    task = `Compaction: compress message ${m2.i} into one line of at most 512 bytes
+(about 70 words), the length of this ruler:
+${ruler}
+<input>
+${source}
+</input>`;
+  } else {
+    const a = await readNode(tx, root, [ref[0] - 1, ref[1] * 2]);
+    const b = await readNode(tx, root, [ref[0] - 1, ref[1] * 2 + 1]);
+    if (!a || !b) throw new Error("Parent halves must both exist");
+    source = `${flat(a.text)}
+${flat(b.text)}`;
+    task = `Compaction: merge lines ${first(a.ref)}+${2 ** a.ref[0]} and ${first(b.ref)}+${2 ** b.ref[0]}, adjacent, into one line of at most
+512 bytes (about 70 words), the length of this ruler:
+${ruler}
+<chat> may hold their messages, ${first(ref)} to ${end(ref) - 1}, in more detail: take details
+of them from there too.
+<input>
+${source}
+</input>`;
+  }
+  const view = await renderCompaction(tx, root, ref[0] === 0 ? first(ref) : end(ref));
+  return { source, task, view };
+}
+var JOBS = 64;
+var ctx = ([l, i2]) => l === 0 ? i2 : (i2 + 1) * 2 ** l;
+async function pumpBuilds(tx, root) {
+  const s2 = await tx.doc(MemoryDoc, root);
+  const { summary } = await tx.doc(ConfigDoc, root);
+  const created = [];
+  if (!summary) return created;
+  const selected = summary;
+  async function admit(ref) {
+    const k = key(ref);
+    if (s2.active[k] || s2.failed[k]?.at === s2.messageProgress) return false;
+    if (await readNode(tx, root, ref)) return false;
+    const frozen = await freeze(tx, root, ref);
+    const id = await tx.createTask(BuildNode, { ref }, {
+      conversationId: root,
+      ownership: { kind: "conversation" },
+      background: true
+    });
+    const scratch = await tx.doc(BuildScratchDoc, id);
+    scratch.source = frozen.source;
+    scratch.task = frozen.task;
+    scratch.view = frozen.view;
+    scratch.selection = {
+      model: { provider: selected.model.provider, modelId: selected.model.modelId },
+      thinkingLevel: selected.thinkingLevel
+    };
+    s2.active[k] = id;
+    delete s2.failed[k];
+    s2.revision++;
+    created.push(id);
+    return true;
+  }
+  const deepest = s2.pendingLeaves[JOBS - 1] ?? s2.nextMessage;
+  const ready = [
+    ...s2.pendingLeaves.filter((i2) => i2 <= deepest).map((i2) => [0, i2]),
+    ...s2.readyParents.filter((ref) => ctx(ref) <= deepest)
+  ].sort((a, b) => ctx(a) - ctx(b) || b[0] - a[0]);
+  for (const ref of ready) {
+    if (Object.keys(s2.active).length >= JOBS) break;
+    const parent = s2.readyParents.findIndex(([l, i2]) => l === ref[0] && i2 === ref[1]);
+    if (parent >= 0 && await readNode(tx, root, ref)) {
+      s2.readyParents.splice(parent, 1);
+    } else if (await admit(ref) && parent >= 0) {
+      s2.readyParents.splice(parent, 1);
+    }
+  }
+  return created;
+}
+async function release(tx, root, ref, id) {
+  const s2 = await tx.doc(MemoryDoc, root);
+  const k = key(ref);
+  if (s2.active[k] !== id) return;
+  delete s2.active[k];
+  s2.failed[k] = { ref, at: s2.messageProgress };
+  if (ref[0] > 0) s2.readyParents.push(ref);
+  s2.revision++;
+}
+async function renderedSections(agent, conversationId, read2, context3) {
+  const sections = {};
+  for (const section2 of agent.sections) {
+    const text = await section2.render({ conversationId, agent, env: void 0, shown: {}, read: read2 }, context3);
+    if (text === void 0) continue;
+    sections[section2.key] = section2.tag === false ? text : `<${section2.key}>
+${text}
+</${section2.key}>`;
+  }
+  return sections;
+}
+var BuildNode = defineTask({
+  name: "optchat.build-node",
+  version: 2,
+  // Version 1 had no retry phase: a request it saved has had no provider failure since its last answer.
+  migrate: (input, checkpoint) => {
+    const saved = checkpoint;
+    return { input, checkpoint: saved.phase === "request" ? { ...saved, retries: 0 } : saved };
+  },
+  initial: () => ({ phase: "prepare" }),
+  phases: {
+    prepare: async (task, r2, ctx2) => {
+      await r2.commit(async (tx) => {
+        const d = await tx.doc(BuildScratchDoc, task.id);
+        if (bytes(d.source) <= 512) {
+          d.shortest = d.source;
+          return { status: "running", checkpoint: { phase: "publish" } };
+        }
+        return { status: "running", checkpoint: { phase: "request", attempt: 0, retries: 0 } };
+      }, ctx2);
+    },
+    request: async (task, r2, ctx2) => {
+      const { attempt, retries } = task.state.checkpoint;
+      const saved = await r2.snapshot(BuildScratchDoc, task.id, ctx2);
+      if (!saved?.selection) throw new Error("Missing native task scratch");
+      const { selection } = saved;
+      const model2 = r2.models.getModel(selection.model.provider, selection.model.modelId);
+      const agent = await r2.agent(ctx2);
+      const request2 = {
+        messages: [
+          {
+            role: "system",
+            content: "",
+            sections: await renderedSections(agent, r2.conversationId, r2, ctx2),
+            toolsAdded: agent.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+            timestamp: 0
+          },
+          {
+            role: "user",
+            timestamp: 0,
+            // Never a try's words or thoughts: a line too long comes back as one note on its size and cut.
+            content: [
+              { type: "text", text: saved.view },
+              { type: "text", text: saved.task },
+              ...saved.last === null ? [] : [{ type: "text", text: tooLong(saved.last) }]
+            ]
+          }
+        ]
+      };
+      let failure;
+      let reply;
+      if (!model2) {
+        failure = "Configured summary model is unavailable";
+      } else {
+        try {
+          reply = await r2.models.completeSimple(model2, request2, {
+            ...selection.thinkingLevel === "off" ? {} : { reasoning: selection.thinkingLevel },
+            toolChoice: "none",
+            signal: r2.signal
+          });
+          r2.signal.throwIfAborted();
+        } catch (error) {
+          r2.signal.throwIfAborted();
+          failure = error instanceof Error ? error.message : String(error);
+        }
+      }
+      const answer2 = reply;
+      const { retry: retry2 } = r2.settings;
+      const until3 = r2.now() + retryDelayMs(retry2, retries + 1);
+      await r2.commit(async (tx) => {
+        const d = await tx.doc(BuildScratchDoc, task.id);
+        const text = answer2 ? replyText(answer2) : "";
+        if (answer2 !== void 0 && !isRetryableAssistantError(answer2) && unanswerable(answer2, text)) {
+          d.shortest ??= prefixUtf8(flat(d.source), 512);
+          return { status: "running", checkpoint: { phase: "publish" } };
+        }
+        if (answer2 === void 0 || answer2.stopReason === "error" || answer2.stopReason === "aborted") {
+          if (retry2.enabled) {
+            return { status: "sleeping", checkpoint: { phase: "retry", attempt, retries: retries + 1, until: until3 }, until: until3 };
+          }
+          await release(tx, r2.conversationId, task.input.ref, task.id);
+          const message = failure ?? answer2?.errorMessage ?? "Summary model returned no reply";
+          return { status: "terminal", outcome: { status: "failed", error: { message } } };
+        }
+        if (d.shortest === null || bytes(text) < bytes(d.shortest)) d.shortest = text;
+        const done = bytes(text) <= 512 || attempt + 1 >= 5;
+        if (!done) d.last = text;
+        return {
+          status: "running",
+          checkpoint: done ? { phase: "publish" } : { phase: "request", attempt: attempt + 1, retries: 0 }
+        };
+      }, ctx2);
+    },
+    // After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
+    retry: async (task, r2, ctx2) => {
+      const { attempt, retries, until: until3 } = task.state.checkpoint;
+      if (until3 > r2.now()) return r2.sleepUntil(until3, task.state.checkpoint, ctx2);
+      await r2.commit(() => ({ status: "running", checkpoint: { phase: "request", attempt, retries } }), ctx2);
+    },
+    publish: async (task, r2, ctx2) => {
+      await r2.commit(async (tx) => {
+        const d = await tx.doc(BuildScratchDoc, task.id);
+        if (d.shortest === null) throw new Error("No candidate to publish");
+        await publishNode(tx, r2.conversationId, {
+          ref: task.input.ref,
+          text: d.shortest,
+          bytes: bytes(d.shortest),
+          builder: task.id
+        });
+        return { status: "terminal", outcome: { status: "completed", result: key(task.input.ref) } };
+      }, ctx2);
+    }
+  },
+  abort: async (task, r2, ctx2) => {
+    await r2.commit(async (tx) => {
+      await release(tx, r2.conversationId, task.input.ref, task.id);
+      return { status: "terminal", outcome: { status: "aborted" } };
+    }, ctx2);
+  }
+});
+
 // ../infinichat/src/pi/infinichat/agents.ts
 var AgentDirectoryDoc = defineDoc({
   kind: "optchat.agent-directory",
@@ -128708,22 +128974,23 @@ ${saved.turnState}
             background: true
           });
           const created = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-          const instructions = (await tx.doc(AgentDoc, root)).instructions;
-          const prompt = await setup.prompt(tx, root);
-          await configure(tx, created.id, {
-            extensions: { remove: [setup.master()] },
-            instructions: instructions ? `${prompt}
-
-${instructions}` : prompt,
-            cwd: name,
-            ...agent.effort ? { thinkingLevel: agent.effort } : {}
-          });
+          await configure(tx, created.id, { extensions: { remove: [setup.master()] } });
           agent.conversationId = created.id;
           child = created.id;
         } else {
-          if ((await tx.doc(AgentDoc, child)).cwd === void 0) await configure(tx, child, { cwd: name });
           await tx.appendEntry(ResetEntry, child, { head: "self" });
         }
+        const main2 = await tx.doc(AgentDoc, root);
+        const { subagents } = await tx.doc(ConfigDoc, root);
+        const prompt = await setup.prompt(tx, root);
+        await configure(tx, child, {
+          model: subagents?.model ?? main2.model,
+          thinkingLevel: agent.effort ?? subagents?.thinkingLevel ?? main2.thinkingLevel,
+          instructions: main2.instructions ? `${prompt}
+
+${main2.instructions}` : prompt,
+          cwd: name
+        });
         const words = [message, ...agent.waiting];
         agent.waiting = [];
         const lines2 = [...log, ...words.map((said) => `user: ${said}`)].map((line, i2) => `${i2}|${line}`).join("\n\n");
@@ -129239,269 +129506,6 @@ function subagentPrompt(agentName2, hasDeviceTools) {
   const prompt = hasDeviceTools ? originalSubagentPrompt : originalSubagentPrompt.slice(0, originalSubagentPrompt.indexOf("\n\nDevices:"));
   return renamed(prompt, agentName2);
 }
-
-// ../infinichat/src/pi/infinichat/summary.ts
-init_define_INFINICHAT_PI();
-var ConfigDoc = defineDoc({
-  kind: "optchat.config",
-  version: 2,
-  scope: "conversation",
-  history: "latest",
-  fork: "current",
-  checkpointWhen: () => true,
-  // Version 1 had no name, so the conversation went by the host's.
-  migrate: (value) => ({ ...value, name: null }),
-  initial: () => ({ summary: null, name: null })
-});
-var BuildScratchDoc = defineDoc({
-  kind: "optchat.build-scratch",
-  version: 2,
-  scope: "task",
-  checkpointWhen: () => true,
-  // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
-  migrate: (value) => {
-    const { replies, ...scratch } = value;
-    return { ...scratch, last: replies.at(-1)?.text ?? null };
-  },
-  initial: () => ({ source: "", task: "", view: "", selection: null, last: null, shortest: null })
-});
-function prefixUtf8(text, budget) {
-  let out = "";
-  let n = 0;
-  for (const ch of text) {
-    const k = bytes(ch);
-    if (n + k > budget) break;
-    out += ch;
-    n += k;
-  }
-  return out;
-}
-function tooLong(line) {
-  return `Too long: your last line for this <input> was ${bytes(line)} bytes,
-over the 512-byte limit. Write the whole line again, cutting just
-enough of the least valuable items to fit before this cut:
-${prefixUtf8(line, 512)}| \u2190 LIMIT`;
-}
-var replyText = (reply) => reply.content.filter((block) => block.type === "text").map((block) => block.text).join("").replace(/\r\n|\r|\n/g, " ").trim();
-var unanswerable = (reply, text) => reply.stopReason === "length" || reply.stopReason === "error" && reply.rawStopReason !== void 0 || reply.content.some((block) => block.type === "toolCall") || reply.stopReason !== "error" && reply.stopReason !== "aborted" && !text;
-async function freeze(tx, root, ref) {
-  let source;
-  let task;
-  const ruler = "-".repeat(512);
-  if (ref[0] === 0) {
-    const m2 = await readMessage(tx, root, ref[1]);
-    source = shownMessage(m2);
-    task = `Compaction: compress message ${m2.i} into one line of at most 512 bytes
-(about 70 words), the length of this ruler:
-${ruler}
-<input>
-${source}
-</input>`;
-  } else {
-    const a = await readNode(tx, root, [ref[0] - 1, ref[1] * 2]);
-    const b = await readNode(tx, root, [ref[0] - 1, ref[1] * 2 + 1]);
-    if (!a || !b) throw new Error("Parent halves must both exist");
-    source = `${flat(a.text)}
-${flat(b.text)}`;
-    task = `Compaction: merge lines ${first(a.ref)}+${2 ** a.ref[0]} and ${first(b.ref)}+${2 ** b.ref[0]}, adjacent, into one line of at most
-512 bytes (about 70 words), the length of this ruler:
-${ruler}
-<chat> may hold their messages, ${first(ref)} to ${end(ref) - 1}, in more detail: take details
-of them from there too.
-<input>
-${source}
-</input>`;
-  }
-  const view = await renderCompaction(tx, root, ref[0] === 0 ? first(ref) : end(ref));
-  return { source, task, view };
-}
-var JOBS = 64;
-var ctx = ([l, i2]) => l === 0 ? i2 : (i2 + 1) * 2 ** l;
-async function pumpBuilds(tx, root) {
-  const s2 = await tx.doc(MemoryDoc, root);
-  const { summary } = await tx.doc(ConfigDoc, root);
-  const created = [];
-  if (!summary) return created;
-  const selected = summary;
-  async function admit(ref) {
-    const k = key(ref);
-    if (s2.active[k] || s2.failed[k]?.at === s2.messageProgress) return false;
-    if (await readNode(tx, root, ref)) return false;
-    const frozen = await freeze(tx, root, ref);
-    const id = await tx.createTask(BuildNode, { ref }, {
-      conversationId: root,
-      ownership: { kind: "conversation" },
-      background: true
-    });
-    const scratch = await tx.doc(BuildScratchDoc, id);
-    scratch.source = frozen.source;
-    scratch.task = frozen.task;
-    scratch.view = frozen.view;
-    scratch.selection = {
-      model: { provider: selected.model.provider, modelId: selected.model.modelId },
-      thinkingLevel: selected.thinkingLevel
-    };
-    s2.active[k] = id;
-    delete s2.failed[k];
-    s2.revision++;
-    created.push(id);
-    return true;
-  }
-  const deepest = s2.pendingLeaves[JOBS - 1] ?? s2.nextMessage;
-  const ready = [
-    ...s2.pendingLeaves.filter((i2) => i2 <= deepest).map((i2) => [0, i2]),
-    ...s2.readyParents.filter((ref) => ctx(ref) <= deepest)
-  ].sort((a, b) => ctx(a) - ctx(b) || b[0] - a[0]);
-  for (const ref of ready) {
-    if (Object.keys(s2.active).length >= JOBS) break;
-    const parent = s2.readyParents.findIndex(([l, i2]) => l === ref[0] && i2 === ref[1]);
-    if (parent >= 0 && await readNode(tx, root, ref)) {
-      s2.readyParents.splice(parent, 1);
-    } else if (await admit(ref) && parent >= 0) {
-      s2.readyParents.splice(parent, 1);
-    }
-  }
-  return created;
-}
-async function release(tx, root, ref, id) {
-  const s2 = await tx.doc(MemoryDoc, root);
-  const k = key(ref);
-  if (s2.active[k] !== id) return;
-  delete s2.active[k];
-  s2.failed[k] = { ref, at: s2.messageProgress };
-  if (ref[0] > 0) s2.readyParents.push(ref);
-  s2.revision++;
-}
-async function renderedSections(agent, conversationId, read2, context3) {
-  const sections = {};
-  for (const section2 of agent.sections) {
-    const text = await section2.render({ conversationId, agent, env: void 0, shown: {}, read: read2 }, context3);
-    if (text === void 0) continue;
-    sections[section2.key] = section2.tag === false ? text : `<${section2.key}>
-${text}
-</${section2.key}>`;
-  }
-  return sections;
-}
-var BuildNode = defineTask({
-  name: "optchat.build-node",
-  version: 2,
-  // Version 1 had no retry phase: a request it saved has had no provider failure since its last answer.
-  migrate: (input, checkpoint) => {
-    const saved = checkpoint;
-    return { input, checkpoint: saved.phase === "request" ? { ...saved, retries: 0 } : saved };
-  },
-  initial: () => ({ phase: "prepare" }),
-  phases: {
-    prepare: async (task, r2, ctx2) => {
-      await r2.commit(async (tx) => {
-        const d = await tx.doc(BuildScratchDoc, task.id);
-        if (bytes(d.source) <= 512) {
-          d.shortest = d.source;
-          return { status: "running", checkpoint: { phase: "publish" } };
-        }
-        return { status: "running", checkpoint: { phase: "request", attempt: 0, retries: 0 } };
-      }, ctx2);
-    },
-    request: async (task, r2, ctx2) => {
-      const { attempt, retries } = task.state.checkpoint;
-      const saved = await r2.snapshot(BuildScratchDoc, task.id, ctx2);
-      if (!saved?.selection) throw new Error("Missing native task scratch");
-      const { selection } = saved;
-      const model2 = r2.models.getModel(selection.model.provider, selection.model.modelId);
-      const agent = await r2.agent(ctx2);
-      const request2 = {
-        messages: [
-          {
-            role: "system",
-            content: "",
-            sections: await renderedSections(agent, r2.conversationId, r2, ctx2),
-            toolsAdded: agent.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
-            timestamp: 0
-          },
-          {
-            role: "user",
-            timestamp: 0,
-            // Never a try's words or thoughts: a line too long comes back as one note on its size and cut.
-            content: [
-              { type: "text", text: saved.view },
-              { type: "text", text: saved.task },
-              ...saved.last === null ? [] : [{ type: "text", text: tooLong(saved.last) }]
-            ]
-          }
-        ]
-      };
-      let failure;
-      let reply;
-      if (!model2) {
-        failure = "Configured summary model is unavailable";
-      } else {
-        try {
-          reply = await r2.models.completeSimple(model2, request2, {
-            ...selection.thinkingLevel === "off" ? {} : { reasoning: selection.thinkingLevel },
-            toolChoice: "none",
-            signal: r2.signal
-          });
-          r2.signal.throwIfAborted();
-        } catch (error) {
-          r2.signal.throwIfAborted();
-          failure = error instanceof Error ? error.message : String(error);
-        }
-      }
-      const answer2 = reply;
-      const { retry: retry2 } = r2.settings;
-      const until3 = r2.now() + retryDelayMs(retry2, retries + 1);
-      await r2.commit(async (tx) => {
-        const d = await tx.doc(BuildScratchDoc, task.id);
-        const text = answer2 ? replyText(answer2) : "";
-        if (answer2 !== void 0 && !isRetryableAssistantError(answer2) && unanswerable(answer2, text)) {
-          d.shortest ??= prefixUtf8(flat(d.source), 512);
-          return { status: "running", checkpoint: { phase: "publish" } };
-        }
-        if (answer2 === void 0 || answer2.stopReason === "error" || answer2.stopReason === "aborted") {
-          if (retry2.enabled) {
-            return { status: "sleeping", checkpoint: { phase: "retry", attempt, retries: retries + 1, until: until3 }, until: until3 };
-          }
-          await release(tx, r2.conversationId, task.input.ref, task.id);
-          const message = failure ?? answer2?.errorMessage ?? "Summary model returned no reply";
-          return { status: "terminal", outcome: { status: "failed", error: { message } } };
-        }
-        if (d.shortest === null || bytes(text) < bytes(d.shortest)) d.shortest = text;
-        const done = bytes(text) <= 512 || attempt + 1 >= 5;
-        if (!done) d.last = text;
-        return {
-          status: "running",
-          checkpoint: done ? { phase: "publish" } : { phase: "request", attempt: attempt + 1, retries: 0 }
-        };
-      }, ctx2);
-    },
-    // After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
-    retry: async (task, r2, ctx2) => {
-      const { attempt, retries, until: until3 } = task.state.checkpoint;
-      if (until3 > r2.now()) return r2.sleepUntil(until3, task.state.checkpoint, ctx2);
-      await r2.commit(() => ({ status: "running", checkpoint: { phase: "request", attempt, retries } }), ctx2);
-    },
-    publish: async (task, r2, ctx2) => {
-      await r2.commit(async (tx) => {
-        const d = await tx.doc(BuildScratchDoc, task.id);
-        if (d.shortest === null) throw new Error("No candidate to publish");
-        await publishNode(tx, r2.conversationId, {
-          ref: task.input.ref,
-          text: d.shortest,
-          bytes: bytes(d.shortest),
-          builder: task.id
-        });
-        return { status: "terminal", outcome: { status: "completed", result: key(task.input.ref) } };
-      }, ctx2);
-    }
-  },
-  abort: async (task, r2, ctx2) => {
-    await r2.commit(async (tx) => {
-      await release(tx, r2.conversationId, task.input.ref, task.id);
-      return { status: "terminal", outcome: { status: "aborted" } };
-    }, ctx2);
-  }
-});
 
 // ../infinichat/src/pi/infinichat/tools.ts
 init_define_INFINICHAT_PI();
@@ -130385,6 +130389,8 @@ var InfiniChatControlsSchema = typebox_exports.Object({
   instructions: typebox_exports.String(),
   /** The name the user gave the agent; empty for InfiniChat. */
   name: typebox_exports.String(),
+  /** What subagents run on, or `null` for the main model and effort. */
+  subagents: typebox_exports.Union([ChatModelSettingsSchema, typebox_exports.Null()]),
   /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
   configured: typebox_exports.Boolean()
 });
@@ -130668,6 +130674,7 @@ var InfiniChatView = class {
       summary,
       instructions: docs.agent?.instructions ?? "",
       name: this.config?.value?.name ?? "",
+      subagents: this.config?.value?.subagents ?? null,
       configured: docs.agent?.model !== void 0 && summary !== null,
       ...error ? { error } : {}
     };
@@ -131015,7 +131022,8 @@ var InfiniChatRemote = remote("infinichat.remote", {
           main: ChatModelSettingsSchema,
           summary: ChatModelSettingsSchema,
           instructions: typebox_exports.String(),
-          name: typebox_exports.String()
+          name: typebox_exports.String(),
+          subagents: typebox_exports.Union([ChatModelSettingsSchema, typebox_exports.Null()])
         })),
         cancelScheduled: method(
           typebox_exports.Object({ id: typebox_exports.Number(), replacement: typebox_exports.Optional(ScheduledInputSchema) }),
@@ -132317,21 +132325,24 @@ var InfiniChatService = class _InfiniChatService {
     return this.chat.abort();
   }
   /**
-   * The main model and effort with pi-durable's `configure`, the summary model and effort, the user's own
-   * instructions and the agent's name, in one commit.
+   * The main model and effort with pi-durable's `configure`, the summary and subagent models and efforts, the user's
+   * own instructions and the agent's name, in one commit.
    */
-  async updateSettings({ main: main2, summary, instructions, name }, context3 = BACKGROUND_CONTEXT) {
+  async updateSettings({ main: main2, summary, instructions, name, subagents }, context3 = BACKGROUND_CONTEXT) {
     const catalog = buildModelCatalog(this.models);
     const selectedMain = { model: { ...main2.model }, thinkingLevel: main2.thinkingLevel };
     const selectedSummary = { model: { ...summary.model }, thinkingLevel: summary.thinkingLevel };
+    const selectedSubagents = subagents && { model: { ...subagents.model }, thinkingLevel: subagents.thinkingLevel };
     assertModelSettings(catalog, selectedMain);
     assertModelSettings(catalog, selectedSummary);
+    if (selectedSubagents) assertModelSettings(catalog, selectedSubagents);
     this.assertOpen();
     const root = this.chat.root;
     await root.commit(async (tx) => {
       await configure(tx, root.id, selectedMain);
       const config = await tx.doc(ConfigDoc, root.id);
       config.summary = selectedSummary;
+      config.subagents = selectedSubagents;
       config.name = name.trim() || null;
       await this.chat.setInstructions(tx, instructions);
     }, context3);

@@ -112,7 +112,8 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         // Piece 6: the settings and scheduled tasks sheets, through the side shown, and the avatar: a file chosen in
         // the open dialog becomes it at once (its URL comes back; null when nothing was chosen).
         updateSettings: method(Type.Object({ main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema,
-          instructions: Type.String(), name: Type.String() })),
+          instructions: Type.String(), name: Type.String(),
+          subagents: Type.Union([ChatModelSettingsSchema, Type.Null()]) })),
         cancelScheduled: method(Type.Object({ id: Type.Number(), replacement: Type.Optional(ScheduledInputSchema) }),
           Type.Boolean()),
         setAvatar: method(undefined, Type.Union([Type.Null(), Type.String()])),

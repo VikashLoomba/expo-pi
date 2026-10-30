@@ -14,7 +14,7 @@ A reply without a line is the model’s own failure and fails alike when asked a
 
 Any other failure only delays a summary, as UniiChat’s patient calls ask again till one is answered: a provider error, retryable or not (overload, rate limits, 5xx, network, a missing credential), a thrown error or a summary model that is unavailable. The task commits a `sleeping` state with the `retry` phase as its checkpoint, until pi-ai’s `retryDelayMs` backoff for that retry under the Harness `retry` settings (capped at `maxAgentDelayMs`, a minute by default), so the wait holds no invocation and survives a restart; the `retry` phase sleeps again if it runs early, then asks again, without pi-durable’s `maxRetries` bound. Both follow pi-durable’s own compaction task. Only with the Harness `retry` settings disabled does such a failure release its slot, eligible again at the next new semantic message, not a timer loop. Accepted external input and later assistant/tool/result messages count as new progress; replaying a duplicate request does not. Do not count one accepted input a second time when projecting its native entry.
 
-Changed shapes migrate through pi-durable, as it reads them: `MemoryDoc` is version 2, as above; the scratch document is version 2, a version 1 scratch keeping its last too-long reply’s line as `last`, and `BuildNode` is version 2, a version 1 `request` checkpoint gaining `retries: 0`.
+Changed shapes migrate through pi-durable, as it reads them: `ConfigDoc` is version 2, a version 1 config gaining `subagents: null`, its subagents running on the main model; `MemoryDoc` is version 2, as above; the scratch document is version 2, a version 1 scratch keeping its last too-long reply’s line as `last`, and `BuildNode` is version 2, a version 1 `request` checkpoint gaining `retries: 0`.
 
 Permanent message/node records live at conversation scope. Task-local scratch lives only for the task. A phase transition must make native durable progress; changing only task-local document contents is not a substitute for advancing a checkpoint when the runtime requires it.
 
@@ -62,25 +62,36 @@ import {
   type NodeRef,
 } from "./memory.mjs";
 
-/** The summary model and effort the host selected. Builds wait while it is `null`. */
-export type SummarySelection = {
+/** A model and effort the host selected. */
+export type ModelSelection = {
   model: ModelRef;
   thinkingLevel: ModelThinkingLevel;
 };
-export const ConfigDoc = defineDoc<{ summary: SummarySelection | null }>({
+export type OptChatConfig = {
+  /** Builds wait while it is `null`. */
+  summary: ModelSelection | null;
+  /** What subagents run on, UniiChat's `agents`: `null` for the main agent's model and effort. */
+  subagents: ModelSelection | null;
+};
+export const ConfigDoc = defineDoc<OptChatConfig>({
   kind: "optchat.config",
-  version: 1,
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "current",
   checkpointWhen: () => true,
-  initial: () => ({ summary: null }),
+  // Version 1 ran subagents on the main model.
+  migrate: (value) => ({
+    ...(value as Omit<OptChatConfig, "subagents">),
+    subagents: null,
+  }),
+  initial: () => ({ summary: null, subagents: null }),
 });
 type BuildScratch = {
   source: string;
   task: string;
   view: string;
-  selection: SummarySelection | null;
+  selection: ModelSelection | null;
   /** The last line, when it was too long: the next try adds only a note of its size and where the limit cuts it. */
   last: string | null;
   shortest: string | null;

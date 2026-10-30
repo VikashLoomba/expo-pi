@@ -26,7 +26,7 @@ export default function InfiniChatSettingsLayout() {
   }
   return <InfiniChatSettingsDraftProvider view={view} initial={{ main: conversation.settings,
     summary: conversation.summary ?? unchosen, instructions: conversation.instructions, name: conversation.name,
-    avatar }}>
+    subagents: conversation.subagents, avatar }}>
     <Stack screenOptions={screenOptions}>
       <Stack.Screen name="index" options={{ title: 'InfiniChat settings' }} />
       <Stack.Screen name="model" options={{ title: 'Model' }} />

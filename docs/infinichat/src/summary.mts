@@ -33,25 +33,36 @@ import {
   type NodeRef,
 } from "./memory.mjs";
 
-/** The summary model and effort the host selected. Builds wait while it is `null`. */
-export type SummarySelection = {
+/** A model and effort the host selected. */
+export type ModelSelection = {
   model: ModelRef;
   thinkingLevel: ModelThinkingLevel;
 };
-export const ConfigDoc = defineDoc<{ summary: SummarySelection | null }>({
+export type OptChatConfig = {
+  /** Builds wait while it is `null`. */
+  summary: ModelSelection | null;
+  /** What subagents run on, UniiChat's `agents`: `null` for the main agent's model and effort. */
+  subagents: ModelSelection | null;
+};
+export const ConfigDoc = defineDoc<OptChatConfig>({
   kind: "optchat.config",
-  version: 1,
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "current",
   checkpointWhen: () => true,
-  initial: () => ({ summary: null }),
+  // Version 1 ran subagents on the main model.
+  migrate: (value) => ({
+    ...(value as Omit<OptChatConfig, "subagents">),
+    subagents: null,
+  }),
+  initial: () => ({ summary: null, subagents: null }),
 });
 type BuildScratch = {
   source: string;
   task: string;
   view: string;
-  selection: SummarySelection | null;
+  selection: ModelSelection | null;
   /** The last line, when it was too long: the next try adds only a note of its size and where the limit cuts it. */
   last: string | null;
   shortest: string | null;

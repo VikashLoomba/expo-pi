@@ -36,6 +36,8 @@ export type InfiniChatSettings = {
   instructions: string;
   /** The agent's name; empty for InfiniChat. */
   name: string;
+  /** What subagents run on; `null` for the main model and effort. */
+  subagents: ChatModelSettings | null;
 };
 
 /** A value the screens follow with `useSyncExternalStore`. */
@@ -218,22 +220,25 @@ export class InfiniChatService implements InfiniChatHost {
   }
 
   /**
-   * The main model and effort with pi-durable's `configure`, the summary model and effort, the user's own
-   * instructions and the agent's name, in one commit.
+   * The main model and effort with pi-durable's `configure`, the summary and subagent models and efforts, the user's
+   * own instructions and the agent's name, in one commit.
    */
-  async updateSettings({ main, summary, instructions, name }: InfiniChatSettings,
+  async updateSettings({ main, summary, instructions, name, subagents }: InfiniChatSettings,
     context = BACKGROUND_CONTEXT): Promise<void> {
     const catalog = buildModelCatalog(this.models);
     const selectedMain = { model: { ...main.model }, thinkingLevel: main.thinkingLevel };
     const selectedSummary = { model: { ...summary.model }, thinkingLevel: summary.thinkingLevel };
+    const selectedSubagents = subagents && { model: { ...subagents.model }, thinkingLevel: subagents.thinkingLevel };
     assertModelSettings(catalog, selectedMain);
     assertModelSettings(catalog, selectedSummary);
+    if (selectedSubagents) assertModelSettings(catalog, selectedSubagents);
     this.assertOpen();
     const root = this.chat.root;
     await root.commit(async (tx) => {
       await configure(tx, root.id, selectedMain);
       const config = await tx.doc(ConfigDoc, root.id);
       config.summary = selectedSummary;
+      config.subagents = selectedSubagents;
       config.name = name.trim() || null;
       await this.chat.setInstructions(tx, instructions);
     }, context);

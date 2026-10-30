@@ -31,6 +31,8 @@ export const InfiniChatControlsSchema = Type.Object({
   instructions: Type.String(),
   /** The name the user gave the agent; empty for InfiniChat. */
   name: Type.String(),
+  /** What subagents run on, or `null` for the main model and effort. */
+  subagents: Type.Union([ChatModelSettingsSchema, Type.Null()]),
   /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
   configured: Type.Boolean(),
 });
@@ -338,6 +340,7 @@ export class InfiniChatView implements ChatViewSource<InfiniChatControls> {
       summary,
       instructions: docs.agent?.instructions ?? '',
       name: this.config?.value?.name ?? '',
+      subagents: this.config?.value?.subagents ?? null,
       configured: docs.agent?.model !== undefined && summary !== null,
       ...(error ? { error } : {}),
     };

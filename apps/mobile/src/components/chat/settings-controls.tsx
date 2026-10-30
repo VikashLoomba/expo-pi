@@ -6,7 +6,7 @@ import {
   findCatalogModel, type ChatModelSettings, type ModelCatalog, type ModelOption, type ModelThinkingLevel,
   type ProviderOption,
 } from '@pi-agent/infinichat/pi/model-catalog';
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { ActivityIndicator, PlatformColor, StyleSheet, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
@@ -50,9 +50,13 @@ export function PushRow({ label, value, disabled, onPress }: {
  * One model choice as a form section: the provider and reasoning effort are menus, and the model, which can be one
  * of hundreds, opens a searchable list. Choosing another provider opens that list at once.
  */
-export function ModelSection({ title, error, caption, catalog, settings, disabled, onChange, onChooseModel }: {
+export function ModelSection({
+  title, error, caption, catalog, settings, disabled, onChange, onChooseModel, children,
+}: {
   title: string; error?: string; caption?: string; catalog: ModelCatalog; settings: ChatModelSettings;
   disabled: boolean; onChange: (settings: ChatModelSettings) => void; onChooseModel: () => void;
+  /** Rows before the provider's. */
+  children?: ReactNode;
 }) {
   const provider = catalog.find((entry) => entry.id === settings.model.provider);
   const model = findCatalogModel(catalog, settings.model);
@@ -71,6 +75,7 @@ export function ModelSection({ title, error, caption, catalog, settings, disable
   };
   return <Section title={title} footer={<SectionFooter error={error}
     caption={[effortNote, caption].filter(Boolean).join(' ') || undefined} />}>
+    {children}
     <Picker<string> label="Provider" selection={settings.model.provider} onSelectionChange={chooseProvider}
       modifiers={[pickerStyle('menu'), disable(disabled)]}>
       {!provider && <Text modifiers={[tag(settings.model.provider)]}>

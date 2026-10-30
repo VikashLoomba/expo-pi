@@ -9,6 +9,7 @@ import {
 
 import { MemoryDoc, renderMain } from './memory';
 import { agentName } from './names';
+import { ConfigDoc } from './summary';
 
 /** What a subagent's conversation is set up from. */
 export type SubagentSetup = {
@@ -261,28 +262,31 @@ export const agentTask = (setup: SubagentSetup) => defineTask<AgentInput, Checkp
         const view = await renderMain(tx, root, cutoff);
         if (child === null) {
           // Native task ownership copies pi.agent from the root conversation. As pi-durable's subagent example sets
-          // one up, it goes without the master's extension, so without the master's prompt and the agent tools, and
-          // its own prompt leads the user's instructions. Its device tools run in its own folder, its name.
+          // one up, it goes without the master's extension, so without the master's prompt and the agent tools.
           const anchor = await tx.createTask(AgentAnchor, null, {
             conversationId: root,
             ownership: { kind: 'conversation' },
             background: true,
           });
           const created = await tx.createConversation({ ownership: { kind: 'task', taskId: anchor } });
-          const instructions = (await tx.doc(AgentDoc, root)).instructions;
-          const prompt = await setup.prompt(tx, root);
-          await configure(tx, created.id, {
-            extensions: { remove: [setup.master()] },
-            instructions: instructions ? `${prompt}\n\n${instructions}` : prompt,
-            cwd: name,
-            ...(agent.effort ? { thinkingLevel: agent.effort } : {}),
-          });
+          await configure(tx, created.id, { extensions: { remove: [setup.master()] } });
           agent.conversationId = created.id;
           child = created.id;
         } else {
-          if ((await tx.doc(AgentDoc, child)).cwd === undefined) await configure(tx, child, { cwd: name });
           await tx.appendEntry(ResetEntry, child, { head: 'self' });
         }
+        // Each call runs on the settings as it starts, as UniiChat's `Tools.ask` reads them: the subagent model, else
+        // the main agent's, at the spawn's effort over either, and its own prompt leading the user's instructions.
+        // Its device tools run in its own folder, its name.
+        const main = await tx.doc(AgentDoc, root);
+        const { subagents } = await tx.doc(ConfigDoc, root);
+        const prompt = await setup.prompt(tx, root);
+        await configure(tx, child, {
+          model: subagents?.model ?? main.model,
+          thinkingLevel: agent.effort ?? subagents?.thinkingLevel ?? main.thinkingLevel,
+          instructions: main.instructions ? `${prompt}\n\n${main.instructions}` : prompt,
+          cwd: name,
+        });
         // What it was told before the call began joins its log.
         const words = [message, ...agent.waiting];
         agent.waiting = [];
