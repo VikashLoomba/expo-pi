@@ -131,8 +131,11 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
       if (snapshot.keys) {
         const keys = await exchangeKeys(connection, snapshot.keys.others(), { signal, token });
         if (signal.aborted || closingRequested || notified) throw aborted();
-        // The record is for the next exchange; one that can't be written now doesn't stop this connection.
-        await snapshot.keys.store(keys).catch(() => {});
+        // The record is for the next exchange; one that can't be written now doesn't stop this connection, and this
+        // connection never waits for it: the record is a call on the machine's InfiniChat, which waits for its link,
+        // and a dial after the background opens this very connection before the link (2026-10-29: the two waited for
+        // each other until the app was quit).
+        void snapshot.keys.store(keys).catch(() => {});
       }
       // Through the login shell, as pi-env's `loginShell` starts its daemon (`launchCommand`, `dist/ssh.js:392-403` at
       // v1.4.0), so commands see the PATH the account's profile sets up. The decoder skips what the profile prints.

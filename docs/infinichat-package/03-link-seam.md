@@ -224,3 +224,21 @@ Checks:
 Unverified: nothing ran on a device. Every device check above is left to the owner's iPhone. The paths that matter
 most there are by source assessment only: the notice after an install, a refused server reinstalled once, a drop of
 the SSH session or the tunnel while live, and a dial cancelled by `close()`.
+
+## Later (2026-10-29): the return from the background
+
+The owner's phone sat at "Connecting to vikash-system…" after a return from the background until the app was quit.
+vikash-system's tailscaled log showed the dial's daemon connection run its cache check and key exchange, then nothing
+for 32 seconds. The cause was a cycle with no deadline in it: the daemon connection's start stored the exchanged keys
+by patching the conversation's machines document, a call on the InfiniChat reference the client still held from
+before the background; Chord lets a call on a loading reference wait for the link with no deadline (`remote.js:295`
+at v1.4.0); the link comes back only when the dial finishes; the dial was waiting on the daemon connection. A fresh
+process has no held reference, so the same patch fails fast there, which is why a relaunch worked.
+
+- The phone's channel factory no longer awaits the key store (`apps/mobile/src/pi/execution/remote/channel.ts`);
+  the record is for the next exchange, and the patch completes on its own once the link is live. The Mac's key exchange
+  runs only in its Check connection, not when a dial opens a daemon connection, so it has no cycle.
+- `reconnect` tries again after a failure, with the delay pi-env's watcher uses for its daemon (1 s doubling to 30 s,
+  `dist/watch.js:105-110`); a failure still shows until the next attempt, and Try Again comes sooner.
+- `resume` cancels an attempt that was under way when the app was suspended, so the return from the background never
+  waits on a transport that died meanwhile.
