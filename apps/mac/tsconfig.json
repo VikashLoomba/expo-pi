@@ -170,6 +170,7 @@
   },
   "include": [
     "src",
+    "scripts",
     "electrobun.config.ts",
     "hutch.config.ts"
   ]

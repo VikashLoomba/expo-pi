@@ -25,7 +25,17 @@ export default {
       'node_modules/@pi-agent/infinichat-server/assets': 'server',
     },
     watch: ['../../packages/infinichat/src'],
+    mac: {
+      // Canary and stable builds are signed with the Developer ID and notarized; dev builds skip both
+      // (guides/code-signing). The signing identity and Apple's credentials come from the release's environment.
+      codesign: true,
+      notarize: true,
+      // Icon Composer's file, made from the phone's icon: Liquid Glass on macOS 26 and later, an .icns before.
+      icons: 'InfiniChat.icon',
+    },
   },
+  // Stable releases on GitHub; `latest/download` follows the newest release, never a prerelease (guides/updates).
+  release: { baseUrl: 'https://github.com/VikashLoomba/expo-pi/releases/latest/download' },
   // A Mac app stays open without windows; the Dock reopens one.
   runtime: { exitOnLastWindowClosed: false },
   scripts: { preBuild: './scripts/pre-build.ts' },

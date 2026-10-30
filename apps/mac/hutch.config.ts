@@ -7,5 +7,7 @@ export default {
     dev: ['hutch', 'electrobun', 'dev', '--watch'],
     'build:dev': ['hutch', 'electrobun', 'build', '--env=dev'],
     build: ['hutch', 'electrobun', 'build', '--env=stable'],
+    // Signs, notarizes and publishes the stable build as a GitHub release (scripts/release.ts).
+    release: ['hutch', 'scripts/release.ts'],
   },
 };

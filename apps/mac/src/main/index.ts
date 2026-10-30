@@ -24,6 +24,7 @@ import { serveInfiniChat } from './serve-infinichat';
 import { serveMachines } from './serve-machines';
 import { readSettings, writeSettings } from './settings';
 import { SignInRelay } from './sign-in-relay';
+import { MacUpdates } from './updater';
 
 const INITIAL_FRAME = { width: 1100, height: 720 };
 const SETTINGS_FRAME = { width: 780, height: 560 };
@@ -45,6 +46,7 @@ function setMenu(): void {
   ApplicationMenu.setApplicationMenu([
     { label: 'InfiniChat', submenu: [
       { role: 'about' },
+      { label: 'Check for Updates…', action: 'check-for-updates' },
       { type: 'separator' },
       { label: 'Settings…', action: 'settings', accelerator: ',' },
       { type: 'separator' },
@@ -173,6 +175,26 @@ async function main(): Promise<void> {
   };
   ui.openSettings = openSettings;
 
+  // Closes the app once, before a quit and before an update's relaunch; a quit asked for after it began is allowed.
+  let quitting: Promise<void> | undefined;
+  const shutDown = () => quitting ??= (async () => {
+    current?.remember();
+    // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
+    // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
+    let failure: unknown;
+    for (const step of [async () => { relay.close(); own.close(); notifier.close(); }, () => infinichat.close(),
+      () => chats.close(), async () => machines.close(), () => host.close(), async () => account.close(),
+      () => windows.close()]) {
+      try {
+        await step();
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure !== undefined) throw failure;
+  })();
+  const updates = new MacUpdates(shutDown);
+
   setMenu();
   ApplicationMenu.on('application-menu-clicked', (event) => {
     const action = clickedAction(event);
@@ -180,31 +202,19 @@ async function main(): Promise<void> {
       openSettings();
       return;
     }
+    if (action === 'check-for-updates') {
+      void updates.check(false);
+      return;
+    }
     if (action === undefined || !isCommand(action)) return;
     open().rpc.send.command({ name: action });
   });
   Electrobun.events.on('reopen', () => open());
-  let quitting: Promise<void> | undefined;
   Electrobun.events.on('before-quit', (event: ElectrobunEvent<unknown, { allow: boolean }>) => {
-    // The first ask is refused while the host closes; the quit that follows is allowed.
+    // The first ask is refused while the app closes; the quit that follows, the app's or the Updater's, is allowed.
     if (quitting) return;
     event.response = { allow: false };
-    current?.remember();
-    quitting = (async () => {
-      // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
-      // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
-      let failure: unknown;
-      for (const step of [async () => { relay.close(); own.close(); notifier.close(); }, () => infinichat.close(),
-        () => chats.close(), async () => machines.close(), () => host.close(), async () => account.close(),
-        () => windows.close()]) {
-        try {
-          await step();
-        } catch (error) {
-          failure ??= error;
-        }
-      }
-      if (failure !== undefined) throw failure;
-    })().then(() => { Utils.quit(); }, (error: unknown) => {
+    shutDown().then(() => { Utils.quit(); }, (error: unknown) => {
       console.error(error);
       Utils.quit(1);
     });
@@ -212,6 +222,8 @@ async function main(): Promise<void> {
   open();
   infinichat.open();
   chats.open();
+  // A release build looks for its update at each launch and asks only when one is ready to install.
+  void updates.check(true);
 }
 
 main().catch((error: unknown) => {
