@@ -6,5 +6,5 @@ declare module '*.wasm' {
   export default bytes;
 }
 
-/** The pi versions the bundle was built with, defined at build time from the installed packages. */
-declare const INFINICHAT_PI: { durable: string; ai: string; chord: string };
+/** This server's release, defined at build time from package.json. */
+declare const INFINICHAT_SERVER_VERSION: string;

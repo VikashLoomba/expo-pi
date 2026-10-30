@@ -51,7 +51,7 @@ export type Attachment = Static<typeof AttachmentSchema>;
 /** This app's connection to the machine shown, as `RemoteInfiniChat` reports it; null before a machine is shown. */
 export const ConnectionSchema = Type.Union([Type.Null(), Type.Object({
   status: Type.Enum(['connecting', 'connected', 'failed']),
-  stage: Type.Optional(Type.Enum(['connecting', 'checking', 'uploading', 'starting'])),
+  stage: Type.Optional(Type.Enum(['connecting', 'checking', 'installing', 'starting'])),
   error: Type.Optional(Type.String()),
   notice: Type.Optional(Type.String()),
 })]);

@@ -11,7 +11,7 @@ import type {
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
 import {
-  copyFrom, DATA, receivePatch, serverLines, type Copy,
+  copyFrom, DATA, receivePatch, type Copy,
 } from '@pi-agent/infinichat/pi/infinichat-remote/transfer';
 
 import { readState, updateState } from './state';
@@ -48,7 +48,7 @@ export class ServerConversation {
   private unfollow = noop;
   private readonly data: string;
 
-  constructor(private readonly home: string, private readonly bundle: string,
+  constructor(private readonly home: string,
     private readonly openCore: (storage: Storage) => Promise<InfiniChatService>) {
     this.data = join(home, 'data');
     const { active, adopted, heldBy } = readState(home);
@@ -160,7 +160,7 @@ export class ServerConversation {
       await mkdir(join(this.data, 'incoming'), { recursive: true, mode: 0o700 });
       const incoming = join(this.data, 'incoming', DATABASE);
       const copy: Copy = { machine: source.env, files: nodeDatabaseFiles, signal: signalOf(context),
-        name: source.name, server: serverLines(this.bundle), transfer: join(this.data, 'incoming', 'transfer') };
+        name: source.name, transfer: join(this.data, 'incoming', 'transfer') };
       const kept = join(this.home, 'copy', DATABASE);
       await nodeDatabaseFiles.remove(incoming);
       let copied = false;

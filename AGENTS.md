@@ -1,8 +1,10 @@
 This is an Expo/React Native app for iOS. Prioritize iOS-native patterns and the components Expo provides.
 
 The repository is a pnpm workspace in Expo's monorepo layout: the iOS app is in `apps/mobile`, the Mac app in
-`apps/mac`, the shared InfiniChat code in `packages/infinichat`, and the server the apps install on machines, with its
-build script, generated manifests and the bundled assets both apps ship, in `packages/infinichat-server`. The
+`apps/mac`, the shared InfiniChat code in `packages/infinichat`, and the server machines run, with its build and
+release scripts, generated manifests and the pi-env daemons both apps ship, in `packages/infinichat-server`. The
+server is published as `server/v<version>` GitHub releases (`pnpm release` there, before the apps that need it) and
+updates itself; the apps only set one up on a machine that has none. The
 phone's SSH library, `@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
 `packages/react-native-ssh` (Rust engine, C FFI, Nitro module); `pnpm install` builds its `lib/`, and its iOS
 archives are built there by `bash scripts/build-rust-ios.sh` before an iOS build, neither committed. App paths

@@ -36,8 +36,8 @@ export type InfiniChatSettings = {
   instructions: string;
   /** The agent's name; empty for InfiniChat. */
   name: string;
-  /** What subagents run on; `null` for the main model and effort. */
-  subagents: ChatModelSettings | null;
+  /** What subagents run on; `null` for the main model and effort, absent to leave it as it is. */
+  subagents?: ChatModelSettings | null;
 };
 
 /** A value the screens follow with `useSyncExternalStore`. */
@@ -228,7 +228,8 @@ export class InfiniChatService implements InfiniChatHost {
     const catalog = buildModelCatalog(this.models);
     const selectedMain = { model: { ...main.model }, thinkingLevel: main.thinkingLevel };
     const selectedSummary = { model: { ...summary.model }, thinkingLevel: summary.thinkingLevel };
-    const selectedSubagents = subagents && { model: { ...subagents.model }, thinkingLevel: subagents.thinkingLevel };
+    const selectedSubagents = subagents
+      && { model: { ...subagents.model }, thinkingLevel: subagents.thinkingLevel };
     assertModelSettings(catalog, selectedMain);
     assertModelSettings(catalog, selectedSummary);
     if (selectedSubagents) assertModelSettings(catalog, selectedSubagents);
@@ -238,7 +239,7 @@ export class InfiniChatService implements InfiniChatHost {
       await configure(tx, root.id, selectedMain);
       const config = await tx.doc(ConfigDoc, root.id);
       config.summary = selectedSummary;
-      config.subagents = selectedSubagents;
+      if (selectedSubagents !== undefined) config.subagents = selectedSubagents;
       config.name = name.trim() || null;
       await this.chat.setInstructions(tx, instructions);
     }, context);

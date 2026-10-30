@@ -3,9 +3,8 @@ import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil
 import { connect, type SshConnection, type SshLocalForward } from '@automatalabs/react-native-ssh';
 import type { ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import {
-  installServer, machineIdentity, machineSecret, runningServer, savedSecret,
+  installServer, machineSecret, requestUpdate, runningServer, savedSecret,
 } from '@pi-agent/infinichat/pi/infinichat-remote/install';
-import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import { getRandomBytesAsync } from 'expo-crypto';
 
 import { connectionFailure } from '../execution/remote/channel';
@@ -14,9 +13,8 @@ import { tailscaleSignIn } from '../execution/remote/tailscale';
 import type { RemoteExecution } from '../execution/remote/owner';
 import { createCredentialBackend } from '../secure-storage';
 import { phoneClient } from './phone-client';
-import { phoneServerAssets, SERVER_BUNDLE } from './server-assets';
 
-type Target = { port: number; secret: string };
+type Target = { port: number; secret: string; version: string };
 
 /**
  * React Native's own declaration of its WebSocket constructor, restated from
@@ -49,11 +47,11 @@ function connectAdmitted(hosts: RemoteHostRepository, admission: RemoteHostAdmis
 /**
  * How this phone reaches a configured machine's InfiniChat server: one SSH connection with the machine's admission,
  * and a WebSocket tunnelled over it to the server's loopback port (`server/listen.ts`), carrying this phone's secret.
- * It installs or updates the server, writing the secret as this phone's client file there, when this phone has no
- * secret for the machine, and when `server.json` names no live server of this bundle. That check and the install go
- * through the environment owner.ts keeps for the machine: one daemon connection, shared with the chats' tools, which
- * the provider closes. It borrows that, the machine record and the phone's secret, and closes only the SSH connection
- * and tunnel it opened.
+ * It writes the secret as this phone's client file there and starts the server, setting one up first on a machine
+ * with none (`installServer`), when this phone has no secret for the machine or `server.json` names no live server.
+ * That check and setup go through the environment owner.ts keeps for the machine: one daemon connection, shared with
+ * the chats' tools, which the provider closes. It borrows that, the machine record and the phone's secret, and closes
+ * only the SSH connection and tunnel it opened.
  */
 export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution, machineId: string): ServerDialer {
   return {
@@ -72,16 +70,13 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
       // A dial that is cancelled stops waiting for it; the owner keeps the connection it opens.
       const machine = () => awaitWithContext(remote.environment(machineId, undefined),
         withAbortSignal(signal, BACKGROUND_CONTEXT));
-      // The server's device name and description are the machine's own, as every client reads them.
-      const identity = await machineIdentity(await machine(), host.hostname, signal);
-      const name = identity.name;
-      const description = machineDescription({ username: host.username, hostname: identity.hostname });
+      const name = host.hostname;
       let forward: SshLocalForward | undefined;
       let link: Link | undefined;
       const install = async (): Promise<Target> => {
         const installing = await machineSecret(credentials, getRandomBytesAsync, machineId);
-        const server = await installServer({ machine: await machine(), name, description, username: host.username },
-          phoneServerAssets, phoneClient().id, installing, { signal, onProgress: onStage });
+        const server = await installServer({ machine: await machine(), name, username: host.username },
+          phoneClient().id, installing, { signal, onProgress: onStage });
         onInstalled(server.notice);
         return server;
       };
@@ -106,13 +101,13 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
         await connection.disconnect().catch(() => {});
       };
       try {
-        const port = secret === undefined ? undefined
-          : await runningServer(await machine(), name, SERVER_BUNDLE, signal);
-        const target = secret !== undefined && port !== undefined ? { port, secret } : await install();
+        const running = secret === undefined ? undefined : await runningServer(await machine(), name, signal);
+        const target = secret !== undefined && running !== undefined ? { ...running, secret } : await install();
         return {
           link: await open(target),
-          expected: { bundle: SERVER_BUNDLE, device: name, description },
-          reinstall: async () => open(await install()),
+          version: target.version,
+          install: async () => open(await install()),
+          requestUpdate: async () => requestUpdate(await machine(), name, signal),
           close,
         };
       } catch (error) {

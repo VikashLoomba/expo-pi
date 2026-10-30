@@ -1,5 +1,5 @@
 import { mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, hostname, userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -8,13 +8,16 @@ import { createHost } from '@earendil-works/chord';
 import { processLock } from '@earendil-works/chord/node';
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 import type { SessionEnd } from '@earendil-works/pi-durable';
+import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/node/credentials';
 import { serverDevices } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
 import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { machineIdentity } from '@pi-agent/infinichat/pi/infinichat-remote/install';
 import { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
+import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import { validateOpenAICredential } from '@pi-agent/infinichat/pi/openai-auth/core';
 import { ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 
@@ -23,8 +26,9 @@ import { listen } from './listen';
 import { writeDiff, writePages, writePatch } from './pages';
 import { serveInfiniChat } from './serve';
 import { restoreTimeZone, setTimeZone } from './state';
+import { ServerUpdates } from './update';
 
-const USAGE = ['Usage: node server.js serve --device <name> --description <text>',
+const USAGE = ['Usage: node server.js serve',
   '       node server.js pages <db> <out>',
   '       node server.js diff <db> <pages> <out> [--live]',
   '       node server.js patch <base> <patch> <out>'].join('\n');
@@ -34,13 +38,21 @@ const USAGE = ['Usage: node server.js serve --device <name> --description <text>
 // `src/bun/runtime-setup.ts:10` at v1.4.0). The flows use only `node:http` and `node:crypto`.
 registerBunOAuthFlows();
 
+/** The exit by which an update has the service manager start the new release (`update.ts`), EX_TEMPFAIL. */
+const UPDATED = 75;
+
 /**
- * Runs InfiniChat on this machine until SIGTERM or SIGINT, or until a storage error ends its Harness, which fails the
- * process so its service manager starts it again: reopening is how pi-durable recovers (README "Errors").
+ * Runs InfiniChat on this machine until SIGTERM or SIGINT, an update, or a storage error that ends its Harness, which
+ * fails the process so its service manager starts it again: reopening is how pi-durable recovers (README "Errors").
+ * It names and describes the machine itself, as the apps' device lists do.
  */
-async function serve(device: string, description: string): Promise<number> {
+async function serve(): Promise<number> {
   const home = join(homedir(), '.infinichat');
-  const stopping = Promise.withResolvers<SessionEnd | undefined>();
+  const identity = await machineIdentity(new NodeExecutionEnv({ cwd: homedir() }), hostname(),
+    new AbortController().signal);
+  const device = identity.name;
+  const description = machineDescription({ username: userInfo().username, hostname: identity.hostname });
+  const stopping = Promise.withResolvers<SessionEnd | 'updated' | undefined>();
   process.once('SIGTERM', () => stopping.resolve(undefined));
   process.once('SIGINT', () => stopping.resolve(undefined));
   // Opened in order and closed in reverse; every close runs, and the first failure is reported after the rest.
@@ -70,10 +82,8 @@ async function serve(device: string, description: string): Promise<number> {
     // closes its remote owner after both Harnesses.
     const machines = new ServerMachines(home, device);
     closes.push(() => machines.close());
-    // The phone installs each bundle in a directory named after its hash.
-    const bundle = basename(dirname(fileURLToPath(import.meta.url)));
     // Open only while this machine holds the conversation; the phone moves it here and back.
-    const conversation = new ServerConversation(home, bundle, (storage) => InfiniChatService.open({
+    const conversation = new ServerConversation(home, (storage) => InfiniChatService.open({
       storage, models, devices: serverDevices(device, description, machines), machine: device,
       onClosed: (end) => {
         if (end.reason === 'failed') stopping.resolve(end);
@@ -93,13 +103,20 @@ async function serve(device: string, description: string): Promise<number> {
     // It disposes its objects, then closes its links.
     closes.push(() => host.close());
     serveInfiniChat(host, conversation, {
-      server: { bundle, pi: INFINICHAT_PI, device, description }, setTimeZone: (zone) => setTimeZone(home, zone),
+      server: { version: INFINICHAT_SERVER_VERSION }, device, setTimeZone: (zone) => setTimeZone(home, zone),
       models, credentials, signIn, machines,
     });
-    const server = await listen(host, home, bundle);
+    const server = await listen(host, home, INFINICHAT_SERVER_VERSION);
     // Stops accepting first; the host closes the connections already accepted.
     closes.push(() => server.close());
+    // Node runs the bundle from its real path, so its folder is this release's, beside the others (`install.ts`).
+    const release = dirname(fileURLToPath(import.meta.url));
+    const updates = new ServerUpdates(dirname(release), basename(release), INFINICHAT_SERVER_VERSION,
+      () => stopping.resolve('updated'));
+    closes.push(() => updates.close());
+    await updates.start();
     const end = await stopping.promise;
+    if (end === 'updated') return UPDATED;
     if (end?.reason === 'failed') console.error('InfiniChat storage failed:', end.error);
     return end === undefined ? 0 : 1;
   } finally {
@@ -117,10 +134,8 @@ async function serve(device: string, description: string): Promise<number> {
 
 async function main(args: string[]): Promise<number> {
   const { positionals: [command, ...paths], values } = parseArgs({ args, allowPositionals: true,
-    options: { device: { type: 'string' }, description: { type: 'string' }, live: { type: 'boolean' } } });
-  if (command === 'serve' && paths.length === 0 && values.device && values.description) {
-    return serve(values.device, values.description);
-  }
+    options: { live: { type: 'boolean' } } });
+  if (command === 'serve' && paths.length === 0) return serve();
   const [first, second, third] = paths;
   if (command === 'pages' && paths.length === 2) {
     await writePages(first, second);

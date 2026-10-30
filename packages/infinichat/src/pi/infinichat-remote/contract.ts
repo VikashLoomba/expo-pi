@@ -26,17 +26,10 @@ export const MessagesSchema = Type.ReadonlyObject(Type.Array(ChatMessageSchema))
  */
 export const ScheduledSchema = Type.Union([Type.ReadonlyObject(Type.Array(ScheduledTaskSchema)), Type.Null()]);
 /**
- * Which server answers: `bundle` names its bundle (the first 32 hex digits of its SHA-256), built with these pi
- * versions, running as the device `--device` named. The phone reinstalls when `bundle` differs from its manifest, and
- * never moves a conversation to another bundle, because pi-durable's SQLite migrations are one-way.
+ * Which server answers: its release (`release.ts`). A conversation moves only to a side of the same release or a newer
+ * one, because pi-durable's migrations are one-way.
  */
-export const ServerSchema = Type.Object({
-  bundle: Type.String(),
-  pi: Type.Object({ durable: Type.String(), ai: Type.String(), chord: Type.String() }),
-  device: Type.String(),
-  /** The device's description, the text the phone's device list gives the machine. */
-  description: Type.String(),
-});
+export const ServerSchema = Type.Object({ version: Type.String() });
 export type InfiniChatServer = Static<typeof ServerSchema>;
 
 const FileSchema = Type.Object({ sha256: Type.String(), size: Type.Number() });
@@ -144,7 +137,7 @@ export type SignInAttempt = Static<typeof SignInAttemptSchema>;
  * and the operations of its screens.
  */
 export const InfiniChatRemote = remote('infinichat.remote', {
-  version: 5,
+  version: 6,
   input: Type.Object({}),
   host: hostNamed('infinichat-server'),
   variants: {
@@ -161,7 +154,7 @@ export const InfiniChatRemote = remote('infinichat.remote', {
         stop: method(),
         updateSettings: method(Type.Object({
           main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema, instructions: Type.String(),
-          name: Type.String(), subagents: Type.Union([ChatModelSettingsSchema, Type.Null()]),
+          name: Type.String(), subagents: Type.Optional(Type.Union([ChatModelSettingsSchema, Type.Null()])),
         })),
         cancelScheduled: method(Type.Object({ id: Type.Number(), replacement: Type.Optional(ScheduledInputSchema) }),
           Type.Boolean()),

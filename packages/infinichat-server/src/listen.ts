@@ -27,9 +27,9 @@ async function authorized(request: IncomingMessage, clients: string): Promise<bo
  * a client link acting as the owner, so every client shares one object (chord `docs/guide.md`, "Principals and
  * variants"). As Chord's `acceptWebSockets` does, the socket is wrapped at once, so frames sent while the secret is
  * checked wait; links send plain frames, because `acceptWebSockets` deflates large ones, which the phone's Hermes
- * cannot inflate. `bundle` tells the clients which bundle answers.
+ * cannot inflate. `version` tells the clients which release answers.
  */
-export async function listen(host: Host<InfiniChatPrincipal>, home: string, bundle: string): Promise<WebSocketServer> {
+export async function listen(host: Host<InfiniChatPrincipal>, home: string, version: string): Promise<WebSocketServer> {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   server.on('connection', (socket, request) => {
     const link = webSocketLink(socket, { compress: false, acceptPacked: false });
@@ -44,11 +44,11 @@ export async function listen(host: Host<InfiniChatPrincipal>, home: string, bund
   });
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error(`Unexpected listening address ${address}.`);
-  // Written aside and renamed into place, so a client polling it never reads half a file. The install's readiness
-  // check (packages/infinichat/src/pi/infinichat-remote/install.ts) matches this exact JSON.stringify form. `node` is
-  // the Node the phone runs this bundle's page commands with (move.ts).
+  // Written aside and renamed into place, so a client polling it never reads half a file. The apps' checks
+  // (packages/infinichat/src/pi/infinichat-remote/install.ts) match this exact JSON.stringify form. `node` is the Node
+  // the phone runs the server's page commands with (move.ts).
   const temporary = join(home, `server.json.${process.pid}`);
-  await writeFile(temporary, JSON.stringify({ pid: process.pid, port: address.port, bundle, node: process.execPath }));
+  await writeFile(temporary, JSON.stringify({ pid: process.pid, port: address.port, version, node: process.execPath }));
   await rename(temporary, join(home, 'server.json'));
   console.log(`InfiniChat listening on 127.0.0.1:${address.port}`);
   return server;

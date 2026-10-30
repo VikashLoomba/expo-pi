@@ -31,6 +31,8 @@ const LOADING = { status: 'loading' } as const;
  */
 export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: ServerConversation, options: {
   server: InfiniChatServer;
+  /** The machine's name, for messages. */
+  device: string;
   setTimeZone(zone: string): void;
   models: Models;
   credentials: ProviderCredentialStore;
@@ -40,7 +42,7 @@ export function serveInfiniChat(host: Host<InfiniChatPrincipal>, conversation: S
   const { models, credentials, signIn, machines } = options;
   const core = () => {
     const open = conversation.current;
-    if (!open) throw new Error(`InfiniChat isn’t open on ${options.server.device}.`);
+    if (!open) throw new Error(`InfiniChat isn’t open on ${options.device}.`);
     return open;
   };
   host.serve(InfiniChatRemote, (_input, _principal, self) => {

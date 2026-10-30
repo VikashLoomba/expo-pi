@@ -15,6 +15,7 @@ import {
 } from './contract';
 import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from './dialer';
 import type { MachinePatch, MachinesState } from './machines';
+import { compareVersions } from './release';
 
 type ConnectionStatus =
   | { status: 'connecting'; stage?: InstallStage }
@@ -50,7 +51,8 @@ function plain(error: unknown): Error {
  * re-holds it, and the screens keep the last values meanwhile. It closes each dialed server's link and transport
  * through the dialer, and borrows the machine directory. The machine's own tools reach the conversation's other
  * machines with its own SSH, from the machines document it serves. `client` is this app as the server's client: its
- * ID and the name a move back records.
+ * ID and the name a move back records. `version` is the server release this app was built with, which tells which
+ * side is behind when the server's contract doesn't cover this app's.
  */
 export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
@@ -81,7 +83,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private readonly machineListeners = new Set<() => void>();
 
   constructor(private readonly dialer: ServerDialer, private readonly directory: MachineDirectory,
-    private readonly client: InfiniChatClient) {}
+    private readonly client: InfiniChatClient, private readonly version: string) {}
 
   /** The machine's endpoint, its ID in this app. */
   get machineId(): string {
@@ -139,9 +141,19 @@ export class RemoteInfiniChat implements InfiniChatHost {
   readonly getReach = () => this.values?.reach;
   readonly getPendingHostKeys = () => this.values?.pendingHostKeys;
 
+  /** The release of the server answering now, once connected. */
+  serverVersion(): string | undefined {
+    return this.session?.live ? this.ref?.server.value.version : undefined;
+  }
+
+  /** Asks the machine's server to update itself now, through the connection's machine. */
+  async requestUpdate(): Promise<void> {
+    await this.session?.server?.requestUpdate();
+  }
+
   /**
-   * Resolves once connected to this app's server for the machine, installing it as needed. Rejects as a call waiting
-   * for the connection does: with a failed attempt's error, or when this client closes.
+   * Resolves once connected to the machine's server, setting it up as needed. Rejects as a call waiting for the
+   * connection does: with a failed attempt's error, or when this client closes.
    */
   connected(signal: AbortSignal): Promise<void> {
     this.reconnect();
@@ -394,9 +406,10 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   /**
-   * One attempt: dials the machine's server, which installs or updates it only when needed, then connects the client
-   * host over its link and holds the reference. When the server refuses the socket or is another bundle or device,
-   * the dialed server is installed again, unless this attempt already installed it.
+   * One attempt: dials the machine's server, which sets it up only when needed, then connects the client host over its
+   * link and holds the reference. When the server refuses the socket, this app's key is written again and the server
+   * started, unless this attempt already did. A server whose contract doesn't cover this app's (Chord's
+   * `upgrade_required`) is either behind this app, and asked to update itself, or ahead of it.
    */
   private async connect(signal: AbortSignal): Promise<void> {
     const session: Session = { live: false };
@@ -414,11 +427,22 @@ export class RemoteInfiniChat implements InfiniChatHost {
         onDropped: () => this.dropped(session),
       });
       session.server = server;
-      const { expected } = server;
       let { link } = server;
-      while (!(await this.open(session, link, expected, signal))) {
-        if (installed) throw new Error(`InfiniChat on ${expected.device} did not accept this iPhone. Try again.`);
-        link = await server.reinstall();
+      for (;;) {
+        let opened: boolean;
+        try {
+          opened = await this.open(session, link, signal);
+        } catch (error) {
+          if (!isChordError(error, 'upgrade_required')) throw error;
+          if (compareVersions(server.version, this.version) >= 0) {
+            throw new Error(`InfiniChat on ${this.name} is newer than this app. Update this app to use it.`);
+          }
+          await server.requestUpdate();
+          throw new Error(`InfiniChat on ${this.name} is updating to work with this app. Try again in a moment.`);
+        }
+        if (opened) break;
+        if (installed) throw new Error(`InfiniChat on ${this.name} did not accept this app. Try again.`);
+        link = await server.install();
       }
       session.live = true;
       this.refresh();
@@ -433,11 +457,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   /**
    * Connects the client host over a dialed link, which re-holds the reference. Resolves true once the reference is
-   * live and the expected server answers; false when the link closed first, as a stale port or a removed client file
-   * makes it.
+   * live; false when the link closed first, as a stale port or a removed client file makes it.
    */
-  private async open(session: Session, link: Link, expected: DialedServer['expected'],
-    signal: AbortSignal): Promise<boolean> {
+  private async open(session: Session, link: Link, signal: AbortSignal): Promise<boolean> {
     link.onClose(() => this.dropped(session));
     this.host.connect(link, { principal: { kind: 'host' } });
     const ref = this.ref === undefined || this.ref.status === 'gone' ? this.hold() : this.ref;
@@ -456,10 +478,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
       link.onClose(() => settle(() => resolve(false)));
       if (signal.aborted) abort();
     });
-    if (!live) return false;
-    const server = ref.server.value;
-    return server.bundle === expected.bundle && server.device === expected.device
-      && server.description === expected.description;
+    return live;
   }
 
   /** The one reference to the machine's InfiniChat, held again only after the server forced it away. */
@@ -483,13 +502,13 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return ref;
   }
 
-  /** Copies the reference's state once an attempt has checked which server answers. */
+  /** Copies the reference's state once an attempt's reference is live. */
   private readonly refresh = () => {
     const ref = this.ref;
     if (ref === undefined || !this.session?.live) return;
     const { view, report } = ref.snapshot.value;
     const scheduled = ref.scheduled.value ?? undefined;
-    // The values are copied here only, once the server is checked, so the list's own store compares; Chord replaces a
+    // The values are copied here only, once the reference is live, so the list's own store compares; Chord replaces a
     // member's value only when that member changes.
     const rescheduled = scheduled !== this.values?.scheduled;
     const machines = ref.machines.value ?? undefined;

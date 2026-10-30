@@ -13,6 +13,7 @@ import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/ma
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 import { NEW_CHAT_DEFAULTS } from '@pi-agent/infinichat/pi/new-chat';
 import type { ProviderAccess, ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
+import { INFINICHAT_SERVER_MANIFEST } from '@pi-agent/infinichat-server/manifest';
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
 } from 'react';
@@ -30,7 +31,6 @@ import { phoneDialer } from '../pi/infinichat-remote/phone-dialer';
 import { phoneMachines, shownMachines } from '../pi/infinichat-remote/phone-machines';
 import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
 import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
-import { SERVER_BUNDLE } from '../pi/infinichat-remote/server-assets';
 import { createChatCredentialStore, createChatModels } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
@@ -46,6 +46,8 @@ const closedService: ChatServiceSnapshot = { chats: [] };
 const getClosedService = () => closedService;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const INFINICHAT_MOVING = 'InfiniChat is moving. Send again once the move is done.';
+/** The server release this app was built with, which a machine's server and a move are compared with. */
+const SERVER_VERSION = INFINICHAT_SERVER_MANIFEST.version;
 
 /**
  * App-lifetime objects. Chats open at launch and stay open in the background until the provider unmounts.
@@ -142,7 +144,7 @@ function useChatRuntime() {
       let client = state.remotes.get(machineId);
       if (!client) {
         client = new RemoteInfiniChat(phoneDialer(remoteHosts, remote, machineId),
-          phoneMachines(machines, machineId), phoneClient());
+          phoneMachines(machines, machineId), phoneClient(), SERVER_VERSION);
         state.remotes.set(machineId, client);
       }
       setInfiniChatClient(client);
@@ -188,7 +190,7 @@ function useChatRuntime() {
     };
     // A move borrows the remote owner's connection to the machine, as the chats' tools do, and never closes it.
     const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(machines, machineId),
-      (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', SERVER_BUNDLE, {
+      (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', SERVER_VERSION, {
       hold: () => infiniChat.hold(),
       closeLocal: () => queued(async () => {
         const closing = state.phone;

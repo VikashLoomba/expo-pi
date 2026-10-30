@@ -51,8 +51,11 @@ export function useChatSettingsDraft(): ChatSettingsDraft {
  * run on the main model unless they have their own.
  */
 export type InfiniChatRole = 'main' | 'summary' | 'subagents';
-/** The settings the conversation keeps, and the avatar, which stays on this phone. */
-export type InfiniChatSettingsDraftValues = InfiniChatSettings & { avatar: string | undefined };
+/** The settings the conversation keeps, the subagents' always shown, and the avatar, which stays on this phone. */
+export type InfiniChatSettingsDraftValues = Omit<InfiniChatSettings, 'subagents'> & {
+  subagents: ChatModelSettings | null;
+  avatar: string | undefined;
+};
 
 /** A role's model as the draft has it: subagents without their own show the main model they run on. */
 export function roleSettings(draft: InfiniChatSettingsDraftValues, role: InfiniChatRole): ChatModelSettings {

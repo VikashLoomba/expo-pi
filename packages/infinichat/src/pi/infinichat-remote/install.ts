@@ -6,34 +6,20 @@ import type { InstallStage } from './dialer';
 import {
   discard, fileFailure, HASH, MARKER, PRINT_MARKER, quotePosix, runScript, temporary, type Step,
 } from './machine';
-
-/** The name of a server bundle on a machine, its directory there: the first 32 hex digits of its SHA-256. */
-export const serverBundle = (sha256: string) => sha256.slice(0, 32);
+import { DAEMON_TARGETS, latestServerRelease, releaseFile } from './release';
 
 export interface InstalledServer {
   /** The server's port on the machine's loopback, where the app's tunnel goes. */
   port: number;
   /** What each connection carries as `Authorization: Bearer <secret>`. */
   secret: string;
+  /** The server's release (`release.ts`). */
+  version: string;
   /** Set when the machine won't keep the server running by itself; shown instead of failing. */
   notice?: string;
 }
 
-/** A system the app ships a pi-env daemon for, in Node's names. */
-export interface DaemonPlatform { platform: 'darwin' | 'linux'; arch: 'arm64' | 'x64' }
-type DaemonTarget = `${DaemonPlatform['platform']}-${DaemonPlatform['arch']}`;
-
-/** The server bundle and the pi-env daemons an install uploads, which each app ships its own way. */
-export interface ServerAssets {
-  /** The SHA-256 of the bundle and of each daemon, which the machine's copies are checked against first. */
-  manifest: { sha256: string; daemons: Readonly<Record<DaemonTarget, { sha256: string }>> };
-  /** The bundle, verified against the manifest. */
-  bundle(signal: AbortSignal): Promise<Uint8Array>;
-  /** One system's daemon, verified, with its SHA-256. */
-  daemon(platform: DaemonPlatform, signal: AbortSignal): Promise<{ bytes: Uint8Array; sha256: string }>;
-}
-
-/** What a machine calls itself, which every client installs and expects its server under (`machineIdentity`). */
+/** What a machine calls itself (`machineIdentity`). */
 export interface MachineIdentity {
   /** macOS's computer name, else Linux's static host name, else the host name. */
   name: string;
@@ -42,9 +28,8 @@ export interface MachineIdentity {
 }
 
 /**
- * The machine's own name and host name, read on the machine, so the apps agree on the server's device name without
- * naming it themselves: a client that named it would reinstall a server another client named (the owner's rule,
- * 2026-10-28). `label` names the machine in a connection failure, as the app lists it.
+ * The machine's own name and host name, read on the machine, which its server names and describes itself by, so no
+ * client names it. `label` names the machine in a failure.
  */
 export async function machineIdentity(machine: ExecutionEnv, label: string, signal: AbortSignal,
 ): Promise<MachineIdentity> {
@@ -65,34 +50,38 @@ export async function machineIdentity(machine: ExecutionEnv, label: string, sign
 export interface InstallTarget {
   /** Its files and commands, borrowed from the owner of the app's connection to it. */
   machine: ExecutionEnv;
-  /** Its own name (`machineIdentity`), for messages and as the server's device name. */
+  /** Its name as the app lists it, for messages. */
   name: string;
-  /** The device list's text for it (`machineDescription`), which the server describes itself with. */
-  description: string;
   /** The account the app signs in as, which the linger advice names. */
   username: string;
 }
 
 const LABEL = 'com.vikashloomba.piagent.infinichat';
-/** pi-env's `UPLOAD_TIMEOUT_MS`, as it uploads its daemon; other steps keep the 60 s default. */
-const UPLOAD_TIMEOUT_MS = 300_000;
+/** pi-env's `UPLOAD_TIMEOUT_MS`, as it uploads its daemon, for a release's download; other steps keep 60 s. */
+const DOWNLOAD_TIMEOUT = 300;
 const CONTROL = /[\x00-\x1f\x7f]/;
 const PID = `sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$s"`;
-/** The Node that runs the server, from `server.json` at `$s`, which move.ts runs the bundle's page commands with. */
+/** The Node that runs the server, from `server.json` at `$s`, which move.ts runs the server's page commands with. */
 export const NODE = `sed -n 's/.*"node":"\\([^"]*\\)".*/\\1/p' "$s"`;
 /**
- * The pi-env daemons the app ships, which the server deploys to the other machines its tools use. pi-env takes the one
- * for each system it detects from `bin/` beside its package (`packagedDaemon`, `src/ssh.ts:356-360` at v1.4.0); in the
- * single-file bundle that is `bin/` beside the bundle folders, and its options name no binary per system.
+ * The server a machine runs, under its home: each release in a folder named after its version, `current` naming the
+ * one the service starts, and `bin/` with the pi-env daemons the server deploys to the other machines its tools use.
+ * pi-env takes the one for each system it detects from `bin/` beside its package (`packagedDaemon`,
+ * `src/ssh.ts:356-360` at v1.4.0); in the single-file bundle that is `bin/` beside the release folders.
  */
-const DAEMONS: readonly DaemonPlatform[] = [{ platform: 'darwin', arch: 'arm64' }, { platform: 'darwin', arch: 'x64' },
-  { platform: 'linux', arch: 'arm64' }, { platform: 'linux', arch: 'x64' }];
+export const SERVER = '.infinichat/server';
+/** The server the service starts. */
+export const CURRENT = `${SERVER}/current/server.js`;
+/** `fetch <url> <file>`, with whichever of curl and wget the machine has. */
+const FETCH = 'fetch() { if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$2" "$1"; '
+  + 'else wget -q -O "$2" "$1"; fi; }';
 
 /** Fixed messages: remote output never reaches one. */
 function messages(name: string) {
   return {
     check: `Checking ${name} for InfiniChat failed. Try again.`,
     files: `Setting up InfiniChat on ${name} failed. Check the account’s home folder permissions and disk space.`,
+    download: `InfiniChat could not be downloaded on ${name}. Check its internet connection and try again.`,
     service: `InfiniChat’s service could not be started on ${name}.`,
     ready: `InfiniChat did not start on ${name}.`,
   };
@@ -170,7 +159,10 @@ async function detect(run: Run, name: string) {
 
 const xml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** Started at login and kept alive by launchd: a clean stop stays stopped, and a failure starts it again. */
+/**
+ * Started at login and kept alive by launchd: a clean stop stays stopped, and a failure, or the exit by which an
+ * update restarts the server, starts it again.
+ */
 function launchAgent(args: string[]): string {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -196,30 +188,30 @@ function systemdUnit(args: string[]): string {
 }
 
 /**
- * With the service file at `$t`, names `server.json` `$s`, and sets `$current` when it names this bundle and a live
- * process.
+ * With the service file at `$t`, names `server.json` `$s`, and sets `$running` when it names a live server of a
+ * release; a server from before releases names none, and is replaced.
  */
-const readService = (bundle: string) => ['umask 077', 's="$HOME/.infinichat/server.json"', 'current=0',
-  `if [ -f "$s" ] && grep -q '"bundle":"${bundle}"' "$s"; then`,
-  `  pid=$(${PID}); if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then current=1; fi`,
+const readService = ['umask 077', 's="$HOME/.infinichat/server.json"', 'running=0',
+  'if [ -f "$s" ] && grep -q \'"version":\' "$s"; then',
+  `  pid=$(${PID}); if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then running=1; fi`,
   'fi'];
 
 /**
- * Publishes `$t` at `path` when it differs, and sets `$changed` then, or when the running server isn't this bundle's:
- * a reload that failed or was cancelled after an earlier publish left the service manager on the old definition.
+ * Publishes `$t` at `path` when it differs, and sets `$changed` then, or when no server runs: a reload that failed or
+ * was cancelled after an earlier publish left the service manager on the old definition.
  */
 const publish = (path: string) => [`if [ -f ${path} ] && cmp -s "$t" ${path}; then changed=0`,
   `else mkdir -p "$(dirname ${path})"; mv -f "$t" ${path}; changed=1; fi`,
-  'if [ "$current" = 0 ]; then changed=1; fi'];
+  'if [ "$running" = 0 ]; then changed=1; fi'];
 
 /**
- * Installs the LaunchAgent and starts it, or boots it out and bootstraps it again when it changed or isn't this
- * bundle's. The service stays listed for a moment after `bootout` returns, and a `bootstrap` then fails with an I/O
- * error, so it waits until launchd has let go; the step's timeout bounds the wait.
+ * Installs the LaunchAgent and starts it, or boots it out and bootstraps it again when it changed or isn't running.
+ * The service stays listed for a moment after `bootout` returns, and a `bootstrap` then fails with an I/O error, so it
+ * waits until launchd has let go; the step's timeout bounds the wait.
  */
-function launchdScript(bundle: string): string[] {
+function launchdScript(): string[] {
   const service = `"$domain"/${LABEL}`;
-  return [...readService(bundle), 'domain="gui/$(id -u)"', `p="$HOME/Library/LaunchAgents/${LABEL}.plist"`,
+  return [...readService, 'domain="gui/$(id -u)"', `p="$HOME/Library/LaunchAgents/${LABEL}.plist"`,
     // The gui domain exists while the account is logged in; LaunchAgents start there at login.
     `if ! launchctl print "$domain" >/dev/null 2>&1; then ${PRINT_MARKER}; echo nologin; exit 0; fi`,
     ...publish('"$p"'),
@@ -231,13 +223,13 @@ function launchdScript(bundle: string): string[] {
 }
 
 /**
- * Installs the systemd user unit and starts it, or starts it again when it changed or isn't this bundle's, then
- * reports lingering. Without a user bus (a container), the server starts detached, and the next install starts it
- * again. A detached server to replace gets SIGTERM, and the new one starts only once it is gone; the step's timeout
- * bounds the wait.
+ * Installs the systemd user unit and starts it, or starts it again when it changed or isn't running, then reports
+ * lingering. Without a user bus (a container), the server starts detached, and the next connection starts it again,
+ * as after an update. A detached server to replace gets SIGTERM, and the new one starts only once it is gone; the
+ * step's timeout bounds the wait.
  */
-function systemdScript(args: string[], bundle: string): string[] {
-  return [...readService(bundle), 'u="$HOME/.config/systemd/user/infinichat.service"',
+function systemdScript(args: string[]): string[] {
+  return [...readService, 'u="$HOME/.config/systemd/user/infinichat.service"',
     'if systemctl --user show-environment >/dev/null 2>&1; then',
     ...publish('"$u"'),
     '  if [ "$changed" = 1 ]; then',
@@ -247,7 +239,7 @@ function systemdScript(args: string[], bundle: string): string[] {
     `  ${PRINT_MARKER}; echo systemd`,
     '  loginctl show-user "$(id -un)" --property=Linger --value 2>/dev/null || echo unknown',
     'else',
-    '  if [ "$current" = 0 ]; then',
+    '  if [ "$running" = 0 ]; then',
     `    old=$(${PID} 2>/dev/null || true)`,
     '    if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then kill "$old"; fi',
     '    while [ -n "$old" ] && kill -0 "$old" 2>/dev/null; do sleep 1; done',
@@ -259,99 +251,80 @@ function systemdScript(args: string[], bundle: string): string[] {
     'fi'];
 }
 
-/**
- * Waits until `server.json` names this bundle and a live process, in the form listen.ts writes, then removes the
- * server folders of other bundles, which no service starts any more. The step's timeout bounds the wait, as pi-env
- * bounds each `ssh` command (`SSH_TIMEOUT_MS`) and its daemon's start (`START_TIMEOUT_MS`) by 60 s.
- */
-function readyScript(bundle: string): string[] {
-  return ['s="$HOME/.infinichat/server.json"', `current="$HOME/.infinichat/server/${bundle}"`, 'while :; do',
-    `  if [ -f "$s" ] && grep -q '"bundle":"${bundle}"' "$s"; then`,
-    `    pid=$(${PID})`,
-    '    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then break; fi',
-    '  fi',
-    '  sleep 1',
-    'done',
-    // `bin/` holds the pi-env daemons, which every bundle shares.
-    'for d in "$HOME/.infinichat/server"/*; do',
-    '  [ "$d" = "$current" ] || [ "$d" = "$HOME/.infinichat/server/bin" ] || rm -rf "$d"',
-    'done',
-    PRINT_MARKER, 'cat "$s"'];
-}
+/** True when `server.json` at `$s` names a live server of a release, in the form listen.ts writes. */
+const LIVE = `[ -f "$s" ] && grep -q '"version":' "$s" && pid=$(${PID}) && [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null`;
 
-function readyPort(line: string | undefined, bundle: string): number | undefined {
+/**
+ * Waits until `server.json` names a live server; the service scripts removed it before starting one. The step's
+ * timeout bounds the wait, as pi-env bounds each `ssh` command (`SSH_TIMEOUT_MS`) and its daemon's start
+ * (`START_TIMEOUT_MS`) by 60 s.
+ */
+const READY = ['s="$HOME/.infinichat/server.json"', `until ${LIVE}; do sleep 1; done`, PRINT_MARKER, 'cat "$s"'];
+
+/** The port and release `server.json` names, or undefined when it doesn't name both. */
+function serverInfo(line: string | undefined): { port: number; version: string } | undefined {
   let info: unknown;
   try {
     info = JSON.parse(line ?? '');
   } catch {
     return undefined;
   }
-  if (typeof info !== 'object' || info === null || !('port' in info) || !('bundle' in info)) return undefined;
-  return typeof info.port === 'number' && info.bundle === bundle ? info.port : undefined;
+  if (typeof info !== 'object' || info === null || !('port' in info) || !('version' in info)) return undefined;
+  return typeof info.port === 'number' && typeof info.version === 'string'
+    ? { port: info.port, version: info.version } : undefined;
 }
 
 /**
- * Installs the app's InfiniChat server on a configured machine and starts it as that account's service, through the
- * machine's `ExecutionEnv`, which the app borrows and never closes. The bundle is uploaded only when missing and
- * verified before it is renamed into place, as pi-env deploys its daemon; a dropped run leaves at most a bundle folder,
- * which the next run removes once its server is ready, and, if its connection was lost while writing, that file's
- * temporary copy. The service manager owns the server; the environment's connection never does. `secret` is the app's
- * for this machine (`machineSecret`), written as the file of `client`, the app's client ID, beside other clients'.
+ * Lets this app use InfiniChat on a configured machine: writes `secret`, the app's for this machine (`machineSecret`),
+ * as the file of `client`, the app's client ID, beside other clients', and starts the server as that account's
+ * service when it isn't running. A machine with no server first downloads the newest release (`release.ts`), each file
+ * verified before it is renamed into place, as pi-env deploys its daemon. It never replaces a server, which updates
+ * itself. It works through the machine's `ExecutionEnv`, which the app borrows and never closes; the service manager
+ * owns the server, and the environment's connection never does.
  */
-export async function installServer({ machine, name, description, username }: InstallTarget, assets: ServerAssets,
-  client: string, secret: string, options: { signal: AbortSignal; onProgress?: (stage: InstallStage) => void },
+export async function installServer({ machine, name, username }: InstallTarget, client: string, secret: string,
+  options: { signal: AbortSignal; onProgress?: (stage: InstallStage) => void },
 ): Promise<InstalledServer> {
   const { signal } = options;
   const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
   const run: Run = (lines, step) => runScript(machine, signal, name, lines, step);
   const message = messages(name);
-  const bundle = serverBundle(assets.manifest.sha256);
   // A lazily connected environment connects at its first command.
   options.onProgress?.('connecting');
   const system = await detect(run, name);
   options.onProgress?.('checking');
-  const { sha256 } = assets.manifest;
-  const file = `${system.home}/.infinichat/server/${bundle}/server.js`;
-  const daemons = DAEMONS.map((daemon) => {
-    const target = `${daemon.platform}-${daemon.arch}` as const;
-    return { daemon, target, sha256: assets.manifest.daemons[target].sha256,
-      file: `${system.home}/.infinichat/server/bin/pi-env-${target}/pi-env` };
-  });
-  const present = (path: string, hash: string) =>
-    `[ -f ${quotePosix(path)} ] && [ ! -L ${quotePosix(path)} ] && [ "$(hash ${quotePosix(path)})" = ${hash} ]`;
-  // The bundle's state, then each daemon that is missing.
-  const [state, ...missing] = await run([HASH, PRINT_MARKER,
-    'if [ "$(hash /dev/null)" = none ]; then echo nohash',
-    `elif ${present(file, sha256)}; then echo present`,
-    'else echo missing; fi',
-    ...daemons.map((daemon) => `${present(daemon.file, daemon.sha256)} || echo ${daemon.target}`)],
-  { failure: message.check });
+  const [state] = await run([HASH, PRINT_MARKER, `if [ -f "$HOME/${CURRENT}" ]; then echo present`,
+    'elif ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then echo nofetch',
+    'elif [ "$(hash /dev/null)" = none ]; then echo nohash',
+    'else echo missing; fi'], { failure: message.check });
+  if (state === 'nofetch') throw new Error(`${name} needs curl or wget to download InfiniChat.`);
   if (state === 'nohash') throw new Error(`${name} needs sha256sum, shasum or openssl to verify InfiniChat.`);
   if (state !== 'present' && state !== 'missing') throw new Error(message.check);
-  /**
-   * Its folder made under umask 077, as pi-env deploys its daemon, then written beside its final name, verified, and
-   * renamed into place, readable by the account alone (600).
-   */
-  const upload = async (path: string, hash: string, bytes: Uint8Array) => {
-    const aside = temporary(path.slice(0, path.lastIndexOf('/')), 'upload');
-    try {
-      await run([`f=${quotePosix(path)}`, 'umask 077', 'mkdir -p "$(dirname "$f")"', PRINT_MARKER],
-        { failure: message.files });
-      const written = await machine.writeFile(aside, bytes,
-        withAbortSignal(AbortSignal.timeout(UPLOAD_TIMEOUT_MS), context));
-      if (!written.ok) throw fileFailure(signal, written.error, name, message.files);
-      await run([HASH, `f=${quotePosix(path)}`, `t=${quotePosix(aside)}`,
-        // mv treats a directory, or a symlink to one, as a container; never publish into it.
-        'if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then exit 1; fi',
-        `[ "$(hash "$t")" = ${hash} ]`, 'chmod 600 "$t"', 'mv -f "$t" "$f"', PRINT_MARKER],
-      { failure: message.files });
-    } finally {
-      discard(machine, aside);
-    }
-  };
+  if (state === 'missing') {
+    options.onProgress?.('installing');
+    const release = await latestServerRelease(signal);
+    if (release === undefined) throw new Error('No InfiniChat server has been released yet.');
+    const { version } = release;
+    const files = [{ name: 'server.js', sha256: release.sha256, path: `${SERVER}/${version}/server.js` },
+      ...DAEMON_TARGETS.map((target) => ({ name: `pi-env-${target}`, sha256: release.daemons[target],
+        path: `${SERVER}/bin/pi-env-${target}/pi-env` }))];
+    // Each file not already there is downloaded beside its final name under umask 077, verified, and renamed into
+    // place, readable by the account alone; `current` then names the release.
+    await run([HASH, FETCH, 'umask 077', ...files.flatMap((file) => [
+      `f="$HOME/${file.path}"`,
+      `if [ -L "$f" ] || [ ! -f "$f" ] || [ "$(hash "$f")" != ${file.sha256} ]; then`,
+      '  mkdir -p "$(dirname "$f")"; t="$f.$$"',
+      `  if fetch ${quotePosix(releaseFile(version, file.name))} "$t" && [ "$(hash "$t")" = ${file.sha256} ]; then`,
+      '    chmod 600 "$t"; mv -f "$t" "$f"',
+      '  else rm -f "$t"; exit 1; fi',
+      'fi']),
+    `ln -sfn ${quotePosix(version)} "$HOME/${SERVER}/current"`, PRINT_MARKER],
+    { failure: message.download, timeout: DOWNLOAD_TIMEOUT, timedOut: message.download });
+  }
+  options.onProgress?.('starting');
   /**
    * Runs `lines` with `$t` naming a file of `content`, written first: never onto a command line other accounts can
-   * read. It goes into ~/.infinichat, which the bundle's install made under umask 077, as the server makes it (0700).
+   * read. It goes into ~/.infinichat, which the download made under umask 077, as the server makes it (0700).
    */
   const runWith = async (kind: string, content: string, lines: string[], step: Step) => {
     const input = temporary(`${system.home}/.infinichat`, kind);
@@ -363,44 +336,32 @@ export async function installServer({ machine, name, description, username }: In
       discard(machine, input);
     }
   };
-  if (state === 'missing') {
-    options.onProgress?.('uploading');
-    await upload(file, sha256, await assets.bundle(signal));
-  }
-  for (const { daemon, target, file: path } of daemons) {
-    if (!missing.includes(target)) continue;
-    options.onProgress?.('uploading');
-    const { bytes, sha256: hash } = await assets.daemon(daemon, signal);
-    await upload(path, hash, bytes);
-  }
-  options.onProgress?.('starting');
   // The server reads the clients' files at each connection, so a new secret needs no restart, and the other clients'
   // files stay as they are.
   await runWith('secret', secret, ['umask 077', `d="$HOME/${CLIENTS}"`, 'mkdir -p "$d"', `f="$d/"${quotePosix(client)}`,
     'if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then exit 1; fi', 'mv -f "$t" "$f"', 'chmod 600 "$f"',
     PRINT_MARKER], { failure: message.files });
   // Started through the login shell, as pi-env's `loginShell` starts its daemon, so the agent's tools see the PATH
-  // the account's profile sets up rather than the service manager's. The device list's own text for the machine,
-  // so the model's memory of it stays true once the conversation moves.
-  const args = [system.shell, '-lc', 'exec "$0" "$@"', system.node, file, 'serve', '--device', name,
-    '--description', description];
+  // the account's profile sets up rather than the service manager's. The server names and describes the machine
+  // itself.
+  const args = [system.shell, '-lc', 'exec "$0" "$@"', system.node, `${system.home}/${CURRENT}`, 'serve'];
   const service = { failure: message.service, timedOut: message.service };
   const [manager, linger] = system.platform === 'darwin'
-    ? await runWith('service', launchAgent(args), launchdScript(bundle), service)
-    : await runWith('service', systemdUnit(args), systemdScript(args, bundle), service);
+    ? await runWith('service', launchAgent(args), launchdScript(), service)
+    : await runWith('service', systemdUnit(args), systemdScript(args), service);
   if (manager === 'nologin') {
     throw new Error(`InfiniChat starts at login on ${name}, and no one is logged in there. Log in, then try again.`);
   }
-  const [line] = await run(readyScript(bundle), { failure: message.service, timedOut: message.ready });
-  const port = readyPort(line, bundle);
-  if (port === undefined) throw new Error(message.ready);
+  const [line] = await run(READY, { failure: message.service, timedOut: message.ready });
+  const server = serverInfo(line);
+  if (server === undefined) throw new Error(message.ready);
   const notice = manager === 'detached'
     ? `${name} has no user service manager, so InfiniChat won’t start again by itself after a restart.`
     : linger === 'no'
       ? `InfiniChat stops on ${name} whenever no session is open there, including when this phone disconnects. `
         + `To keep it running, an administrator can run “loginctl enable-linger ${username}” on it.`
       : undefined;
-  return { port, secret, ...(notice === undefined ? {} : { notice }) };
+  return { ...server, secret, ...(notice === undefined ? {} : { notice }) };
 }
 
 /**
@@ -413,15 +374,20 @@ export async function removeClient(machine: ExecutionEnv, client: string): Promi
 }
 
 /**
- * The port of this bundle's server when `server.json` names it and a live process; undefined when it must be installed
- * or started first. The file can name a process that exited or a reused pid, so the caller installs when the server
+ * The port and release of the machine's server when `server.json` names a live one; undefined when it must be started
+ * or set up first. The file can name a process that exited or a reused pid, so the caller installs when the server
  * refuses its socket anyway.
  */
-export async function runningServer(machine: ExecutionEnv, name: string, bundle: string, signal: AbortSignal,
-): Promise<number | undefined> {
-  const [line] = await runScript(machine, signal, name, ['s="$HOME/.infinichat/server.json"', PRINT_MARKER,
-    `if [ -f "$s" ] && grep -q '"bundle":"${bundle}"' "$s"; then`,
-    `  pid=$(${PID}); if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then cat "$s"; fi`,
-    'fi'], { failure: messages(name).check });
-  return readyPort(line, bundle);
+export async function runningServer(machine: ExecutionEnv, name: string, signal: AbortSignal,
+): Promise<{ port: number; version: string } | undefined> {
+  const [line] = await runScript(machine, signal, name,
+    ['s="$HOME/.infinichat/server.json"', PRINT_MARKER, `if ${LIVE}; then cat "$s"; fi`],
+    { failure: messages(name).check });
+  return serverInfo(line);
+}
+
+/** Asks the machine's server to update itself now (`SIGHUP`, server `update.ts`), as it does each day. */
+export async function requestUpdate(machine: ExecutionEnv, name: string, signal: AbortSignal): Promise<void> {
+  await runScript(machine, signal, name, ['s="$HOME/.infinichat/server.json"', `if ${LIVE}; then kill -HUP "$pid"; fi`,
+    PRINT_MARKER], { failure: messages(name).check });
 }

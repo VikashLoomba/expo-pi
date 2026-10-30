@@ -24,7 +24,7 @@ const TITLE = 'InfiniChat';
 const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its settings to send a message.';
 const PHONE = 'This iPhone';
 
-const connecting = (machine: string, stage: InstallStage | undefined) => stage === 'uploading'
+const connecting = (machine: string, stage: InstallStage | undefined) => stage === 'installing'
   ? `Installing InfiniChat on ${machine}…`
   : stage === 'starting' ? `Starting InfiniChat on ${machine}…` : `Connecting to ${machine}…`;
 const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
