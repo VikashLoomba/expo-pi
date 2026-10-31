@@ -24,6 +24,7 @@ import { ServerConversation } from './conversation';
 import { InfiniChatProcess } from './process';
 import { durableRegistry, Extensions } from './registry';
 import { setTimeZone } from './state';
+import { ServerTools } from './tools';
 
 /** The credential store, its backend, and the models over it, which the Harness and the sign-in share. */
 interface Account { backend: CredentialBackend; credentials: ProviderCredentialStore; models: Models }
@@ -99,16 +100,26 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
       open: () => new ServerMachines(proc().home, proc().device),
       close: (connections) => connections.close(),
     });
+    // What the conversation's open core shows as its report, or the server's log while none is open.
+    const report = (error: unknown) => {
+      try {
+        conversation.value.current?.report(error);
+      } catch {
+        console.error('InfiniChat:', error instanceof Error ? error.message : error);
+      }
+    };
+    // Code mode and the MCP servers, on by default; their connections and sandbox close after the conversation.
+    const tools = self.resource('tools', {
+      version: 1,
+      deps: [host],
+      open: () => ServerTools.open(proc().home, (message) => report(new Error(message))),
+      close: (opened) => opened.close(),
+    });
     // What the Harness reads; a table pi-durable refuses shows as the conversation's report when it is open.
     const registry = self.resource('registry', {
       version: 1,
-      open: () => durableRegistry(facet.registry(Extensions), (error) => {
-        try {
-          conversation.value.current?.report(error);
-        } catch {
-          console.error('InfiniChat could not install its extensions:', error);
-        }
-      }),
+      deps: [tools],
+      open: () => durableRegistry(facet.registry(Extensions), tools.value, report),
       close: (reader) => reader.close(),
     });
     const conversation = self.resource('conversation', {
