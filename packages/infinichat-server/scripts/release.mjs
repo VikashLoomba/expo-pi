@@ -44,7 +44,8 @@ try {
     .update(await readFile(join(stage, 'main.js'))).digest('hex').slice(0, 32);
   const runtime = join(folder, `runtime-${key}.tar.gz`);
   // Without macOS's metadata, which Linux's tar would only warn about.
-  run('tar', ['--no-mac-metadata', '--no-xattrs', '--no-acls', '-czf', runtime, '-C', stage, '.'],
+  const metadata = process.platform === 'darwin' ? ['--no-mac-metadata'] : [];
+  run('tar', [...metadata, '--no-xattrs', '--no-acls', '-czf', runtime, '-C', stage, '.'],
     { env: { ...process.env, COPYFILE_DISABLE: '1' } });
   const plugin = join(folder, 'infinichat.js');
   await copyFile(join(root, 'dist/plugins/infinichat/server.js'), plugin);

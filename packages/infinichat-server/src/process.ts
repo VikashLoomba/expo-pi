@@ -12,7 +12,7 @@ export interface ServerProcess {
   readonly description: string;
   /** Ends the process as failed, so its service manager starts it again: reopening is how pi-durable recovers. */
   fail(error: unknown): void;
-  /** Loads the plugins added to the plugins folder and reloads the others (`plugins.ts`); says what happened. */
+  /** Reloads built-in/user plugins and their configuration, including MCP (`plugins.ts`); says what happened. */
   reloadPlugins(): Promise<string>;
 }
 

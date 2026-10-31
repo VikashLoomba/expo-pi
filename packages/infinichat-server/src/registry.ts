@@ -4,51 +4,73 @@ import {
 } from '@earendil-works/pi-durable';
 
 /**
- * The Durable extensions a server's plugins contribute for its Harness, by extension name: InfiniChat's own and any
- * plugin the user installs (chord `docs/guide.md` "Durable"). A plugin registers with `self.register(Extensions, …)`
- * from an object of lifetime `"host"`; a token of this name in its own module is the same registry.
+ * A plugin whose Durable extensions also change between code reloads, such as MCP discovery. Chord owns the
+ * registration; its resource owns the connections. The source is rebuilt by the facet, not retained as resource code.
+ * A reload explicitly refreshes configuration; unchanged Chord resources do not reopen on a code reload.
  */
-export const Extensions = defineRegistry<Extension>('infinichat.extensions');
-
-/**
- * Extensions that change while the server runs rather than with its code, such as an MCP server's tools once it has
- * listed them: pi-durable's registry is the application's and may change while the Harness runs, new work using the
- * new state (durable README "Concepts"), while a Chord registration changes only when code is committed.
- */
-export interface LiveExtensions {
+export interface ExtensionSource {
   extensions(): readonly Extension[];
   subscribe(listener: () => void): () => void;
+  reload(validate: (extensions: readonly Extension[]) => void): Promise<string>;
+}
+
+export type ExtensionContribution = Extension | ExtensionSource;
+
+/**
+ * Durable extensions contributed by host-lifetime plugin objects through `self.register(Extensions, ...)`, following
+ * Chord's Durable guide. Static extensions and live sources share this table: no built-in is appended after plugins.
+ */
+export const Extensions = defineRegistry<ExtensionContribution>('infinichat.extensions');
+
+export const isExtensionSource = (value: ExtensionContribution): value is ExtensionSource => 'extensions' in value;
+
+/** Build before publishing: a rejected contribution leaves the Harness's previous complete snapshot in use. */
+export function extensionSnapshot(table: RegistryTable<ExtensionContribution>, replacement?: {
+  source: ExtensionSource; extensions: readonly Extension[];
+}): RegistrySnapshot {
+  const registry = createRegistry();
+  const names = new Set<string>();
+  for (const contribution of table.values()) {
+    const extensions = contribution === replacement?.source ? replacement.extensions
+      : isExtensionSource(contribution) ? contribution.extensions() : [contribution];
+    for (const extension of extensions) {
+      // Durable replaces by name for reload; two different contributors must not silently replace one another.
+      if (names.has(extension.name)) throw new Error(`More than one plugin contributes extension ${extension.name}.`);
+      names.add(extension.name);
+      registry.install(extension);
+    }
+  }
+  return registry.snapshot();
 }
 
 /**
- * Durable's `RegistryReader` over the tables of `Extensions`, which Chord leaves to the application (chord
- * `docs/spec.md` §8), followed by `live`'s: one complete snapshot per code version and per change of `live`, so a
- * Durable phase pins a whole one and a reload never shows a moment without an extension. pi-durable builds and
- * validates a snapshot as a registry installs, so each gets a registry of its own. One pi-durable refuses, such as two
- * plugins' tasks of one name, is reported and the last snapshot stays.
+ * One immutable Durable snapshot per Chord table or live-source change. Durable pins it for a phase; subsequent
+ * phases see the next publication (durable test/examples/10-registry-reload.ts). The reader and Harness stay open.
  */
-export function durableRegistry(view: RegistryView<Extension>, live: LiveExtensions,
-  report: (error: unknown) => void): RegistryReader & { close(): void } {
+export function durableRegistry(view: RegistryView<ExtensionContribution>, report: (error: unknown) => void):
+RegistryReader & { close(): void } {
   const listeners = new Set<() => void>();
   let current: RegistrySnapshot = createRegistry().snapshot();
-  let table: RegistryTable<Extension> | undefined;
+  let table: RegistryTable<ExtensionContribution> = new Map();
+  let subscriptions: (() => void)[] = [];
   const publish = () => {
     try {
-      const registry = createRegistry();
-      for (const extension of [...(table?.values() ?? []), ...live.extensions()]) registry.install(extension);
-      current = registry.snapshot();
+      current = extensionSnapshot(table);
     } catch (error) {
       report(error);
       return;
     }
     for (const listener of [...listeners]) listener();
   };
-  // Chord hands the current table at once (chord `src/host.ts:805`), so the first snapshot has both.
   const stopTables = view.subscribe((next) => {
+    for (const stop of subscriptions) stop();
     table = next;
+    subscriptions = [];
+    for (const contribution of table.values()) {
+      if (isExtensionSource(contribution)) subscriptions.push(contribution.subscribe(publish));
+    }
     publish();
   });
-  const stopLive = live.subscribe(publish);
   return {
     snapshot: () => current,
     subscribe(listener) {
@@ -59,7 +81,8 @@ export function durableRegistry(view: RegistryView<Extension>, live: LiveExtensi
     },
     close: () => {
       stopTables();
-      stopLive();
+      for (const stop of subscriptions) stop();
+      listeners.clear();
     },
   };
 }

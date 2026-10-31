@@ -49,8 +49,9 @@ async function place(path: string, bytes: Uint8Array | string): Promise<void> {
  * InfiniChat's plugin is the code its long-lived parts run: the sign-ins, the other machines' connections and the open
  * conversation's Harness, whose own code reaches nearly every module the extensions share, documents included. So a
  * release takes effect as pi-durable takes host code: the Harness closes, waiting for running task code, and the next
- * process installs the extensions again, where pending work resumes (README "Reload", "Errors"); Chord's hot reload is
- * for the user's plugins, which only add extensions (`plugins.ts`). A release on this runtime replaces the plugin in
+ * process installs the extensions again, where pending work resumes (README "Reload", "Errors"). Explicit plugin
+ * reload retains those resources and refreshes extension configuration (`plugins.ts`); a release replaces host code
+ * and still needs this restart. A release on this runtime replaces the plugin in
  * place; one on another runtime, a change of Chord, pi or this host itself, is unpacked into a folder beside this one,
  * and `current` names it. `folder` is the server folder (`install.ts`'s `SERVER`), `runtime` the folder this host
  * runs from.

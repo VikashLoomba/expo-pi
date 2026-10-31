@@ -4,7 +4,9 @@ The repository is a pnpm workspace in Expo's monorepo layout: the iOS app is in 
 `apps/mac`, the shared InfiniChat code in `packages/infinichat`, and the server machines run, with its build and
 release scripts, generated manifests and the pi-env daemons both apps ship, in `packages/infinichat-server`. The
 server is published as `server/v<version>` GitHub releases (`pnpm release` there, before the apps that need it) and
-updates itself; the apps only set one up on a machine that has none. The
+updates itself; the apps only set one up on a machine that has none. For server extension/reload work, read
+`docs/server-plugins.md`: built-in and user contributions share the Chord registry, configuration refresh is explicit,
+and the Harness/code-mode sandbox survive plugin reloads. A server release still restarts the service. The
 phone's SSH library, `@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
 `packages/react-native-ssh` (Rust engine, C FFI, Nitro module); `pnpm install` builds its `lib/`, and its iOS
 archives are built there by `bash scripts/build-rust-ios.sh` before an iOS build, neither committed. App paths

@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Host } from '@earendil-works/chord';
 import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 
+import { extensionSnapshot, Extensions, isExtensionSource } from './registry';
+
 /** A plugin's server facet, the first of these its folder has: Node strips TypeScript's types as it loads. */
 const ENTRIES = ['server.ts', 'server.mts', 'server.js', 'server.mjs'];
 
@@ -14,18 +16,19 @@ const nameOf = (url: string) => basename(dirname(fileURLToPath(url)));
 
 /**
  * The plugins the user installs on this machine, outside the runtime so updates leave them be: each folder in
- * `folder` (`~/.infinichat/plugins`) with a server facet (chord `docs/guide.md` "Plugins"), loaded after InfiniChat's
- * own. Their imports of Chord, pi and TypeBox resolve through `node_modules` there, a link to the runtime's
- * `modules`, so a plugin shares the host's single instances, which Chord's loader keeps outside a facet's folder
+ * `folder` (`~/.infinichat/plugins`) with a server facet (chord `docs/guide.md` "Plugins"), loaded after the built-ins.
+ * Both participate in explicit reload. Imports of Chord, pi and TypeBox resolve through `node_modules`, a link to
+ * the runtime's `modules`, so a plugin shares the host's single instances, kept outside a facet's folder
  * (chord `src/loader.ts:17-21`).
  */
 export class ServerPlugins {
   /** The facets loaded, by name. */
   private readonly loaded = new Set<string>();
   private queue: Promise<unknown> = Promise.resolve();
+  private reloading?: Promise<string>;
 
   constructor(private readonly host: Host<InfiniChatPrincipal>, private readonly folder: string,
-    private readonly modules: string) {}
+    private readonly modules: string, private readonly builtins: readonly string[]) {}
 
   /** Loads each plugin on its own, so one that fails leaves the others; returns the failures. */
   load(): Promise<string[]> {
@@ -36,6 +39,8 @@ export class ServerPlugins {
           await this.host.load([url]);
           this.loaded.add(url);
         } catch (error) {
+          // A user plugin may fail independently; without its built-in provider the server cannot serve clients.
+          if (this.builtins.includes(url)) throw error;
           failed.push(`Plugin ${nameOf(url)} failed to load: ${message(error)}`);
         }
       }
@@ -45,11 +50,12 @@ export class ServerPlugins {
 
   /**
    * Chord's explicit reload (`docs/spec.md` §7), which the user runs from an app's `/reload-plugins`: the plugins
-   * still there in one reload, which removes those whose folder is gone, then each plugin added since. What it did,
-   * for the app to show.
+   * still there in one reload, which removes those whose folder is gone, then each plugin added since. Finally refresh
+   * each dynamic contribution's configuration. Chord deliberately retains unchanged resources across code reloads.
    */
   reload(): Promise<string> {
-    return this.run(async () => {
+    // Two clients share the operation: a queued old-version caller would otherwise block Chord's next retirement.
+    this.reloading ??= this.run(async () => {
       const found = await this.found();
       const gone = [...this.loaded].filter((url) => !found.includes(url));
       const kept = found.filter((url) => this.loaded.has(url));
@@ -62,7 +68,7 @@ export class ServerPlugins {
           lines.push(`Reloaded ${kept.map(nameOf).join(', ') || 'no plugin'}; changed types: `
             + `${report.changed.join(', ') || 'none'}${removed}.`);
         } catch (error) {
-          lines.push(`The reload was refused, and the plugins run as before: ${message(error)}`);
+          return `The reload was refused, and the plugins run as before: ${message(error)}`;
         }
       }
       for (const url of found.filter((candidate) => !this.loaded.has(candidate))) {
@@ -74,8 +80,28 @@ export class ServerPlugins {
           lines.push(`Plugin ${nameOf(url)} failed to load: ${message(error)}`);
         }
       }
+      const table = this.host.registry(Extensions).table();
+      for (const [name, contribution] of table) {
+        if (!isExtensionSource(contribution)) continue;
+        try {
+          lines.push(await contribution.reload((extensions) => {
+            extensionSnapshot(table, { source: contribution, extensions });
+          }));
+        } catch (error) {
+          lines.push(`${name}: configuration refresh failed; previous configuration retained: ${message(error)}`);
+        }
+      }
+      // The registry bridge reports errors independently of Chord's commit. Do not call that a successful refresh.
+      try {
+        extensionSnapshot(table);
+      } catch (error) {
+        lines.push(`Durable extension publication failed; the previous snapshot remains active: ${message(error)}`);
+      }
       return lines.join('\n') || `No plugins are installed in ${this.folder}.`;
+    }).finally(() => {
+      this.reloading = undefined;
     });
+    return this.reloading;
   }
 
   /** One load or reload at a time, as Chord serializes reloads. */
@@ -89,7 +115,7 @@ export class ServerPlugins {
   }
 
   private async found(): Promise<string[]> {
-    const urls: string[] = [];
+    const urls: string[] = [...this.builtins];
     for (const entry of await readdir(this.folder, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name === 'node_modules') continue;
       for (const file of ENTRIES) {

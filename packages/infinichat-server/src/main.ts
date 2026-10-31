@@ -61,7 +61,8 @@ async function serve(): Promise<number> {
     });
     // It disposes its objects, the conversation's among them, then closes its links.
     closes.push(() => host.close());
-    const plugins = new ServerPlugins(host, join(home, 'plugins'), join(runtime, 'node_modules'));
+    const builtin = pathToFileURL(join(runtime, PLUGIN)).href;
+    const plugins = new ServerPlugins(host, join(home, 'plugins'), join(runtime, 'node_modules'), [builtin]);
     // The process, for every plugin, before any loads.
     await host.install({
       name: 'infinichat.process',
@@ -73,8 +74,6 @@ async function serve(): Promise<number> {
         },
       }), { lifetime: 'host' })),
     });
-    const builtin = pathToFileURL(join(runtime, PLUGIN)).href;
-    await host.load([builtin]);
     for (const failure of await plugins.load()) console.error(failure);
     const installed = await installedRelease(runtime);
     const server = await listen(host, home, installed?.version ?? INFINICHAT_SERVER_VERSION);

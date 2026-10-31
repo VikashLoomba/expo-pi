@@ -57,6 +57,13 @@ The attach control in the composer offers **Take Photo** and **Choose Photos**. 
 
 Each chat can run its tools on a remote machine over SSH instead of the on-device workspace. Add machines in **Remote machines**: the app tests the connection, shows the server's host-key fingerprint for out-of-band comparison, and provisions the pi-env daemon automatically (verified by SHA-256, uploaded once per daemon version). SSH passwords and private keys live in the Keychain; host metadata lives in app settings storage. A chat's remote working directory is optional — blank runs in the account's home directory, and **Choose a folder** browses the machine one folder at a time in a native list, with a search that runs `find` a few levels below the shown folder, so a path never has to be remembered. One SSH connection per machine is shared by every chat and working directory on it, and a credential or host-key change applies at the machine's next connection start. The error copy points at Tailscale for connectivity, but any reachable SSH host works.
 
+## Server plugins and MCP
+
+When InfiniChat runs on a server, `/reload-plugins` reloads built-in and user plugins and refreshes
+`~/.infinichat/mcp.json` without restarting the conversation or code-mode sandbox. See
+[server plugins, configuration, ownership and release](docs/server-plugins.md) for supported configuration,
+MCP reconnection semantics, failure handling and the upstream Pi Durable patterns.
+
 ## Persistent chats and lifecycle
 
 Chats receive Pi's own `CodingTools` (`read`, `write`, `edit`, and `bash`), with Pi's default tool execution. Each chat has a private, persistent `/workspace`: a real directory in the app's documents (`workspaces/<id>`), accessed through `expo-file-system`. Each workspace also has its own temporary directory under the system cache, exposed as `/tmp`, which nothing deletes and the system may purge. Long bash output spills to a `/tmp` file once it passes Pi's thresholds, including partial output on abort or timeout, and can be read back with the file tools. Bash runs just-bash's interpreted shell with text tools, jq and checksums; JavaScript, Python, network commands, gzip, links and chmod are not offered.

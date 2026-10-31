@@ -14,7 +14,7 @@ import {
 } from '@earendil-works/pi-mcp';
 import { Check } from 'typebox/value';
 
-import type { LiveExtensions } from './registry';
+import type { ExtensionSource } from './registry';
 
 /**
  * How a server's tools reach the model, as pi's coding agent exposes them (coding-agent `docs/mcp.md`, "Control tool
@@ -91,22 +91,29 @@ function parseServer(name: string, entry: unknown): ServerConfig | string {
   return `MCP server ${name} needs a command (stdio) or a url (streamable HTTP); SSE is not supported.`;
 }
 
-/** One configured server: its client while connected, and the tools and instructions it last listed. */
+/** One connection generation. A reload retires it without interrupting requests that have already borrowed it. */
 class McpServer {
   tools: readonly Tool[] = [];
   instructions?: string;
   private client?: McpClient;
   private connecting?: Promise<McpClient>;
+  private closing?: Promise<void>;
+  private closeClient?: () => Promise<void>;
+  private readonly shutdown = new AbortController();
+  private readonly calls = new Set<Promise<CallToolResult>>();
+  private retired = false;
   private closed = false;
 
-  constructor(readonly name: string, readonly config: ServerConfig, private readonly changed: () => void) {}
+  constructor(readonly name: string, readonly config: ServerConfig, private readonly owner: ServerToolsState) {
+    owner.connections.add(this);
+  }
 
   get exposure(): Exposure {
     const exposure = this.config.exposure ?? 'codemode';
     return exposure === 'codemode-deferred' ? 'codemode' : exposure;
   }
 
-  /** The connected client, connecting when there is none: a dropped connection reconnects on the next call. */
+  /** A dropped connection reconnects on the next call, using this generation's captured configuration. */
   connect(): Promise<McpClient> {
     if (this.closed) return Promise.reject(new Error(`MCP server ${this.name} is closed.`));
     if (this.client?.connectionState === 'connected') return Promise.resolve(this.client);
@@ -116,53 +123,86 @@ class McpServer {
     return this.connecting;
   }
 
-  async call(tool: string, args: Record<string, unknown>, signal: AbortSignal | undefined): Promise<CallToolResult> {
-    return (await this.connect()).callTool(tool, args, { signal });
+  call(tool: string, args: Record<string, unknown>, signal: AbortSignal | undefined): Promise<CallToolResult> {
+    const pending = this.connect().then((client) => client.callTool(tool, args, { signal }));
+    this.calls.add(pending);
+    const settled = () => {
+      this.calls.delete(pending);
+      if (this.retired && this.calls.size === 0) void this.close().catch(this.owner.report);
+    };
+    void pending.then(settled, settled);
+    return pending;
   }
 
-  async close(): Promise<void> {
+  retire(): void {
+    this.retired = true;
+    if (this.calls.size === 0) void this.close().catch(this.owner.report);
+  }
+
+  close(): Promise<void> {
+    this.closing ??= this.finish();
+    return this.closing;
+  }
+
+  private async finish(): Promise<void> {
     this.closed = true;
-    const client = this.client;
+    this.shutdown.abort();
     this.client = undefined;
-    await client?.close();
+    try {
+      await Promise.all([this.closeClient?.(), this.connecting?.catch(() => {})]);
+    } finally {
+      this.owner.connections.delete(this);
+    }
   }
 
   private transport(): McpTransport {
     const { config } = this;
-    if ('url' in config) return new StreamableHttpTransport({ url: config.url, headers: expandAll(config.headers) });
-    return new StdioTransport({
-      command: home(config.command),
-      args: config.args?.map(home),
-      env: expandAll(config.env),
-      // A relative folder is the account's home's, where the server runs.
-      cwd: config.cwd === undefined ? undefined : resolve(homedir(), home(config.cwd)),
-    });
+    if ('url' in config) return new StreamableHttpTransport({ url: config.url, headers: config.headers });
+    return new StdioTransport({ command: config.command, args: config.args, env: config.env, cwd: config.cwd });
   }
 
   private async open(): Promise<McpClient> {
     const client = new McpClient({ name: 'infinichat', version: INFINICHAT_SERVER_VERSION,
       requestTimeoutMs: (this.config.timeout ?? DEFAULT_TIMEOUT) * 1000 });
-    await client.connect(this.transport());
-    if (this.closed) {
-      await client.close();
-      throw new Error(`MCP server ${this.name} is closed.`);
+    let closing: Promise<void> | undefined;
+    const close = () => closing ??= client.close();
+    this.closeClient = close;
+    const abort = () => { void close().catch(this.owner.report); };
+    this.shutdown.signal.addEventListener('abort', abort, { once: true });
+    try {
+      await client.connect(this.transport());
+      client.onClose(() => {
+        if (this.client === client) this.client = undefined;
+      });
+      client.onNotification('notifications/tools/list_changed', () => {
+        void this.list(client).catch(this.owner.report);
+      });
+      const tools = client.serverCapabilities?.tools ? await client.listTools() : [];
+      if (this.closed || client.connectionState !== 'connected') {
+        throw new Error(`MCP server ${this.name} closed during discovery.`);
+      }
+      this.client = client;
+      this.tools = tools;
+      this.instructions = client.instructions;
+      this.changed();
+      return client;
+    } catch (error) {
+      await close();
+      throw error;
+    } finally {
+      this.shutdown.signal.removeEventListener('abort', abort);
     }
-    this.client = client;
-    client.onClose(() => {
-      if (this.client === client) this.client = undefined;
-    });
-    // New tools are added and withdrawn ones become unreachable, as the coding agent follows a changed list.
-    client.onNotification('notifications/tools/list_changed', () => {
-      void this.list(client).catch((error: unknown) => console.error(`MCP server ${this.name}:`, error));
-    });
-    this.instructions = client.instructions;
-    await this.list(client);
-    return client;
   }
 
   private async list(client: McpClient): Promise<void> {
-    this.tools = await client.listTools();
+    const tools = client.serverCapabilities?.tools ? await client.listTools() : [];
+    if (this.client !== client || this.closed || this.retired) return;
+    this.tools = tools;
     this.changed();
+  }
+
+  private changed(): void {
+    if (!this.closed && !this.retired && this.owner.servers.includes(this)) notify(this.owner);
   }
 }
 
@@ -190,98 +230,142 @@ function mcpTool(server: McpServer, tool: Tool, name: string): ToolRegistration 
   });
 }
 
-/**
- * The tools InfiniChat's server adds by default: pi's code mode (`@earendil-works/pi-durable/codemode`, its scripts
- * run by `CodemodeSandbox` in worker threads, pi-codemode's defaults), and the tools of the MCP servers
- * `~/.infinichat/mcp.json` configures, in the `mcpServers` format pi's coding agent and other MCP clients read
- * (coding-agent `docs/mcp.md` "Configure servers"). Servers connect in the background, so a server's tools reach the
- * Harness once it has listed them (`LiveExtensions`); a server named in a script is grouped as its codemode namespace.
- * The process owns the connections and the sandbox, and `close` ends them after the conversation has closed.
- */
-export class ServerTools implements LiveExtensions {
-  private readonly sandbox = new CodemodeSandbox();
-  private readonly toolSearch = createToolSearchExtension();
-  private readonly listeners = new Set<() => void>();
-  private readonly servers: McpServer[] = [];
+/** Retained native resources and data only. The facet rebuilds the source and its implementation on every reload. */
+export interface ServerToolsState {
+  readonly sandbox: CodemodeSandbox;
+  readonly connections: Set<McpServer>;
+  readonly listeners: Set<() => void>;
+  readonly report: (error: unknown) => void;
+  servers: McpServer[];
+}
 
-  /** Reads `mcp.json` in `folder` (`~/.infinichat`); without it there are no MCP servers. */
-  static async open(folder: string, report: (message: string) => void): Promise<ServerTools> {
-    const tools = new ServerTools();
-    const text = await readFile(join(folder, 'mcp.json'), 'utf8').catch(() => undefined);
-    if (text === undefined) return tools;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      report('~/.infinichat/mcp.json is not valid JSON, so no MCP server connects.');
-      return tools;
-    }
-    if (!Check(ConfigFileSchema, parsed)) {
-      report('~/.infinichat/mcp.json needs an mcpServers object, so no MCP server connects.');
-      return tools;
-    }
-    const seen = new Set<string>();
-    for (const [name, entry] of Object.entries(parsed.mcpServers ?? {})) {
-      const config = parseServer(name, entry);
-      // Names that differ only in - and _ name one server, as the coding agent counts them.
-      const key = name.replace(/-/g, '_');
-      if (typeof config === 'string') report(config);
-      else if (seen.has(key)) report(`MCP server ${name} repeats another server's name.`);
-      else if (config.enabled !== false) tools.servers.push(new McpServer(name, config, () => tools.notify()));
-      seen.add(key);
-    }
-    // Invalid entries and failed connections are reported and skip only that server.
-    for (const server of tools.servers) {
-      server.connect().catch((error: unknown) => {
-        report(`MCP server ${server.name} could not connect: ${error instanceof Error ? error.message : error}`);
-      });
-    }
-    return tools;
+const notify = (state: ServerToolsState) => {
+  for (const listener of [...state.listeners]) listener();
+};
+
+/** Validate the whole file before changing anything. Only ENOENT means an intentionally absent configuration. */
+async function configuration(folder: string): Promise<readonly { name: string; config: ServerConfig }[]> {
+  const text = await readFile(join(folder, 'mcp.json'), 'utf8').catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (text === undefined) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('MCP configuration is not valid JSON.');
   }
+  if (!Check(ConfigFileSchema, parsed)) throw new Error('MCP configuration needs an mcpServers object.');
+  const seen = new Set<string>();
+  const result: { name: string; config: ServerConfig }[] = [];
+  for (const [name, entry] of Object.entries(parsed.mcpServers ?? {})) {
+    const config = parseServer(name, entry);
+    if (typeof config === 'string') throw new Error(config);
+    const key = name.replace(/-/g, '_');
+    if (seen.has(key)) throw new Error(`MCP server ${name} repeats another server's name.`);
+    seen.add(key);
+    if (config.enabled === false) continue;
+    // Resolve options once: a phase using an older configuration must never borrow new credentials or endpoints.
+    result.push({ name, config: 'url' in config
+      ? { ...config, headers: expandAll(config.headers) }
+      : { ...config, command: home(config.command), args: config.args?.map(home), env: expandAll(config.env),
+        cwd: config.cwd === undefined ? undefined : resolve(homedir(), home(config.cwd)) } });
+  }
+  return result;
+}
 
-  readonly subscribe = (listener: () => void) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+/** Startup stays responsive while MCP discovery runs; the registered source publishes completed discoveries. */
+export async function openServerTools(folder: string, report: (error: unknown) => void): Promise<ServerToolsState> {
+  const state: ServerToolsState = {
+    sandbox: new CodemodeSandbox(), connections: new Set(), listeners: new Set(), report, servers: [],
   };
+  try {
+    state.servers = (await configuration(folder)).map(({ name, config }) => new McpServer(name, config, state));
+    for (const server of state.servers) void server.connect().catch(report);
+  } catch (error) {
+    report(error);
+  }
+  return state;
+}
 
-  extensions(): readonly Extension[] {
-    const taken = new Set<string>();
-    const tools: ToolRegistration[] = [];
-    for (const server of this.servers) {
-      if (server.exposure === 'hidden') continue;
-      for (const tool of server.tools) {
-        const name = toolName(server.name, tool.name, taken);
-        taken.add(name);
-        tools.push(mcpTool(server, tool, name));
+/** The host calls this after the conversation has closed. It includes clients still connecting or draining. */
+export async function closeServerTools(state: ServerToolsState): Promise<void> {
+  try {
+    await Promise.all([...state.connections].map((server) => server.close().catch(state.report)));
+  } finally {
+    await state.sandbox.close();
+    state.listeners.clear();
+  }
+}
+
+/**
+ * A reload reconnects configured MCP sessions, as a changed command can still name the same executable. Prepare
+ * discovery before publication; a failed configuration or connection keeps the previously working contribution.
+ * Calls already executing drain on their old connection. The code-mode sandbox and Harness are never restarted.
+ */
+async function reloadServerTools(state: ServerToolsState, folder: string,
+  validate: (extensions: readonly Extension[]) => void): Promise<string> {
+  const next = (await configuration(folder)).map(({ name, config }) => new McpServer(name, config, state));
+  try {
+    await Promise.all(next.map(async (server) => {
+      try {
+        await server.connect();
+      } catch (error) {
+        throw new Error(`MCP server ${server.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }));
+    validate(serverExtensions({ ...state, servers: next }));
+  } catch (error) {
+    await Promise.all(next.map((server) => server.close().catch(state.report)));
+    throw error;
+  }
+  const previous = state.servers;
+  state.servers = next;
+  notify(state);
+  for (const server of previous) server.retire();
+  const count = next.reduce((total, server) => total + server.tools.length, 0);
+  return `Reloaded MCP configuration: ${next.length} enabled servers, ${count} discovered tools; code mode refreshed.`;
+}
+
+/** Fresh extension objects over the current contribution, not a mutable extension already held by a phase. */
+function serverExtensions(state: ServerToolsState): readonly Extension[] {
+  const taken = new Set<string>();
+  const tools: ToolRegistration[] = [];
+  for (const server of state.servers) {
+    if (server.exposure === 'hidden') continue;
+    for (const tool of server.tools) {
+      const name = toolName(server.name, tool.name, taken);
+      taken.add(name);
+      tools.push(mcpTool(server, tool, name));
     }
-    const namespaces: CodemodeNamespace[] = this.servers.map((server) => {
-      // Its description, else the first line of its instructions, as the coding agent describes a server.
-      const description = server.config.description ?? server.instructions?.split('\n')[0];
-      return {
-        name: `mcp__${server.name}`,
-        prefix: `mcp__${server.name.replace(/[^A-Za-z0-9_]/g, '_')}__`,
-        ...(description ? { description } : {}),
-        ...(server.instructions === undefined ? {} : { instructions: server.instructions }),
-      };
-    });
-    // `tool_search` loads deferred tools for the model, which the coding agent activates for `deferred` servers.
-    const searched = this.servers.some((server) => server.exposure === 'deferred' && server.tools.length > 0);
-    return [
-      createCodemodeExtension({ sandbox: this.sandbox, namespaces }),
-      ...(tools.length === 0 ? [] : [defineExtension({ name: 'mcp', tools })]),
-      ...(searched ? [this.toolSearch] : []),
-    ];
   }
+  const namespaces: CodemodeNamespace[] = state.servers.map((server) => {
+    const description = server.config.description ?? server.instructions?.split('\n')[0];
+    return {
+      name: `mcp__${server.name}`,
+      prefix: `mcp__${server.name.replace(/[^A-Za-z0-9_]/g, '_')}__`,
+      ...(description ? { description } : {}),
+      ...(server.instructions === undefined ? {} : { instructions: server.instructions }),
+    };
+  });
+  const searched = state.servers.some((server) => server.exposure === 'deferred' && server.tools.length > 0);
+  return [
+    createCodemodeExtension({ sandbox: state.sandbox, namespaces }),
+    ...(tools.length === 0 ? [] : [defineExtension({ name: 'mcp', tools })]),
+    ...(searched ? [createToolSearchExtension()] : []),
+  ];
+}
 
-  async close(): Promise<void> {
-    await Promise.all(this.servers.map((server) => server.close().catch(() => {})));
-    await this.sandbox.close();
-  }
-
-  private notify(): void {
-    for (const listener of [...this.listeners]) listener();
-  }
+/** Called in the Chord factory: defer resource access until activation/commit, when the source becomes visible. */
+export function serverToolSource(state: () => ServerToolsState, folder: () => string): ExtensionSource {
+  return {
+    extensions: () => serverExtensions(state()),
+    subscribe(listener) {
+      const listeners = state().listeners;
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    reload: (validate) => reloadServerTools(state(), folder(), validate),
+  };
 }

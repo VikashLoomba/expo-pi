@@ -11,7 +11,7 @@ export interface ChatCommand {
 export const INFINICHAT_COMMANDS: readonly ChatCommand[] = [
   {
     name: 'reload-plugins',
-    description: 'Load new plugins and reload changed ones on the machine InfiniChat runs on.',
+    description: 'Reload plugins and MCP configuration on the machine InfiniChat runs on.',
   },
 ];
 
