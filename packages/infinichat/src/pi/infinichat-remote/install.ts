@@ -199,18 +199,16 @@ const readService = ['umask 077', 's="$HOME/.infinichat/server.json"', 'running=
   `  pid=$(${PID}); if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then running=1; fi`,
   'fi'];
 
-/**
- * Publishes `$t` at `path` when it differs, and sets `$changed` then, or when no server runs: a reload that failed or
- * was cancelled after an earlier publish left the service manager on the old definition.
- */
+/** Publishes `$t` at `path` when it differs, and sets `$changed` then. */
 const publish = (path: string) => [`if [ -f ${path} ] && cmp -s "$t" ${path}; then changed=0`,
-  `else mkdir -p "$(dirname ${path})"; mv -f "$t" ${path}; changed=1; fi`,
-  'if [ "$running" = 0 ]; then changed=1; fi'];
+  `else mkdir -p "$(dirname ${path})"; mv -f "$t" ${path}; changed=1; fi`];
 
 /**
- * Installs the LaunchAgent and starts it, or boots it out and bootstraps it again when it changed or isn't running.
- * The service stays listed for a moment after `bootout` returns, and a `bootstrap` then fails with an I/O error, so it
- * waits until launchd has let go; the step's timeout bounds the wait.
+ * Installs the LaunchAgent and starts it: boots it out and bootstraps it again when its definition changed, and
+ * otherwise, with no server running, kickstarts it, which leaves one launchd is already starting, as after an update's
+ * exit, so several apps reconnecting at once never restart a server that is still starting. The service stays listed
+ * for a moment after `bootout` returns, and a `bootstrap` then fails with an I/O error, so it waits until launchd has
+ * let go; the step's timeout bounds the wait.
  */
 function launchdScript(): string[] {
   const service = `"$domain"/${LABEL}`;
@@ -221,15 +219,18 @@ function launchdScript(): string[] {
     `if ! launchctl print ${service} >/dev/null 2>&1; then rm -f "$s"; launchctl bootstrap "$domain" "$p"`,
     `elif [ "$changed" = 1 ]; then rm -f "$s"; launchctl bootout ${service}`,
     `  while launchctl print ${service} >/dev/null 2>&1; do sleep 1; done`,
-    '  launchctl bootstrap "$domain" "$p"', 'fi',
+    '  launchctl bootstrap "$domain" "$p"',
+    `elif [ "$running" = 0 ]; then launchctl kickstart ${service}`, 'fi',
     PRINT_MARKER, 'echo launchd'];
 }
 
 /**
- * Installs the systemd user unit and starts it, or starts it again when it changed or isn't running, then reports
- * lingering. Without a user bus (a container), the server starts detached, and the next connection starts it again,
- * as after an update. A detached server to replace gets SIGTERM, and the new one starts only once it is gone; the
- * step's timeout bounds the wait.
+ * Installs the systemd user unit and starts it: restarts it when its definition changed, and otherwise, with no server
+ * running, starts it, which leaves one systemd is already starting, as after an update's exit, so several apps
+ * reconnecting at once never restart a server that is still starting; the reload first catches up an earlier publish
+ * whose reload failed. Then it reports lingering. Without a user bus (a container), the server starts detached, and
+ * the next connection starts it again, as after an update. A detached server to replace gets SIGTERM, and the new one
+ * starts only once it is gone; the step's timeout bounds the wait.
  */
 function systemdScript(args: string[]): string[] {
   return [...readService, 'u="$HOME/.config/systemd/user/infinichat.service"',
@@ -238,6 +239,9 @@ function systemdScript(args: string[]): string[] {
     '  if [ "$changed" = 1 ]; then',
     '    rm -f "$s"; systemctl --user daemon-reload; systemctl --user enable infinichat.service',
     '    systemctl --user restart infinichat.service',
+    '  elif [ "$running" = 0 ]; then',
+    '    systemctl --user daemon-reload; systemctl --user enable infinichat.service',
+    '    systemctl --user start infinichat.service',
     '  else systemctl --user enable infinichat.service; fi',
     `  ${PRINT_MARKER}; echo systemd`,
     '  loginctl show-user "$(id -un)" --property=Linger --value 2>/dev/null || echo unknown',
@@ -258,7 +262,7 @@ function systemdScript(args: string[]): string[] {
 const LIVE = `[ -f "$s" ] && grep -q '"version":' "$s" && pid=$(${PID}) && [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null`;
 
 /**
- * Waits until `server.json` names a live server; the service scripts removed it before starting one. The step's
+ * Waits until `server.json` names a live server, which a server starting writes once it listens. The step's
  * timeout bounds the wait, as pi-env bounds each `ssh` command (`SSH_TIMEOUT_MS`) and its daemon's start
  * (`START_TIMEOUT_MS`) by 60 s.
  */
