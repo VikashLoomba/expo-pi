@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
-// The server's runtime and InfiniChat's server plugin (src/main.ts, src/facet.ts), each one module in dist/, both
-// importing the packages of runtime/package.json from the runtime's node_modules, so the host and every plugin share
-// one instance of each (chord src/loader.ts:17-21). The workspace's own code is bundled into each. --check verifies
-// the generated manifest and that the runtime pins the very packages the workspace builds against.
+// The server's runtime, its tools plugin and InfiniChat's server plugin (src/main.ts, src/tools-facet.ts,
+// src/facet.ts), each one module in dist/, all importing the packages of runtime/package.json from the runtime's
+// node_modules, so the host and every plugin share one instance of each (chord src/loader.ts:17-21). The workspace's
+// own code is bundled into each. --check verifies the generated manifest and that the runtime pins the very packages
+// the workspace builds against.
 const check = process.argv.includes('--check');
 if (process.argv.slice(2).some((arg) => arg !== '--check')) {
   throw new Error('Usage: node scripts/build.mjs [--check]');
@@ -44,7 +45,11 @@ if (check) {
 } else {
   await rm(join(root, 'dist'), { recursive: true, force: true });
   const { metafile } = await build({
-    entryPoints: { main: join(root, 'src/main.ts'), 'plugins/infinichat/server': join(root, 'src/facet.ts') },
+    entryPoints: {
+      main: join(root, 'src/main.ts'),
+      'plugins/tools/server': join(root, 'src/tools-facet.ts'),
+      'plugins/infinichat/server': join(root, 'src/facet.ts'),
+    },
     // Paths in the bundles' comments are relative to this, so every checkout builds the same bytes.
     absWorkingDir: root,
     outdir: 'dist',

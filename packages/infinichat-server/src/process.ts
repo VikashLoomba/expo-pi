@@ -1,4 +1,4 @@
-import { local, opaque } from '@earendil-works/chord';
+import { local, method, opaque } from '@earendil-works/chord';
 import { Type } from '@earendil-works/pi-ai';
 
 /**
@@ -12,7 +12,7 @@ export interface ServerProcess {
   readonly description: string;
   /** Ends the process as failed, so its service manager starts it again: reopening is how pi-durable recovers. */
   fail(error: unknown): void;
-  /** Reloads built-in/user plugins and their configuration, including MCP (`plugins.ts`); says what happened. */
+  /** Reloads the tools plugin and the user's plugins (`plugins.ts`); says what happened, the MCP servers' too. */
   reloadPlugins(): Promise<string>;
 }
 
@@ -24,4 +24,17 @@ export const InfiniChatProcess = local('infinichat.process', {
   version: 1,
   input: Type.Object({}),
   members: { process: opaque<ServerProcess>('infinichat.process@1') },
+});
+
+/**
+ * The runtime's tools plugin (`tools-facet.ts`), one object of lifetime `"host"`, which the host asks after a reload
+ * what its MCP servers did.
+ */
+export const InfiniChatTools = local('infinichat.tools', {
+  version: 1,
+  input: Type.Object({}),
+  members: {
+    /** Connects each server that isn't, then says which connected, reconnected, closed or failed since the last run. */
+    mcp: method(undefined, Type.String()),
+  },
 });

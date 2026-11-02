@@ -25,15 +25,17 @@ const USAGE = ['Usage: node main.js serve',
 
 /** The exit by which an update has the service manager start the new runtime (`update.ts`), EX_TEMPFAIL. */
 const UPDATED = 75;
+/** The tools plugin within the runtime's folder (`tools-facet.ts`), which a runtime release changes. */
+const TOOLS = 'plugins/tools/server.js';
 
 type End = { failed: unknown } | 'updated' | undefined;
 
 /**
  * The Chord host of InfiniChat on this machine (chord `docs/guide.md` "Plugins"): it holds the process, its lock, its
- * clients' links and its updates, and loads InfiniChat's server plugin and the plugins the user installs, which serve
- * everything else. It runs until SIGTERM or SIGINT, an update of its runtime, or a storage error that ends the
- * conversation's Harness, which fails the process so its service manager starts it again: reopening is how
- * pi-durable recovers (README "Errors"). It names and describes the machine itself, as the apps' device lists do.
+ * clients' links and its updates, and loads InfiniChat's server plugin, the tools plugin and the plugins the user
+ * installs, which serve everything else. It runs until SIGTERM or SIGINT, an update of its runtime, or a storage error
+ * that ends the conversation's Harness, which fails the process so its service manager starts it again: reopening is
+ * how pi-durable recovers (README "Errors"). It names and describes the machine itself, as the apps' device lists do.
  */
 async function serve(): Promise<number> {
   const home = join(homedir(), '.infinichat');
@@ -61,8 +63,8 @@ async function serve(): Promise<number> {
     });
     // It disposes its objects, the conversation's among them, then closes its links.
     closes.push(() => host.close());
-    const builtin = pathToFileURL(join(runtime, PLUGIN)).href;
-    const plugins = new ServerPlugins(host, join(home, 'plugins'), join(runtime, 'node_modules'), [builtin]);
+    const plugins = new ServerPlugins(host, join(home, 'plugins'), join(runtime, 'node_modules'),
+      [pathToFileURL(join(runtime, TOOLS)).href]);
     // The process, for every plugin, before any loads.
     await host.install({
       name: 'infinichat.process',
@@ -74,6 +76,8 @@ async function serve(): Promise<number> {
         },
       }), { lifetime: 'host' })),
     });
+    // InfiniChat's first, so its extensions come first; only a release changes it, so `/reload-plugins` leaves it.
+    await host.load([pathToFileURL(join(runtime, PLUGIN)).href]);
     for (const failure of await plugins.load()) console.error(failure);
     const installed = await installedRelease(runtime);
     const server = await listen(host, home, installed?.version ?? INFINICHAT_SERVER_VERSION);

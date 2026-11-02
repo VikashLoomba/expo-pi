@@ -24,18 +24,18 @@ import { ServerConversation } from './conversation';
 import { InfiniChatProcess } from './process';
 import { durableRegistry, Extensions } from './registry';
 import { setTimeZone } from './state';
-import { closeServerTools, openServerTools, serverToolSource } from './tools';
 
 /** The credential store, its backend, and the models over it, which the Harness and the sign-in share. */
 interface Account { backend: CredentialBackend; credentials: ProviderCredentialStore; models: Models }
 
 /**
  * InfiniChat on this machine, one object of lifetime `"host"`, as chord's guide gives a host its Durable Harness
- * (`docs/guide.md` "Durable"): what outlives every client and plugin reload. Reload reconstructs registrations while
- * retaining these resources; a server release still restarts the process (`update.ts`). The
- * conversation's Harness reads its extensions from `Extensions`, which this object fills
- * with InfiniChat's and installed plugins with theirs. It opens the database only while this machine holds the
- * conversation (`ServerConversation`), so it holds the holder rather than the Harness itself.
+ * (`docs/guide.md` "Durable"): what outlives every client and plugin reload. Only a release changes this plugin, and
+ * a release restarts the process (`update.ts`), so its resources' versions stay as they are and never need raising.
+ * The conversation's Harness reads its extensions from `Extensions`, which this object fills with InfiniChat's, the
+ * tools plugin with code mode and MCP (`tools-facet.ts`), and installed plugins with theirs. It opens the database
+ * only while this machine holds the conversation (`ServerConversation`), so it holds the holder rather than the
+ * Harness itself.
  */
 export const InfiniChatMachine = local('infinichat.machine', {
   version: 1,
@@ -61,7 +61,7 @@ function live<T>(value: T | undefined, name: string): T {
 const callContext = (ctx: Ctx<InfiniChatPrincipal>) => withAbortSignal(ctx.signal, BACKGROUND_CONTEXT);
 const LOADING = { status: 'loading' } as const;
 
-/** InfiniChat's built-in plugin, included in the same explicit reload as user-installed facets. */
+/** InfiniChat's server plugin: the facet a server host loads from its runtime (`main.ts`) and replaces on update. */
 export default defineFacet<InfiniChatPrincipal>((facet) => {
   facet.serve(InfiniChatMachine, (_input, _principal, self) => {
     const host = self.get(InfiniChatProcess, {});
@@ -113,17 +113,9 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
       }
       console.error('InfiniChat:', error instanceof Error ? error.message : error);
     };
-    // Code mode and the MCP servers, on by default; their connections and sandbox close after the conversation.
-    const tools = self.resource('tools', {
-      version: 1,
-      deps: [host],
-      open: () => openServerTools(proc().home, report),
-      close: closeServerTools,
-    });
     // What the Harness reads; a table pi-durable refuses shows as the conversation's report when it is open.
     const registry = self.resource('registry', {
       version: 1,
-      deps: [tools],
       open: () => durableRegistry(facet.registry(Extensions), report),
       close: (reader) => reader.close(),
     });
@@ -160,10 +152,7 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
       serverDevices(() => ({ name: proc().device, description: proc().description }),
         () => machines.value),
       () => conversation.value.current?.harness, (error) => conversation.value.current?.report(error));
-    self.register(Extensions, {
-      ...Object.fromEntries(parts.extensions.map((extension) => [extension.name, extension])),
-      'infinichat.server-tools': serverToolSource(() => tools.value, () => proc().home),
-    });
+    self.register(Extensions, Object.fromEntries(parts.extensions.map((extension) => [extension.name, extension])));
     return {
       account: self.expose(account),
       signIn: self.expose(signIn),

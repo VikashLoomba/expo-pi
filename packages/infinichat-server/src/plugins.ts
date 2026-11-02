@@ -5,7 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Host } from '@earendil-works/chord';
 import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 
-import { extensionSnapshot, Extensions, isExtensionSource } from './registry';
+import { InfiniChatTools } from './process';
+import { extensionSnapshot, Extensions } from './registry';
 
 /** A plugin's server facet, the first of these its folder has: Node strips TypeScript's types as it loads. */
 const ENTRIES = ['server.ts', 'server.mts', 'server.js', 'server.mjs'];
@@ -15,11 +16,12 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 const nameOf = (url: string) => basename(dirname(fileURLToPath(url)));
 
 /**
- * The plugins the user installs on this machine, outside the runtime so updates leave them be: each folder in
- * `folder` (`~/.infinichat/plugins`) with a server facet (chord `docs/guide.md` "Plugins"), loaded after the built-ins.
- * Both participate in explicit reload. Imports of Chord, pi and TypeBox resolve through `node_modules`, a link to
- * the runtime's `modules`, so a plugin shares the host's single instances, kept outside a facet's folder
- * (chord `src/loader.ts:17-21`).
+ * The plugins Chord's hot reload takes on this machine: the runtime's built-ins (the tools plugin, `tools-facet.ts`),
+ * and those the user installs outside the runtime, so updates leave them be: each folder in `folder`
+ * (`~/.infinichat/plugins`) with a server facet (chord `docs/guide.md` "Plugins"), loaded after the built-ins. Their
+ * imports of Chord, pi and TypeBox resolve through `node_modules` there, a link to the runtime's `modules`, so a plugin
+ * shares the host's single instances, which Chord's loader keeps outside a facet's folder (chord
+ * `src/loader.ts:17-21`). InfiniChat's own plugin is not among them: only a release changes it (`update.ts`).
  */
 export class ServerPlugins {
   /** The facets loaded, by name. */
@@ -39,7 +41,7 @@ export class ServerPlugins {
           await this.host.load([url]);
           this.loaded.add(url);
         } catch (error) {
-          // A user plugin may fail independently; without its built-in provider the server cannot serve clients.
+          // A user plugin may fail on its own; a built-in that fails is a broken release.
           if (this.builtins.includes(url)) throw error;
           failed.push(`Plugin ${nameOf(url)} failed to load: ${message(error)}`);
         }
@@ -50,8 +52,8 @@ export class ServerPlugins {
 
   /**
    * Chord's explicit reload (`docs/spec.md` §7), which the user runs from an app's `/reload-plugins`: the plugins
-   * still there in one reload, which removes those whose folder is gone, then each plugin added since. Finally refresh
-   * each dynamic contribution's configuration. Chord deliberately retains unchanged resources across code reloads.
+   * still there in one reload, which removes those whose folder is gone, then each plugin added since. What it did,
+   * for the app to show, with what the tools plugin's reload did to the MCP servers.
    */
   reload(): Promise<string> {
     // Two clients share the operation: a queued old-version caller would otherwise block Chord's next retirement.
@@ -60,16 +62,14 @@ export class ServerPlugins {
       const gone = [...this.loaded].filter((url) => !found.includes(url));
       const kept = found.filter((url) => this.loaded.has(url));
       const lines: string[] = [];
-      if (kept.length > 0 || gone.length > 0) {
-        try {
-          const report = await this.host.reload(kept, { remove: gone });
-          for (const url of gone) this.loaded.delete(url);
-          const removed = gone.length ? `; removed ${gone.map(nameOf).join(', ')}` : '';
-          lines.push(`Reloaded ${kept.map(nameOf).join(', ') || 'no plugin'}; changed types: `
-            + `${report.changed.join(', ') || 'none'}${removed}.`);
-        } catch (error) {
-          return `The reload was refused, and the plugins run as before: ${message(error)}`;
-        }
+      try {
+        const report = await this.host.reload(kept, { remove: gone });
+        for (const url of gone) this.loaded.delete(url);
+        const removed = gone.length ? `; removed ${gone.map(nameOf).join(', ')}` : '';
+        lines.push(`Reloaded ${kept.map(nameOf).join(', ')}; changed types: `
+          + `${report.changed.join(', ') || 'none'}${removed}.`);
+      } catch (error) {
+        return `The reload was refused, and the plugins run as before: ${message(error)}`;
       }
       for (const url of found.filter((candidate) => !this.loaded.has(candidate))) {
         try {
@@ -80,24 +80,15 @@ export class ServerPlugins {
           lines.push(`Plugin ${nameOf(url)} failed to load: ${message(error)}`);
         }
       }
-      const table = this.host.registry(Extensions).table();
-      for (const [name, contribution] of table) {
-        if (!isExtensionSource(contribution)) continue;
-        try {
-          lines.push(await contribution.reload((extensions) => {
-            extensionSnapshot(table, { source: contribution, extensions });
-          }));
-        } catch (error) {
-          lines.push(`${name}: configuration refresh failed; previous configuration retained: ${message(error)}`);
-        }
-      }
-      // The registry bridge reports errors independently of Chord's commit. Do not call that a successful refresh.
+      // In a root of its own, which runs the code just committed (chord `docs/spec.md` §6).
+      lines.push(await this.host.root(async (ctx) => (await ctx.get(InfiniChatTools, {})).mcp(ctx)));
+      // Chord commits a table pi-durable refuses, and the Harness keeps its last snapshot: say so here too.
       try {
-        extensionSnapshot(table);
+        extensionSnapshot(this.host.registry(Extensions).table());
       } catch (error) {
-        lines.push(`Durable extension publication failed; the previous snapshot remains active: ${message(error)}`);
+        lines.push(`The Harness keeps the extensions it had: ${message(error)}`);
       }
-      return lines.join('\n') || `No plugins are installed in ${this.folder}.`;
+      return lines.join('\n');
     }).finally(() => {
       this.reloading = undefined;
     });

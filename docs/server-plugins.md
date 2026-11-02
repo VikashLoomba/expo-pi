@@ -1,23 +1,23 @@
 # Server plugins, MCP and code mode
 
 The server uses Pi Durable / Chord **1.4.0**, upstream tag `v1.4.0`, commit
-`4a080252f06caf63a525d7873c5d94d3c23887e0`. The starting patterns are Chord's
-`packages/chord/docs/guide.md` sections **Plugins**, **Hot reload**, and **Durable**, and Durable's
-`packages/durable/test/examples/10-registry-reload.ts` and `31-reload-and-restart.ts`.
+`4a080252f06caf63a525d7873c5d94d3c23887e0`. The starting patterns are Chord's `packages/chord/docs/guide.md`
+sections **Plugins**, **Declarations**, **Hot reload** (Resources) and **Durable**, and Durable's README sections
+**Extensions**, **Reload** and **Code Mode** with `docs/spec.md` §7.4–7.5.
+
+## What the server loads
+
+The Chord host (`main.js`) loads, in order: InfiniChat's plugin (`plugins/infinichat/server.js`, `src/facet.ts`), the
+tools plugin (`plugins/tools/server.js`, `src/tools-facet.ts`: code mode and MCP), and the user's plugins, each a
+folder of `~/.infinichat/plugins` with a `server.ts`, `server.mts`, `server.js` or `server.mjs` facet.
 
 ## Reload from a client
 
-Send `/reload-plugins` from the Mac or iOS client while InfiniChat runs on a server. It:
-
-1. Reloads the built-in InfiniChat facet and installed facets under `~/.infinichat/plugins`, loads newly added
-   folders, and removes deleted ones. A user facet's entry is `server.ts`, `server.mts`, `server.js`, or `server.mjs`.
-2. Explicitly refreshes configuration for dynamic extension contributors, including `~/.infinichat/mcp.json`.
-   Chord keeps an unchanged resource across a code reload; its `open` callback is not a configuration reload hook.
-3. Reports plugin-code, MCP discovery/configuration, and Durable registry-publication outcomes separately.
-
-The command works with no user-installed plugins. It does not reopen the conversation database, restart the
-Harness, reconnect clients, or close the code-mode sandbox. A **server release update** is different: it restarts
-into the new runtime, and Durable resumes unfinished work.
+`/reload-plugins` from the Mac or iOS client reloads the tools plugin and the user's plugins in one Chord reload,
+removes plugins whose folder is gone, then loads new folders. InfiniChat's own plugin is not reloaded: only a release
+changes it, and a release restarts the server. The conversation, its Harness and the clients' links stay as they are.
+The reply says which types Chord changed and what happened to the MCP servers: connected, reconnected, closed,
+failed or unchanged, and which entries were skipped and why. A refused reload leaves everything as it was.
 
 ## MCP configuration
 
@@ -36,65 +36,53 @@ into the new runtime, and Durable resumes unfinished work.
 ```
 
 A server can instead have a streamable HTTP `url` and optional `headers`. Stdio supports `args`, `env`, and `cwd`.
-`${NAME}` in explicit environment/header values expands from the server process environment. A leading `~/` in
-command, arguments, or working directory expands to the account's home. Common fields are `enabled`, `description`,
-`timeout` (seconds per MCP request; default 60), and `exposure`. OAuth and legacy SSE are not implemented.
+`${NAME}` in `env` and `headers` values expands from the server process's environment; a name it lacks skips that
+server, and the reply names the variable. A leading `~/` in command, arguments, or working directory expands to the
+account's home. Common fields are `enabled`, `description`, `timeout` (seconds per MCP request; default 60), and
+`exposure`. OAuth and legacy SSE are not implemented.
 
-Exposure retains the server's existing behavior: `direct` tools are offered to the model; `codemode` (default,
-including its `codemode-deferred` alias) and `deferred` tools are callable through code mode but omitted from its
-inline prompt declarations. A `deferred` server also enables Durable's `tool_search`, which can load deferred tools
-for direct model calls. `hidden` tools are not registered. This is not a separate per-server authorization boundary.
+Exposure: `direct` tools are offered to the model; `codemode` (default, including its `codemode-deferred` alias) and
+`deferred` tools are callable through code mode but omitted from its inline prompt declarations. A `deferred` server
+also enables Durable's `tool_search`, which can load deferred tools for direct model calls. `hidden` tools are not
+registered. This is not a separate per-server authorization boundary.
 
-At startup, discovery runs in the background. A connected server's `notifications/tools/list_changed` updates
-its contribution without a client command. Configuration changes require `/reload-plugins`.
+## How a reload treats servers
 
-On explicit reload the server validates the entire file, opens the proposed enabled servers, discovers their tools,
-and validates their combined extension contribution before replacing the active configuration. A malformed or
-unreadable file, invalid entry, failed connection/discovery, or conflicting contribution leaves the previous MCP
-configuration in use and is reported to the client. Only a missing file means no configured servers; `{ "mcpServers":
-{} }` explicitly removes them too. Fix a failed server and reload to retry.
+The tools plugin's object reads `mcp.json` on every run and declares the code-mode sandbox and one Chord resource per
+enabled server, named `mcp__<server>`, whose version is a hash of its resolved connection (command, args, env and
+cwd, or url and headers, and timeout). Chord keeps a resource whose version is unchanged, opens a changed one beside
+the old one, and closes one no longer declared. So a reload connects added servers, reconnects changed ones, closes
+removed or disabled ones, and leaves the others connected; a change of only `exposure` or `description` republishes
+the tools without reconnecting. A server left unchanged that isn't connected, for example one that was down, is
+tried again.
 
-**Reload reconnects MCP sessions**, even if their command or URL is unchanged, so changed stdio implementations can
-be picked up. A stateful MCP server may therefore lose process/session-local handles. Requests already executing
-finish on their old connection, which closes when they settle. Reload does not promise to retain old remote session
-state, and already-dispatched tool calls are not retried on a different connection.
+A server connects and lists its tools in the background, so one that fails never fails the start or the reload; the
+reply and the server's log report it. A dropped connection reconnects at the next call, and
+`notifications/tools/list_changed` republishes the tools without a reload. A malformed or unreadable `mcp.json` is
+reported and configures no server, so every server closes and code mode stays; fix it and reload. Calls already
+running finish on their old connection, which closes once they settle.
 
-The code-mode sandbox itself stays alive: changing MCP namespaces does not discard a running script. Subsequent
-nested tool calls resolve according to Durable's own phase/registry semantics, not an app-owned script-wide snapshot.
+## Extensions
 
-## Extension ownership
+`src/registry.ts` defines the Chord registry `infinichat.extensions`. Host-lifetime plugin objects register Durable
+`Extension`s with `self.register(Extensions, ...)`. The tools plugin registers an `ExtensionSource` instead
+(`extensions()` and `subscribe()`), because a server's tools arrive after it connects while a registration changes
+only with a reload. InfiniChat's `durableRegistry` is Durable's `RegistryReader` over these tables, which Chord leaves
+to the application (spec §8): one complete snapshot per table and per source change, resubscribing whenever a commit
+swaps the table, so a reload or removal of a plugin replaces or withdraws exactly what it registered. Two plugins
+contributing one extension name are refused; the Harness keeps its previous snapshot and the reply says so.
 
-`packages/infinichat-server/src/registry.ts` defines the Chord `infinichat.extensions` registry. Host-lifetime plugin
-objects contribute with `self.register(Extensions, ...)`. Ordinary values are Durable `Extension` objects.
-
-For tools discovered asynchronously, the same registry also accepts a small application `ExtensionSource` adapter:
-
-- `extensions()` returns fresh extension objects for the current state;
-- `subscribe(listener)` reports changes between code reloads;
-- `reload(validate)` prepares a configuration refresh, calls `validate(candidateExtensions)` before publishing,
-  and returns a human-readable result; rejection must leave its current configuration intact.
-
-This adapter is the application's registry reader, not an additional Pi SDK extension API. It is needed because
-Chord's registration table changes on code commits, while MCP tool discovery can change afterward. The reader
-subscribes to the current sources and publishes a complete immutable Durable snapshot. Duplicate extension owners
-are rejected; a built-in live contribution cannot silently overwrite a user plugin after the table has been read.
-
-The built-in facet registers the MCP/code-mode source just like the other extensions. Its source functions are
-recreated when the facet reloads. Only native resources and data are retained: the sandbox, current connections,
-and listeners. Durable extension names remain `mcp`, `codemode`, and `tool-search` as supplied by their factories.
-The Harness and its registry reader stay open, so existing conversations and subagents see future publications.
-
-The host owns clients, including clients still connecting or draining; individual operations only borrow a shared
-client. Canceling one operation does not close another's client. Retired callbacks cannot publish into the current
-server set. Shutdown closes conversation work first, then every remaining MCP connection and the sandbox.
+At shutdown the host disposes the tools plugin's object before or with InfiniChat's. A running script finds its
+sandbox closed and waits for the Harness's abort, so it resumes at the next start (durable
+`src/codemode/codemode.ts`); an MCP server closes once its calls settle, which the Harness's close aborts.
 
 ## Release
 
-Only the server version and its generated manifest change for a server release. Run the server package's lint,
-typecheck, build, and `check`, commit and push, then run `pnpm release` there. It produces the runtime tarball,
-`infinichat.js`, and the hash-bearing `release.json`. `--latest=false` is intentional: GitHub Latest belongs to the
-Mac app, not the server. The release script supports GNU tar on Linux and BSD tar on macOS.
+The tools plugin is part of the runtime: the runtime tarball holds `plugins/tools/server.js`, and the runtime key
+hashes `package-lock.json`, `main.js` and that plugin, so a server whose runtime differs downloads the new one and
+restarts into it. `release.json` keeps its schema (`version`, `runtime.key`/`sha256`, `plugin.sha256`). Run the
+server package's lint, typecheck, build and `check`, commit and push, then run `pnpm release` there. `--latest=false`
+is intentional: GitHub Latest belongs to the Mac app, not the server.
 
 A server installed from a release checks at startup, daily, and on SIGHUP. It verifies downloaded artifacts, closes
-its Harness and exits 75 for the service manager to restart it. Verify the live advertised version and service,
-not only the downloaded manifest. Old runtime folders are cleaned on startup; keep recovery assets separately.
+its Harness and exits 75 for the service manager to restart it. Old runtime folders are cleaned on startup.

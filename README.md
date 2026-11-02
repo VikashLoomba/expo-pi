@@ -59,10 +59,11 @@ Each chat can run its tools on a remote machine over SSH instead of the on-devic
 
 ## Server plugins and MCP
 
-When InfiniChat runs on a server, `/reload-plugins` reloads built-in and user plugins and refreshes
-`~/.infinichat/mcp.json` without restarting the conversation or code-mode sandbox. See
-[server plugins, configuration, ownership and release](docs/server-plugins.md) for supported configuration,
-MCP reconnection semantics, failure handling and the upstream Pi Durable patterns.
+When InfiniChat runs on a server, `/reload-plugins` reloads the tools plugin (code mode and the MCP servers of
+`~/.infinichat/mcp.json`) and the user's plugins with Chord's hot reload, without restarting the conversation: added
+servers connect, changed ones reconnect, removed ones close, and the others stay connected. See
+[server plugins, MCP and release](docs/server-plugins.md) for configuration, failure handling and the upstream
+patterns.
 
 ## Persistent chats and lifecycle
 
