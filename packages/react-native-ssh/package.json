@@ -1,7 +1,8 @@
 {
   "name": "@automatalabs/react-native-ssh",
   "version": "0.4.0",
-  "description": "Native SSH client for React Native and Expo \u2014 russh (Rust) wrapped in Nitro Modules. Connections, shells, exec and keys; bring your own terminal. The owner's fork, with an onBanner handler, kept in this workspace.",
+  "description": "Native SSH client for React Native and Expo — russh (Rust) wrapped in Nitro Modules. Connections, shells, exec and keys; bring your own terminal. The owner's fork, with an onBanner handler, kept in this workspace.",
+  "homepage": "https://github.com/VikashLoomba/expo-pi/tree/main/packages/react-native-ssh",
   "main": "./lib/index.js",
   "module": "./lib/index.js",
   "types": "./lib/index.d.ts",
