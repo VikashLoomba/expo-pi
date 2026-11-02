@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: UniiChat’s [zoom and date](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1020-L1045), [their tools](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L192-L198), [agent logs](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1186-L1192), [clipping and pages](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Clip.ts#L1-L13) and [the clip](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Clip.ts#L18-L43), [native hooks](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L2901-L3028), [native tool tasks](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L3030-L3654).
+Sources: UniiChat’s [zoom and date](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1020-L1045), [their tools](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Tools.ts#L192-L198), [agent logs](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Memory.ts#L1186-L1192), [clipping and pages](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Clip.ts#L1-L13) and [the clip](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Clip.ts#L18-L43), [native hooks](https://github.com/earendil-works/pi/blob/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/durable/docs/spec.md#L3328-L3455), [native tool tasks](https://github.com/earendil-works/pi/blob/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/durable/docs/spec.md#L3551-L4200).
 
 `zoom(id,n)` opens a line of the tree: `n` a power of two, `id` a multiple of `n`, and the line within the messages logged. A line that isn’t one is an answer, not a failed call: it lists the tree’s roots, as UniiChat’s zoom does. For `n>1`, return its two immediate children, not a fresh summary; a child not built yet shows `(not summarized yet: zoom it)`. For `n=1`, return the original message headed `id+0|`, as UniiChat’s zoom heads a message whole, an `[image]` line for each image, and its images. An `id` that does not start with a letter is a message id, since a model may pass one as a string. `date(id)` returns the message’s date and time in the device’s local time, formatted as UniiChat’s (`sv-SE`, such as `2026-10-19 15:40:12`), and `No message N.` for a message there isn’t. No turn states the current time, as in UniiChat: the model learns it with `date` on the newest message. Long recall has explicit lossless pagination by page number; UniiChat’s zoom takes a character offset `at` instead. `zoom(name)` reads the named agent’s log as UniiChat keeps one, its lines `i|kind: text` separated by blank lines: `note: subagent` (with ` at effort <level>` when spawned with one), then each message it was sent, in its own words without the view and devices sent with them, its replies, its calls and their results, an attempt cut by a failure or a stop marked `[cut off: <why>]`, and no thinking; its images come with the first page. An agent there isn’t is an answer, `No agent <name>.`, as UniiChat’s log gives.
 
@@ -22,11 +22,7 @@ The implementation must compose these narrowly scoped native extensions rather t
 
 ```typescript
 import type { Context } from "@earendil-works/chord";
-import {
-  Type,
-  type ImageContent,
-  type TextContent,
-} from "@earendil-works/pi-ai";
+import { type ImageContent, type TextContent } from "@earendil-works/pi-ai";
 import {
   defineExtension,
   defineTool,
@@ -39,6 +35,7 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { type ExecutionEnv, getOrThrow } from "@earendil-works/pi-durable/env";
+import { int, obj, opt, str, union } from "@earendil-works/pi-schema";
 import {
   MemoryDoc,
   MessageDoc,
@@ -84,14 +81,14 @@ export function memoryTools(root: ConversationId) {
     description:
       "Open line id+n into its two children; n=1 gives the complete message with images, in pages. A string id opens the named agent’s separate chat. Use page=0 first.",
     replay: "safe",
-    parameters: Type.Object({
-      id: Type.Union([
-        Type.Integer({ minimum: 0 }),
-        Type.String({ minLength: 1 }),
-      ]),
-      n: Type.Optional(Type.Integer({ minimum: 1 })),
-      page: Type.Optional(Type.Integer({ minimum: 0 })),
-    }),
+    parameters: obj(
+      {
+        id: union([int({ minimum: 0 }), str({ minLength: 1 })]),
+        n: opt(int({ minimum: 1 })),
+        page: opt(int({ minimum: 0 })),
+      },
+      { open: true },
+    ),
     outputLimits: { maxBytes: 120_000, maxLines: 30_000 },
     async execute({ id: given, n = 1, page = 0 }, api, context) {
       const images: ImageContent[] = [];
@@ -177,7 +174,7 @@ export function memoryTools(root: ConversationId) {
     name: "date",
     description: "The date and time of message id.",
     replay: "safe",
-    parameters: Type.Object({ id: Type.Integer({ minimum: 0 }) }),
+    parameters: obj({ id: int({ minimum: 0 }) }, { open: true }),
     async execute({ id }, api, context) {
       const message = Number.isSafeInteger(id)
         ? await api.snapshot(MessageDoc, root, String(id), context)

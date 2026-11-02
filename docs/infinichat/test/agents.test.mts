@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import {
-  Type,
   createModels,
   fauxAssistantMessage,
   fauxProvider,
@@ -11,6 +10,7 @@ import {
   type Context as ModelContext,
   type FauxResponseStep,
 } from '@earendil-works/pi-ai';
+import { obj } from '@earendil-works/pi-schema';
 import {
   AgentDoc,
   Harness,
@@ -90,7 +90,7 @@ async function agentHarness(route: FauxResponseStep, work: () => Promise<void> =
   const workTool = defineTool({
     name: 'work',
     description: 'Work for a while.',
-    parameters: Type.Object({}),
+    parameters: obj({}, { open: true }),
     async execute() {
       await work();
       return { output: [{ type: 'text' as const, text: 'worked' }] };
@@ -111,7 +111,7 @@ async function agentHarness(route: FauxResponseStep, work: () => Promise<void> =
     {
       models,
       registry,
-      onReport: (error) => reports.push(error),
+      onReport: (report) => reports.push(report),
       // As openOptChat sets them.
       settings: {
         toolExecution: 'sequential', steeringMode: 'all', followUpMode: 'all', afterFailedRun: 'withdraw',

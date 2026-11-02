@@ -6,9 +6,8 @@ import { promisify } from 'node:util';
 
 import { PLUGIN } from '@pi-agent/infinichat/pi/infinichat-remote/install';
 import {
-  compareVersions, latestServerRelease, PLUGIN_FILE, releaseFile, runtimeFile, ServerReleaseSchema, type ServerRelease,
+  compareVersions, isServerRelease, latestServerRelease, PLUGIN_FILE, releaseFile, runtimeFile, type ServerRelease,
 } from '@pi-agent/infinichat/pi/infinichat-remote/release';
-import { Check } from 'typebox/value';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** pi-env's `UPLOAD_TIMEOUT_MS`, as an app's setup bounds the same download (`install.ts`). */
@@ -23,7 +22,7 @@ export async function installedRelease(runtime: string): Promise<ServerRelease |
   const text = await readFile(join(runtime, RELEASE), 'utf8').catch(() => undefined);
   if (text === undefined) return undefined;
   const value: unknown = JSON.parse(text);
-  return Check(ServerReleaseSchema, value) ? value : undefined;
+  return isServerRelease(value) ? value : undefined;
 }
 
 /** A release file, verified against `expected`. */

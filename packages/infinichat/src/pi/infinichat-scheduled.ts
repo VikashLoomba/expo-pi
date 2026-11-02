@@ -1,14 +1,14 @@
-import type { AttachedReplicatedState, JsonValue } from '@earendil-works/chord';
+import type { JsonValue } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { Type, type Static } from '@earendil-works/pi-ai';
-import type { Harness, TaskGraph } from '@earendil-works/pi-durable';
+import { num, obj, type Static } from '@earendil-works/pi-schema';
+import type { Harness, TaskGraphWatch } from '@earendil-works/pi-durable';
 
-import { SCHEDULED_TASK, ScheduledInputSchema, type ScheduledInput } from './infinichat/schedule';
+import { SCHEDULED_TASK, ScheduledInputProperties, type ScheduledInput } from './infinichat/schedule';
 
 const context = BACKGROUND_CONTEXT;
 
 /** A scheduled task still waiting, by the number of pi-durable's own task ID. */
-export const ScheduledTaskSchema = Type.Object({ id: Type.Number(), ...ScheduledInputSchema.properties });
+export const ScheduledTaskSchema = obj({ id: num(), ...ScheduledInputProperties }, { open: true });
 export type ScheduledTask = Static<typeof ScheduledTaskSchema>;
 
 /** The input of a scheduled task, read from pi-durable's own record. */
@@ -23,23 +23,24 @@ function scheduledInput(value: JsonValue): ScheduledInput | undefined {
  * Scheduled tasks sheet shows them, and the phone mirrors them as local notifications wherever they run.
  */
 export class ScheduledTasks {
-  private graph?: AttachedReplicatedState<TaskGraph>;
+  private graph?: TaskGraphWatch;
   private tasks?: readonly ScheduledTask[];
   private readonly listeners = new Set<() => void>();
-  private unsubscribe = () => {};
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
 
   constructor(private readonly harness: Harness, private readonly report: (error: unknown) => void) {}
 
   async start(): Promise<void> {
-    const graph = await this.harness.taskGraph(context);
+    const graph = await this.harness.watchTaskGraph(context);
     if (this.closed) {
-      graph.dispose();
+      await graph.stop();
       return;
     }
     this.graph = graph;
-    this.unsubscribe = graph.subscribe(this.schedule);
+    graph.start(async (call) => {
+      if (call.kind === 'value') this.schedule();
+    });
     this.schedule();
   }
 
@@ -53,8 +54,7 @@ export class ScheduledTasks {
   /** Stops following the Harness; a read under way finishes on its own. */
   close(): void {
     this.closed = true;
-    this.unsubscribe();
-    this.graph?.dispose();
+    void this.graph?.stop();
   }
 
   private readonly schedule = () => {

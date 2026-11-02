@@ -1,15 +1,18 @@
-import { Type, type Message, type Static, type UserMessage } from '@earendil-works/pi-ai';
+import type { Message, UserMessage } from '@earendil-works/pi-ai';
+import { stringLiteral } from '@earendil-works/pi-ai/providers/schema-builders';
+import { arr, obj, str, union, type Static } from '@earendil-works/pi-schema';
 
 /** pi-ai's image part without its tag: what a saved message carries and what the composer sends. */
-export const ChatImageSchema = Type.Object({ data: Type.String(), mimeType: Type.String() });
+export const ChatImageProperties = { data: str(), mimeType: str() };
+export const ChatImageSchema = obj(ChatImageProperties, { open: true });
 export type ChatImage = Static<typeof ChatImageSchema>;
 
 /** pi-ai's `UserMessage` content, as a caller on another host sends it: text, or text and image parts. */
-export const UserInputSchema = Type.Union([
-  Type.String(),
-  Type.Array(Type.Union([
-    Type.Object({ type: Type.Literal('text'), text: Type.String() }),
-    Type.Object({ type: Type.Literal('image'), ...ChatImageSchema.properties }),
+export const UserInputSchema = union([
+  str(),
+  arr(union([
+    obj({ type: stringLiteral('text'), text: str() }, { open: true }),
+    obj({ type: stringLiteral('image'), ...ChatImageProperties }, { open: true }),
   ])),
 ]);
 

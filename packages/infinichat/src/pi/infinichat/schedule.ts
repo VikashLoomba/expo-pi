@@ -1,4 +1,4 @@
-import { Type, type Static } from '@earendil-works/pi-ai';
+import { num, obj, str, type Static } from '@earendil-works/pi-schema';
 import { defineTask, defineTool, type ConversationId, type Tx } from '@earendil-works/pi-durable';
 
 import { AgentCallDoc } from './agents';
@@ -7,7 +7,8 @@ import { AgentCallDoc } from './agents';
 export const SCHEDULED_TASK = 'optchat.scheduled-task';
 
 /** What the main agent is sent, and when, as a Harness clock time. */
-export const ScheduledInputSchema = Type.Object({ task: Type.String(), until: Type.Number() });
+export const ScheduledInputProperties = { task: str(), until: num() };
+export const ScheduledInputSchema = obj(ScheduledInputProperties, { open: true });
 export type ScheduledInput = Static<typeof ScheduledInputSchema>;
 
 /** Admits a work message to the main agent in the caller's commit, as OptChat admits an agent's report. */
@@ -52,13 +53,13 @@ export function scheduleTool(rootId: ConversationId, scheduled: ReturnType<typeo
       + 'aren\'t running then, the task reaches you as a message "[Scheduled task]" followed by the task, as a new '
       + 'turn or between your tool calls.',
     replay: 'safe',
-    parameters: Type.Object({
-      task: Type.String({ description: 'What to do then; it reaches you as written.' }),
-      run_after: Type.String({
+    parameters: obj({
+      task: str({ description: 'What to do then; it reaches you as written.' }),
+      run_after: str({
         description: 'When it reaches you, as an ISO 8601 date and time in the device\'s local time, for example '
           + '2026-10-21T09:00:00, or with an offset.',
       }),
-    }),
+    }, { open: true }),
     async execute({ task, run_after }, api, context) {
       const until = Date.parse(run_after);
       if (Number.isNaN(until)) {

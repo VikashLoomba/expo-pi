@@ -1,17 +1,18 @@
-import { Type, type Static } from '@earendil-works/pi-ai';
+import { stringLiteral } from '@earendil-works/pi-ai/providers/schema-builders';
+import { nul, obj, str, union, type Static } from '@earendil-works/pi-schema';
 import { defineDoc, type AgentState } from '@earendil-works/pi-durable';
 
-const ExecutionTargetSchema = Type.Union([
-  Type.Object({ kind: Type.Literal('local') }),
-  Type.Object({ kind: Type.Literal('ssh'), machineId: Type.String() }),
+const ExecutionTargetSchema = union([
+  obj({ kind: stringLiteral('local') }, { open: true }),
+  obj({ kind: stringLiteral('ssh'), machineId: str() }, { open: true }),
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTargetSchema>;
 export type ExecutionTargetState = { target: ExecutionTarget };
 /** `cwd: null` leaves the agent's directory unset, so a remote machine uses its account's home directory. */
-export const ChatExecutionSettingsSchema = Type.Object({
+export const ChatExecutionSettingsSchema = obj({
   target: ExecutionTargetSchema,
-  cwd: Type.Union([Type.String(), Type.Null()]),
-});
+  cwd: union([str(), nul()]),
+}, { open: true });
 export type ChatExecutionSettings = Static<typeof ChatExecutionSettingsSchema>;
 
 /**

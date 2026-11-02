@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { defineDoc, type DocumentState, type Harness } from '@earendil-works/pi-durable';
+import { defineDoc, type DocumentWatch, type Harness } from '@earendil-works/pi-durable';
 
 import { machineEndpoint, type Machine } from './contract';
 
@@ -57,14 +57,13 @@ export async function removeMachine(harness: Harness, endpoint: string, context 
 }
 
 /**
- * The document as a store the screens and the server read, over its Chord state (`04-chord-state.ts`), which the
- * service creates with its first commit so the state is there to attach to.
+ * The document as a store the screens and the server read, over a watch of it (pi-durable `04-watches.ts`), which the
+ * service creates with its first commit so the watch has a document to follow.
  */
 export class MachineList {
-  private state?: DocumentState<MachinesState>;
+  private watch?: DocumentWatch<MachinesState>;
   private value?: Readonly<MachinesState>;
   private readonly listeners = new Set<() => void>();
-  private unsubscribe = () => {};
   private closed = false;
 
   constructor(private readonly harness: Harness) {}
@@ -75,17 +74,17 @@ export class MachineList {
         await tx.doc(MachinesDoc);
       }, BACKGROUND_CONTEXT);
     }
-    const state = await this.harness.documentState(MachinesDoc, BACKGROUND_CONTEXT);
-    if (state === undefined) throw new Error('The machines of the conversation could not be read.');
+    const watch = await this.harness.watchDoc(MachinesDoc, BACKGROUND_CONTEXT);
+    if (watch === undefined) throw new Error('The machines of the conversation could not be read.');
     if (this.closed) {
-      state.dispose();
+      await watch.stop();
       return;
     }
-    this.state = state;
-    this.value = state.value ?? undefined;
-    this.unsubscribe = state.subscribe((value) => {
-      // A session document never retires, so a null here never comes.
-      this.value = value ?? undefined;
+    this.watch = watch;
+    this.value = watch.value;
+    watch.start(async (call) => {
+      if (call.kind !== 'value') return;
+      this.value = call.value;
       for (const listener of [...this.listeners]) listener();
     });
     for (const listener of [...this.listeners]) listener();
@@ -100,7 +99,6 @@ export class MachineList {
 
   close(): void {
     this.closed = true;
-    this.unsubscribe();
-    this.state?.dispose();
+    void this.watch?.stop();
   }
 }

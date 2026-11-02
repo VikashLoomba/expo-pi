@@ -1,7 +1,7 @@
 # Server plugins, MCP and code mode
 
-The server uses Pi Durable / Chord **1.4.0**, upstream tag `v1.4.0`, commit
-`4a080252f06caf63a525d7873c5d94d3c23887e0`. The starting patterns are Chord's `packages/chord/docs/guide.md`
+The server uses Pi Durable / Chord **1.5.0**, upstream tag `v1.5.0`, commit
+`f9a26365568127461c47a07a37dcb42c140a3ac5`. The starting patterns are Chord's `packages/chord/docs/guide.md`
 sections **Plugins**, **Declarations**, **Hot reload** (Resources) and **Durable**, and Durable's README sections
 **Extensions**, **Reload** and **Code Mode** with `docs/spec.md` §7.4–7.5.
 
@@ -86,3 +86,9 @@ is intentional: GitHub Latest belongs to the Mac app, not the server.
 
 A server installed from a release checks at startup, daily, and on SIGHUP. It verifies downloaded artifacts, closes
 its Harness and exits 75 for the service manager to restart it. Old runtime folders are cleaned on startup.
+
+pi-durable migrates documents and tasks one way: once a newer release has opened the conversation, an older one
+refuses it (Durable `docs/spec.md` §3.6, §11.2). So before a release first opens the database another release left,
+the server copies it to `~/.infinichat/backup/before-<release>/infinichat.db` with SQLite's online backup, replacing
+the copy the previous update made; `state.json`'s `opened` records the release that last opened it. To go back,
+install the release that left the copy and put it in `~/.infinichat/data/` while the server is stopped.

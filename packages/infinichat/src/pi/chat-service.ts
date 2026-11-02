@@ -2,7 +2,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
   AgentDoc, Harness, configure, createRegistry, defineExtension, section,
-  type ConversationId, type Cursor, type DocumentState, type SessionEnd, type Storage, type SubmissionId,
+  type ConversationId, type Cursor, type DocumentWatch, type SessionEnd, type Storage, type SubmissionId,
   type TaskGraphNode,
 } from '@earendil-works/pi-durable';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
@@ -47,7 +47,7 @@ export const chatTasks = (task: TaskGraphNode): string | undefined =>
  * transcript is read only while a `ChatView` of it is shown.
  */
 export class DurableChatService {
-  private readonly chats = new Map<ConversationId, DocumentState<ChatMetadata>>();
+  private readonly chats = new Map<ConversationId, DocumentWatch<ChatMetadata>>();
   /** Routes carry a chat's ID as text; it is only ever resolved to an ID pi-durable issued. */
   private readonly ids = new Map<string, ConversationId>();
   private readonly listeners = new Set<() => void>();
@@ -124,9 +124,10 @@ export class DurableChatService {
         const metadata = await tx.doc(ChatMetadataDoc, conversation.id);
         metadata.createdAt = now();
       },
-      // A parked task shows in its own chat, which offers to resume it (pi-durable README "Crash loops").
-      onReport: (error, info) => {
-        if (info.type !== 'task_parked') service?.report(error);
+      // A crash that ended a run, a compaction or a tool call shows in its own chat (pi-durable README "Crash loops"):
+      // the run's `runFailure`, which offers to continue it, the compaction's failure or the tool's error result.
+      onReport: (report) => {
+        if (report.kind !== 'task_interrupted') service?.report(report.error);
       },
     }, context);
     service = new DurableChatService(harness, options.storage, options.models, local, {
@@ -144,7 +145,7 @@ export class DurableChatService {
     if (options.observe) service.detachObserver = options.observe(harness);
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void harness.closed.then((end) => {
-      if (end.reason === 'failed') service.report(end.error);
+      if (end.kind === 'failed') service.report(end.error);
       options.onClosed?.(end);
     });
     return service;
@@ -162,17 +163,19 @@ export class DurableChatService {
   }
 
   private async watchChat(id: ConversationId) {
-    const state = await this.harness.documentState(ChatMetadataDoc, id, context);
-    if (!state) return;
-    this.chats.set(id, state);
+    const watch = await this.harness.watchDoc(ChatMetadataDoc, id, context);
+    if (!watch) return;
+    this.chats.set(id, watch);
     this.ids.set(String(id), id);
-    state.subscribe(this.updateList);
+    watch.start(async (call) => {
+      if (call.kind === 'value') this.updateList();
+    });
   }
 
   private readonly updateList = () => {
     if (this.closed) return;
-    const chats = [...this.chats].flatMap(([id, state]) => {
-      const summary = state.value ? summarizeChat(id, state.value) : undefined;
+    const chats = [...this.chats].flatMap(([id, watch]) => {
+      const summary = summarizeChat(id, watch.value);
       return summary ? [summary] : [];
     }).sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id);
     this.snapshot = { ...this.snapshot, chats };
@@ -219,7 +222,7 @@ export class DurableChatService {
   /** The listed chat a route names, or undefined when there is none. */
   findChat(key: string): ConversationId | undefined { return this.ids.get(key); }
 
-  /** A chat's committed state while subscribed; `transcript` adds its messages, including pre-compaction history. */
+  /** A chat's committed state while subscribed; `transcript` adds its messages, loaded a page at a time. */
   chat(id: ConversationId, options: { transcript?: boolean } = {}): ChatView {
     return new ChatView(this.harness, id, options.transcript ?? false, this.options.localRoot);
   }
@@ -260,8 +263,8 @@ export class DurableChatService {
     const conversation = await this.harness.createConversation({
       ownership: { kind: 'ownerless' },
       agent: settings,
-      // As pi's examples 06 and 29 create in `init` a document they later read, the execution target exists from the
-      // creating commit, so an open chat observes it through `documentState` from the start.
+      // As pi's examples 05 and 28 create in `init` a document they later read, the execution target exists from the
+      // creating commit, so an open chat watches it with `watchDoc` from the start.
       init: async (tx, id) => {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
         (await tx.doc(ExecutionTargetDoc, id)).target = { kind: 'local' };
@@ -351,7 +354,6 @@ export class DurableChatService {
     const photos = images === 1 ? 'Photo' : `${images} photos`;
     await conversation.commit(async (tx) => {
       const chat = await tx.doc(ChatMetadataDoc, id);
-      chat.lastInput = submission.id;
       chat.title ||= oneLine(text, 64) || photos;
       chat.preview = oneLine(text, 120) || photos;
       chat.updatedAt = this.options.now();
@@ -372,21 +374,20 @@ export class DurableChatService {
     if (result === 'already_placed') return;
     if (result === 'settled' || result === 'not_found') throw new Error('That message already left the queue.');
     // A new request ID: the withdrawn submission is settled, and its ID would return that aborted submission.
-    const submission = await conversation.submit(
-      { type: 'input', content, whenBusy: 'steer', requestId: uuidv7() }, context);
+    await conversation.submit({ type: 'input', content, whenBusy: 'steer', requestId: uuidv7() }, context);
     await conversation.commit(async (tx) => {
-      const chat = await tx.doc(ChatMetadataDoc, id);
-      chat.lastInput = submission.id;
-      chat.updatedAt = this.options.now();
+      (await tx.doc(ChatMetadataDoc, id)).updatedAt = this.options.now();
     }, context);
   }
 
-  /** Runs a chat's parked tasks again, the ones its view's controls list by number, from the Harness's records. */
-  async retryParked(tasks: readonly number[]): Promise<void> {
-    this.assertOpen();
-    for (const { record } of (await this.harness.inspect(context)).tasks) {
-      if (tasks.includes(record.id)) await this.harness.retryTask(record.id, context);
-    }
+  /**
+   * Continues the run that ended without an answer, the view's `runFailure`, on the context as it is: pi-durable's
+   * continue submission (`33-turn-limit-and-continue.ts`), which a busy chat refuses with `ConversationBusy`.
+   */
+  async continue(id: ConversationId): Promise<void> {
+    const conversation = await this.conversation(id);
+    await this.requireAuth(settingsOf(await this.harness.snapshot(AgentDoc, id, context)));
+    await conversation.submit({ type: 'continue' }, context);
   }
 
   /** Withdraws queued input and aborts the running work; resolves once the chat is idle. */
@@ -398,7 +399,7 @@ export class DurableChatService {
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
-    for (const state of this.chats.values()) state.dispose();
+    for (const watch of this.chats.values()) void watch.stop();
     this.listeners.clear();
     this.closePromise = (async () => {
       // The Harness aborts and waits for running task code, which still uses the environments; the owner of

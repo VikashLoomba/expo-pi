@@ -29,7 +29,7 @@ export type SearchPresentationsState = {
 };
 
 /**
- * One presentation document per chat, created in `createConversation`'s `init` (as examples 06 and 29 create a
+ * One presentation document per chat, created in `createConversation`'s `init` (as examples 05 and 28 create a
  * document they later read), so a chat view observes it from the start and nothing attaches late. `history: 'latest'`
  * because nothing reads it rewindably; `fork: 'current'` so a fork keeps showing the searches of the answers it
  * inherited.

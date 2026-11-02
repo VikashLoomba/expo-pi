@@ -1,9 +1,11 @@
 import type { SqliteDatabase, SqliteExecutor, SqliteValue } from '@earendil-works/chord/sqlite';
+import type { SQLiteRunResult } from 'expo-sqlite';
 
 /** Native surface used by the driver; also permits a real SQLite connection in Node tests. */
 export interface ExpoSqliteConnection {
   execAsync(sql: string): Promise<void>;
-  runAsync(sql: string, params: ExpoSqliteParameter[]): Promise<unknown>;
+  /** Resolves with `sqlite3_changes()`, which Chord's `runCounted` reports. */
+  runAsync(sql: string, params: ExpoSqliteParameter[]): Promise<Pick<SQLiteRunResult, 'changes'>>;
   getFirstAsync<T extends object>(sql: string, params: ExpoSqliteParameter[]): Promise<T | null>;
   getAllAsync<T extends object>(sql: string, params: ExpoSqliteParameter[]): Promise<T[]>;
   closeAsync(): Promise<void>;
@@ -41,6 +43,8 @@ function executor(database: ExpoSqliteConnection, schedule: <T>(operation: () =>
   return {
     exec: (sql) => schedule(() => database.execAsync(sql)),
     run: (sql, ...params) => schedule(async () => { await database.runAsync(sql, bindParameters(params)); }),
+    runCounted: (sql, ...params) => schedule(async () =>
+      (await database.runAsync(sql, bindParameters(params))).changes),
     get: <T extends object>(sql: string, ...params: SqliteValue[]) => schedule(async () =>
       (await database.getFirstAsync<T>(sql, bindParameters(params))) ?? undefined),
     all: <T extends object>(sql: string, ...params: SqliteValue[]) => schedule(() =>

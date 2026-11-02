@@ -40,8 +40,9 @@ test('SQLite reopen resumes interrupted summary and preserves saved views before
     const watch=await chat.harness.watchDoc(MemoryDoc,chat.root.id,context);
     assert.ok(watch);
     const built=gate();
-    watch.start(async value=>{if(value && value.nextMessage>=2 && value.frontier===value.nextMessage)built.resolve();});
-    if(watch.value && watch.value.nextMessage>=2 && watch.value.frontier===watch.value.nextMessage)built.resolve();
+    const caughtUp=(value:typeof watch.value)=>{if(value.nextMessage>=2 && value.frontier===value.nextMessage)built.resolve();};
+    watch.start(async call=>{if(call.kind==='value')caughtUp(call.value);});
+    caughtUp(watch.value);
     await built.promise;await watch.stop();
     await chat.accept({requestId:'long',content:'RECOVERY FACT. '+ 'padding '.repeat(200)});
     await chat.waitForAnswer('long');

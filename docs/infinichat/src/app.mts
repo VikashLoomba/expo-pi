@@ -619,8 +619,9 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
         const changed = new Promise<void>((resolve) => {
           for (const watch of watches) {
             const seen = JSON.stringify(watch.value);
-            watch.start(async (value) => {
-              if (JSON.stringify(value) !== seen) resolve();
+            watch.start(async (call) => {
+              if (call.kind === "value" && JSON.stringify(call.value) !== seen)
+                resolve();
             });
           }
         });
@@ -841,12 +842,9 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
           } else if (!progressed) {
             const ended = Promise.race(watches.map((watch) => watch.closed)).then(
               (end) => {
-                if (
-                  end.reason === "session_failed" ||
-                  end.reason === "listener_error"
-                )
+                if (end.kind === "failed" || end.kind === "listener_error")
                   throw end.error;
-                throw new Error(`OptChat watch ended: ${end.reason}`);
+                throw new Error(`OptChat watch ended: ${end.kind}`);
               },
             );
             await awaitWithContext(Promise.race([changed, ended]), invocation);
@@ -993,7 +991,7 @@ export async function openOptChat(
         // An input queued behind a failed run starts a fresh turn, as UniiChat's next call takes it, never the failed
         // turn's context.
         afterFailedRun: "withdraw",
-        // The coordinator is stored running while idle, so every crash or kill would count toward parking it.
+        // The coordinator is stored running while idle, so every crash or kill would count toward ending it.
         restartLimit: Infinity,
       },
     },
@@ -1045,7 +1043,7 @@ export async function openOptChat(
     );
     if (!watch)
       throw new Error("Accept the request before waiting for its answer");
-    const accepted = watch.value?.value;
+    const accepted = watch.value.value;
     if (!accepted) {
       await watch.stop();
       throw new Error("Accept the request before waiting for its answer");
@@ -1057,24 +1055,24 @@ export async function openOptChat(
     const cancellation = new AbortController();
     const waiting = withAbortSignal(cancellation.signal, waitContext);
     const settled = new Promise<void>((resolve) => {
-      const inspect = (value: Readonly<{ value: Admission | null }> | null) => {
-        const phase = value?.value?.phase;
+      const inspect = (value: Readonly<{ value: Admission | null }>) => {
+        const phase = value.value?.phase;
         if (
-          (phase === "submitted" && (value?.value?.attempt ?? 0) >= attempt) ||
+          (phase === "submitted" && (value.value?.attempt ?? 0) >= attempt) ||
           phase === "cancelled"
         )
           resolve();
       };
-      watch.start(async (value) => {
-        inspect(value);
+      watch.start(async (call) => {
+        if (call.kind === "value") inspect(call.value);
       });
       inspect(watch.value);
     });
     try {
       const ended = watch.closed.then((end) => {
-        if (end.reason === "listener_error" || end.reason === "session_failed")
+        if (end.kind === "listener_error" || end.kind === "failed")
           throw end.error;
-        throw new Error(`Admission watch ended: ${end.reason}`);
+        throw new Error(`Admission watch ended: ${end.kind}`);
       });
       await awaitWithContext(
         Promise.race([
@@ -1187,10 +1185,10 @@ export async function openOptChat(
       const waiting = withAbortSignal(cancellation.signal, context);
       const done = new Promise<void>((resolve) => {
         const check = (value: typeof watch.value) => {
-          if (value && value.stopped >= requested) resolve();
+          if (value.stopped >= requested) resolve();
         };
-        watch.start(async (value) => {
-          check(value);
+        watch.start(async (call) => {
+          if (call.kind === "value") check(call.value);
         });
         check(watch.value);
       });
@@ -1200,12 +1198,9 @@ export async function openOptChat(
             done,
             coordinatorFailure(opened, root.id, waiting),
             watch.closed.then((end) => {
-              if (
-                end.reason === "session_failed" ||
-                end.reason === "listener_error"
-              )
+              if (end.kind === "failed" || end.kind === "listener_error")
                 throw end.error;
-              throw new Error(`Stop watch ended: ${end.reason}`);
+              throw new Error(`Stop watch ended: ${end.kind}`);
             }),
           ]),
           context,

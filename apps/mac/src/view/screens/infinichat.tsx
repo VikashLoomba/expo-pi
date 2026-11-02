@@ -138,6 +138,13 @@ function InfiniChat() {
     }).finally(() => setStopping(false));
   }, [ref, setLocalError, stopping]);
 
+  // A run that ended without an answer continues on the context as it is (pi-durable's continue submission).
+  const resume = () => {
+    setLocalError(undefined);
+    void ref.continue().catch((cause: unknown) => {
+      setLocalError(errorText(cause, 'The response could not continue. Try again.'));
+    });
+  };
   const connectionError = connection?.status === 'failed' ? connection.error : undefined;
   const messageError = localError || connectionError || controls?.error || snapshot?.report || snapshot?.view.error;
   const retry = connectionError && (!localError || localError === connectionError) ? () => {
@@ -162,6 +169,7 @@ function InfiniChat() {
     ? held.heldBy ? `InfiniChat is on ${held.heldBy.name}.`
       : `InfiniChat isn’t on ${machineName} yet. Move it here from your iPhone.` : undefined;
   const machines = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
+  const failure = !busy && !away ? controls?.runFailure : undefined;
   return (
     <ChatAgentContext value={agent}>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -224,6 +232,11 @@ function InfiniChat() {
           <Notice tone={access.error === undefined ? 'neutral' : 'error'}
             message={access.error ?? `Connect ${providerLabel} on ${machineName} to send a message`}
             action="Providers" onAction={() => openProviders(providerId)} />
+        )}
+        {failure && (
+          <Notice tone={failure.reason === 'aborted' ? 'neutral' : 'error'} message={failure.message}
+            action={configured && connected && settingsError === undefined && !move ? 'Continue' : undefined}
+            onAction={resume} />
         )}
         {move?.error !== undefined && !messageError && (
           <Notice message={move.error} action="Try Again" onAction={() => { void ref.retryMove(); }} />

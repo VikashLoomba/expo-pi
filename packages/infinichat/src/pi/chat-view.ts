@@ -1,12 +1,12 @@
-import type { AttachedReplicatedState } from '@earendil-works/chord';
-import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
-import { Type, type Static } from '@earendil-works/pi-ai';
-import type {
-  Conversation, ConversationId, ConversationView, Cursor, DocumentState, EntryId, EntryRecord, Harness,
-  SubmissionId, SubmissionRecord, TaskGraph,
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import {
+  ConversationTranscript,
+  type ConversationId, type ConversationWatch, type DocumentWatch, type Harness, type TranscriptItem,
+  type TranscriptView,
 } from '@earendil-works/pi-durable';
+import { obj, oneOf, opt, str, type Static } from '@earendil-works/pi-schema';
 
-import type { ChatControls, ChatMessage } from '../chat/types';
+import type { ChatControls, ChatMessage, TranscriptGap } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { projectControls, projectMessages, readConversationView, type ChatState } from './chat-projection';
 import {
@@ -15,12 +15,11 @@ import {
 import { SearchPresentationsDoc, type SearchPresentationsState } from './native-web-search/durable';
 
 const context = BACKGROUND_CONTEXT;
-const noop = () => {};
 
-export const ChatViewSnapshotSchema = Type.Object({
-  status: Type.Enum(['loading', 'ready', 'missing', 'failed']),
-  error: Type.Optional(Type.String()),
-});
+export const ChatViewSnapshotSchema = obj({
+  status: oneOf(['loading', 'ready', 'missing', 'failed']),
+  error: opt(str()),
+}, { open: true });
 export type ChatViewSnapshot = Static<typeof ChatViewSnapshotSchema>;
 
 /** What screens read from a conversation's view; InfiniChat's view extends the controls. */
@@ -29,31 +28,37 @@ export interface ChatViewSource<C extends ChatControls = ChatControls> {
   readonly getSnapshot: () => ChatViewSnapshot;
   readonly getControls: () => C | undefined;
   readonly getMessages: () => readonly ChatMessage[];
+  /** Loads the page of entries before the oldest one held, for the `earlier` row once it scrolls into view. */
+  readonly loadEarlier: () => Promise<void>;
+  /** Loads the next page of a `gap` row's entries once it scrolls into view. */
+  readonly fillGap: (gap: TranscriptGap) => Promise<void>;
 }
 
+type Gap = Extract<TranscriptItem, { kind: 'gap' }>;
+
+/** The gap item of `view` that a row names, looked up among the items pi-durable's transcript returned. */
+export const gapOf = (view: TranscriptView | undefined, { after, upTo }: TranscriptGap): Gap | undefined =>
+  view?.items.find((item): item is Gap => item.kind === 'gap' && item.after === after && item.upTo === upTo);
+
 /**
- * A chat while something shows it. The first subscriber attaches pi-durable's conversation view, the chat's
- * app document states — every one of them exists from the creating commit, so nothing attaches late — and the task
- * graph, for the chat's parked tasks; the last one to leave disposes them. With `transcript`, it also reads the chat's whole history once, so messages
- * from before a compaction stay visible.
+ * A chat while something shows it. The first subscriber attaches watches of pi-durable's conversation view and of the
+ * chat's app documents — every one of them exists from the creating commit, so nothing attaches late; the last one to
+ * leave stops them. With `transcript`, a `ConversationTranscript` keeps what the chat showed beyond the view's window
+ * across attachments, resumes after it, and loads earlier and missed entries when their rows scroll into view
+ * (pi-durable's `31-transcript.ts`).
  */
 export class ChatView implements ChatViewSource {
   private readonly listeners = new Set<() => void>();
   /** Each connection counts up; asynchronous work from a disposed connection is dropped. */
   private connection = 0;
-  private view?: AttachedReplicatedState<ConversationView>;
-  private unsubscribeView = noop;
-  private unsubscribeDocs: (() => void)[] = [];
-  private metadata?: DocumentState<ChatMetadata>;
-  private target?: DocumentState<ExecutionTargetState>;
-  private search?: DocumentState<SearchPresentationsState>;
-  private tasks?: AttachedReplicatedState<TaskGraph>;
+  private view?: ConversationWatch;
+  private metadata?: DocumentWatch<ChatMetadata>;
+  private target?: DocumentWatch<ExecutionTargetState>;
+  private search?: DocumentWatch<SearchPresentationsState>;
+  private history?: ConversationTranscript;
+  private shown?: TranscriptView;
   private loaded = false;
   private scheduled = false;
-  private readonly entries = new Map<EntryId, EntryRecord>();
-  /** The chat's latest input, followed until it settles; disconnecting or a newer input cancels the wait. */
-  private followed?: { id: SubmissionId; cancel: (reason?: unknown) => void };
-  private submission?: SubmissionRecord;
   private snapshot: ChatViewSnapshot = { status: 'loading' };
   private controls?: ChatControls;
   private messages: readonly ChatMessage[] = [];
@@ -77,6 +82,19 @@ export class ChatView implements ChatViewSource {
   readonly getControls = () => this.controls;
   readonly getMessages = () => this.messages;
 
+  readonly loadEarlier = async () => {
+    if (this.history === undefined || this.shown === undefined) return;
+    this.shown = await this.history.loadEarlier(context);
+    this.schedule();
+  };
+
+  readonly fillGap = async (gap: TranscriptGap) => {
+    const item = gapOf(this.shown, gap);
+    if (this.history === undefined || item === undefined) return;
+    this.shown = await this.history.fillGap(item, context);
+    this.schedule();
+  };
+
   private async connect() {
     const connection = ++this.connection;
     const current = () => connection === this.connection;
@@ -87,39 +105,42 @@ export class ChatView implements ChatViewSource {
         this.publish({ status: 'missing' });
         return;
       }
-      const view = await conversation.viewState(context);
+      if (this.transcript) {
+        this.history ??= new ConversationTranscript((query, limit, loadContext) =>
+          conversation.entries(query, limit, undefined, loadContext));
+      }
+      const [view, metadata, target, search] = await Promise.all([
+        conversation.watch(context, this.history?.resume),
+        this.harness.watchDoc(ChatMetadataDoc, this.id, context),
+        this.harness.watchDoc(ExecutionTargetDoc, this.id, context),
+        this.harness.watchDoc(SearchPresentationsDoc, this.id, context),
+      ]);
+      const docs = [metadata, target, search];
       if (!current()) {
-        view.dispose();
+        await Promise.all([view.stop(), ...docs.map((watch) => watch?.stop())]);
         return;
       }
       this.view = view;
-      this.unsubscribeView = view.subscribe(this.schedule);
-      const [metadata, target, search, tasks] = await Promise.all([
-        this.harness.documentState(ChatMetadataDoc, this.id, context),
-        this.harness.documentState(ExecutionTargetDoc, this.id, context),
-        this.harness.documentState(SearchPresentationsDoc, this.id, context),
-        this.harness.taskGraph(context),
-      ]);
-      if (!current()) {
-        for (const state of [metadata, target, search, tasks]) state?.dispose();
-        return;
-      }
       this.metadata = metadata;
       this.target = target;
       this.search = search;
-      this.tasks = tasks;
-      this.unsubscribeDocs = [metadata?.subscribe(this.schedule) ?? noop,
-        target?.subscribe(this.schedule) ?? noop, search?.subscribe(this.schedule) ?? noop,
-        tasks.subscribe(this.schedule)];
+      this.shown = this.history?.merge(view.value);
+      view.start(async (call) => {
+        if (call.kind !== 'value') return;
+        // Every value joins the transcript, which keeps what the window drops.
+        this.shown = this.history?.merge(call.value);
+        this.schedule();
+      });
+      for (const watch of docs) {
+        watch?.start(async (call) => {
+          if (call.kind === 'value') this.schedule();
+        });
+      }
       const chat = metadata?.value;
       if (!chat || chat.deleted) {
         this.publish({ status: 'missing' });
         return;
       }
-      if (chat.lastInput !== undefined) await this.follow(chat.lastInput, current);
-      if (!current()) return;
-      if (this.transcript) await this.readHistory(conversation, current);
-      if (!current()) return;
       this.loaded = true;
       this.update();
     } catch (error) {
@@ -128,77 +149,20 @@ export class ChatView implements ChatViewSource {
   }
 
   private disconnect() {
-    // Committed entries are immutable, so a later subscriber reuses them. The last snapshot stays
-    // readable; the next one is published once every document is attached again.
+    // The transcript keeps what was shown, so a later subscriber resumes after it. The last snapshot stays readable;
+    // the next one is published once every watch is attached again.
     this.connection++;
     this.loaded = false;
-    this.followed?.cancel();
-    this.followed = undefined;
-    this.submission = undefined;
-    this.unsubscribeView();
-    this.unsubscribeView = noop;
-    for (const unsubscribe of this.unsubscribeDocs) unsubscribe();
-    this.unsubscribeDocs = [];
-    this.view?.dispose();
+    for (const watch of [this.view, this.metadata, this.target, this.search]) void watch?.stop();
     this.view = undefined;
-    this.metadata?.dispose();
     this.metadata = undefined;
-    this.target?.dispose();
     this.target = undefined;
-    this.search?.dispose();
     this.search = undefined;
-    this.tasks?.dispose();
-    this.tasks = undefined;
   }
 
   /**
-   * The view holds only the active context, from the newest head on. Read the whole history once, newest first;
-   * the view supplies everything committed afterwards.
-   */
-  private async readHistory(conversation: Conversation, current: () => boolean) {
-    let cursor: Cursor | undefined;
-    do {
-      const page = await conversation.entries({}, 200, cursor, context);
-      if (!current()) return;
-      for (const entry of page.items) this.entries.set(entry.id, entry);
-      cursor = page.next;
-    } while (cursor !== undefined);
-  }
-
-  /**
-   * The outcome of an input is not part of the view. Read its record now, then wait for it to settle, as pi-durable's
-   * inbox example does; the wait's context is cancelled when the chat disconnects or a newer input replaces it.
-   */
-  private async follow(id: SubmissionId, current: () => boolean) {
-    this.followed?.cancel();
-    this.submission = undefined;
-    const waiting = withCancel(context);
-    const followed = { id, cancel: waiting.cancel };
-    this.followed = followed;
-    const following = () => current() && this.followed === followed;
-    // A read that the cancellation interrupted belongs to an input or a connection that was replaced.
-    const unlessReplaced = (error: unknown): undefined => {
-      if (following()) throw error;
-      return undefined;
-    };
-    const submission = await this.harness.submission(id, waiting.context).catch(unlessReplaced);
-    if (!submission || !following()) return;
-    const record = await submission.status(waiting.context).catch(unlessReplaced);
-    if (!record || !following()) return;
-    this.submission = record;
-    this.schedule();
-    submission.wait(waiting.context).then((settled) => {
-      if (!following()) return;
-      this.submission = settled;
-      this.schedule();
-    }, (error: unknown) => {
-      if (following()) this.fail(error);
-    });
-  }
-
-  /**
-   * The view and each app document deliver a commit in their own microtask. Coalesce them into one projection;
-   * entries and the built-in documents always come from the same view revision.
+   * The view and each app document deliver a commit in their own call. Coalesce them into one projection; entries and
+   * the built-in documents always come from the same view revision.
    */
   private readonly schedule = () => {
     if (this.scheduled) return;
@@ -219,29 +183,11 @@ export class ChatView implements ChatViewSource {
       this.publish({ status: 'missing' });
       return;
     }
-    const lastInput = metadata?.lastInput;
-    if (lastInput !== undefined && lastInput !== this.followed?.id) {
-      // Only the loaded connection updates, so this one is current.
-      const connection = this.connection;
-      const current = () => connection === this.connection;
-      this.follow(lastInput, current).catch((error: unknown) => {
-        if (current()) this.fail(error);
-      });
-    }
-    // pi-durable's crash-loop guard parks a task the app quit during too many times; README "Crash loops" says to
-    // show it and offer `retryTask`.
-    const parked = Object.values(this.tasks?.value.tasks ?? {}).flatMap((task) =>
-      task.conversationId === this.id && task.blocked === 'restart_limit' ? [task.id] : []);
-    const state: ChatState = { id: this.id, ...readConversationView(view), metadata: metadata ?? undefined,
-      execution: this.target?.value ?? undefined, search: this.search?.value ?? undefined,
-      submission: this.submission, parked };
-    if (this.transcript) {
-      for (const entry of view.entries) this.entries.set(entry.id, entry);
-    }
-    const entries = this.transcript
-      ? [...this.entries.values()].sort((left, right) => left.id - right.id) : view.entries;
-    this.controls = projectControls(state, entries, this.localRoot);
-    if (this.transcript) this.messages = projectMessages(state, entries);
+    const state: ChatState = { id: this.id, ...readConversationView(view), metadata,
+      execution: this.target?.value, search: this.search?.value };
+    // The window holds the newest entries, which include the last run's.
+    this.controls = projectControls(state, view.entries, this.localRoot);
+    if (this.shown) this.messages = projectMessages(state, this.shown.items);
     this.publish({ status: 'ready' });
   }
 

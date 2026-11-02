@@ -115,13 +115,16 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
       setSteering(false);
     }
   };
+  // A run that ended without an answer continues on the context as it is (pi-durable's continue submission).
   const resume = async () => {
-    const parked = conversation?.parked;
-    if (!service || !parked) return;
+    if (id === undefined || !service) return;
     setLocalError(undefined);
-    try { await service.retryParked(parked); }
-    catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'The work could not resume. Try again.'); }
+    try { await service.continue(id); }
+    catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'The response could not continue. Try again.');
+    }
   };
+  const failure = !busy ? conversation?.runFailure : undefined;
   const stop = async () => {
     if (id === undefined || !service || stopping) return;
     // Shown until the abort settles; it resolves once the chat is idle.
@@ -169,10 +172,11 @@ function ConversationScreen({ id }: { id: ConversationId | undefined }) {
           <InlineNotice testID="conversation-settings-error" message={settingsError}
             action={!settingsDisabled ? 'Chat settings' : undefined} onAction={openSettings} />
         </View>}
-        {conversation?.parked && <View style={styles.banner}>
-          <InlineNotice testID="conversation-parked"
-            message="Pi paused this chat's work because the app quit while it was running several times in a row."
-            action="Resume" onAction={() => { void resume(); }} />
+        {failure && <View style={styles.banner}>
+          <InlineNotice testID="conversation-run-failure" message={failure.message}
+            tone={failure.reason === 'aborted' ? 'neutral' : 'error'}
+            action={access.connected && !settingsError ? 'Continue' : undefined}
+            onAction={() => { void resume(); }} />
         </View>}
         {messageError && messageError !== settingsError && <View style={styles.banner}>
           <InlineNotice testID="conversation-error" message={messageError}

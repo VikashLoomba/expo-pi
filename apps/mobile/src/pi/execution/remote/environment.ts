@@ -1,4 +1,4 @@
-// Adapted from Pi Env 1.4.0 remote-env.ts (MIT); the daemon wire contract is protocol 1.
+// Adapted from Pi Env 1.5.0 remote-env.ts (MIT); the daemon wire contract is protocol 1.
 import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
 import { posix, resolveRemotePath } from "./paths";
@@ -9,6 +9,7 @@ import {
 	type ExecutionEnv,
 	ExecutionError,
 	err,
+	type FileChange,
 	FileError,
 	type FileInfo,
 	type FileListing,
@@ -21,7 +22,6 @@ import {
 	type ShellOutputInfo,
 	type ShellOutputSkip,
 	type TextLineReader,
-	type WatchChange,
 	type WatchTarget,
 } from "@earendil-works/pi-durable/env";
 import { type Connection, type Json, RemoteError, type RemoteInfo } from "./connection";
@@ -509,7 +509,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 
 	async watch(
 		targets: readonly WatchTarget[],
-		onChange: (change: WatchChange) => void,
+		onChange: (change: FileChange) => void,
 		context: Context,
 	): Promise<Result<FileWatcher, FileError>> {
 		const aborted = abortResult<FileWatcher>(context.abortSignal);
@@ -523,7 +523,7 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 			const watcher = await RemoteWatcher.open(this.connection, resolved, onChange, this.#watchOptions);
 			const afterOpen = abortResult<FileWatcher>(context.abortSignal);
 			if (afterOpen) {
-				await watcher.close(context);
+				await watcher.stop(context);
 				return afterOpen;
 			}
 			return ok(watcher);

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { defineFacet } from '@earendil-works/chord';
 import { CodemodeSandbox } from '@earendil-works/pi-codemode';
-import { Type } from '@earendil-works/pi-ai';
+import { arr, str } from '@earendil-works/pi-schema';
 import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 
 import { InfiniChatTools } from './process';
@@ -26,14 +26,14 @@ const counted = (name: string, server: McpServer) =>
  * borrow them through the tools of their snapshots. A server's tools arrive after it connects and change when it says
  * so, while a registration changes only with a reload, so the object registers a live source in `Extensions`.
  * At shutdown the host disposes this object before or with InfiniChat's, whose Harness then aborts what still runs:
- * a script finds its sandbox closed and waits for that abort (durable `src/codemode/codemode.ts:481-491`), and a
+ * a script finds its sandbox closed and waits for that abort (durable `src/codemode/codemode.ts:483-493`), and a
  * server closes once its calls settle (`McpServer.retire`).
  */
 export default defineFacet<InfiniChatPrincipal>((facet) => {
   facet.serve(InfiniChatTools, (_input, _principal, self) => {
     const { servers, problems } = mcpConfiguration(CONFIG);
     // A prepare reads the cell as the run before left it (chord `docs/spec.md` §7); this run's summary compares.
-    const declared = self.state('servers', Type.Array(Type.String()), []);
+    const declared = self.state('servers', arr(str()), []);
     const previous = declared.value;
     // Once the run is live, never in a prepare a reload may abort; at a start, only the log has these.
     self.task(async (ctx) => {

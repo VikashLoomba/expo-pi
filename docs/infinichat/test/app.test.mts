@@ -81,10 +81,10 @@ test(
       ))!;
       await new Promise<void>((resolve) => {
         const inspect = (value: typeof noteWatch.value) => {
-          if (value?.value?.phase === "submitted") resolve();
+          if (value.value?.phase === "submitted") resolve();
         };
-        noteWatch.start(async (value) => {
-          inspect(value);
+        noteWatch.start(async (call) => {
+          if (call.kind === "value") inspect(call.value);
         });
         inspect(noteWatch.value);
       });

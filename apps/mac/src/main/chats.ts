@@ -72,7 +72,7 @@ export class MacChats {
           },
           machines: { environment: (id, cwd) => this.machines.environment(id, new AbortController().signal, cwd) },
           onClosed: (end) => {
-            if (end.reason !== 'failed') return;
+            if (end.kind !== 'failed') return;
             this.serialize(async () => {
               if (this.current !== opened) return;
               this.current = undefined;

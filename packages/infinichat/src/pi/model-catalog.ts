@@ -1,7 +1,8 @@
 import {
-  Type, getSupportedThinkingLevels, type Api, type Model, type Models, type ModelThinkingLevel, type Static,
+  getSupportedThinkingLevels, type Api, type Model, type Models, type ModelThinkingLevel,
 } from '@earendil-works/pi-ai';
 import { ModelThinkingLevelSchema } from '@earendil-works/pi-ai/providers/model-schema';
+import { arr, bool, num, obj, opt, str, type Static } from '@earendil-works/pi-schema';
 import type { ModelRef } from '@earendil-works/pi-durable';
 import { DEFAULT_IMAGE_LIMITS } from '@earendil-works/pi-durable/tools';
 
@@ -11,33 +12,33 @@ export type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 export const DEFAULT_JPEG_QUALITY = 80;
 
 /** The same serializable references persisted by pi-durable's AgentDoc: its `ModelRef` and pi-ai's effort. */
-export const ChatModelSettingsSchema = Type.Object({
-  model: Type.Object({ provider: Type.String(), modelId: Type.String() }),
+export const ChatModelSettingsSchema = obj({
+  model: obj({ provider: str(), modelId: str() }, { open: true }),
   thinkingLevel: ModelThinkingLevelSchema,
-});
+}, { open: true });
 export type ChatModelSettings = Static<typeof ChatModelSettingsSchema>;
 
 /** What an attached photo is fitted to before it is sent, from the model's `inputLimits.images`. */
-export const ImageInputSchema = Type.Object({
-  maxWidth: Type.Number(),
-  maxHeight: Type.Number(),
+export const ImageInputSchema = obj({
+  maxWidth: num(),
+  maxHeight: num(),
   /** Most bytes of base64 per image. */
-  maxBytes: Type.Number(),
-  jpegQuality: Type.Number(),
-  maxPerMessage: Type.Optional(Type.Number()),
-});
+  maxBytes: num(),
+  jpegQuality: num(),
+  maxPerMessage: opt(num()),
+}, { open: true });
 export type ImageInput = Static<typeof ImageInputSchema>;
 
-export const ModelOptionSchema = Type.Object({
-  id: Type.String(),
-  provider: Type.String(),
-  name: Type.String(),
-  reasoning: Type.Boolean(),
-  thinkingLevels: Type.ReadonlyObject(Type.Array(ModelThinkingLevelSchema)),
-  contextWindow: Type.Number(),
+export const ModelOptionSchema = obj({
+  id: str(),
+  provider: str(),
+  name: str(),
+  reasoning: bool(),
+  thinkingLevels: arr(ModelThinkingLevelSchema),
+  contextWindow: num(),
   /** Absent when the model takes no images. */
-  images: Type.Optional(ImageInputSchema),
-});
+  images: opt(ImageInputSchema),
+}, { open: true });
 export type ModelOption = Static<typeof ModelOptionSchema>;
 
 /** The limits pi-durable's `read` tool fits an image to for this model: its own, else pi-durable's defaults. */
@@ -53,15 +54,15 @@ function imageInput(model: Model<Api>): ImageInput | undefined {
   };
 }
 
-export const ProviderOptionSchema = Type.Object({
-  id: Type.String(),
-  name: Type.String(),
-  models: Type.ReadonlyObject(Type.Array(ModelOptionSchema)),
-});
+export const ProviderOptionSchema = obj({
+  id: str(),
+  name: str(),
+  models: arr(ModelOptionSchema),
+}, { open: true });
 export type ProviderOption = Static<typeof ProviderOptionSchema>;
 
 /** The providers and models a `Models` offers. A machine that runs InfiniChat sends its own as Chord state. */
-export const ModelCatalogSchema = Type.ReadonlyObject(Type.Array(ProviderOptionSchema));
+export const ModelCatalogSchema = arr(ProviderOptionSchema);
 export type ModelCatalog = Static<typeof ModelCatalogSchema>;
 
 /** Registration-time choices for a new chat when no recently used chat applies. */

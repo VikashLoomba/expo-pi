@@ -118,7 +118,7 @@ class SearchObserver {
     }, this.signal));
   }
 
-  /** The completed call's findings for the model's later turns, placed at the next boundary (example 20). */
+  /** The completed call's findings for the model's later turns, placed at the next boundary (example 19). */
   #persist(done: WebSearchCall): void {
     const { write } = this.binding;
     this.#run(() => write.submit({

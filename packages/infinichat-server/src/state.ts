@@ -5,11 +5,11 @@ import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/
 
 /**
  * What `~/.infinichat/state.json` keeps across restarts: whether this machine holds the conversation, with the files
- * it adopted or the phone it handed them to, and the phone's time zone. The agent reads local times (message dates,
- * scheduled times); the phone sends its IANA zone on every connect, so those times match the phone's clock wherever
- * the machine is.
+ * it adopted or the phone it handed them to, the phone's time zone, and the release that last opened the database
+ * here. The agent reads local times (message dates, scheduled times); the phone sends its IANA zone on every connect,
+ * so those times match the phone's clock wherever the machine is.
  */
-export type ServerState = ConversationState & { timeZone?: string };
+export type ServerState = ConversationState & { timeZone?: string; opened?: string };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -41,6 +41,7 @@ export function readState(home: string): ServerState {
     ...(adopted === undefined ? {} : { adopted }),
     ...(heldBy === undefined ? {} : { heldBy }),
     ...(typeof state.timeZone === 'string' ? { timeZone: state.timeZone } : {}),
+    ...(typeof state.opened === 'string' ? { opened: state.opened } : {}),
   };
 }
 

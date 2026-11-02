@@ -2,7 +2,7 @@ import type { AssistantMessage, ToolResultMessage, UserMessage } from '@earendil
 import {
   AgentDoc, CompactionEntry, InboxDoc, LiveDoc, ResetEntry,
   type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord,
-  type InboxState, type LiveState, type SubmissionRecord, type TaskId,
+  type InboxState, type LiveState, type RunFailure, type TaskId, type TranscriptItem,
 } from '@earendil-works/pi-durable';
 
 import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-presentation';
@@ -18,7 +18,7 @@ import { isSearchObservationEntry } from './native-web-search/entries';
 import { hasSearchActivity, toWebSearchPresentation } from './native-web-search/presentation';
 import { imagesOf, textOf } from './user-input';
 
-/** Committed state of one chat: its conversation view, app documents and the record of its latest input. */
+/** Committed state of one chat: its conversation view's documents and the chat's app documents. */
 export type ChatState = {
   readonly id: ConversationId;
   readonly metadata?: Readonly<ChatMetadata>;
@@ -27,8 +27,6 @@ export type ChatState = {
   readonly live?: Readonly<LiveState>;
   readonly inbox?: Readonly<InboxState>;
   readonly search?: Readonly<SearchPresentationsState>;
-  readonly submission?: SubmissionRecord;
-  readonly parked?: readonly TaskId[];
 };
 
 const SUMMARIZED_NOTICE = 'Earlier messages summarized';
@@ -37,8 +35,8 @@ const SUMMARIZED_NOTICE = 'Earlier messages summarized';
  * The built-in documents of a conversation view, published with its entries in one revision so a row never shows
  * a streamed partial beside its saved entry. The view keys them by kind as JSON whose shapes pi-durable defines.
  */
-export function readConversationView(view: ConversationView) {
-  // pi-durable reads its view this way in its own example, test/examples/21-late-join.ts.
+export function readConversationView(view: { readonly docs: ConversationView['docs'] }) {
+  // pi-durable reads its view this way in its own example, test/examples/20-late-join.ts.
   return {
     live: view.docs[LiveDoc.definition.kind] as LiveState | undefined,
     agent: view.docs[AgentDoc.definition.kind] as AgentState | undefined,
@@ -62,27 +60,46 @@ export function summarizeChat(id: ConversationId, metadata: Readonly<ChatMetadat
     updatedAt: Math.max(metadata.createdAt, metadata.updatedAt ?? 0) };
 }
 
-/** Why the latest input went unanswered, unless a saved assistant entry or stop notice already shows it. */
-function submissionError(submission: SubmissionRecord | undefined, entries: readonly EntryRecord[]): string | undefined {
-  if (submission?.status !== 'unanswered' || submission.reason === 'aborted') return undefined;
-  const { detail, entry: placed } = submission;
-  let error = `The response could not finish (${submission.reason}). You can send another message to continue.`;
-  if (typeof detail === 'string' && detail) error = detail;
-  else if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.message === 'string') {
-    error = detail.message;
+/**
+ * What the screens say about the last run that ended without an answer (pi-durable README "Busy Conversations"), or
+ * nothing for a continue that found nothing to answer. A failed response's own error shows in the transcript.
+ */
+function runFailureMessage(failure: Readonly<RunFailure>, entries: readonly EntryRecord[]): string | undefined {
+  const { detail } = failure;
+  switch (failure.reason) {
+    case 'nothing_to_answer':
+      return undefined;
+    case 'aborted':
+      return 'Response stopped.';
+    case 'model_error': {
+      const shown = entries.some((entry) => entry.byTaskId === failure.taskId
+        && entry.model?.some((message) => message.role === 'assistant' && message.stopReason === 'error'));
+      return shown || !detail ? 'The response failed.' : detail;
+    }
+    case 'no_model':
+      return `${detail ? `The model ${detail}` : 'This chat’s model'} is not available. `
+        + 'Choose another in its settings.';
+    case 'interrupted':
+      return 'The response was interrupted while the model was answering.';
+    case 'restart_limit':
+      return 'The response stopped after it was interrupted several times in a row.';
+    case 'turn_limit':
+      return `The response reached its limit of ${detail ?? 'tool rounds'}.`;
+    case 'faulted':
+      return detail || 'The response failed.';
+    case 'orphaned':
+      return 'This version of the app can’t continue that response.';
+    case 'reset':
+      return 'The conversation was reset before the response finished.';
   }
-  // A blocking compaction can fail without an assistant entry, so model_error alone cannot hide an error.
-  const represented = submission.reason === 'model_error' && placed !== undefined && entries.some((entry) =>
-    entry.id > placed && entry.model?.some((message) => message.role === 'assistant' && message.stopReason === 'error'
-      && (!message.errorMessage || message.errorMessage === error)));
-  return represented ? undefined : error;
 }
 
+/** `entries` are the newest the client holds, which include the last run's. */
 export function projectControls(state: ChatState, entries: readonly EntryRecord[],
   localRoot: LocalRoot = DEFAULT_LOCAL_ROOT): ChatControls {
-  const failure = state.live?.compactionFailure;
-  const error = submissionError(state.submission, entries)
-    ?? (failure ? `Could not summarize earlier messages: ${failure.error}` : undefined);
+  const compaction = state.live?.compactionFailure;
+  const failure = state.live?.runFailure;
+  const message = failure && runFailureMessage(failure, entries);
   return {
     id: state.id,
     title: state.metadata?.title || 'New chat',
@@ -92,8 +109,8 @@ export function projectControls(state: ChatState, entries: readonly EntryRecord[
     compacting: (state.live?.compactions?.length ?? 0) > 0,
     // pi-durable waits before retrying a failed request; the failed attempt is not an answer.
     retrying: state.live?.generation?.retry !== undefined,
-    ...(error ? { error } : {}),
-    ...(state.parked?.length ? { parked: state.parked } : {}),
+    ...(compaction ? { error: `Could not summarize earlier messages: ${compaction.error}` } : {}),
+    ...(failure && message ? { runFailure: { reason: failure.reason, message } } : {}),
   };
 }
 
@@ -145,13 +162,36 @@ function assistantRows(message: AssistantMessage, key: string, streaming: boolea
 }
 
 /**
- * Derive transcript rows from committed entries (ascending IDs) and live documents. Row IDs stay stable as a
- * streamed partial becomes a saved entry: assistants are numbered in order, and the partial takes the next number.
+ * A transcript item that is not an entry, as a row that loads it (`ChatMessage.history`). Its ID names what it stands
+ * before, so a page that leaves more to load makes a new row, which loads again while it is in view.
  */
-export function projectMessages(state: ChatState, entries: readonly EntryRecord[]): ChatMessage[] {
+function historyRow(item: Exclude<TranscriptItem, { kind: 'entry' }>, next: TranscriptItem | undefined): ChatMessage {
+  if (item.kind === 'earlier') {
+    return { id: `history-earlier-${next?.kind === 'entry' ? next.entry.id : 'start'}`, role: 'notice',
+      text: 'Earlier messages', createdAt: 0, history: { kind: 'earlier' } };
+  }
+  const { after, upTo } = item;
+  return { id: `history-${after}-${upTo}`, role: 'notice', text: 'More messages', createdAt: 0,
+    history: { kind: 'gap', after, upTo } };
+}
+
+/**
+ * Derive transcript rows from a client's transcript (pi-durable's `ConversationTranscript` items, in entry order) and
+ * live documents. Row IDs stay stable as a streamed partial becomes a saved entry and as earlier pages load: a
+ * generation's assistants are numbered in order, and its partial takes the next number.
+ */
+export function projectMessages(state: ChatState, items: readonly TranscriptItem[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const calls = new Map<string, number>();
-  let assistantCount = 0;
+  const assistants = new Map<TaskId, number>();
+  /** The next assistant's row ID: its generation's, or its entry's for one no generation wrote. */
+  const assistantKey = (taskId: TaskId | undefined, fallback: string) => {
+    if (taskId === undefined) return `assistant-${fallback}`;
+    const ordinal = assistants.get(taskId) ?? 0;
+    assistants.set(taskId, ordinal + 1);
+    return `assistant-${taskId}-${ordinal}`;
+  };
+  const entries = items.flatMap((item) => item.kind === 'entry' ? [item.entry] : []);
   const createdAt = state.metadata?.createdAt ?? 0;
   const presentations = state.search?.responses ?? {};
   const webSearchFor = (responseId: string | undefined): WebSearchPresentation | undefined => {
@@ -194,7 +234,13 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
       if (offset >= 0) calls.set(part.id, start + offset);
     }
   };
-  for (const entry of visible) {
+  for (const [position, item] of items.entries()) {
+    if (item.kind !== 'entry') {
+      messages.push(historyRow(item, items[position + 1]));
+      continue;
+    }
+    const { entry } = item;
+    if (isSearchObservationEntry(entry)) continue;
     for (const summary of summaries.get(entry.id) ?? []) {
       messages.push({ id: `summary-${summary.id}`, role: 'notice', text: SUMMARIZED_NOTICE, createdAt: 0 });
     }
@@ -212,7 +258,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
       if (message.role !== 'assistant') return;
       // Entries are append-only, so the next assistant's ordinal is known before its entry exists. Count every
       // assistant, including tool-only responses and hidden attempts, so a partial and its entry share a row ID.
-      const key = `assistant-${assistantCount++}`;
+      const key = assistantKey(entry.byTaskId, `${entry.id}-${index}`);
       const webSearch = webSearchFor(message.responseId);
       if (message.stopReason === 'error' && retried(entry)) {
         // A failed attempt's answer stays hidden; its searches remain as an interrupted row.
@@ -228,7 +274,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
 
   const partial = state.live?.generation?.message;
   if (partial) {
-    const key = `assistant-${assistantCount++}`;
+    const key = assistantKey(runTask, 'partial');
     pushAssistant(assistantRows(partial, key, true, webSearchFor(partial.responseId)), key, partial);
   }
   // A busy run whose current response has search activity but no partial yet shows a live search row.
@@ -237,7 +283,7 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
   if (liveSearchId !== undefined && liveSearchId !== partial?.responseId && !represented.has(liveSearchId)) {
     const presentation = presentations[liveSearchId];
     if (presentation && hasSearchActivity(presentation)) {
-      const key = `assistant-${assistantCount++}`;
+      const key = assistantKey(runTask, 'search');
       messages.push({ id: key, role: 'assistant', text: '', createdAt, streaming: true,
         webSearch: toWebSearchPresentation(presentation) });
     }
@@ -251,14 +297,6 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
         ...(file ? { file } : {}) } };
     }
   }
-  // A stopped run saves its partial answer as an interrupted entry, which already shows the stop.
-  const last = state.submission;
-  const placed = last?.entry;
-  const partialSaved = placed !== undefined && visible.some((entry) => entry.id > placed
-    && entry.model?.some((message) => message.role === 'assistant' && message.stopReason === 'aborted'));
-  if (last?.status === 'unanswered' && last.reason === 'aborted' && !partialSaved) {
-    messages.push(stoppedNotice(`submission-${last.id}`));
-  }
   // Queued inputs wait in the inbox for a turn boundary; write items are evidence for the model, never rows.
   for (const item of state.inbox?.items ?? []) {
     if (item.mode === 'write') continue;
@@ -266,10 +304,6 @@ export function projectMessages(state: ChatState, entries: readonly EntryRecord[
   }
   return messages;
 }
-
-/** The notice that a stop ended the latest input before it was answered. */
-export const stoppedNotice = (id: string): ChatMessage =>
-  ({ id, role: 'notice', text: 'Response stopped', createdAt: 0 });
 
 /** An input that waits to be placed, shown as the user sent it. */
 export function queuedRow(id: string, content: UserMessage['content'],

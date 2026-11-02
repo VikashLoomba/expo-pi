@@ -1,5 +1,5 @@
 import type { Host } from '@earendil-works/chord';
-import { Type } from '@earendil-works/pi-ai';
+import { arr, nul, str, union } from '@earendil-works/pi-schema';
 import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
 import type { DurableChatService } from '@pi-agent/infinichat/pi/chat-service';
 import {
@@ -15,9 +15,9 @@ import type { MacChats as Chats } from './chats';
 import { listFolder, searchFolders } from './folders';
 import type { MacMachines } from './machines';
 
-const ChatsCell = Type.Union([Type.Null(), Type.Array(ChatSummarySchema)]);
-const ReportCell = Type.Union([Type.Null(), Type.String()]);
-const ControlsCell = Type.Union([ChatControlsSchema, Type.Null()]);
+const ChatsCell = union([nul(), arr(ChatSummarySchema)]);
+const ReportCell = union([nul(), str()]);
+const ControlsCell = union([ChatControlsSchema, nul()]);
 const NOT_OPEN = 'The chats are not open on this Mac.';
 
 /**
@@ -92,7 +92,9 @@ export function serveChats(host: Host<MacPrincipal>, chats: Chats, account: Acco
       send: async ({ content, requestId }) => { await chat().service.send(chat().id, content, requestId); },
       cancel: () => chat().service.cancel(chat().id),
       steer: ({ submissionId, content }) => chat().service.steerQueued(chat().id, submissionId, content),
-      retryParked: () => chat().service.retryParked(view?.getControls()?.parked ?? []),
+      continue: () => chat().service.continue(chat().id),
+      loadEarlier: async () => { await view?.loadEarlier(); },
+      fillGap: async (gap) => { await view?.fillGap(gap); },
       updateSettings: ({ settings }) => chat().service.updateSettings(chat().id, settings),
       updateExecution: ({ execution, settings }) => chat().service.updateExecution(chat().id, execution, settings),
       listFolder: async ({ machineId, path }, ctx) =>

@@ -19,7 +19,7 @@ import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { useTranscriptScroll } from '@/hooks/use-transcript-scroll';
 import { ChatIcon, type ChatIconName } from './icon';
-import { TurnItem } from './turn-item';
+import { TurnItem, type OnLoadHistory } from './turn-item';
 import { AgentMark, useChatAgentName } from './agent';
 import { ActionButton } from './primitives';
 
@@ -83,7 +83,8 @@ function ChatScrollView({ composerHeight, onEndVisible, ...props }: ScrollViewPr
  * by React Compiler (it contains `try … finally`). The composer floats over the transcript and moves with the
  * keyboard. The thread is folded by turn (owner, 2026-10-29): the person's messages and the agent's replies as they
  * are, the steps between them folded in every turn, the newest too, a tap on a run's summary opening its turn's
- * steps, and a new turn folding the rest again.
+ * steps, and a new turn folding the rest again. It holds the newest turns; a row above them loads earlier ones as the
+ * reader scrolls up, and FlashList keeps the reader's place as they arrive.
  */
 export const ChatTranscript = memo(function ChatTranscript({
   view, ready, stopping, onChoose, onSteerQueued, composer,
@@ -109,9 +110,15 @@ export const ChatTranscript = memo(function ChatTranscript({
     ...current,
     open: current.open.includes(id) ? current.open.filter((other) => other !== id) : [...current.open, id],
   }));
+  // The history rows load through the view, which pages its transcript (pi-durable's `ConversationTranscript`).
+  const loadHistory = useCallback<OnLoadHistory>(async (history) => {
+    if (!view) return;
+    if (history.kind === 'earlier') await view.loadEarlier();
+    else await view.fillGap(history);
+  }, [view]);
   const renderTurn = ({ item }: { item: Turn }) =>
     <TurnItem turn={item} open={opened.open.includes(item.id)} onToggle={() => toggle(item.id)} stopping={stopping}
-      onSteerQueued={onSteerQueued} />;
+      onSteerQueued={onSteerQueued} onLoadHistory={loadHistory} />;
   const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
     : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
   const { listRef, onEndVisible, scrollToLatest, showScrollDown } = useTranscriptScroll();

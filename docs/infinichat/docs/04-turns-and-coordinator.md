@@ -2,7 +2,7 @@
 
 [Guide index](../README.md) · [Behavioral coverage](09-validation.md) · [Pinned references](10-references.md)
 
-Sources: UniiChat’s [prompt.txt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/prompt.txt), [turns](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L12-L14), [a message taken between tool calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L482-L495), [the turn message](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L528-L556), [the turns’ calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L498-L521), [a call’s end and the messages it didn’t take](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L563-L581), [a failed turn’s note](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L620-L623), [a cut attempt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Agent.ts#L444-L448), [stop](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L1209-L1224) and [tool results](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Agent.ts#L198), [native inbox](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L2481-L2638), [prompt and context](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L3656-L3784), [document watches](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/packages/durable/docs/spec.md#L4709-L4768).
+Sources: UniiChat’s [prompt.txt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/prompt.txt), [turns](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L12-L14), [a message taken between tool calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L482-L495), [the turn message](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L528-L556), [the turns’ calls](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L498-L521), [a call’s end and the messages it didn’t take](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L563-L581), [a failed turn’s note](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L620-L623), [a cut attempt](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Agent.ts#L444-L448), [stop](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Server.ts#L1209-L1224) and [tool results](https://github.com/VictorTaelin/UniiChat/blob/0500bf6a8ea4bf0ce047488562022b1b6532cc30/Agent.ts#L198), [native inbox](https://github.com/earendil-works/pi/blob/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/durable/docs/spec.md#L2847-L3065), [prompt and context](https://github.com/earendil-works/pi/blob/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/durable/docs/spec.md#L4202-L4330), [document watches](https://github.com/earendil-works/pi/blob/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/durable/docs/spec.md#L5533-L5599).
 
 ## Fresh versus active input
 
@@ -12,7 +12,7 @@ Native completion, not a delayed coordinator status update, determines whether a
 
 Inputs arriving while a fresh turn is being prepared remain distinct inputs in its reserved epoch. Notes can enter semantic memory and trigger summaries without implicitly dispatching a new main-model request.
 
-A run that fails can leave inputs queued, which pi-durable would place in a later run’s context. As UniiChat’s next call takes the messages its last one didn’t, the Harness sets `afterFailedRun: "withdraw"`, so pi-durable settles them `unanswered` with reason `run_failed` in the commit that ends the failed run, and their epoch stays open. Once the run has ended, the coordinator submits them anew in the next turn, after the failed turn’s note, the first as that fresh turn’s message: each input counts its next attempt, and attempt `n` is submitted as `optchat:<requestId>:<n>`, the first keeping `optchat:<requestId>`. An input accepted while a turn ran but not submitted before it ended, prepared for that turn or not, starts the next turn the same way. A run whose task faulted keeps its queue, since `afterFailedRun` covers only runs that fail with `model_error` or `no_model` (pi-durable’s spec), so once such a run has ended the coordinator withdraws what is still queued with an abort, counting each input’s next attempt first, and submits it anew the same way. `waitForAnswer` follows an input across its resubmissions.
+A run that fails can leave inputs queued, which pi-durable would place in a later run’s context. As UniiChat’s next call takes the messages its last one didn’t, the Harness sets `afterFailedRun: "withdraw"`, so pi-durable settles them `unanswered` with reason `run_failed` in the commit that ends the failed run, and their epoch stays open. Once the run has ended, the coordinator submits them anew in the next turn, after the failed turn’s note, the first as that fresh turn’s message: each input counts its next attempt, and attempt `n` is submitted as `optchat:<requestId>:<n>`, the first keeping `optchat:<requestId>`. An input accepted while a turn ran but not submitted before it ended, prepared for that turn or not, starts the next turn the same way. A run whose task faulted keeps its queue, since `afterFailedRun` covers only runs that end `model_error`, `no_model`, `interrupted`, `restart_limit`, `nothing_to_answer` or `turn_limit`, and an aborted, faulted or orphaned run keeps its inbox (pi-durable’s spec), so once such a run has ended the coordinator withdraws what is still queued with an abort, counting each input’s next attempt first, and submits it anew the same way. `waitForAnswer` follows an input across its resubmissions.
 
 ## Projection and wakeups
 
@@ -846,8 +846,9 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
         const changed = new Promise<void>((resolve) => {
           for (const watch of watches) {
             const seen = JSON.stringify(watch.value);
-            watch.start(async (value) => {
-              if (JSON.stringify(value) !== seen) resolve();
+            watch.start(async (call) => {
+              if (call.kind === "value" && JSON.stringify(call.value) !== seen)
+                resolve();
             });
           }
         });
@@ -1068,12 +1069,9 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
           } else if (!progressed) {
             const ended = Promise.race(watches.map((watch) => watch.closed)).then(
               (end) => {
-                if (
-                  end.reason === "session_failed" ||
-                  end.reason === "listener_error"
-                )
+                if (end.kind === "failed" || end.kind === "listener_error")
                   throw end.error;
-                throw new Error(`OptChat watch ended: ${end.reason}`);
+                throw new Error(`OptChat watch ended: ${end.kind}`);
               },
             );
             await awaitWithContext(Promise.race([changed, ended]), invocation);
@@ -1220,7 +1218,7 @@ export async function openOptChat(
         // An input queued behind a failed run starts a fresh turn, as UniiChat's next call takes it, never the failed
         // turn's context.
         afterFailedRun: "withdraw",
-        // The coordinator is stored running while idle, so every crash or kill would count toward parking it.
+        // The coordinator is stored running while idle, so every crash or kill would count toward ending it.
         restartLimit: Infinity,
       },
     },
@@ -1272,7 +1270,7 @@ export async function openOptChat(
     );
     if (!watch)
       throw new Error("Accept the request before waiting for its answer");
-    const accepted = watch.value?.value;
+    const accepted = watch.value.value;
     if (!accepted) {
       await watch.stop();
       throw new Error("Accept the request before waiting for its answer");
@@ -1284,24 +1282,24 @@ export async function openOptChat(
     const cancellation = new AbortController();
     const waiting = withAbortSignal(cancellation.signal, waitContext);
     const settled = new Promise<void>((resolve) => {
-      const inspect = (value: Readonly<{ value: Admission | null }> | null) => {
-        const phase = value?.value?.phase;
+      const inspect = (value: Readonly<{ value: Admission | null }>) => {
+        const phase = value.value?.phase;
         if (
-          (phase === "submitted" && (value?.value?.attempt ?? 0) >= attempt) ||
+          (phase === "submitted" && (value.value?.attempt ?? 0) >= attempt) ||
           phase === "cancelled"
         )
           resolve();
       };
-      watch.start(async (value) => {
-        inspect(value);
+      watch.start(async (call) => {
+        if (call.kind === "value") inspect(call.value);
       });
       inspect(watch.value);
     });
     try {
       const ended = watch.closed.then((end) => {
-        if (end.reason === "listener_error" || end.reason === "session_failed")
+        if (end.kind === "listener_error" || end.kind === "failed")
           throw end.error;
-        throw new Error(`Admission watch ended: ${end.reason}`);
+        throw new Error(`Admission watch ended: ${end.kind}`);
       });
       await awaitWithContext(
         Promise.race([
@@ -1414,10 +1412,10 @@ export async function openOptChat(
       const waiting = withAbortSignal(cancellation.signal, context);
       const done = new Promise<void>((resolve) => {
         const check = (value: typeof watch.value) => {
-          if (value && value.stopped >= requested) resolve();
+          if (value.stopped >= requested) resolve();
         };
-        watch.start(async (value) => {
-          check(value);
+        watch.start(async (call) => {
+          if (call.kind === "value") check(call.value);
         });
         check(watch.value);
       });
@@ -1427,12 +1425,9 @@ export async function openOptChat(
             done,
             coordinatorFailure(opened, root.id, waiting),
             watch.closed.then((end) => {
-              if (
-                end.reason === "session_failed" ||
-                end.reason === "listener_error"
-              )
+              if (end.kind === "failed" || end.kind === "listener_error")
                 throw end.error;
-              throw new Error(`Stop watch ended: ${end.reason}`);
+              throw new Error(`Stop watch ended: ${end.kind}`);
             }),
           ]),
           context,

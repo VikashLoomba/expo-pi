@@ -1,7 +1,8 @@
 import type { Context } from '@earendil-works/chord';
 import { awaitWithContext, withAbortSignal } from '@earendil-works/chord/context';
-import { Type, type ImageContent, type ThinkingLevel } from '@earendil-works/pi-ai';
+import type { ImageContent, ThinkingLevel } from '@earendil-works/pi-ai';
 import { ThinkingLevelSchema } from '@earendil-works/pi-ai/providers/model-schema';
+import { arr, obj, opt, str } from '@earendil-works/pi-schema';
 import {
   AgentDoc, InboxDoc, LiveDoc, ResetEntry, configure, defineDoc, defineDocFamily, defineEntry, defineTask, defineTool,
   type ConversationId, type Cursor, type EntryId, type Extension, type TaskId, type Tx, type WatchHandle,
@@ -189,8 +190,8 @@ async function until(watches: readonly WatchHandle<unknown>[], ready: () => bool
       }
     });
     const ended = Promise.race(watches.map((watch) => watch.closed)).then((end) => {
-      if (end.reason === 'session_failed' || end.reason === 'listener_error') throw end.error;
-      throw new Error(`Agent watch ended: ${end.reason}`);
+      if (end.kind === 'failed' || end.kind === 'listener_error') throw end.error;
+      throw new Error(`Agent watch ended: ${end.kind}`);
     });
     await awaitWithContext(Promise.race([change, ended]), context);
   } finally {
@@ -235,13 +236,13 @@ export const agentTask = (setup: SubagentSetup) => defineTask<AgentInput, Checkp
       if (!watch) throw new Error('MemoryDoc must be initialized before calling an agent');
       try {
         await awaitWithContext(new Promise<void>((resolve, reject) => {
-          watch.start(async (value) => {
-            if (value && value.frontier >= cutoff) resolve();
+          watch.start(async (call) => {
+            if (call.kind === 'value' && call.value.frontier >= cutoff) resolve();
           });
-          if (watch.value && watch.value.frontier >= cutoff) resolve();
+          if (watch.value.frontier >= cutoff) resolve();
           void watch.closed.then((ended) => {
-            if (ended.reason === 'session_failed' || ended.reason === 'listener_error') reject(ended.error);
-            else reject(new Error(`Agent memory watch ended: ${ended.reason}`));
+            if (ended.kind === 'failed' || ended.kind === 'listener_error') reject(ended.error);
+            else reject(new Error(`Agent memory watch ended: ${ended.kind}`));
           });
         }), invocation);
       } finally {
@@ -338,7 +339,7 @@ export const agentTask = (setup: SubagentSetup) => defineTask<AgentInput, Checkp
           throw new Error('The agent documents are missing');
         }
         // Until it is told more, or its conversation rests.
-        await until([told, live], () => Boolean(told.value?.waiting.length) || !live.value?.run, invocation);
+        await until([told, live], () => told.value.waiting.length > 0 || !live.value.run, invocation);
         // pi-durable withdraws what was steered to a run that failed (`afterFailedRun: 'withdraw'`), but a run whose
         // task faulted keeps its inbox (spec "afterFailedRun"). Withdrawn here, that input ends with the call too.
         const inbox = await runtime.snapshot(InboxDoc, conversationId, context);
@@ -495,13 +496,13 @@ export function agentTools(rootId: ConversationId, task: AgentTask) {
       + 'reaches you as a message "[Name] report" when it finishes. A subagent sees the view and the user\'s '
       + 'instructions, but knows what you want only from its task.',
     replay: 'safe',
-    parameters: Type.Object({
-      tasks: Type.Array(Type.String()),
-      effort: Type.Optional({
+    parameters: obj({
+      tasks: arr(str()),
+      effort: opt({
         ...ThinkingLevelSchema,
         description: 'How hard they think; by default, as hard as you.',
       }),
-    }),
+    }, { open: true }),
     async execute({ tasks, effort }, api, context) {
       const text = await api.commit(async (tx) => {
         // A native tool task may replay after a lost result commit; its own ID makes it act once.
@@ -521,7 +522,7 @@ export function agentTools(rootId: ConversationId, task: AgentTask) {
     description: 'Send a message to a subagent, by name. One at work reads it between its tool calls, and its '
       + 'report answers it; an idle one goes on from its chat, and its reply reaches you as a message "[Name] reply".',
     replay: 'safe',
-    parameters: Type.Object({ name: Type.String(), message: Type.String() }),
+    parameters: obj({ name: str(), message: str() }, { open: true }),
     async execute({ name, message }, api, context) {
       const text = await api.commit(async (tx) => {
         const done = await tx.doc(AgentCallDoc, rootId, String(api.taskId), null);

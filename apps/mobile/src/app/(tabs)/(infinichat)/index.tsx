@@ -191,6 +191,16 @@ export default function InfiniChatScreen() {
       setStopping(false);
     }
   };
+  // A run that ended without an answer continues on the context as it is (pi-durable's continue submission).
+  const resume = async () => {
+    setLocalError(undefined);
+    try {
+      await service.continue();
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'The response could not continue. Try again.');
+    }
+  };
+  const failure = !busy && !movingNow ? conversation?.runFailure : undefined;
   // A move that failed, and a machine that can't be reached, are tried again when the user asks and when the app
   // becomes active; a send that failed with the same error offers the same. A removed machine has nothing to try again.
   const moveError = move?.running === false ? move.error : undefined;
@@ -285,6 +295,12 @@ export default function InfiniChatScreen() {
       {settingsError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-settings-error" message={settingsError}
           action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
+      </View>}
+      {failure && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-run-failure" message={failure.message}
+          tone={failure.reason === 'aborted' ? 'neutral' : 'error'}
+          action={configured && access.connected && !settingsError ? 'Continue' : undefined}
+          onAction={() => { void resume(); }} />
       </View>}
       {messageError && messageError !== settingsError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-error" message={messageError}

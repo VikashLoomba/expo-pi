@@ -1,13 +1,13 @@
-import { Type, type Static } from '@earendil-works/pi-ai';
+import { num, obj, oneOf, opt, str, type Static } from '@earendil-works/pi-schema';
 
 /** Small, validated UI state derived from tool arguments and durable result details. */
-export const FileToolPresentationSchema = Type.Object({
-  kind: Type.Enum(['read', 'write', 'edit']),
-  path: Type.String(),
-  summary: Type.String(),
-  diff: Type.Optional(Type.String()),
-  firstChangedLine: Type.Optional(Type.Number()),
-});
+export const FileToolPresentationSchema = obj({
+  kind: oneOf(['read', 'write', 'edit']),
+  path: str(),
+  summary: str(),
+  diff: opt(str()),
+  firstChangedLine: opt(num()),
+}, { open: true });
 export type FileToolPresentation = Static<typeof FileToolPresentationSchema>;
 
 function record(value: unknown): Record<string, unknown> | undefined {

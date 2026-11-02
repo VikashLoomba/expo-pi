@@ -4,7 +4,7 @@ import {
   SignInAttemptSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { ModelCatalogSchema, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
-import { Type } from '@earendil-works/pi-ai';
+import { nul, str, union } from '@earendil-works/pi-schema';
 
 import {
   ConnectionSchema, MacInfiniChat, MoveStatusSchema, ShownMachineSchema, type Connection, type MacPrincipal,
@@ -15,10 +15,10 @@ import type { MacInfiniChat as Shown } from './infinichat';
 const LOADING = { status: 'loading' } as const;
 const NO_CATALOG: ModelCatalog = [];
 const NO_ACCESS = {};
-const AvatarSchema = Type.Union([Type.Null(), Type.String()]);
-const HeldSchema = Type.Union([Type.Null(), ConversationSchema]);
-const MoveSchema = Type.Union([Type.Null(), MoveStatusSchema]);
-const MoveNoticeSchema = Type.Union([Type.Null(), Type.String()]);
+const AvatarSchema = union([nul(), str()]);
+const HeldSchema = union([nul(), ConversationSchema]);
+const MoveSchema = union([nul(), MoveStatusSchema]);
+const MoveNoticeSchema = union([nul(), str()]);
 
 /** The connection as the contract carries it: a field that is absent is left out, as Chord requires. */
 function connection(infinichat: Shown): Connection {
@@ -113,6 +113,9 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown, ava
       avatar: avatarUrl,
       accept: ({ content, requestId }) => shown.accept(content, requestId),
       stop: () => shown.stop(),
+      continue: () => shown.continue(),
+      loadEarlier: () => view.loadEarlier(),
+      fillGap: (gap) => view.fillGap(gap),
       dismissError: () => shown.dismissError(),
       dismissNotice: () => infinichat.dismissNotice(),
       reconnect: () => infinichat.reconnect(),

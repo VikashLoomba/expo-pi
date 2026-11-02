@@ -1,4 +1,3 @@
-import type { Context } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
@@ -58,6 +57,8 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   patchMachine(endpoint: string, patch: MachinePatch): Promise<void>;
   removeMachine(endpoint: string): Promise<void>;
   accept(input: UserMessage['content'], requestId: string): Promise<void>;
+  /** Continues the run the view's `runFailure` names, with no message of the user's (pi-durable's continue). */
+  continue(): Promise<void>;
   stop(): Promise<void>;
   updateSettings(settings: InfiniChatSettings): Promise<void>;
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean>;
@@ -135,7 +136,10 @@ export class InfiniChatService implements InfiniChatHost {
       models: options.models,
       registry: options.registry,
       parts: options.parts,
-      onReport: (error) => service?.report(error),
+      // A crash that ended a run shows in the conversation as its `runFailure` (`InfiniChatView`).
+      onReport: (report) => {
+        if (report.kind !== 'task_interrupted') service?.report(report.error);
+      },
       // The chat view shows a conversation only with its metadata document; the phone device reads the workspace.
       init: async (tx, id) => {
         const metadata = await tx.doc(ChatMetadataDoc, id);
@@ -144,7 +148,7 @@ export class InfiniChatService implements InfiniChatHost {
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
       },
     }, BACKGROUND_CONTEXT);
-    // pi-durable's `documentState` finds no document that doesn't exist yet, and a view stays attached without it, so
+    // pi-durable's `watchDoc` finds no document that doesn't exist yet, and a view stays attached without it, so
     // the searches document exists before any view, as a chat's does from its creating commit (`chat-service.ts`). A
     // conversation from before web search gets it here once; a new document is adopted even unmodified.
     await chat.root.commit(async (tx) => {
@@ -157,7 +161,7 @@ export class InfiniChatService implements InfiniChatHost {
     void machines.start().catch((error: unknown) => service?.report(error));
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
-      if (end.reason === 'failed') service.report(end.error);
+      if (end.kind === 'failed') service.report(end.error);
       options.onClosed?.(end);
     });
     return service;
@@ -209,11 +213,11 @@ export class InfiniChatService implements InfiniChatHost {
     await requireModelAuth(this.models, settingsOf(agent), this.authError, this.machine);
     this.assertOpen();
     await this.chat.accept({ requestId, content });
-    // OptChat's acceptance commit is its own, so the view's record of the request follows in the next one. Once the
-    // input is admitted that record is part of the work, so a caller that goes away cannot cancel it.
-    await root.commit(async (tx) => {
-      (await tx.doc(ChatMetadataDoc, root.id)).lastRequest = requestId;
-    }, BACKGROUND_CONTEXT);
+  }
+
+  continue(): Promise<void> {
+    this.assertOpen();
+    return this.chat.continue();
   }
 
   putMachine(record: Machine): Promise<void> {
@@ -279,15 +283,8 @@ export class InfiniChatService implements InfiniChatHost {
    * do not read its history again; it attaches while something subscribes.
    */
   view(): InfiniChatView {
-    this.shownView ??= new InfiniChatView(this.chat.harness, this.chat.root.id,
-      (requestId, waitContext) => this.waitForAnswer(requestId, waitContext));
+    this.shownView ??= new InfiniChatView(this.chat.harness, this.chat.root.id);
     return this.shownView;
-  }
-
-  /** The native receipt of an accepted input once it is submitted; rejects when a stop cancelled it first. */
-  waitForAnswer(requestId: string, waitContext?: Context): ReturnType<OptChat['waitForAnswer']> {
-    this.assertOpen();
-    return this.chat.waitForAnswer(requestId, waitContext);
   }
 
   close(): Promise<void> {

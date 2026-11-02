@@ -1,5 +1,4 @@
 import type { Context } from '@earendil-works/chord';
-import { Type } from '@earendil-works/pi-ai';
 import {
   AgentDoc, ROOT_CONVERSATION_ID, defineTool, type ConversationId, type DocumentReader, type ToolRegistration,
 } from '@earendil-works/pi-durable';
@@ -7,6 +6,7 @@ import { getOrThrow, type ExecutionEnv } from '@earendil-works/pi-durable/env';
 import {
   createBashTool, createEditTool, createReadTool, createWriteTool, type ImageProcessor,
 } from '@earendil-works/pi-durable/tools';
+import { str, type Schema } from '@earendil-works/pi-schema';
 
 import type { OptChatExtensionOptions } from './app';
 
@@ -30,7 +30,24 @@ export type Device = {
 /** What InfiniChat's tools need from the host it runs on. */
 export type InfiniChatDevices = Required<Pick<OptChatExtensionOptions, 'tools' | 'callEnv' | 'turnState'>>;
 
-const deviceParameter = Type.String({ description: 'The device to run on, from the list at the start of the message' });
+const deviceParameter = str({ description: 'The device to run on, from the list at the start of the message' });
+
+/**
+ * A built-in tool's parameters with a required `device` first: the same JSON Schema object, as pi's built-in tools
+ * write theirs with pi-schema (an open object, `durable/src/tools/bash.ts`), typed as the values it accepts the way
+ * pi-schema's own builders type theirs. pi-schema has no combinator that adds a property to an object schema.
+ */
+function withDevice<T>(parameters: Schema<T>): Schema<T & { device: string }> {
+  // Its keywords as plain data, so the copy carries no value type of its own.
+  const keywords = Object.fromEntries(Object.entries(parameters));
+  const { properties, required } = keywords;
+  const own = typeof properties === 'object' && properties !== null ? properties : {};
+  return {
+    ...keywords,
+    properties: { device: deviceParameter, ...own },
+    required: ['device', ...(Array.isArray(required) ? required : [])],
+  };
+}
 
 /**
  * What a device tool keeps of the built-in registration; its schema gains `device` and `execute` injects that env.
@@ -87,25 +104,25 @@ export function infiniChatDevices(list: () => Promise<readonly Device[]>, images
     tools: [
       defineTool({
         ...kept(bash),
-        parameters: Type.Object({ device: deviceParameter, ...bash.parameters.properties }),
+        parameters: withDevice(bash.parameters),
         execute: async ({ device, ...args }, api, context) =>
           bash.execute(args, { ...api, env: await envFor(device, api, context) }, context),
       }),
       defineTool({
         ...kept(read),
-        parameters: Type.Object({ device: deviceParameter, ...read.parameters.properties }),
+        parameters: withDevice(read.parameters),
         execute: async ({ device, ...args }, api, context) =>
           read.execute(args, { ...api, env: await envFor(device, api, context) }, context),
       }),
       defineTool({
         ...kept(write),
-        parameters: Type.Object({ device: deviceParameter, ...write.parameters.properties }),
+        parameters: withDevice(write.parameters),
         execute: async ({ device, ...args }, api, context) =>
           write.execute(args, { ...api, env: await envFor(device, api, context) }, context),
       }),
       defineTool({
         ...kept(edit),
-        parameters: Type.Object({ device: deviceParameter, ...edit.parameters.properties }),
+        parameters: withDevice(edit.parameters),
         prepareArguments: prepareEdit && ((args) => ({ ...prepareEdit(args), device: deviceArgument(args) })),
         execute: async ({ device, ...args }, api, context) =>
           edit.execute(args, { ...api, env: await envFor(device, api, context) }, context),

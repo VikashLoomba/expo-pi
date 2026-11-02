@@ -35,7 +35,7 @@ const CODE_PREFIX = /^[a-z_]+(\/[a-z_]+)?: /;
 const LOADING: ChatViewSnapshot = { status: 'loading' };
 const NO_MESSAGES: readonly ChatMessage[] = [];
 const NO_REPORT: InfiniChatSnapshot = {};
-/** A failed attempt is tried again as pi-env's watcher reconnects its daemon (`dist/watch.js:4-5` at v1.4.0). */
+/** A failed attempt is tried again as pi-env's watcher reconnects its daemon (`dist/watch.js:6-7` at v1.5.0). */
 const RECONNECT_FIRST_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -122,6 +122,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
     getSnapshot: () => this.values?.view ?? LOADING,
     getControls: () => this.values?.controls,
     getMessages: () => this.values?.messages ?? NO_MESSAGES,
+    // The machine's view loads them into the transcript every client reads.
+    loadEarlier: () => this.call((ref, ctx) => ref.loadEarlier(ctx)),
+    fillGap: (gap) => this.call((ref, ctx) => ref.fillGap(gap, ctx)),
   };
 
   view(): ChatViewSource<InfiniChatControls> {
@@ -282,6 +285,10 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.accept({ content: input, requestId }, ctx));
   }
 
+  continue(): Promise<void> {
+    return this.call((ref, ctx) => ref.continue(ctx));
+  }
+
   stop(): Promise<void> {
     return this.call((ref, ctx) => ref.stop(ctx));
   }
@@ -324,7 +331,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
    * Connects unless connected or connecting, on demand as the daemon connection restarts: when the link or the
    * transport under it closes, when the app becomes active, and when the user acts. A failure shows until the next
    * attempt, which follows by itself after a delay that doubles up to half a minute, as pi-env's watcher reconnects
-   * its daemon (`dist/watch.js:105-110` at v1.4.0); the user's Try Again comes sooner. Coming back from the background
+   * its daemon (`dist/watch.js:109-114` at v1.5.0); the user's Try Again comes sooner. Coming back from the background
    * replaces even a live link (`resume`).
    */
   reconnect(): void {

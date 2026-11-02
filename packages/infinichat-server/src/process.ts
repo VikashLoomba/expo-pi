@@ -1,5 +1,5 @@
 import { local, method, opaque } from '@earendil-works/chord';
-import { Type } from '@earendil-works/pi-ai';
+import { obj, str } from '@earendil-works/pi-schema';
 
 /**
  * What the host process gives the plugins it loads: InfiniChat's folder, this machine as the apps' device lists name
@@ -22,7 +22,7 @@ export interface ServerProcess {
  */
 export const InfiniChatProcess = local('infinichat.process', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   members: { process: opaque<ServerProcess>('infinichat.process@1') },
 });
 
@@ -32,9 +32,9 @@ export const InfiniChatProcess = local('infinichat.process', {
  */
 export const InfiniChatTools = local('infinichat.tools', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   members: {
     /** Connects each server that isn't, then says which connected, reconnected, closed or failed since the last run. */
-    mcp: method(undefined, Type.String()),
+    mcp: method(undefined, str()),
   },
 });

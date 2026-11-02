@@ -23,8 +23,6 @@ import { providersPane, useOpenSettings } from '../lib/app-context';
 
 const NO_CATALOG: ModelCatalog = [];
 const NO_ACCESS: ProviderAccess = { ready: false, connected: false };
-const PARKED = 'Pi paused this chat’s work because the app quit while it was running several times in a row.';
-
 interface ChatScreenProps {
   host: Host<MacPrincipal>;
   id: string;
@@ -42,6 +40,8 @@ export function ChatScreen({ host, id, ...props }: ChatScreenProps) {
   const source = useMemo((): ThreadSource => ({
     snapshot: ref.snapshot, controls: ref.controls, messages: ref.messages,
     steerQueued: (submissionId, content) => ref.steer({ submissionId, content }),
+    loadEarlier: () => ref.loadEarlier(),
+    fillGap: (gap) => ref.fillGap(gap),
   }), [ref]);
   return (
     <ThreadSourceContext value={source}>
@@ -52,8 +52,8 @@ export function ChatScreen({ host, id, ...props }: ChatScreenProps) {
 
 /**
  * The screen as the phone's `chats/chat/[id].tsx`: the header with the model summary and the chat's menu, the
- * transcript, what stands in the way (settings, a parked task, an error, a provider to connect), the composer whose
- * draft it owns, and the settings sheet.
+ * transcript, what stands in the way (settings, a run that stopped, an error, a provider to connect), the composer
+ * whose draft it owns, and the settings sheet.
  */
 function Chat({ host, chat: ref, settingsOpen, onSettingsOpenChange, onRename, onDelete, onDeleted }:
   Omit<ChatScreenProps, 'id'> & { chat: ChatRef }) {
@@ -106,12 +106,14 @@ function Chat({ host, chat: ref, settingsOpen, onSettingsOpenChange, onRename, o
       setLocalError(errorText(cause, 'Something went wrong. Please try again.'));
     }).finally(() => setStopping(false));
   }, [ref, setLocalError, stopping]);
+  // A run that ended without an answer continues on the context as it is (pi-durable's continue submission).
   const resume = () => {
     setLocalError(undefined);
-    void ref.retryParked().catch((cause: unknown) => {
-      setLocalError(errorText(cause, 'The work could not resume. Try again.'));
+    void ref.continue().catch((cause: unknown) => {
+      setLocalError(errorText(cause, 'The response could not continue. Try again.'));
     });
   };
+  const failure = !busy ? controls?.runFailure : undefined;
 
   const messageError = localError || controls?.error || access.error;
   const accountStatus = !access.ready ? 'Restoring your connection…'
@@ -152,7 +154,10 @@ function Chat({ host, chat: ref, settingsOpen, onSettingsOpenChange, onRename, o
       <Transcript stopping={stopping} onChoose={choosePrompt} />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-6 pb-6">
         {settingsError && <Notice message={settingsError} action="Chat Settings" onAction={openSheet} />}
-        {controls?.parked && <Notice tone="neutral" message={PARKED} action="Resume" onAction={resume} />}
+        {failure && (
+          <Notice tone={failure.reason === 'aborted' ? 'neutral' : 'error'} message={failure.message}
+            action={access.connected && !settingsError ? 'Continue' : undefined} onAction={resume} />
+        )}
         {messageError && messageError !== settingsError && (
           <Notice message={messageError} action={localError ? 'Dismiss' : access.error ? 'Open Settings' : undefined}
             onAction={localError ? () => setLocalError(undefined) : access.error ? openProviders : undefined} />

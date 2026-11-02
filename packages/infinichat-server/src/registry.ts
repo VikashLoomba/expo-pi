@@ -46,7 +46,7 @@ export function extensionSnapshot(table: RegistryTable<ExtensionContribution>): 
 /**
  * Durable's `RegistryReader` over the tables of `Extensions`, which Chord leaves to the application (chord
  * `docs/spec.md` §8): one complete snapshot per code version and per change of a source in it, so a Durable phase pins
- * a whole one and a reload never shows a moment without an extension (durable `test/examples/10-registry-reload.ts`).
+ * a whole one and a reload never shows a moment without an extension (durable `test/examples/09-registry-reload.ts`).
  * One pi-durable refuses, such as two plugins' tasks of one name, is reported and the last snapshot stays.
  */
 export function durableRegistry(view: RegistryView<ExtensionContribution>, report: (error: unknown) => void):

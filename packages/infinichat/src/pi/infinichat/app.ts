@@ -461,8 +461,8 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
       const changed = new Promise<void>((resolve) => {
         for (const watch of watches) {
           const seen = JSON.stringify(watch.value);
-          watch.start(async (value) => {
-            if (JSON.stringify(value) !== seen) resolve();
+          watch.start(async (call) => {
+            if (call.kind === 'value' && JSON.stringify(call.value) !== seen) resolve();
           });
         }
       });
@@ -611,8 +611,8 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
           }, context);
         } else if (!progressed) {
           const ended = Promise.race(watches.map((watch) => watch.closed)).then((end) => {
-            if (end.reason === 'session_failed' || end.reason === 'listener_error') throw end.error;
-            throw new Error(`OptChat watch ended: ${end.reason}`);
+            if (end.kind === 'failed' || end.kind === 'listener_error') throw end.error;
+            throw new Error(`OptChat watch ended: ${end.kind}`);
           });
           await awaitWithContext(Promise.race([changed, ended]), invocation);
           await runtime.commit(() => ({
@@ -688,9 +688,15 @@ export type OptChat = {
    */
   setInstructions(tx: Tx, text: string): Promise<void>;
   waitForAnswer(requestId: string, context?: Context): ReturnType<Submission['wait']>;
+  /**
+   * Continues the run that ended without an answer (`pi.live.runFailure`) with pi-durable's continue submission, as a
+   * turn of its own: what is sent meanwhile steers it, and the coordinator closes it. Refused while a turn is open or
+   * being closed, or inputs wait for the coordinator.
+   */
+  continue(): Promise<void>;
   abort(): Promise<void>;
   /**
-   * Aborts a scheduled task still waiting, as pi-durable's example 24 cancels a task, and schedules `replacement`
+   * Aborts a scheduled task still waiting, as pi-durable's example 23 cancels a task, and schedules `replacement`
    * in its place, since a task's input never changes. False when the task was sent first.
    */
   cancelScheduled(id: TaskId, replacement?: ScheduledInput): Promise<boolean>;
@@ -784,7 +790,7 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
   async function submitted(requestId: string, attempt: number, waitContext: Context): Promise<Admission> {
     const watch = await opened.watchDoc(InputDoc, root.id, requestId, waitContext);
     if (!watch) throw new Error('Accept the request before waiting for its answer');
-    const accepted = watch.value?.value;
+    const accepted = watch.value.value;
     if (!accepted) {
       await watch.stop();
       throw new Error('Accept the request before waiting for its answer');
@@ -796,19 +802,19 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     const cancellation = new AbortController();
     const waiting = withAbortSignal(cancellation.signal, waitContext);
     const settled = new Promise<void>((resolve) => {
-      const inspect = (value: Readonly<{ value: Admission | null }> | null) => {
-        const phase = value?.value?.phase;
-        if ((phase === 'submitted' && (value?.value?.attempt ?? 0) >= attempt) || phase === 'cancelled') resolve();
+      const inspect = (value: Readonly<{ value: Admission | null }>) => {
+        const phase = value.value?.phase;
+        if ((phase === 'submitted' && (value.value?.attempt ?? 0) >= attempt) || phase === 'cancelled') resolve();
       };
-      watch.start(async (value) => {
-        inspect(value);
+      watch.start(async (call) => {
+        if (call.kind === 'value') inspect(call.value);
       });
       inspect(watch.value);
     });
     try {
       const ended = watch.closed.then((end) => {
-        if (end.reason === 'listener_error' || end.reason === 'session_failed') throw end.error;
-        throw new Error(`Admission watch ended: ${end.reason}`);
+        if (end.kind === 'listener_error' || end.kind === 'failed') throw end.error;
+        throw new Error(`Admission watch ended: ${end.kind}`);
       });
       await awaitWithContext(Promise.race([settled, ended, coordinatorFailure(opened, root.id, waiting)]),
         waitContext);
@@ -857,6 +863,21 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
         return settled;
       }
     },
+    async continue() {
+      await opened.commit(async (tx) => {
+        const app = await tx.doc(AppDoc, root.id);
+        if (app.open || app.pending.length > 0 || app.cut !== null || app.endNote !== null) {
+          throw new Error(`${name} is still finishing its turn. Try again in a moment.`);
+        }
+        // Admitted in this commit, before its table writes, with the turn it opens (pi-durable's
+        // `34-submit-in-commit.ts`); a run at work refuses it with `ConversationBusy`.
+        await root.submit(tx, { type: 'continue' });
+        app.open = true;
+        app.started = true;
+        app.requests = [];
+        app.revision++;
+      }, context);
+    },
     async abort() {
       const { requested, work } = await opened.commit(async (tx) => {
         const app = await tx.doc(AppDoc, root.id);
@@ -883,10 +904,10 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       const waiting = withAbortSignal(cancellation.signal, context);
       const done = new Promise<void>((resolve) => {
         const check = (value: typeof watch.value) => {
-          if (value && value.stopped >= requested) resolve();
+          if (value.stopped >= requested) resolve();
         };
-        watch.start(async (value) => {
-          check(value);
+        watch.start(async (call) => {
+          if (call.kind === 'value') check(call.value);
         });
         check(watch.value);
       });
@@ -895,8 +916,8 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
           done,
           coordinatorFailure(opened, root.id, waiting),
           watch.closed.then((end) => {
-            if (end.reason === 'session_failed' || end.reason === 'listener_error') throw end.error;
-            throw new Error(`Stop watch ended: ${end.reason}`);
+            if (end.kind === 'failed' || end.kind === 'listener_error') throw end.error;
+            throw new Error(`Stop watch ended: ${end.kind}`);
           }),
         ]), context);
       } finally {

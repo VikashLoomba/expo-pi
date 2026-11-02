@@ -5,14 +5,15 @@ import { join, resolve } from 'node:path';
 
 import { copyJson } from '@earendil-works/chord';
 import type { CodemodeSandbox } from '@earendil-works/pi-codemode';
-import { Type, type Static } from '@earendil-works/pi-ai';
 import { defineExtension, defineTool, type Extension, type ToolRegistration } from '@earendil-works/pi-durable';
 import { createCodemodeExtension, type CodemodeNamespace } from '@earendil-works/pi-durable/codemode';
 import { createToolSearchExtension } from '@earendil-works/pi-durable/tool-search';
 import {
   McpClient, StdioTransport, StreamableHttpTransport, toLlmContent, type CallToolResult, type McpTransport, type Tool,
 } from '@earendil-works/pi-mcp';
-import { Check } from 'typebox/value';
+import {
+  arr, bool, compile, map, num, obj, oneOf, opt, str, unknown, type Schema, type Static,
+} from '@earendil-works/pi-schema';
 
 /**
  * How a server's tools reach the model, as pi's coding agent exposes them (coding-agent `docs/mcp.md`, "Control tool
@@ -20,36 +21,36 @@ import { Check } from 'typebox/value';
  * `tool_search` loads but the model is not offered nor the `codemode` section lists (durable README "Who may call a
  * tool"); `direct` tools are offered; `hidden` ones are not registered.
  */
-const ExposureSchema = Type.Union([Type.Literal('codemode'), Type.Literal('codemode-deferred'),
-  Type.Literal('deferred'), Type.Literal('direct'), Type.Literal('hidden')]);
+const ExposureSchema = oneOf(['codemode', 'codemode-deferred', 'deferred', 'direct', 'hidden']);
 type Exposure = Static<typeof ExposureSchema>;
 const common = {
-  type: Type.Optional(Type.Union([Type.Literal('stdio'), Type.Literal('http'), Type.Literal('streamable-http')])),
-  enabled: Type.Optional(Type.Boolean()),
-  description: Type.Optional(Type.String()),
+  type: opt(oneOf(['stdio', 'http', 'streamable-http'])),
+  enabled: opt(bool()),
+  description: opt(str()),
   /** Seconds per request, pi-mcp's `requestTimeoutMs`; progress notifications renew it. */
-  timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
-  exposure: Type.Optional(ExposureSchema),
+  timeout: opt(num({ exclusiveMinimum: 0 })),
+  exposure: opt(ExposureSchema),
 };
-const StdioServerSchema = Type.Object({
+// Open, as the coding agent's configuration allows keys this server does not read.
+const isStdioServer = compile(obj({
   ...common,
-  command: Type.String({ minLength: 1 }),
-  args: Type.Optional(Type.Array(Type.String())),
-  env: Type.Optional(Type.Record(Type.String(), Type.String())),
-  cwd: Type.Optional(Type.String()),
-});
-const HttpServerSchema = Type.Object({
+  command: str({ minLength: 1 }),
+  args: opt(arr(str())),
+  env: opt(map(str())),
+  cwd: opt(str()),
+}, { open: true })).check;
+const isHttpServer = compile(obj({
   ...common,
-  url: Type.String({ minLength: 1 }),
-  headers: Type.Optional(Type.Record(Type.String(), Type.String())),
-});
-const ConfigFileSchema = Type.Object({ mcpServers: Type.Optional(Type.Record(Type.String(), Type.Unknown())) });
+  url: str({ minLength: 1 }),
+  headers: opt(map(str())),
+}, { open: true })).check;
+const isConfigFile = compile(obj({ mcpServers: opt(map(unknown())) }, { open: true })).check;
 /** What scripts get for a call, the coding agent's: the server's `CallToolResult` without `_meta`. */
-const CallResultSchema = Type.Object({
-  content: Type.Array(Type.Unknown()),
-  structuredContent: Type.Optional(Type.Unknown()),
-  isError: Type.Optional(Type.Boolean()),
-});
+const CallResultSchema = obj({
+  content: arr(unknown()),
+  structuredContent: opt(unknown()),
+  isError: opt(bool()),
+}, { open: true });
 
 const NAME = /^[A-Za-z0-9_-]+$/;
 const VARIABLE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
@@ -109,9 +110,9 @@ function parseServer(name: string, entry: unknown): McpServerConfig | string | u
   if (typeof entry === 'object' && entry !== null && ('oauth' in entry || 'toolExposure' in entry)) {
     return skipped('oauth and toolExposure are not supported on InfiniChat’s server.');
   }
-  const stdio = Check(StdioServerSchema, entry) && entry.type !== 'http' && entry.type !== 'streamable-http'
+  const stdio = isStdioServer(entry) && entry.type !== 'http' && entry.type !== 'streamable-http'
     ? entry : undefined;
-  const http = Check(HttpServerSchema, entry) && entry.type !== 'stdio' ? entry : undefined;
+  const http = isHttpServer(entry) && entry.type !== 'stdio' ? entry : undefined;
   const missing = new Set<string>();
   const connection: Connection | undefined = stdio !== undefined
     ? { command: home(stdio.command), args: stdio.args?.map(home), env: expand(stdio.env, missing),
@@ -151,7 +152,7 @@ export function mcpConfiguration(file: string): McpConfiguration {
   } catch (error) {
     return none(`${FILE} is not valid JSON: ${message(error)}.`);
   }
-  if (!Check(ConfigFileSchema, parsed)) return none(`${FILE} needs an mcpServers object.`);
+  if (!isConfigFile(parsed)) return none(`${FILE} needs an mcpServers object.`);
   const servers: McpServerConfig[] = [];
   const problems: string[] = [];
   // Tool and namespace names write `-` as `_`, so two names that differ only there would collide.
@@ -312,14 +313,21 @@ export class McpServer {
   }
 }
 
+/**
+ * `tool`'s input schema as providers take it: an object schema, which some reject without `properties` (pi-mcp
+ * README). Typed as the objects it accepts, as pi-schema's builders type the JSON Schema they return: the Harness
+ * validates a call's arguments against it before `execute`.
+ */
+function mcpParameters(tool: Tool): Schema<Record<string, unknown>> {
+  return { ...tool.inputSchema, type: 'object', properties: tool.inputSchema.properties ?? {} };
+}
+
 /** A pi-durable tool calling `tool` of `server`; its result reaches the model as text and images, and scripts whole. */
 function mcpTool(server: McpServer, direct: boolean, tool: Tool, name: string): ToolRegistration {
   return defineTool({
     name,
     description: tool.description ?? tool.title ?? `${tool.name} of the MCP server ${server.name}`,
-    // Providers require an object schema, and some reject one without `properties` (pi-mcp README).
-    parameters: Type.Unsafe<Record<string, unknown>>({ ...tool.inputSchema, type: 'object',
-      properties: tool.inputSchema.properties ?? {} }),
+    parameters: mcpParameters(tool),
     structuredOutputSchema: CallResultSchema,
     ...(direct ? {} : { deferred: true as const }),
     async execute(args, _api, context) {

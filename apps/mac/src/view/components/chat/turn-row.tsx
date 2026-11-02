@@ -6,6 +6,7 @@ import { Message, MessageContent } from '../ui/message';
 import {
   Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle,
 } from '../ui/trace';
+import { HistoryRow } from './history-row';
 import { MessageRow, StepRows, WorkingRow } from './message-row';
 import { StatusIcon } from './status-icon';
 
@@ -58,6 +59,7 @@ export const TurnRow = memo(function TurnRow({ turn, open, onOpenChange, stoppin
   /** The working line, in the newest turn while the agent is busy without a row of its own. */
   working?: string;
 }) {
+  if (turn.history !== undefined) return <HistoryRow history={turn.history} />;
   return (
     <div className="flex flex-col gap-6">
       {blocksOf(turn.rows).map((block) => block.kind === 'message'

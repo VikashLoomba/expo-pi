@@ -45,18 +45,18 @@ test('real native zoom/date tools read permanent docs and preserve original imag
 });
 
 test('native output hook keeps exact Unicode head and tail including diagnostic-inclusive model budget',async()=>{
- const { defineTool }=await import('@earendil-works/pi-durable');const {Type}=await import('@earendil-works/pi-ai');
+ const { defineTool }=await import('@earendil-works/pi-durable');const {obj}=await import('@earendil-works/pi-schema');
  const full='HEAD'+'😀\n'.repeat(40_000)+'TAIL';
- const tool=defineTool({name:'large',description:'large',parameters:Type.Object({}),async execute(){return{output:[{type:'text' as const,text:full}],diagnostics:[{severity:'info' as const,message:'d'.repeat(20_000)}]};}});
+ const tool=defineTool({name:'large',description:'large',parameters:obj({},{open:true}),async execute(){return{output:[{type:'text' as const,text:full}],diagnostics:[{severity:'info' as const,message:'d'.repeat(20_000)}]};}});
  const faux=fauxProvider({models:[{id:'test',contextWindow:1_000_000}],tokensPerSecond:1e9});const models=createModels();models.setProvider(faux.provider);const registry=createRegistry();registry.install(defineExtension({name:'tools',tools:[tool]}));registry.install(toolPolicy([tool],async()=>undefined));let seen:any;
  faux.setResponses([fauxAssistantMessage([fauxToolCall('large',{})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false}}},context);
  try{const root=await harness.root(context,{agent:{model:{provider:'faux',modelId:'test'}}});await(await root.submit({type:'input',content:'run'},context)).wait(context);const result=seen.messages.find((m:any)=>m.role==='toolResult');const text=result.content.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('');assert.ok(Array.from(text).length<=30_000);assert.match(text,/\n\[\.\.\. \d+ characters cut \.\.\.\]\n/);assert.ok(text.startsWith('HEAD'));const entry=(await root.entries({order:'ascending'},100,undefined,context)).items.find(e=>e.kind==='pi.tool-result')!;const raw=entry.model![0]!;assert.equal(raw.role,'toolResult');if(raw.role==='toolResult')assert.equal(text,clipToolText(raw.content.filter(x=>x.type==='text').map(x=>x.text).join('')));assert.ok(text.includes('d'.repeat(100)));}finally{await harness.close(context);}
 });
 test('native sequential tools finish the round, then the steer is delivered before the next request',async()=>{
- const { defineTool }=await import('@earendil-works/pi-durable');const {Type}=await import('@earendil-works/pi-ai');
+ const { defineTool }=await import('@earendil-works/pi-durable');const {obj,str}=await import('@earendil-works/pi-schema');
  let started!:()=>void,release!:()=>void;const began=new Promise<void>(r=>started=r),go=new Promise<void>(r=>release=r);const calls:string[]=[];
- const tool=defineTool({name:'work',description:'work',parameters:Type.Object({name:Type.String()}),async execute({name}){calls.push(name);if(name==='a'){started();await go;}return{output:[{type:'text' as const,text:name}]};}});
+ const tool=defineTool({name:'work',description:'work',parameters:obj({name:str()},{open:true}),async execute({name}){calls.push(name);if(name==='a'){started();await go;}return{output:[{type:'text' as const,text:name}]};}});
  const faux=fauxProvider({models:[{id:'test'}],tokensPerSecond:1e9});const models=createModels();models.setProvider(faux.provider);const registry=createRegistry();registry.install(defineExtension({name:'tools',tools:[tool]}));registry.install(toolPolicy([tool],async()=>undefined));let seen:any;
  faux.setResponses([fauxAssistantMessage([fauxToolCall('work',{name:'a'}),fauxToolCall('work',{name:'b'}),fauxToolCall('work',{name:'c'})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false},toolExecution:'sequential',steeringMode:'all'}},context);
@@ -73,8 +73,8 @@ test('completed native bash spill recovers full Unicode head and tail through pu
 });
 
 for (const body of ['😀'.repeat(40_000), '\n'.repeat(40_000)]) test('native bounds preserve original head before final diagnostic-inclusive cap: '+(body[0]==='\n'?'newlines':'four-byte Unicode'),async()=>{
- const {defineTool}=await import('@earendil-works/pi-durable');const {Type}=await import('@earendil-works/pi-ai');
- const full='HEAD'+body+'TAIL';const tool=defineTool({name:'boundary',description:'boundary',parameters:Type.Object({}),async execute(){return{output:[{type:'text' as const,text:full}],diagnostics:[{severity:'info' as const,message:'diagnostic'}]};}});
+ const {defineTool}=await import('@earendil-works/pi-durable');const {obj}=await import('@earendil-works/pi-schema');
+ const full='HEAD'+body+'TAIL';const tool=defineTool({name:'boundary',description:'boundary',parameters:obj({},{open:true}),async execute(){return{output:[{type:'text' as const,text:full}],diagnostics:[{severity:'info' as const,message:'diagnostic'}]};}});
  const faux=fauxProvider({models:[{id:'test',contextWindow:1_000_000}],tokensPerSecond:1e9});const models=createModels();models.setProvider(faux.provider);const registry=createRegistry();registry.install(defineExtension({name:'tools',tools:[tool]}));registry.install(toolPolicy([tool],async()=>undefined));let seen:any;
  faux.setResponses([fauxAssistantMessage([fauxToolCall('boundary',{})],{stopReason:'toolUse'}),(request:any)=>{seen=request;return fauxAssistantMessage('done');}]);
  const harness=await Harness.open(new MemoryStorage(),{models,registry,settings:{compaction:{enabled:false}}},context);
@@ -83,10 +83,10 @@ for (const body of ['😀'.repeat(40_000), '\n'.repeat(40_000)]) test('native bo
 
 test('a read registered as native pages itself and reaches the model unclipped', async () => {
   const { defineTool } = await import('@earendil-works/pi-durable');
-  const { Type } = await import('@earendil-works/pi-ai');
+  const { obj } = await import('@earendil-works/pi-schema');
   const page = 'r'.repeat(40_000);
   const tool = defineTool({
-    name: 'read', description: 'read', parameters: Type.Object({}),
+    name: 'read', description: 'read', parameters: obj({}, { open: true }),
     async execute() { return { output: [{ type: 'text' as const, text: page }] }; },
   });
   const faux = fauxProvider({ models: [{ id: 'test', contextWindow: 1_000_000 }], tokensPerSecond: 1e9 });

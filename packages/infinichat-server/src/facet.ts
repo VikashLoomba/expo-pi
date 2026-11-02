@@ -2,7 +2,8 @@ import { join } from 'node:path';
 
 import { defineFacet, local, opaque, type Ctx } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
-import { Type, type Models } from '@earendil-works/pi-ai';
+import type { Models } from '@earendil-works/pi-ai';
+import { obj } from '@earendil-works/pi-schema';
 import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/node/credentials';
 import { serverDevices } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
@@ -39,7 +40,7 @@ interface Account { backend: CredentialBackend; credentials: ProviderCredentialS
  */
 export const InfiniChatMachine = local('infinichat.machine', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   members: {
     account: opaque<Account>('infinichat.account@1'),
     signIn: opaque<ServerSignIn>('infinichat.sign-in@1'),
@@ -127,7 +128,7 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
         const held = new ServerConversation(home, (storage) => InfiniChatService.open({
           storage, models: account.value.models, parts, registry: registry.value, machine: device,
           onClosed: (end) => {
-            if (end.reason === 'failed') proc().fail(end.error);
+            if (end.kind === 'failed') proc().fail(end.error);
           },
         }));
         await held.start();
@@ -256,6 +257,9 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
       pendingHostKeys,
       accept: ({ content, requestId }, ctx) => core().accept(content, requestId, callContext(ctx)),
       stop: () => core().stop(),
+      continue: () => core().continue(),
+      loadEarlier: () => core().view().loadEarlier(),
+      fillGap: (gap) => core().view().fillGap(gap),
       updateSettings: (settings, ctx) => core().updateSettings(settings, callContext(ctx)),
       cancelScheduled: ({ id, replacement }, ctx) => core().cancelScheduled(id, replacement, callContext(ctx)),
       dismissError: () => core().dismissError(),

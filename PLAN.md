@@ -17,33 +17,48 @@ the app plugs an Expo implementation into it. "Upstream" means those libraries a
 | Conversation storage | pi-durable "Storage": the portable SQLite core over an async `SqliteDatabase` facade | expo-sqlite | `src/pi/storage/` |
 | Credentials | pi-ai `CredentialStore` (`read`, `list`, `modify`, `delete`), injected with `createModels({ credentials })`; README "Credential Store" | expo-secure-store (Keychain) | `provider-credentials.ts`, `secure-storage.ts` |
 | Provider sign-in | pi-ai `OAuthAuth` (`login`, `refresh`, `toAuth`) run by `models.login(provider, 'oauth', interaction)` | expo-auth-session, expo-web-browser, the Swift loopback module | `src/pi/openai-auth/`, `modules/pi-oauth-callback` |
-| Chats and UI state | pi-durable `Storage.scanConversations`, `conversation.entries()`, documents, `viewState()`; README "Concepts", "Watching a Conversation" | expo-router | `chat-service.ts`, `chat-view.ts`, `chat-projection.ts` |
+| Chats and UI state | pi-durable `Storage.scanConversations`, documents, `Conversation.watch()`, `watchDoc()`, `ConversationTranscript` (example 31); README "Concepts", "Watching a Conversation" | expo-router | `chat-service.ts`, `chat-view.ts`, `chat-projection.ts` |
 | Chat actions | expo-router `Stack.Toolbar.Menu` and `Link.Menu`; React Native `Alert` | iOS menus and alerts | `chat-actions.tsx`, `app/index.tsx`, `app/chat/[id].tsx` |
-| Sending while busy | pi-durable "Busy Conversations": `whenBusy`, `pi.inbox`, `submission.abort()`; example 20 | none | P2 |
+| Sending while busy | pi-durable "Busy Conversations": `whenBusy`, `pi.inbox`, `submission.abort()`, `pi.live.runFailure` and the continue submission; examples 19 and 33 | none | P2 |
 | Tools | pi-durable `CodingTools` | none | `chat-service.ts` |
 | Prompt | pi-durable extensions and sections; README "System Prompt" | none | the `assistant` section |
-| Local execution | pi-durable `ExecutionEnv`, reference `NodeExecutionEnv`; the `env` resolver, example 29 | expo-file-system, just-bash, the cache directory for `/tmp` | `src/pi/workspace/` |
-| Remote execution | pi-env 1.4.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
+| Local execution | pi-durable `ExecutionEnv`, reference `NodeExecutionEnv`; the `env` resolver, example 28 | expo-file-system, just-bash, the cache directory for `/tmp` | `src/pi/workspace/` |
+| Remote execution | pi-env 1.5.0's protocol v1, reference `RemoteExecutionEnv` at the tag; the app ships the daemon from `assets/pi-env` | react-native-ssh | `src/pi/execution/remote/` |
 | Web search | pi-ai provider decorator: the built provider spread with `stream`/`streamSimple` overridden (plain object from `createProvider`); pi-durable write entries | none | `src/pi/native-web-search/` |
 | Images | pi-ai `UserMessage.content` image parts, submitted as pi-durable input `content`; `createCodingTools({ images })` takes any `ImageProcessor` (`prepare(bytes, mimeType, limits)`), of which Photon is upstream's own implementation (README "Images") | expo-image-manipulator as the processor, expo-image-picker, expo-image | `src/pi/images.ts`, `src/chat/photo-attachments.ts`, `src/pi/user-input.ts`, `message-images.tsx` |
-| Keep-alive (Later) | pi-durable `resume()`, `taskGraph()` | expo-widgets, expo-location, expo-task-manager | none |
+| Keep-alive (Later) | pi-durable `resume()`, `watchTaskGraph()` | expo-widgets, expo-location, expo-task-manager | none |
 
 ## Upstream revision
 
-The app uses registry pi-ai, pi-durable and chord **1.4.0**, with transitive pi-telemetry and pi-codemode **1.4.0**.
-Source assessment uses tag `v1.4.0`, commit `4a080252f06caf63a525d7873c5d94d3c23887e0` (2026-10-21), and the
-published npm declarations.
+The app uses registry pi-ai, pi-durable, chord and pi-schema **1.5.0**, with transitive pi-telemetry and pi-codemode
+**1.5.0**. Source assessment uses tag `v1.5.0`, commit `f9a26365568127461c47a07a37dcb42c140a3ac5` (2026-11-02), and
+the published npm declarations.
 
-pi-env is not an app dependency. Its **1.4.0** daemon binaries come from the npm artifact pinned by version and
+pi-env is not an app dependency. Its **1.5.0** daemon binaries come from the npm artifact pinned by version and
 SHA-512 in `scripts/sync-pi-daemon-assets.mjs`; that script generates the per-platform SHA-256/size manifest.
-Run it to reproduce the assets, or pass `--check` to verify them. The wire protocol is still **v1**; pi-env's
-`src/`, `daemon/` and `docs/` are unchanged from 1.3.0, so the client needed no port. The mobile
-client's existing file, exec and watch methods remain compatible. pi-env 1.4.0's `listFiles` is ported
+Run it to reproduce the assets, or pass `--check` to verify them. The wire protocol is still **v1**; at 1.5.0
+pi-env's `RemoteWatcher` stops with `stop()` and tags its changes, which the phone's port of it follows, and its
+file and exec methods are unchanged. pi-env's `listFiles` is ported
 (`remote/list-files.ts`, `MobileRemoteExecutionEnv.listFiles`) as part of the environment contract; the folder
 picker lists one folder at a time instead, because the recursive listing has no paging. The PTY APIs have no
 production caller and are not ported.
 
-Contracts reviewed at this release (1.3.0 to 1.4.0):
+Contracts reviewed at this release (1.4.0 to 1.5.0):
+
+- Schemas are pi-schema's (TypeBox is gone from pi-ai and Chord). Contract schemas keep TypeBox's JSON, so their
+  fingerprints did not change with the library: `obj(p, { open: true })`, `oneOf`, pi-ai's `stringLiteral` and
+  `stringRecord`, a boolean literal of the same shape. Untyped JSON is checked with `compile(schema).check`.
+- Watches replace the replicated-state getters (`viewState`, `documentState`, `taskGraph`): one listener per watch,
+  tagged calls and ends. `ConversationView.entries` is a window of the newest entries; a shown chat keeps a
+  `ConversationTranscript` and loads earlier pages, and pages a reconnect missed, as their rows scroll into view.
+- Crash-limited tasks no longer park: a run ends with `pi.live.runFailure` (`restart_limit`, `interrupted`, ...), which
+  the chat and InfiniChat show with **Continue** (a continue submission; InfiniChat's opens a turn through OptChat).
+  `retryTask` and the parked banner are gone; `task_interrupted` reports are shown in their chat, not as app errors.
+- `SqliteExecutor.runCounted`, `onReport(report)`, tagged `SessionEnd`, pi-env's `RemoteWatcher.stop` and tagged file
+  changes are ported. Data migrates one way (`pi.live` 1 to 3); the server backs the database up before a newer
+  release first opens it (`docs/server-plugins.md` "Release").
+
+Contracts reviewed at the previous release (1.3.0 to 1.4.0):
 
 - SQLite: `SqliteDatabase`, `SqliteExecutor` and `SqliteValue` moved unchanged to `@earendil-works/chord/sqlite`,
   where the adapter now imports them; pi-durable re-exports them. Opening a database migrates it from schema version

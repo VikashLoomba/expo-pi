@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The npm artifact is pinned independently of mutable registry metadata.
-const version = '1.4.0';
-const integrity = 'sha512-WOO3ltw36D6YFDRCbByYQMl1+dbR8C2rJAmZ8MxBAX/sTKe4HSNLxPEGYWrQjs4EmNyeh6smrQ+7GGoLbBv/Jg==';
+const version = '1.5.0';
+const integrity = 'sha512-i8OcpTYbby55drYJYnFInN6OEiswUPCASSjsaT0KaLOeaRUJd3hYqyfmjPMuYdl8d1O7czD1mR/cC/c4nPv4Vg==';
 const tarball = `https://registry.npmjs.org/@earendil-works/pi-env/-/pi-env-${version}.tgz`;
 const targets = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'];
 const root = fileURLToPath(new URL('../', import.meta.url));

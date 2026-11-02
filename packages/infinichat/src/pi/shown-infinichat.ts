@@ -58,6 +58,8 @@ export class ShownInfiniChat implements InfiniChatHost {
     getSnapshot: () => this.snapshot,
     getControls: () => this.controls,
     getMessages: () => this.messages,
+    loadEarlier: () => this.current().view().loadEarlier(),
+    fillGap: (gap) => this.current().view().fillGap(gap),
   };
   readonly getSnapshot = () => this.report;
   /** The side shown, for the screens that also read its machine's connection and account. */
@@ -87,6 +89,10 @@ export class ShownInfiniChat implements InfiniChatHost {
 
   accept(input: UserMessage['content'], requestId: string): Promise<void> {
     return this.current().accept(input, requestId);
+  }
+
+  continue(): Promise<void> {
+    return this.current().continue();
   }
 
   stop(): Promise<void> {

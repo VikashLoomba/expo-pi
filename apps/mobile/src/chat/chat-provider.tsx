@@ -124,7 +124,7 @@ function useChatRuntime() {
       const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
         storage, models, workspaces, remote, keepAlive, notifications, authError,
         onClosed: (end) => {
-          if (end.reason !== 'failed') return;
+          if (end.kind !== 'failed') return;
           serialize(async () => {
             if (state.phone !== opened) return;
             state.phone = undefined;
@@ -228,7 +228,7 @@ function useChatRuntime() {
             observe: (harness) => keepAlive.observe(harness, chatTasks),
             onClosed: (end) => {
               // pi-durable "Errors": a storage error ends the Harness; reopen to recover.
-              if (end.reason !== 'failed') return;
+              if (end.kind !== 'failed') return;
               serialize(async () => {
                 if (state.service !== opened) return;
                 state.service = undefined;

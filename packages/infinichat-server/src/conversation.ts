@@ -1,4 +1,5 @@
-import { mkdir, rename, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
@@ -73,10 +74,15 @@ export class ServerConversation {
     };
   };
 
-  /** Opens the conversation when this machine held it when it last stopped. */
+  /**
+   * Opens the conversation when this machine held it when it last stopped, backing it up first when another release
+   * opened it last (`backUp`).
+   */
   start(): Promise<void> {
     return this.run(async () => {
-      if (this.state.active) await this.open();
+      if (!this.state.active) return;
+      if (readState(this.home).opened !== INFINICHAT_SERVER_VERSION) await this.backUp();
+      await this.open();
     });
   }
 
@@ -213,6 +219,26 @@ export class ServerConversation {
     return db && { db };
   }
 
+  /**
+   * pi-durable migrates a document to the newer version a release reads when it first reads it, and an older
+   * release then refuses it (its spec §3.6), as SQLite storage refuses a database a newer one migrated (§11.2): a
+   * server update moves the conversation one way. So before a release first opens the database another one left,
+   * this copies it to `backup/before-<release>/` with SQLite's online backup, which the release that left it can open
+   * again; the copy replaces the one an earlier update made.
+   */
+  private async backUp() {
+    const database = join(this.data, DATABASE);
+    if (!existsSync(database)) return;
+    const backups = join(this.home, 'backup');
+    const target = join(backups, `before-${INFINICHAT_SERVER_VERSION}`);
+    await rm(target, { recursive: true, force: true });
+    await mkdir(target, { recursive: true, mode: 0o700 });
+    await nodeDatabaseFiles.backup(database, join(target, DATABASE));
+    for (const name of await readdir(backups)) {
+      if (join(backups, name) !== target) await rm(join(backups, name), { recursive: true, force: true });
+    }
+  }
+
   private async open() {
     const storage = await openNodeSqliteStorage(join(this.data, DATABASE));
     try {
@@ -222,12 +248,14 @@ export class ServerConversation {
       await storage.close(BACKGROUND_CONTEXT).catch(noop);
       throw error;
     }
+    updateState(this.home, (kept) => ({ ...kept, opened: INFINICHAT_SERVER_VERSION }));
     this.changed();
   }
 
   private setState(state: ConversationState) {
     this.state = state;
-    updateState(this.home, ({ timeZone }) => ({ ...state, ...(timeZone === undefined ? {} : { timeZone }) }));
+    updateState(this.home, ({ timeZone, opened }) => ({ ...state, ...(timeZone === undefined ? {} : { timeZone }),
+      ...(opened === undefined ? {} : { opened }) }));
     this.changed();
   }
 

@@ -1,9 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import {
-  Type,
-  type ImageContent,
-  type TextContent,
-} from "@earendil-works/pi-ai";
+import { type ImageContent, type TextContent } from "@earendil-works/pi-ai";
 import {
   defineExtension,
   defineTool,
@@ -16,6 +12,7 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { type ExecutionEnv, getOrThrow } from "@earendil-works/pi-durable/env";
+import { int, obj, opt, str, union } from "@earendil-works/pi-schema";
 import {
   MemoryDoc,
   MessageDoc,
@@ -61,14 +58,14 @@ export function memoryTools(root: ConversationId) {
     description:
       "Open line id+n into its two children; n=1 gives the complete message with images, in pages. A string id opens the named agent’s separate chat. Use page=0 first.",
     replay: "safe",
-    parameters: Type.Object({
-      id: Type.Union([
-        Type.Integer({ minimum: 0 }),
-        Type.String({ minLength: 1 }),
-      ]),
-      n: Type.Optional(Type.Integer({ minimum: 1 })),
-      page: Type.Optional(Type.Integer({ minimum: 0 })),
-    }),
+    parameters: obj(
+      {
+        id: union([int({ minimum: 0 }), str({ minLength: 1 })]),
+        n: opt(int({ minimum: 1 })),
+        page: opt(int({ minimum: 0 })),
+      },
+      { open: true },
+    ),
     outputLimits: { maxBytes: 120_000, maxLines: 30_000 },
     async execute({ id: given, n = 1, page = 0 }, api, context) {
       const images: ImageContent[] = [];
@@ -154,7 +151,7 @@ export function memoryTools(root: ConversationId) {
     name: "date",
     description: "The date and time of message id.",
     replay: "safe",
-    parameters: Type.Object({ id: Type.Integer({ minimum: 0 }) }),
+    parameters: obj({ id: int({ minimum: 0 }) }, { open: true }),
     async execute({ id }, api, context) {
       const message = Number.isSafeInteger(id)
         ? await api.snapshot(MessageDoc, root, String(id), context)

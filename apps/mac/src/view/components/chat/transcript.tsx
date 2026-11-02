@@ -2,7 +2,7 @@ import { turnsOf, type Turn } from '@pi-agent/infinichat/chat/turns';
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { HashIcon, LightbulbIcon, MessageCircleDashedIcon, PencilIcon } from 'lucide-react';
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { useMember } from '../../hooks/use-ref';
 import { Button } from '../ui/button';
@@ -59,7 +59,8 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
 /**
  * The thread as the Chat pattern lays it out, folded by turn (owner, 2026-10-29): the person's messages and the
  * agent's replies as they are, the steps between them folded in every turn, the newest too; a click on a run's
- * summary opens its turn's steps, and a new turn folds the rest again. The rows are
+ * summary opens its turn's steps, and a new turn folds the rest again. The thread holds the newest turns, and a row
+ * above them loads earlier ones as the reader scrolls up to it (`HistoryRow`). The rows are
  * virtualized the way the Message Scroller docs show for a transcript past "hundreds to low thousands of turns":
  * the viewport is the scroll element and a virtualizer owns the rows, measured as they render. The thread opens on
  * the newest turn's start, and a new turn settles there too, as `scrollAnchor` does for a MessageScrollerItem; the
@@ -95,6 +96,17 @@ function Thread({ turns, stopping, busy, working }: {
     settled.current = newest;
     virtualizer.scrollToIndex(turns.length - 1, { align: 'start' });
   }, [newest, turns.length, virtualizer]);
+  // Earlier turns load above the reader, who scrolled to the top to see them: the turn that was first stays first in
+  // view rather than moving down by their height.
+  const firstTurn = turns.find((turn) => turn.history === undefined)?.id;
+  const first = useRef(firstTurn);
+  useLayoutEffect(() => {
+    const previous = first.current;
+    first.current = firstTurn;
+    if (previous === undefined || previous === firstTurn) return;
+    const index = turns.findIndex((turn) => turn.id === previous);
+    if (index > 0) virtualizer.scrollToIndex(index, { align: 'start' });
+  }, [firstTurn, turns, virtualizer]);
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller className="flex-1 select-text">

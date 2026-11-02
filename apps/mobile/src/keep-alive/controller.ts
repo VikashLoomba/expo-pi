@@ -1,6 +1,5 @@
-import type { AttachedReplicatedState } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import type { Harness, TaskGraph, TaskGraphNode } from '@earendil-works/pi-durable';
+import type { Harness, TaskGraphNode, TaskGraphWatch } from '@earendil-works/pi-durable';
 import * as Location from 'expo-location';
 import type { LiveActivity } from 'expo-widgets';
 
@@ -18,8 +17,8 @@ export type ChatOfTask = (task: TaskGraphNode) => string | undefined;
 type Source = {
   harness: Harness;
   chatOf: ChatOfTask;
-  graph?: AttachedReplicatedState<TaskGraph>;
-  unsubscribe: () => void;
+  /** The Harness's task graph; `value` is its latest revision once the watch delivers. */
+  graph?: TaskGraphWatch;
 };
 
 /**
@@ -52,14 +51,13 @@ export class KeepAliveController {
    * detaches it once the Harness is closed.
    */
   observe(harness: Harness, chatOf: ChatOfTask): () => void {
-    const source: Source = { harness, chatOf, unsubscribe: () => {} };
+    const source: Source = { harness, chatOf };
     this.sources.add(source);
     // A Harness that closes before its graph attaches leaves nothing to count.
     this.attach(source).catch(() => {});
     return () => {
       if (!this.sources.delete(source)) return;
-      source.unsubscribe();
-      source.graph?.dispose();
+      void source.graph?.stop();
       this.schedule();
     };
   }
@@ -67,24 +65,25 @@ export class KeepAliveController {
   async close(): Promise<void> {
     this.closed = true;
     this.unsubscribeSettings();
-    for (const source of this.sources) {
-      source.unsubscribe();
-      source.graph?.dispose();
-    }
+    for (const source of this.sources) void source.graph?.stop();
     this.sources.clear();
     await this.queue;
     // Nothing here touches a Harness, so a close after the Harnesses' own is safe.
     await this.disengage(0);
   }
 
+  /** As pi-durable's watches example (`test/examples/04-watches.ts`): the watch's one listener, stopped at detach. */
   private async attach(source: Source) {
-    const graph = await source.harness.taskGraph(context);
+    const graph = await source.harness.watchTaskGraph(context);
     if (this.closed || !this.sources.has(source)) {
-      graph.dispose();
+      await graph.stop();
       return;
     }
     source.graph = graph;
-    source.unsubscribe = graph.subscribe(this.schedule);
+    graph.start(async (call) => {
+      // Durable's watches end on a failure instead of sending a failed call; an ended graph keeps its last value.
+      if (call.kind === 'value') this.schedule();
+    });
     this.schedule();
   }
 
@@ -101,8 +100,8 @@ export class KeepAliveController {
       if (!graph) continue;
       const chats = new Set<string>();
       for (const task of Object.values(graph.tasks)) {
-        // A blocked task (a missing definition, or parked by the restart limit) does not run until something changes;
-        // keeping the phone alive for it would never stop.
+        // A blocked task (a missing or unmigratable definition) does not run until something changes; keeping the
+        // phone alive for it would never stop.
         if (task.blocked !== undefined) continue;
         const chat = source.chatOf(task);
         if (chat !== undefined) chats.add(chat);

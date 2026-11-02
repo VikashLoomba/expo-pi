@@ -1,5 +1,4 @@
-import { Type, type Static } from '@earendil-works/pi-ai';
-import { Check } from 'typebox/value';
+import { arr, bool, compile, obj, str, type Static } from '@earendil-works/pi-schema';
 
 /**
  * InfiniChat's server releases: the GitHub releases of this repository tagged `server/v<version>`, which
@@ -13,21 +12,23 @@ const TAG = /^server\/v(\d+\.\d+\.\d+)$/;
 /** pi's own wait for a catalog fetch, as `pi-catalog.ts` bounds each. */
 const ATTEMPT_MS = 4_000;
 
-const Hash = Type.String({ pattern: '^[0-9a-f]{64}$' });
+const Hash = str({ pattern: '^[0-9a-f]{64}$' });
 /**
  * A release's `release.json`: its version; its runtime, named by `key`, a hash of what it holds, so releases that
  * share one share its folder; and the SHA-256 of each file.
  */
-export const ServerReleaseSchema = Type.Object({
-  version: Type.String(),
-  runtime: Type.Object({ key: Type.String({ pattern: '^[0-9a-f]{32}$' }), sha256: Hash }),
-  plugin: Type.Object({ sha256: Hash }),
-});
+export const ServerReleaseSchema = obj({
+  version: str(),
+  runtime: obj({ key: str({ pattern: '^[0-9a-f]{32}$' }), sha256: Hash }, { open: true }),
+  plugin: obj({ sha256: Hash }, { open: true }),
+}, { open: true });
+/** Whether JSON read from a release or a runtime folder is a release's description. */
+export const isServerRelease = compile(ServerReleaseSchema).check;
 export type ServerRelease = Static<typeof ServerReleaseSchema>;
 /** The fields of GitHub's release list this reads. */
-const ReleasesSchema = Type.Array(Type.Object({
-  tag_name: Type.String(), draft: Type.Boolean(), prerelease: Type.Boolean(),
-}));
+const isReleaseList = compile(arr(obj({
+  tag_name: str(), draft: bool(), prerelease: bool(),
+}, { open: true }))).check;
 
 /** The release's description, its runtime's tarball, and InfiniChat's server plugin, as one module. */
 export const RELEASE_FILE = 'release.json';
@@ -61,7 +62,7 @@ async function json(url: string, signal: AbortSignal): Promise<unknown> {
 /** The newest server release, or undefined when there is none. */
 export async function latestServerRelease(signal: AbortSignal): Promise<ServerRelease | undefined> {
   const listed = await json(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`, signal);
-  if (!Check(ReleasesSchema, listed)) throw new Error('InfiniChat’s server releases could not be read.');
+  if (!isReleaseList(listed)) throw new Error('InfiniChat’s server releases could not be read.');
   let newest: string | undefined;
   for (const release of listed) {
     const version = release.draft || release.prerelease ? undefined : TAG.exec(release.tag_name)?.[1];
@@ -69,7 +70,7 @@ export async function latestServerRelease(signal: AbortSignal): Promise<ServerRe
   }
   if (newest === undefined) return undefined;
   const release = await json(releaseFile(newest, RELEASE_FILE), signal);
-  if (!Check(ServerReleaseSchema, release) || release.version !== newest) {
+  if (!isServerRelease(release) || release.version !== newest) {
     throw new Error(`InfiniChat’s server release ${newest} has no valid description.`);
   }
   return release;

@@ -1,23 +1,23 @@
-import { Type, type Static } from '@earendil-works/pi-ai';
+import { arr, bool, obj, oneOf, opt, str, type Static } from '@earendil-works/pi-schema';
 
 /** Presentation-only metadata. Native response items and encrypted state stay out of the UI. */
-const WebSearchCallSchema = Type.Object({
-  id: Type.String(),
-  status: Type.Enum(['running', 'completed', 'failed', 'interrupted']),
-  action: Type.Enum(['search', 'open_page', 'find_in_page']),
-  queries: Type.Optional(Type.ReadonlyObject(Type.Array(Type.String()))),
-  url: Type.Optional(Type.String()),
-  pattern: Type.Optional(Type.String()),
-  error: Type.Optional(Type.String()),
-});
+const WebSearchCallSchema = obj({
+  id: str(),
+  status: oneOf(['running', 'completed', 'failed', 'interrupted']),
+  action: oneOf(['search', 'open_page', 'find_in_page']),
+  queries: opt(arr(str())),
+  url: opt(str()),
+  pattern: opt(str()),
+  error: opt(str()),
+}, { open: true });
 export type WebSearchCall = Static<typeof WebSearchCallSchema>;
 
-const WebSearchSourceSchema = Type.Object({
-  url: Type.String(),
-  title: Type.Optional(Type.String()),
+const WebSearchSourceSchema = obj({
+  url: str(),
+  title: opt(str()),
   /** The answer's Markdown links cite this page. */
-  cited: Type.Optional(Type.Boolean()),
-});
+  cited: opt(bool()),
+}, { open: true });
 export type WebSearchSource = Static<typeof WebSearchSourceSchema>;
 
 /**
@@ -25,8 +25,8 @@ export type WebSearchSource = Static<typeof WebSearchSourceSchema>;
  * text, so there is nothing to decorate: sources are the union of the calls' results and the cited URLs,
  * cited first, a citation matching its result ignoring the `utm_source=openai` parameter.
  */
-export const WebSearchPresentationSchema = Type.Object({
-  calls: Type.ReadonlyObject(Type.Array(WebSearchCallSchema)),
-  sources: Type.ReadonlyObject(Type.Array(WebSearchSourceSchema)),
-});
+export const WebSearchPresentationSchema = obj({
+  calls: arr(WebSearchCallSchema),
+  sources: arr(WebSearchSourceSchema),
+}, { open: true });
 export type WebSearchPresentation = Static<typeof WebSearchPresentationSchema>;

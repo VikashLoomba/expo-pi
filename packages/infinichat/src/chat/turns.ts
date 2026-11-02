@@ -8,6 +8,8 @@ export interface Turn {
   id: string;
   rows: readonly ChatMessage[];
   opener?: ChatMessage;
+  /** A row of transcript not loaded yet stands alone, and loads its entries once it scrolls into view. */
+  history?: NonNullable<ChatMessage['history']>;
 }
 
 /** An input opens a turn unless it steered the one under way; a queued input is a turn of its own until placed. */
@@ -18,7 +20,9 @@ export function turnsOf(messages: readonly ChatMessage[]): Turn[] {
   const turns: (Turn & { rows: ChatMessage[] })[] = [];
   for (const row of messages) {
     const current = turns.at(-1);
-    if (current === undefined || opens(row)) {
+    if (row.history !== undefined) {
+      turns.push({ id: row.id, rows: [row], history: row.history });
+    } else if (current === undefined || current.history !== undefined || opens(row)) {
       turns.push({ id: row.id, rows: [row], opener: opens(row) ? row : undefined });
     } else current.rows.push(row);
   }

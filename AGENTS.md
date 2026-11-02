@@ -46,7 +46,7 @@ Run lint and typecheck before declaring any task done.
 
 - Never use `any`.
 - Never use type casts (`as X`, `as unknown as X`) or non-null assertions (`x!`) without explicit permission from the owner. `as const` is fine. Prefer typed SDK APIs. A cast that seems necessary usually means a design seam is wrong (for example, rebuilding an SDK-issued id from a string instead of looking it up among the records the SDK returned).
-- Approved exception: reading pi-durable's built-in documents from `ConversationView.docs` by kind with the SDK's own types (`docs["pi.live"] as LiveState`, likewise `InboxState` and `AgentState`), in one helper, exactly as pi's v1.1.0 example `packages/durable/test/examples/21-late-join.ts` does. Don't replace it with hand-written decoders or shadow types.
+- Approved exception: reading pi-durable's built-in documents from `ConversationView.docs` by kind with the SDK's own types (`docs["pi.live"] as LiveState`, likewise `InboxState` and `AgentState`), in one helper, exactly as pi's v1.5.0 example `packages/durable/test/examples/20-late-join.ts` does. Don't replace it with hand-written decoders or shadow types.
 - Before inventing a pattern for a pi-durable, pi-ai or pi-env integration, find the matching upstream example or source at the installed version tag (github.com/earendil-works/pi, `packages/*/test/examples`, tag `v<installed version>`) and follow it, or state why none applies.
 - Idiomatic first; no speculative performance work. Use Expo and pi-durable the way their docs and examples do and assume it is fast enough. Don't add caches, batching, budgets or other optimization layers without a measured problem on a real device.
 - No app-added limits by default; use library defaults. Never construct stress or adversarial scenarios (huge files, runaway loops, enormous outputs) to justify a limit or an optimization. Only ordinary, realistic use counts as evidence.
@@ -57,9 +57,10 @@ Run lint and typecheck before declaring any task done.
 - Deletion is the default: no mechanism or API without a production caller or a stated product requirement. No production code that exists only for tests.
 - The app is unreleased: no backwards compatibility with existing on-device data. Don't preserve old chats, ids, document shapes or stored selections, and don't write compatibility or migration code. If old data breaks the app after a change, the fix is clearing app data; say so in your report.
 - Stay on the latest pi releases: check npm before starting work, and upgrade as its own step. pi-durable, pi-ai,
-  chord and pi-env take their versions from the `catalog` in `pnpm-workspace.yaml`, which `packages/infinichat`'s
-  peer dependencies share, so upgrade all four there together (pi-env depends on chord and pi-durable at exact
-  versions); `pnpm why -r @earendil-works/pi-durable` then finds one version.
+  chord, pi-env, pi-codemode, pi-mcp and pi-schema take their versions from the `catalog` in `pnpm-workspace.yaml`,
+  which `packages/infinichat`'s peer dependencies share, so upgrade all seven there together (pi-env depends on chord
+  and pi-durable at exact versions, and they on pi-schema); `pnpm why -r @earendil-works/pi-durable` then finds one
+  version. The server's `runtime/package.json` pins the same versions (`scripts/build.mjs --check`).
 - Keep lines under about 120 characters, no multi-statement one-liners, and comments that explain why, not what.
 - Design before code: for non-trivial work, propose which upstream example you start from, any deviations, and the rough size compared with upstream's equivalent, and get approval before implementing. Size is a signal: a feature several times larger than upstream's equivalent means the design is wrong.
 

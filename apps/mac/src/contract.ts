@@ -1,5 +1,6 @@
 import { hostNamed, method, remote } from '@earendil-works/chord';
-import { Type, type Static } from '@earendil-works/pi-ai';
+import { stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
+import { arr, bool, nul, num, obj, oneOf, opt, str, union, type Static } from '@earendil-works/pi-schema';
 import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
 import { ChatExecutionSettingsSchema } from '@pi-agent/infinichat/pi/execution/document';
 import {
@@ -8,19 +9,19 @@ import {
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { ScheduledInputSchema } from '@pi-agent/infinichat/pi/infinichat/schedule';
 import { ChatModelSettingsSchema, ModelCatalogSchema } from '@pi-agent/infinichat/pi/model-catalog';
-import { ChatImageSchema, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
+import { ChatImageProperties, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
 
 /** Who acts on the main process's objects: a window, or the main process's own code. */
 export type MacPrincipal = { kind: 'owner' } | { kind: 'host' };
 export const principalKey = (principal: MacPrincipal) => principal.kind;
 
 /** What the app is: its version and where it keeps its data, for the sidebar's footer. */
-export const AboutSchema = Type.Object({ version: Type.String(), userData: Type.String() });
+export const AboutSchema = obj({ version: str(), userData: str() }, { open: true });
 export type About = Static<typeof AboutSchema>;
 /** A Settings pane to show and, for Providers, the provider to list first, as the phone's `account.tsx?provider=`. */
-export const SettingsTargetSchema = Type.Object({
-  pane: Type.Enum(['machines', 'providers']), provider: Type.Optional(Type.String()),
-});
+export const SettingsTargetSchema = obj({
+  pane: oneOf(['machines', 'providers']), provider: opt(str()),
+}, { open: true });
 export type SettingsTarget = Static<typeof SettingsTargetSchema>;
 
 /**
@@ -29,47 +30,47 @@ export type SettingsTarget = Static<typeof SettingsTargetSchema>;
  */
 export const MacApp = remote('infinichat.mac', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   host: hostNamed('mac'),
   variants: {
     owner: {
       state: { about: AboutSchema },
       methods: {
         // Links open in the default browser under the phone's policy (`source-link.ts`): a page can't open them.
-        openExternal: method(Type.Object({ url: Type.String() })),
+        openExternal: method(obj({ url: str() }, { open: true })),
         // The Settings window, as the menu's Settings… opens it: where it was, or at the pane a notice leads to.
-        openSettings: method(Type.Object({ target: Type.Optional(SettingsTargetSchema) })),
+        openSettings: method(obj({ target: opt(SettingsTargetSchema) }, { open: true })),
       },
     },
   },
 });
 
 /** A photo fitted to the model, as the composer shows it and `accept` sends it: pi-ai's image part with an ID. */
-export const AttachmentSchema = Type.Object({ ...ChatImageSchema.properties, id: Type.String() });
+export const AttachmentSchema = obj({ ...ChatImageProperties, id: str() }, { open: true });
 export type Attachment = Static<typeof AttachmentSchema>;
 
 /** This app's connection to the machine shown, as `RemoteInfiniChat` reports it; null before a machine is shown. */
-export const ConnectionSchema = Type.Union([Type.Null(), Type.Object({
-  status: Type.Enum(['connecting', 'connected', 'failed']),
-  stage: Type.Optional(Type.Enum(['connecting', 'checking', 'installing', 'starting'])),
-  error: Type.Optional(Type.String()),
-  notice: Type.Optional(Type.String()),
-})]);
+export const ConnectionSchema = union([nul(), obj({
+  status: oneOf(['connecting', 'connected', 'failed']),
+  stage: opt(oneOf(['connecting', 'checking', 'installing', 'starting'])),
+  error: opt(str()),
+  notice: opt(str()),
+}, { open: true })]);
 export type Connection = Static<typeof ConnectionSchema>;
 /** The machine whose InfiniChat the windows show: its endpoint and its name. */
-export const ShownMachineSchema = Type.Union([Type.Null(), Type.Object({ id: Type.String(), name: Type.String() })]);
+export const ShownMachineSchema = union([nul(), obj({ id: str(), name: str() }, { open: true })]);
 /** A move between machines as `InfiniChatMoves` reports it (`move.ts`), while it runs and after a failure. */
-export const MoveStatusSchema = Type.Object({
-  machineId: Type.String(),
-  to: Type.Enum(['machine', 'phone']),
-  from: Type.Optional(Type.String()),
-  step: Type.Enum(['connecting', 'closing', 'copying', 'opening']),
-  copied: Type.Optional(Type.Object({ bytes: Type.Number(), total: Type.Number() })),
-  running: Type.Boolean(),
-  error: Type.Optional(Type.String()),
-  cancellable: Type.Boolean(),
-  undoing: Type.Optional(Type.Boolean()),
-});
+export const MoveStatusSchema = obj({
+  machineId: str(),
+  to: oneOf(['machine', 'phone']),
+  from: opt(str()),
+  step: oneOf(['connecting', 'closing', 'copying', 'opening']),
+  copied: opt(obj({ bytes: num(), total: num() }, { open: true })),
+  running: bool(),
+  error: opt(str()),
+  cancellable: bool(),
+  undoing: opt(bool()),
+}, { open: true });
 export type MoveStatus = Static<typeof MoveStatusSchema>;
 
 /**
@@ -78,77 +79,81 @@ export type MoveStatus = Static<typeof MoveStatusSchema>;
  */
 export const MacInfiniChat = remote('infinichat.mac.conversation', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   host: hostNamed('mac'),
   variants: {
     owner: {
       state: {
         snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
-        connection: ConnectionSchema, held: Type.Union([Type.Null(), ConversationSchema]), machine: ShownMachineSchema,
+        connection: ConnectionSchema, held: union([nul(), ConversationSchema]), machine: ShownMachineSchema,
         // The conversation's machines, the move under way, and what the last move wants the user to know.
-        machines: MachinesSchema, move: Type.Union([Type.Null(), MoveStatusSchema]),
-        moveNotice: Type.Union([Type.Null(), Type.String()]),
+        machines: MachinesSchema, move: union([nul(), MoveStatusSchema]),
+        moveNotice: union([nul(), str()]),
         // Piece 6: the holder machine's providers and models and its sign-in under way, as `RemoteInfiniChat` reads
         // them, and this Mac's own avatar file as the page loads it (`appdata://avatar/<file>`).
         catalog: ModelCatalogSchema, access: AccessSchema, signInAttempt: SignInAttemptSchema,
-        avatar: Type.Union([Type.Null(), Type.String()]),
+        avatar: union([nul(), str()]),
       },
       methods: {
-        accept: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
+        accept: method(obj({ content: UserInputSchema, requestId: str() }, { open: true })),
         stop: method(),
+        // The run `controls.runFailure` names, continued; the transcript's rows for entries not loaded, loaded.
+        continue: method(),
+        loadEarlier: method(),
+        fillGap: method(obj({ after: num(), upTo: num() }, { open: true })),
         dismissError: method(),
         dismissNotice: method(),
         reconnect: method(),
         // Moving the conversation to a listed machine from the one it lives on, as the phone's menu does.
-        chooseMove: method(Type.Object({ machineId: Type.String() })),
+        chooseMove: method(obj({ machineId: str() }, { open: true })),
         cancelMove: method(),
         retryMove: method(),
         dismissMoveNotice: method(),
         // The composer's `/reload-plugins`: what reloading the plugins on the machine shown did.
-        reloadPlugins: method(undefined, Type.String()),
+        reloadPlugins: method(undefined, str()),
         // Photos for the composer, fitted to the shown model's limits by the main process: chosen in the file
         // dialog, or handed over by the page (dropped or pasted), as base64.
-        pickPhotos: method(undefined, Type.Array(AttachmentSchema)),
-        attach: method(Type.Object({ name: Type.String(), mimeType: Type.String(), data: Type.String() }),
+        pickPhotos: method(undefined, arr(AttachmentSchema)),
+        attach: method(obj({ name: str(), mimeType: str(), data: str() }, { open: true }),
           AttachmentSchema),
         // Piece 6: the settings and scheduled tasks sheets, through the side shown, and the avatar: a file chosen in
         // the open dialog becomes it at once (its URL comes back; null when nothing was chosen).
-        updateSettings: method(Type.Object({ main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema,
-          instructions: Type.String(), name: Type.String(),
-          subagents: Type.Union([ChatModelSettingsSchema, Type.Null()]) })),
-        cancelScheduled: method(Type.Object({ id: Type.Number(), replacement: Type.Optional(ScheduledInputSchema) }),
-          Type.Boolean()),
-        setAvatar: method(undefined, Type.Union([Type.Null(), Type.String()])),
+        updateSettings: method(obj({ main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema,
+          instructions: str(), name: str(),
+          subagents: union([ChatModelSettingsSchema, nul()]) }, { open: true })),
+        cancelScheduled: method(obj({ id: num(), replacement: opt(ScheduledInputSchema) }, { open: true }),
+          bool()),
+        setAvatar: method(undefined, union([nul(), str()])),
         clearAvatar: method(),
         // The providers sheet's operations on the holder machine's credential store, forwarded to its object.
-        signIn: method(Type.Object({ providerId: Type.String() }), Type.Number()),
-        answer: method(Type.Object({ promptId: Type.Number(), value: Type.String() })),
+        signIn: method(obj({ providerId: str() }, { open: true }), num()),
+        answer: method(obj({ promptId: num(), value: str() }, { open: true })),
         cancelSignIn: method(),
-        setApiKey: method(Type.Object({ providerId: Type.String(), key: Type.String() })),
-        signOut: method(Type.Object({ providerId: Type.String() })),
+        setApiKey: method(obj({ providerId: str(), key: str() }, { open: true })),
+        signOut: method(obj({ providerId: str() }, { open: true })),
       },
     },
   },
 });
 
 /** What a check of a machine from this Mac is doing, found, or ran into; one per endpoint while it matters. */
-export const CheckSchema = Type.Object({
-  stage: Type.Optional(Type.Enum(['connecting', 'approving', 'checking', 'exchanging'])),
-  result: Type.Optional(Type.Object({ version: Type.String(), os: Type.String(), arch: Type.String(),
-    name: Type.String() })),
-  error: Type.Optional(Type.String()),
+export const CheckSchema = obj({
+  stage: opt(oneOf(['connecting', 'approving', 'checking', 'exchanging'])),
+  result: opt(obj({ version: str(), os: str(), arch: str(),
+    name: str() }, { open: true })),
+  error: opt(str()),
   /** The host key the machine presents, which differs from the one trusted here; only Trust new key goes on. */
-  pendingKey: Type.Optional(Type.Object({
-    keys: Type.Array(Type.Object({ algorithm: Type.String(), fingerprint: Type.String() })), changed: Type.Boolean(),
-  })),
-});
+  pendingKey: opt(obj({
+    keys: arr(obj({ algorithm: str(), fingerprint: str() }, { open: true })), changed: bool(),
+  }, { open: true })),
+}, { open: true });
 export type Check = Static<typeof CheckSchema>;
 /** What the Settings window saves of a machine: its endpoint's parts; the machine names itself when checked. */
-export const MachineFormSchema = Type.Object({
-  hostname: Type.String(), port: Type.Number(), username: Type.String(),
+export const MachineFormSchema = obj({
+  hostname: str(), port: num(), username: str(),
   /** The endpoint the form opened with, whose record a changed endpoint replaces. */
-  previous: Type.Optional(Type.String()),
-});
+  previous: opt(str()),
+}, { open: true });
 
 /**
  * The conversation's machines as this Mac sees and reaches them: the document the shown side serves, what the
@@ -157,29 +162,29 @@ export const MachineFormSchema = Type.Object({
  */
 export const MacMachines = remote('infinichat.mac.machines', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   host: hostNamed('mac'),
   variants: {
     owner: {
       state: {
         machines: MachinesSchema,
-        reach: Type.Union([Type.Null(), ReachSchema]),
-        pendingHostKeys: Type.Union([Type.Null(), PendingHostKeysSchema]),
-        checks: Type.Record(Type.String(), CheckSchema),
-        identities: Type.Record(Type.String(), Type.String()),
-        self: Type.String(),
+        reach: union([nul(), ReachSchema]),
+        pendingHostKeys: union([nul(), PendingHostKeysSchema]),
+        checks: stringRecord(CheckSchema),
+        identities: stringRecord(str()),
+        self: str(),
         /** The endpoint of the machine InfiniChat runs on, whose row has nothing to reach from there. */
-        holder: Type.Union([Type.Null(), Type.String()]),
+        holder: union([nul(), str()]),
       },
       methods: {
         save: method(MachineFormSchema),
-        remove: method(Type.Object({ endpoint: Type.String() })),
-        check: method(Type.Object({ endpoint: Type.String() })),
-        cancelCheck: method(Type.Object({ endpoint: Type.String() })),
-        trustNewKey: method(Type.Object({ endpoint: Type.String() })),
-        acceptHostKey: method(Type.Object({ endpoint: Type.String(), fingerprints: Type.Array(Type.String()) })),
-        setIdentity: method(Type.Object({ endpoint: Type.String(), path: Type.Union([Type.String(), Type.Null()]) })),
-        pickIdentityFile: method(undefined, Type.Union([Type.String(), Type.Null()])),
+        remove: method(obj({ endpoint: str() }, { open: true })),
+        check: method(obj({ endpoint: str() }, { open: true })),
+        cancelCheck: method(obj({ endpoint: str() }, { open: true })),
+        trustNewKey: method(obj({ endpoint: str() }, { open: true })),
+        acceptHostKey: method(obj({ endpoint: str(), fingerprints: arr(str()) }, { open: true })),
+        setIdentity: method(obj({ endpoint: str(), path: union([str(), nul()]) }, { open: true })),
+        pickIdentityFile: method(undefined, union([str(), nul()])),
       },
     },
   },
@@ -188,13 +193,13 @@ export const MacMachines = remote('infinichat.mac.machines', {
 // ---- The Mac's own chats (piece 7) ----
 
 /** A chat as the sidebar lists it: pi-durable's conversation ID as a number, resolved again on the main side. */
-export const ChatSummarySchema = Type.Object({
-  id: Type.Number(), title: Type.String(), preview: Type.String(), updatedAt: Type.Number(),
-});
+export const ChatSummarySchema = obj({
+  id: num(), title: str(), preview: str(), updatedAt: num(),
+}, { open: true });
 export type ChatSummaryRecord = Static<typeof ChatSummarySchema>;
 /** One folder of a machine as the directory browser shows it, and what a search below one found. */
-export const FolderSchema = Type.Object({ home: Type.String(), path: Type.String(), names: Type.Array(Type.String()) });
-export const FolderSearchSchema = Type.Object({ matches: Type.Array(Type.String()), stoppedEarly: Type.Boolean() });
+export const FolderSchema = obj({ home: str(), path: str(), names: arr(str()) }, { open: true });
+export const FolderSearchSchema = obj({ matches: arr(str()), stoppedEarly: bool() }, { open: true });
 
 /**
  * This Mac's chats as the sidebar reads them: the list as `DurableChatService` keeps it (null until the service
@@ -202,19 +207,19 @@ export const FolderSearchSchema = Type.Object({ matches: Type.Array(Type.String(
  */
 export const MacChats = remote('infinichat.mac.chats', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   host: hostNamed('mac'),
   variants: {
     owner: {
       state: {
-        chats: Type.Union([Type.Null(), Type.Array(ChatSummarySchema)]),
+        chats: union([nul(), arr(ChatSummarySchema)]),
         // Named `report`, as `MacInfiniChat`'s is: a reference itself has `error`, which Chord reserves.
-        report: Type.Union([Type.Null(), Type.String()]),
+        report: union([nul(), str()]),
       },
       methods: {
-        createChat: method(undefined, Type.Object({ id: Type.String() })),
-        rename: method(Type.Object({ id: Type.String(), title: Type.String() })),
-        delete: method(Type.Object({ id: Type.String() })),
+        createChat: method(undefined, obj({ id: str() }, { open: true })),
+        rename: method(obj({ id: str(), title: str() }, { open: true })),
+        delete: method(obj({ id: str() }, { open: true })),
         dismissError: method(),
       },
     },
@@ -227,33 +232,35 @@ export const MacChats = remote('infinichat.mac.chats', {
  */
 export const MacChat = remote('infinichat.mac.chat', {
   version: 1,
-  input: Type.Object({ id: Type.String() }),
+  input: obj({ id: str() }, { open: true }),
   host: hostNamed('mac'),
   variants: {
     owner: {
       state: {
-        snapshot: SnapshotSchema, controls: Type.Union([ChatControlsSchema, Type.Null()]), messages: MessagesSchema,
+        snapshot: SnapshotSchema, controls: union([ChatControlsSchema, nul()]), messages: MessagesSchema,
       },
       methods: {
-        send: method(Type.Object({ content: UserInputSchema, requestId: Type.String() })),
+        send: method(obj({ content: UserInputSchema, requestId: str() }, { open: true })),
         cancel: method(),
         // A queued follow-up sent again as a steer, from its row.
-        steer: method(Type.Object({ submissionId: Type.Number(), content: UserInputSchema })),
-        // The chat's parked tasks, which its controls list, run again.
-        retryParked: method(),
-        updateSettings: method(Type.Object({ settings: ChatModelSettingsSchema })),
-        updateExecution: method(Type.Object({
-          execution: ChatExecutionSettingsSchema, settings: Type.Optional(ChatModelSettingsSchema),
-        })),
+        steer: method(obj({ submissionId: num(), content: UserInputSchema }, { open: true })),
+        // The run `controls.runFailure` names, continued; the transcript's rows for entries not loaded, loaded.
+        continue: method(),
+        loadEarlier: method(),
+        fillGap: method(obj({ after: num(), upTo: num() }, { open: true })),
+        updateSettings: method(obj({ settings: ChatModelSettingsSchema }, { open: true })),
+        updateExecution: method(obj({
+          execution: ChatExecutionSettingsSchema, settings: opt(ChatModelSettingsSchema),
+        }, { open: true })),
         // The directory browser over a machine, and the open dialog for a folder on this Mac.
-        listFolder: method(Type.Object({ machineId: Type.String(), path: Type.Union([Type.String(), Type.Null()]) }),
+        listFolder: method(obj({ machineId: str(), path: union([str(), nul()]) }, { open: true }),
           FolderSchema),
-        searchFolders: method(Type.Object({ machineId: Type.String(), root: Type.String(), query: Type.String() }),
+        searchFolders: method(obj({ machineId: str(), root: str(), query: str() }, { open: true }),
           FolderSearchSchema),
-        chooseLocalFolder: method(undefined, Type.Union([Type.String(), Type.Null()])),
+        chooseLocalFolder: method(undefined, union([str(), nul()])),
         // Photos fitted to the chat's model, as `MacInfiniChat` fits them to InfiniChat's.
-        pickPhotos: method(undefined, Type.Array(AttachmentSchema)),
-        attach: method(Type.Object({ name: Type.String(), mimeType: Type.String(), data: Type.String() }),
+        pickPhotos: method(undefined, arr(AttachmentSchema)),
+        attach: method(obj({ name: str(), mimeType: str(), data: str() }, { open: true }),
           AttachmentSchema),
       },
     },
@@ -267,18 +274,18 @@ export const MacChat = remote('infinichat.mac.chat', {
  */
 export const MacAccount = remote('infinichat.mac.account', {
   version: 1,
-  input: Type.Object({}),
+  input: obj({}, { open: true }),
   host: hostNamed('mac'),
   variants: {
     owner: {
       state: { catalog: ModelCatalogSchema, access: AccessSchema, signInAttempt: SignInAttemptSchema },
       methods: {
         refreshCatalog: method(),
-        signIn: method(Type.Object({ providerId: Type.String() }), Type.Number()),
-        answer: method(Type.Object({ promptId: Type.Number(), value: Type.String() })),
+        signIn: method(obj({ providerId: str() }, { open: true }), num()),
+        answer: method(obj({ promptId: num(), value: str() }, { open: true })),
         cancelSignIn: method(),
-        setApiKey: method(Type.Object({ providerId: Type.String(), key: Type.String() })),
-        signOut: method(Type.Object({ providerId: Type.String() })),
+        setApiKey: method(obj({ providerId: str(), key: str() }, { open: true })),
+        signOut: method(obj({ providerId: str() }, { open: true })),
       },
     },
   },

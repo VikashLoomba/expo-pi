@@ -260,7 +260,9 @@ test(
         const id = [...(v?.requests ?? []), ...(v?.pending ?? [])].find((x) => /^optchat:agent:\d+:report$/.test(x));
         if (id) admitted(id);
       };
-      watch.start(async (v) => inspect(v));
+      watch.start(async (call) => {
+        if (call.kind === 'value') inspect(call.value);
+      });
       inspect(watch.value);
       release();
       const reportId = await admittedPromise;
@@ -309,7 +311,8 @@ test('independent saved main and compaction views survive actual SQLite app reop
   const watch=await chat.harness.watchDoc(MemoryDoc,chat.root.id,context);assert.ok(watch);
   let finished!:()=>void;const done=new Promise<void>(r=>{finished=r;});
   const inspect=(s:typeof watch.value)=>{if(s&&s.frontier===4&&s.readyParents.length===0&&Object.keys(s.active).length===0)finished();};
-  watch.start(async value=>inspect(value));inspect(watch.value);await done;await watch.stop();
+  watch.start(async call=>{if(call.kind==='value')inspect(call.value);});
+  inspect(watch.value);await done;await watch.stop();
   // Different valid saved granularities detect a forbidden reconstruction from leaves.
   await chat.harness.commit(async tx=>{
    assert.ok(await readNode(tx,chat.root.id,[2,0]));
