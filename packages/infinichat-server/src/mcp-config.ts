@@ -9,10 +9,10 @@ import {
 } from '@earendil-works/pi-schema';
 
 /**
- * How a server's tools reach the model, as pi's coding agent exposes them (coding-agent `docs/mcp.md`, "Control tool
- * exposure"): `codemode`, the default, and `deferred` are pi-durable's deferred tools, which codemode scripts call and
- * `tool_search` loads but the model is not offered nor the `codemode` section lists (durable README "Who may call a
- * tool"); `direct` tools are offered; `hidden` ones are not registered.
+ * How a server's tools reach code mode's scripts, as pi's coding agent configures it (coding-agent `docs/mcp.md`,
+ * "Control tool exposure"); the model is offered only code mode (`conversation.ts`). `direct` tools are declared in the
+ * `codemode` section; `codemode`, the default, and `deferred` are pi-durable's deferred tools, which scripts find with
+ * `searchTools()` but the section leaves out (durable README "Who may call a tool"); `hidden` ones are not registered.
  */
 const ExposureSchema = oneOf(['codemode', 'codemode-deferred', 'deferred', 'direct', 'hidden']);
 type ConfiguredExposure = Static<typeof ExposureSchema>;

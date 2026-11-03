@@ -4,7 +4,6 @@ import { copyJson } from '@earendil-works/chord';
 import type { CodemodeSandbox } from '@earendil-works/pi-codemode';
 import { defineExtension, defineTool, type Extension, type ToolRegistration } from '@earendil-works/pi-durable';
 import { createCodemodeExtension, type CodemodeNamespace } from '@earendil-works/pi-durable/codemode';
-import { createToolSearchExtension } from '@earendil-works/pi-durable/tool-search';
 import { toLlmContent, type ContentBlock, type Tool } from '@earendil-works/pi-mcp';
 import { arr, bool, obj, opt, str, unknown, type Schema } from '@earendil-works/pi-schema';
 import type { McpExposure } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
@@ -228,7 +227,6 @@ function resourceTools(servers: readonly McpServer[], exposure: McpExposure): To
 export function serverExtensions(sandbox: CodemodeSandbox, servers: readonly ConnectedServer[]): readonly Extension[] {
   const taken = new Set<string>();
   const tools: ToolRegistration[] = [];
-  let searched = false;
   for (const { config, server } of servers) {
     for (const tool of server.tools) {
       const exposure = toolExposure(config, tool.name);
@@ -236,14 +234,12 @@ export function serverExtensions(sandbox: CodemodeSandbox, servers: readonly Con
       const name = toolName(config.name, tool.name, taken);
       taken.add(name);
       tools.push(mcpTool(server, exposure, tool, name));
-      if (exposure === 'deferred') searched = true;
     }
   }
   const readable = servers.filter(({ config, server }) => config.exposure !== 'hidden' && server.hasResources);
   const exposures = new Set(readable.map(({ config }) => config.exposure));
   const widest = (['direct', 'codemode', 'deferred'] as const).find((exposure) => exposures.has(exposure));
   if (widest !== undefined) tools.push(...resourceTools(readable.map(({ server }) => server), widest));
-  if (widest === 'deferred') searched = true;
   const namespaces: CodemodeNamespace[] = servers.map(({ config, server }) => {
     const description = config.description ?? server.instructions?.split('\n')[0];
     return {
@@ -256,6 +252,5 @@ export function serverExtensions(sandbox: CodemodeSandbox, servers: readonly Con
   return [
     createCodemodeExtension({ sandbox, namespaces }),
     ...(tools.length === 0 ? [] : [defineExtension({ name: 'mcp', tools })]),
-    ...(searched ? [createToolSearchExtension()] : []),
   ];
 }

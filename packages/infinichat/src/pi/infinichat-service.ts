@@ -175,6 +175,11 @@ export class InfiniChatService implements InfiniChatHost {
     return this.chat.harness;
   }
 
+  /** The tool the model is offered alone (`OptChat.offer`), which the host sets before it resumes `harness`. */
+  offer(only?: string): Promise<void> {
+    return this.chat.offer(only);
+  }
+
   /** Shows an error as the latest report until it is dismissed; the host reports its own failures here too. */
   report(error: unknown) {
     this.snapshot = { error: errorText(error) };

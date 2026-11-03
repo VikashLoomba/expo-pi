@@ -17,6 +17,12 @@ that a restart cut off only if its tool is installed when the call is recovered 
 `src/harness/tool.ts`). A conversation moved in later resumes at once. MCP tools appear only once their server has
 connected and listed them, so an MCP call a script makes right after a restart can still fail.
 
+Before it resumes, the server offers the model only code mode, as Durable's README shows it ("Who may call a tool":
+`modelTools: [codemode]`): the main agent and its subagents write scripts, which call InfiniChat's tools, the MCP
+tools and plugins' tools. A conversation held by the phone, which has no code mode, offers every tool again
+(`OptChat.offer`). Without a registered `codemode` tool, for example when the tools plugin did not load, the server
+offers every tool too.
+
 ## Reload from a client
 
 `/reload-plugins` from the Mac or iOS client reloads the tools plugin and the user's plugins in one Chord reload,
@@ -50,13 +56,13 @@ lacks skips that server, and the reply names the variable. A leading `~/` in com
 expands to the account's home. Common fields are `enabled`, `description`, `timeout` (seconds per MCP request; default
 60, renewed by the server's progress notifications), `exposure`, and `toolExposure`. Legacy SSE is not implemented.
 
-Exposure: `direct` tools are offered to the model; `codemode` (default, including its `codemode-deferred` alias) and
-`deferred` tools are callable through code mode but omitted from its inline prompt declarations. A `deferred` server
-also enables Durable's `tool_search`, which can load deferred tools for direct model calls. `hidden` tools are not
-registered. `toolExposure` overrides it per tool, as pi's coding agent reads it: exact tool names win over `*`
-patterns, and the first matching pattern wins. This is not a separate per-server authorization boundary.
+Exposure: scripts call every registered tool. `direct` tools are declared in code mode's prompt section;
+`codemode` (default, including its `codemode-deferred` alias) and `deferred` tools are left out of it, and scripts find
+them with `searchTools()`. Durable's `tool_search` is not installed: the model is offered only code mode. `hidden`
+tools are not registered. `toolExposure` overrides it per tool, as pi's coding agent reads it: exact tool names win
+over `*` patterns, and the first matching pattern wins. This is not a separate per-server authorization boundary.
 
-The model also gets the coding agent's resource tools, `list_mcp_resources`, `list_mcp_resource_templates` and
+Scripts also get the coding agent's resource tools, `list_mcp_resources`, `list_mcp_resource_templates` and
 `read_mcp_resource`, while a connected, non-hidden server offers resources; their exposure is the widest of those
 servers'. A tool's progress notifications show as its running output. The servers get `~/.infinichat/work`, where the
 agents' tools run, as their root, and the log messages they send go to `~/.infinichat/mcp.log` (moved to `mcp.log.1`

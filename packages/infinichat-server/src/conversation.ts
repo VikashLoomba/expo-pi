@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
 import type { Storage } from '@earendil-works/pi-durable';
+import { CODEMODE_TOOL_NAME } from '@earendil-works/pi-durable/codemode';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { nodeDatabaseFiles } from '@pi-agent/infinichat/node/database-files';
@@ -255,8 +256,11 @@ export class ServerConversation {
     updateState(this.home, (kept) => ({ ...kept, opened: INFINICHAT_SERVER_VERSION }));
     this.changed();
     // Paused until every plugin's extensions are installed, which a start waits for and an adopt finds done, so a tool
-    // call a restart cut off reruns instead of ending interrupted (durable `src/harness/tool.ts`, recovery).
-    void this.loaded.then(() => {
+    // call a restart cut off reruns instead of ending interrupted (durable `src/harness/tool.ts`, recovery). By then
+    // the tools plugin has registered code mode, the one tool the model is offered: its scripts call the others.
+    void this.loaded.then(async () => {
+      if (this.core !== core) return;
+      await core.offer(CODEMODE_TOOL_NAME).catch((error: unknown) => core.report(error));
       if (this.core === core) core.harness.resume();
     });
   }

@@ -12,7 +12,7 @@ import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
 import { SearchObservationEntry } from '../native-web-search/entries';
 import {
-  AgentAnchor, AgentDirectoryDoc, agentTask, agentTools, agentWork, agentsAtWork, takeAgentReports,
+  AgentAnchor, AgentDirectoryDoc, PrivateAgentDoc, agentTask, agentTools, agentWork, agentsAtWork, takeAgentReports,
 } from './agents';
 import { MemoryDoc, advanceMessageProgress, appendMessage, memoryReady, renderMain, settleViews } from './memory';
 import { sharedPrompt, subagentPrompt } from './prompt';
@@ -711,6 +711,13 @@ export type OptChat = {
    */
   setInstructions(tx: Tx, text: string): Promise<void>;
   /**
+   * Offers the main agent and its subagents only the tool `only`, whose scripts call the others, as pi-durable's README
+   * offers code mode (`modelTools: [codemode]`, "Who may call a tool"); every tool without one, or while `only` is not
+   * registered. The host sets it before it resumes the Harness, since the conversation moves between hosts with
+   * different tools. A subagent created later copies it with the rest of the main agent's settings.
+   */
+  offer(only?: string): Promise<void>;
+  /**
    * Continues the run that ended without an answer (`pi.live.runFailure`) with pi-durable's continue submission, as a
    * turn of its own: what is sent meanwhile steers it, and the coordinator closes it. Refused while a turn is open or
    * being closed, or inputs wait for the coordinator.
@@ -825,6 +832,21 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     },
     async setInstructions(tx, text) {
       await configure(tx, root.id, { instructions: text || null });
+    },
+    async offer(only) {
+      const tool = only === undefined ? undefined : (await root.agent(context)).tools.find(({ name }) => name === only);
+      await root.commit(async (tx) => {
+        const stored = (await tx.doc(NativeAgentDoc, root.id)).modelTools;
+        const current = tool === undefined ? stored === undefined
+          : Array.isArray(stored) && stored.length === 1 && stored[0] === tool.name;
+        if (current) return;
+        const modelTools = tool === undefined ? null : [tool];
+        await configure(tx, root.id, { modelTools });
+        for (const agent of (await tx.doc(AgentDirectoryDoc, root.id)).names) {
+          const { conversationId } = await tx.doc(PrivateAgentDoc, root.id, agent, null);
+          if (conversationId !== null) await configure(tx, conversationId, { modelTools });
+        }
+      }, context);
     },
     async continue() {
       await opened.commit(async (tx) => {
