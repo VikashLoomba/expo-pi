@@ -15,10 +15,16 @@ import type { ServerMachines } from './machines';
  * run in the work dir the phone uses for machines.
  */
 export function serverDevices(self: () => { name: string; description: string }, machines: () => ServerMachines) {
-  const work = join(homedir(), MACHINE_WORK);
-  const environment = async (who: string) => new NodeExecutionEnv({ cwd: join(work, who) });
+  const environment = async (who: string) => machineEnvironment(who);
   // The plugin carries Photon's WebAssembly itself, so images are prepared on this thread without resolving its
   // package at run time, as pi-durable's `images` documents.
   return infiniChatDevices(async () => [{ ...self(), environment }, ...machines().devices()],
     createPhotonImages(photon));
 }
+
+/**
+ * This machine in <work>/<who>, the device its tools name it by. The Harness gives it to pi-durable's own tools as the
+ * conversation's environment (`HarnessOptions.env`): code mode, whose scripts run in this process, saves a result too
+ * long for the model there (durable `src/codemode/output.ts`).
+ */
+export const machineEnvironment = (who: string) => new NodeExecutionEnv({ cwd: join(homedir(), MACHINE_WORK, who) });

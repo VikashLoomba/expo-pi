@@ -5,7 +5,7 @@ import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/conte
 import type { Models } from '@earendil-works/pi-ai';
 import { obj } from '@earendil-works/pi-schema';
 import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/node/credentials';
-import { serverDevices } from '@pi-agent/infinichat/node/devices';
+import { machineEnvironment, serverDevices } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
 import { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
@@ -127,6 +127,8 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
         const { home, device } = proc();
         const held = new ServerConversation(home, (storage) => InfiniChatService.open({
           storage, models: account.value.models, parts, registry: registry.value, machine: device,
+          // In the conversation's folder, `main` or a subagent's name, as this machine's device tools run.
+          env: ({ cwd }) => machineEnvironment(cwd ?? 'main'),
           onClosed: (end) => {
             if (end.kind === 'failed') proc().fail(end.error);
           },

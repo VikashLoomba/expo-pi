@@ -1,7 +1,8 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
-  AgentDoc, configure, type Harness, type RegistryReader, type SessionEnd, type Storage, type TaskGraphNode,
+  AgentDoc, configure, type Harness, type HarnessOptions, type RegistryReader, type SessionEnd, type Storage,
+  type TaskGraphNode,
 } from '@earendil-works/pi-durable';
 
 import { ChatMetadataDoc } from './chat-metadata';
@@ -131,6 +132,8 @@ export class InfiniChatService implements InfiniChatHost {
     authError?: (providerId: string) => string | undefined;
     /** The machine this runs on, named where a message sends the user to sign in; none on the phone. */
     machine?: string;
+    /** The conversation's environment for pi-durable's own tools (`HarnessOptions.env`); device tools bring theirs. */
+    env?: HarnessOptions['env'];
     /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
     onClosed?: (end: SessionEnd) => void;
   }): Promise<InfiniChatService> {
@@ -138,6 +141,7 @@ export class InfiniChatService implements InfiniChatHost {
     const chat = await openOptChat(options.storage, {
       models: options.models,
       registry: options.registry,
+      env: options.env,
       parts: options.parts,
       // A crash that ended a run shows in the conversation as its `runFailure` (`InfiniChatView`).
       onReport: (report) => {
