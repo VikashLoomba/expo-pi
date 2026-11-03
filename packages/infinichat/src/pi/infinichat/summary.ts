@@ -8,7 +8,7 @@ import {
 } from '@earendil-works/pi-durable';
 
 import {
-  MemoryDoc, bytes, end, first, flat, key, publishNode, readMessage, readNode, renderCompaction, shownMessage,
+  MemoryDoc, bytes, end, first, flat, key, publishNode, readMessage, readNode, renderCompaction, retagged, shownMessage,
   type NodeRef,
 } from './memory';
 
@@ -48,13 +48,20 @@ type BuildScratch = {
 };
 const BuildScratchDoc = defineDoc<BuildScratch>({
   kind: 'optchat.build-scratch',
-  version: 2,
+  version: 3,
   scope: 'task',
   checkpointWhen: () => true,
-  // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
-  migrate: (value) => {
-    const { replies, ...scratch } = value as Omit<BuildScratch, 'last'> & { replies: { text: string }[] };
-    return { ...scratch, last: replies.at(-1)?.text ?? null };
+  migrate: (value, fromVersion) => {
+    let scratch = value as BuildScratch;
+    if (fromVersion < 2) {
+      // Version 1 kept every too-long reply to send again; the next try needs only the last one's line.
+      const { replies, ...rest } = value as Omit<BuildScratch, 'last'> & { replies: { text: string }[] };
+      scratch = { ...rest, last: replies.at(-1)?.text ?? null };
+    }
+    // Version 2 tagged the agent's replies `unii` in the lines it compresses.
+    const { source, view, last, shortest } = scratch;
+    return { ...scratch, source: retagged(source), view: retagged(view),
+      last: last === null ? null : retagged(last), shortest: shortest === null ? null : retagged(shortest) };
   },
   initial: () => ({ source: '', task: '', view: '', selection: null, last: null, shortest: null }),
 });

@@ -80,19 +80,28 @@ export type AppState = {
    * The latest failed or stopped attempt's replies and calls: a retry drops them, as UniiChat drops a retried try, and
    * the run's end logs them cut off.
    */
-  cut: { why: string; records: (Logged & { kind: 'unii' | 'tool' })[] } | null;
+  cut: { why: string; records: (Logged & { kind: 'infinichat' | 'tool' })[] } | null;
 };
 type Logged = { text: string; date: string; source: string };
+type AppStateV4 = Omit<AppState, 'cut'> & {
+  cut: { why: string; records: (Logged & { kind: 'unii' | 'tool' })[] } | null;
+};
 type AppStateV3 = Omit<AppState, 'endNote' | 'cut'> & { stopNote: string | null };
 type AppStateV2 = Omit<AppStateV3, 'stopNote' | 'held'>;
 export const AppDoc = defineDoc<AppState>({
   kind: 'optchat.app',
-  version: 4,
+  version: 5,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   checkpointWhen: () => true,
   migrate: (value, fromVersion) => {
+    if (fromVersion === 4) {
+      // Version 4 named the agent's replies `unii`.
+      const { cut, ...rest } = value as AppStateV4;
+      return { ...rest, cut: cut && { ...cut, records: cut.records.map((record) =>
+        record.kind === 'unii' ? { ...record, kind: 'infinichat' as const } : { ...record, kind: 'tool' as const }) } };
+    }
     let stored: AppStateV3;
     if (fromVersion < 3) {
       // Version 1 had no prompt version; its instructions hold the composed prompt.
@@ -339,10 +348,12 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
       const date = new Date('timestamp' in message ? message.timestamp : 0).toISOString();
       if (message.role === 'assistant') {
         // Replies trimmed, as UniiChat logs them; thinking stays in native history, never in memory.
-        const records: (Logged & { kind: 'unii' | 'tool'; call?: string })[] = [];
+        const records: (Logged & { kind: 'infinichat' | 'tool'; call?: string })[] = [];
         let text = '';
         const reply = () => {
-          if (text.trim()) records.push({ kind: 'unii', text: text.trim(), date, source: `${entry.id}:${index++}` });
+          if (text.trim()) {
+            records.push({ kind: 'infinichat', text: text.trim(), date, source: `${entry.id}:${index++}` });
+          }
           text = '';
         };
         for (const block of message.content) {

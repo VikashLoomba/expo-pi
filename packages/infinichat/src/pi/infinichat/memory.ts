@@ -15,7 +15,16 @@ const TEXT_LIMIT = 30000;
 /** Newlines as spaces, as UniiChat's `flat` writes a line and a merge's input. */
 export const flat = (text: string): string => text.replace(/\s*\n\s*/g, ' ');
 
-type Kind = 'user' | 'unii' | 'tool' | 'echo' | 'work' | 'note';
+type Kind = 'user' | 'infinichat' | 'tool' | 'echo' | 'work' | 'note';
+
+/**
+ * Text logged before the agent's replies were `infinichat` (2026-11-03) with their old `unii` tag renamed: a line's
+ * `unii:`, and the model's shorthand as it compressed (`echo/unii:`, `unii1743:`, `→unii plan`, `367 unii,`). Only
+ * the word set off by spaces or tag punctuation changes, so a path such as `~/.unii/work`, a word such as
+ * `unii-league` and a name such as UniiChat stay.
+ */
+export const retagged = (text: string): string =>
+  text.replace(/(^|[\s(;,|/→>])unii(?=[\s:/,)(\d]|$)/g, '$1infinichat');
 type CanonicalMessage = {
   i: number;
   kind: Kind;
@@ -28,12 +37,17 @@ type CanonicalMessage = {
 type MessageInput = Omit<CanonicalMessage, 'i' | 'bytes'>;
 export const MessageDoc = defineDocFamily<CanonicalMessage, CanonicalMessage | null>({
   kind: 'optchat.message',
-  version: 1,
+  version: 2,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   family: true,
   checkpointWhen: () => false,
+  // Version 1 named the agent's replies `unii`; their text is stored without the tag.
+  migrate: (value) => {
+    const message = value as Omit<CanonicalMessage, 'kind'> & { kind: Kind | 'unii' };
+    return { ...message, kind: message.kind === 'unii' ? 'infinichat' : message.kind };
+  },
   initial: (seed) => {
     if (!seed) throw new Error('Missing canonical message');
     return seed;
@@ -42,12 +56,19 @@ export const MessageDoc = defineDocFamily<CanonicalMessage, CanonicalMessage | n
 type BuiltNode = { ref: NodeRef; text: string; bytes: number; builder: TaskId<string> };
 export const NodeDoc = defineDocFamily<{ value: BuiltNode | null }, BuiltNode | null>({
   kind: 'optchat.node',
-  version: 1,
+  version: 2,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   family: true,
   checkpointWhen: () => false,
+  // Version 1 tagged the agent's replies `unii` in a line's text.
+  migrate: (stored) => {
+    const { value } = stored as { value: BuiltNode | null };
+    if (value === null) return { value };
+    const text = retagged(value.text);
+    return { value: { ...value, text, bytes: bytes(text) } };
+  },
   initial: (value) => ({ value }),
 });
 type View = { refs: NodeRef[]; reducing: boolean };

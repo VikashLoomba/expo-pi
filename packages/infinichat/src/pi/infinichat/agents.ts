@@ -152,7 +152,7 @@ export async function agentLog(
           const cut = message.stopReason === 'error' || message.stopReason === 'aborted' ? `\n[cut off: ${why}]` : '';
           for (const item of message.content) {
             if (item.type === 'text' && item.text.trim()) {
-              lines.push(`unii: ${item.text.trim()}${cut}`);
+              lines.push(`infinichat: ${item.text.trim()}${cut}`);
             } else if (item.type === 'toolCall') {
               lines.push(`tool: ${item.name} ${JSON.stringify(item.arguments)}${cut}`);
             }
