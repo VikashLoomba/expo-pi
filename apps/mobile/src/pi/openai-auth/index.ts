@@ -7,7 +7,7 @@ import { AccessTokenRequest, AuthRequest, RefreshTokenRequest, ResponseType } fr
 import * as Crypto from 'expo-crypto';
 import * as Linking from 'expo-linking';
 
-import { openOpenAIBrowser } from './browser';
+import { openLoopbackBrowser } from './browser';
 
 export { OPENAI_PROVIDER_ID } from '@pi-agent/infinichat/pi/openai-auth/core';
 
@@ -32,21 +32,11 @@ export async function openOpenAIManualBrowser(value: string, signal: AbortSignal
   signal.throwIfAborted();
 }
 
-/**
- * A machine's ChatGPT sign-in, which pi-ai built there with the same redirect: the phone's receiver and browser catch
- * its callback, for the machine's `manual_code` prompt. Expo's `AuthRequest` stands for that request with its state;
- * `promptAsync({ url })` uses only the redirect and the state (`AuthRequest.ts:137-201`), and the PKCE verifier stays
- * on the machine. Resolves with the whole callback URL, checked as the phone's own, or undefined without one.
- */
-export async function openOpenAIBrowserFor(value: string, signal: AbortSignal): Promise<string | undefined> {
-  signal.throwIfAborted();
-  const url = authorizationUrl(value);
-  const state = url.searchParams.get('state') ?? '';
-  const request = new AuthRequest({ clientId: OPENAI_DYNAMIC_CLIENT_ID, redirectUri: OPENAI_REDIRECT_URI, state,
-    usePKCE: false });
-  const callback = await openOpenAIBrowser(request, url.toString(), signal);
-  if (callback !== undefined) validateOpenAICallback(callback, state);
-  return callback;
+/** The phone's own ChatGPT sign-in returns to Pi's fixed loopback redirect, where the native receiver listens. */
+function openAIBrowser(request: AuthRequest, url: string, signal: AbortSignal): Promise<string | undefined> {
+  const redirect = new URL(OPENAI_REDIRECT_URI);
+  return openLoopbackBrowser({ url: redirect, port: Number(redirect.port), state: request.state },
+    () => request.promptAsync(OPENAI_DISCOVERY, { url }), signal);
 }
 
 /** Native implementation of Pi's public OAuthAuth boundary. */
@@ -68,7 +58,7 @@ export function createNativeOpenAIOAuth(): OAuthAuth {
       signal.throwIfAborted();
       notify({ type: 'auth_url', url, instructions: 'Complete sign-in in the browser. If it cannot return here, paste the full return URL.' });
       notify({ type: 'progress', message: 'Complete ChatGPT sign-in in the browser.' });
-      let callback = await openOpenAIBrowser(request, url, signal);
+      let callback = await openAIBrowser(request, url, signal);
       if (!callback) {
         notify({ type: 'info', message: 'The browser did not return a sign-in result. Paste its full return URL to finish, or cancel.' });
         callback = await interaction.prompt({ type: 'manual_code', signal,

@@ -7,6 +7,7 @@ import {
   AccessSchema, ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema,
   ReachSchema, ScheduledSchema, SignInAttemptSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { McpServerStatusSchema, McpSignInAttemptSchema } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { ScheduledInputSchema } from '@pi-agent/infinichat/pi/infinichat/schedule';
 import { ChatModelSettingsSchema, ModelCatalogSchema } from '@pi-agent/infinichat/pi/model-catalog';
 import { ChatImageProperties, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
@@ -131,6 +132,36 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         cancelSignIn: method(),
         setApiKey: method(obj({ providerId: str(), key: str() }, { open: true })),
         signOut: method(obj({ providerId: str() }, { open: true })),
+      },
+    },
+  },
+});
+
+/**
+ * The MCP servers of the machine shown, as `RemoteMcp` reads them from its server's `/mcp` object, for the composer's
+ * `/mcp` sheet; its operations go to that object. `loaded` is false until the object is live. `unavailable` says why
+ * there is nothing to show: the conversation isn't on a machine, or the machine's server is from before `/mcp`.
+ */
+export const MacMcp = remote('infinichat.mac.mcp', {
+  version: 1,
+  input: obj({}, { open: true }),
+  host: hostNamed('mac'),
+  variants: {
+    owner: {
+      state: {
+        machine: ShownMachineSchema,
+        loaded: bool(),
+        servers: arr(McpServerStatusSchema),
+        problems: arr(str()),
+        signInAttempt: McpSignInAttemptSchema,
+        unavailable: union([nul(), str()]),
+      },
+      methods: {
+        signIn: method(obj({ server: str() }, { open: true }), num()),
+        answer: method(obj({ promptId: num(), value: str() }, { open: true })),
+        cancelSignIn: method(),
+        signOut: method(obj({ server: str() }, { open: true })),
+        reconnect: method(obj({ server: str() }, { open: true })),
       },
     },
   },

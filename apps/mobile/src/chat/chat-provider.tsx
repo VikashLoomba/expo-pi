@@ -32,7 +32,8 @@ import { phoneMachines, shownMachines } from '../pi/infinichat-remote/phone-mach
 import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
 import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
 import { createChatCredentialStore, createChatModels } from '../pi/models';
-import { OPENAI_PROVIDER_ID, openOpenAIBrowserFor, openOpenAIManualBrowser } from '../pi/openai-auth';
+import { relayMachineSignIn } from '../pi/machine-sign-in';
+import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
 import { openExpoSqliteStorage } from '../pi/storage';
 import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
@@ -563,7 +564,7 @@ export function useMachines(): MachinesState | undefined {
 }
 
 /** The machine whose InfiniChat the screens show; undefined while they show this iPhone's. */
-function useShownMachine(): RemoteInfiniChat | undefined {
+export function useShownMachine(): RemoteInfiniChat | undefined {
   const { infiniChat } = useChatApp();
   const host = useSyncExternalStore(infiniChat.subscribe, infiniChat.getHost, infiniChat.getHost);
   return host instanceof RemoteInfiniChat ? host : undefined;
@@ -651,23 +652,10 @@ export function useInfiniChatAccount(): ProviderAccount & {
         throw error;
       });
       if (providerId !== OPENAI_PROVIDER_ID) return;
-      const url = await remote.signInStep(attempt, (step) => step.url, controller.signal);
-      // The browser never outlives the machine's attempt, however that ends.
-      void remote.signInStep(attempt, () => undefined, controller.signal).catch(() => controller.abort());
-      const callback = await openOpenAIBrowserFor(url, controller.signal).catch((error: unknown) => {
-        // A callback that declined or failed the check, or a browser that could not open, ends the attempt, as it
-        // ends the phone's own; leaving the machine's prompt open would wait for a paste nobody was asked for.
-        if (!controller.signal.aborted) {
-          setNotice({ providerId, message: 'Sign-in could not be completed. Please try again.' });
-          void remote.cancelSignIn().catch(() => {});
-        }
-        throw error;
+      await relayMachineSignIn(remote, attempt, controller.signal, () => {
+        setNotice({ providerId, message: 'Sign-in could not be completed. Please try again.' });
+        void remote.cancelSignIn().catch(() => {});
       });
-      // Without a callback the machine's prompt stays for the return URL, pasted or opened again in a browser.
-      if (callback === undefined) return;
-      const prompt = await remote.signInStep(attempt,
-        (step) => step.prompt?.prompt.type === 'manual_code' ? step.prompt.id : undefined, controller.signal);
-      await remote.answer(prompt, callback);
     } catch {
       // The machine's state says how its attempt went, and a browser that failed leaves its prompt there.
     } finally {

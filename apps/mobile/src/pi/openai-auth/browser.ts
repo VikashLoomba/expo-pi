@@ -1,14 +1,20 @@
-import { OPENAI_DISCOVERY } from '@pi-agent/infinichat/pi/openai-auth/core';
-import type { AuthRequest, AuthSessionResult } from 'expo-auth-session';
+import type { LoopbackRedirect } from '@pi-agent/infinichat/pi/infinichat-remote/sign-in-attempt';
 import * as WebBrowser from 'expo-web-browser';
 
 import receiver from '../../../modules/pi-oauth-callback/src/PiOAuthCallbackModule';
 
-type BrowserOutcome = { source: 'browser'; result?: AuthSessionResult };
+/** What Expo's authentication browser settles with: `AuthRequest.promptAsync` or `WebBrowser.openAuthSessionAsync`. */
+type Presented = { type: string; url?: string };
+type BrowserOutcome = { source: 'browser'; result?: Presented };
 type CallbackOutcome = { source: 'listener'; url?: string };
 
-/** Expo owns presentation; the native receiver owns only the HTTP callback. */
-export async function openOpenAIBrowser(request: AuthRequest, url: string, signal: AbortSignal): Promise<string | undefined> {
+/**
+ * A browser sign-in that returns to the loopback `redirect`: Expo owns presentation (`present`), and the native
+ * receiver owns only the HTTP callback on the redirect's port and path. Resolves with the whole callback URL, from the
+ * receiver or the browser, or undefined without one, for the flow's manual return.
+ */
+export async function openLoopbackBrowser(redirect: LoopbackRedirect, present: () => Promise<Presented>,
+  signal: AbortSignal): Promise<string | undefined> {
   signal.throwIfAborted();
   let sessionId: string | undefined;
   let stopped: Promise<void> | undefined;
@@ -36,7 +42,7 @@ export async function openOpenAIBrowser(request: AuthRequest, url: string, signa
     try {
       // Await real readiness, not merely listener construction, before the
       // browser can redirect. The native receiver caches an early callback.
-      sessionId = await receiver.start(request.state);
+      sessionId = await receiver.start(redirect.url.hostname, redirect.port, redirect.url.pathname, redirect.state);
       callback = receiver.waitForCallback(sessionId).then(
         (value): CallbackOutcome => ({ source: 'listener', url: value }),
         (): CallbackOutcome => ({ source: 'listener' }),
@@ -44,11 +50,11 @@ export async function openOpenAIBrowser(request: AuthRequest, url: string, signa
     } catch {
       signal.throwIfAborted();
       // Whenever the receiver cannot start (an occupied port, an active session, a startup failure),
-      // Expo's browser and Pi's manual_code fallback still complete this same PKCE attempt.
+      // Expo's browser and the flow's manual return still complete this same attempt.
     }
     signal.throwIfAborted();
     browserPending = true;
-    browser = request.promptAsync(OPENAI_DISCOVERY, { url }).then(
+    browser = present().then(
       (result): BrowserOutcome => ({ source: 'browser', result }),
       (): BrowserOutcome => ({ source: 'browser' }),
     ).then((outcome) => { browserPending = false; settledBrowser = outcome; return outcome; });
@@ -56,7 +62,7 @@ export async function openOpenAIBrowser(request: AuthRequest, url: string, signa
     signal.throwIfAborted();
     if (first.source === 'listener') {
       // Latch the callback before dismissing. Expo releases its own auth lock
-      // only after promptAsync settles, so drain it before permitting a retry.
+      // only after the browser settles, so drain it before permitting a retry.
       // A failed receiver does not own or invalidate the browser. Let Expo's
       // ordinary return/dismissal path finish before offering manual entry.
       if (first.url && !settledBrowser) dismiss();

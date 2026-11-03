@@ -45,29 +45,59 @@ failed or unchanged, and which entries were skipped and why. A refused reload le
 ```
 
 A server can instead have a streamable HTTP `url` and optional `headers`. Stdio supports `args`, `env`, and `cwd`.
-`${NAME}` in `env` and `headers` values expands from the server process's environment; a name it lacks skips that
-server, and the reply names the variable. A leading `~/` in command, arguments, or working directory expands to the
-account's home. Common fields are `enabled`, `description`, `timeout` (seconds per MCP request; default 60), and
-`exposure`. OAuth and legacy SSE are not implemented.
+`${NAME}` in `env`, `headers` and `oauth.clientSecret` values expands from the server process's environment; a name it
+lacks skips that server, and the reply names the variable. A leading `~/` in command, arguments, or working directory
+expands to the account's home. Common fields are `enabled`, `description`, `timeout` (seconds per MCP request; default
+60, renewed by the server's progress notifications), `exposure`, and `toolExposure`. Legacy SSE is not implemented.
 
 Exposure: `direct` tools are offered to the model; `codemode` (default, including its `codemode-deferred` alias) and
 `deferred` tools are callable through code mode but omitted from its inline prompt declarations. A `deferred` server
 also enables Durable's `tool_search`, which can load deferred tools for direct model calls. `hidden` tools are not
-registered. This is not a separate per-server authorization boundary.
+registered. `toolExposure` overrides it per tool, as pi's coding agent reads it: exact tool names win over `*`
+patterns, and the first matching pattern wins. This is not a separate per-server authorization boundary.
+
+The model also gets the coding agent's resource tools, `list_mcp_resources`, `list_mcp_resource_templates` and
+`read_mcp_resource`, while a connected, non-hidden server offers resources; their exposure is the widest of those
+servers'. A tool's progress notifications show as its running output. The servers get `~/.infinichat/work`, where the
+agents' tools run, as their root, and the log messages they send go to `~/.infinichat/mcp.log` (moved to `mcp.log.1`
+past 5 MB).
+
+## OAuth and `/mcp`
+
+The server's MCP client is pi-mcp 1.5.0, signed in the way pi's coding agent signs in (`docs/mcp.md` "Authenticate with
+OAuth", `src/extensions/mcp/oauth.ts`). A streamable HTTP server without an `Authorization` header signs in with OAuth
+when it answers 401: its connection fails as *needs sign-in*, and the user signs in from a client's `/mcp`. The
+optional `oauth` entry takes the coding agent's `clientId`, `clientSecret`, `callbackPort`, `callbackUrl`, `scope`,
+`clientName` and `authServerMetadataUrl`. Without `clientId` the server registers a client dynamically as InfiniChat:
+the coding agent's Client ID Metadata Documents on pi.dev name pi, so `clientRegistration: "cimd"` is refused.
+
+`/mcp` in the Mac or iOS app opens a sheet with the machine's servers (`InfiniChatMcp`, which the tools plugin serves):
+each one's state, tools and resources, its error with a stdio server's stderr tail, sign-in and sign-out for OAuth
+servers, and reconnect; and the entries the configuration skipped. A sign-in runs on the machine, as a provider
+sign-in does (`SignInAttempts`, `node/sign-in.ts`): the machine holds the PKCE verifier, the registration and the
+tokens, in `~/.infinichat/mcp-auth.json` keyed by server name and URL, and refreshes them (pi-mcp's
+`adaptOAuthProvider`). Its authorization URL redirects to the machine's own loopback, which its callback server
+answers when the browser runs there. A client's browser runs elsewhere, so the client listens on the same loopback
+port and path, catches the callback (`sign-in-attempt.ts` `loopbackRedirect`, the phone's `pi-oauth-callback` and the
+Mac's `SignInRelay`) and hands it to the attempt's `manual_code` prompt; the user can also paste the return URL. A
+connection never starts a sign-in itself: without a refresh token, or when the server asks for more scope, it needs one.
+
+A dropped connection reconnects at the next call. A streamable HTTP session the server forgot, after a restart or a
+deploy, is replaced once for that request, so the server needs no reload.
 
 ## How a reload treats servers
 
 The tools plugin's object reads `mcp.json` on every run and declares the code-mode sandbox and one Chord resource per
 enabled server, named `mcp__<server>`, whose version is a hash of its resolved connection (command, args, env and
-cwd, or url and headers, and timeout). Chord keeps a resource whose version is unchanged, opens a changed one beside
+cwd, or url, headers and oauth, and timeout). Chord keeps a resource whose version is unchanged, opens a changed one beside
 the old one, and closes one no longer declared. So a reload connects added servers, reconnects changed ones, closes
 removed or disabled ones, and leaves the others connected; a change of only `exposure` or `description` republishes
 the tools without reconnecting. A server left unchanged that isn't connected, for example one that was down, is
 tried again.
 
 A server connects and lists its tools in the background, so one that fails never fails the start or the reload; the
-reply and the server's log report it. A dropped connection reconnects at the next call, and
-`notifications/tools/list_changed` republishes the tools without a reload. A malformed or unreadable `mcp.json` is
+reply, `/mcp` and the server's log report it. `notifications/tools/list_changed` republishes the tools without a
+reload. A malformed or unreadable `mcp.json` is
 reported and configures no server, so every server closes and code mode stays; fix it and reload. Calls already
 running finish on their old connection, which closes once they settle.
 

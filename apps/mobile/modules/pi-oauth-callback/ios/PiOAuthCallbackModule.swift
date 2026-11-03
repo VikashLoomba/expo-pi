@@ -5,8 +5,8 @@ public final class PiOAuthCallbackModule {
   private let server = OAuthCallbackServer()
 
   @JS
-  func start(state: String) async throws -> String {
-    try await server.start(state: state)
+  func start(host: String, port: Int, path: String, state: String) async throws -> String {
+    try await server.start(host: host, port: port, path: path, state: state)
   }
 
   @JS

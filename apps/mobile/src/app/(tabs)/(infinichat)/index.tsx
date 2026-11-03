@@ -1,5 +1,7 @@
 import { uuidv7 } from '@earendil-works/pi-ai';
-import { draftCommand, INFINICHAT_COMMANDS } from '@pi-agent/infinichat/chat/commands';
+import {
+  draftCommand, INFINICHAT_COMMANDS, type InfiniChatCommandName,
+} from '@pi-agent/infinichat/chat/commands';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import { findCatalogModel, getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
@@ -140,25 +142,35 @@ export default function InfiniChatScreen() {
       setAttaching(false);
     }
   };
-  /** `/reload-plugins` reloads the plugins of the machine InfiniChat runs on; nothing reaches the agent. */
-  const runCommand = async () => {
-    setAdmitting(true);
-    setLocalError(undefined);
-    setCommandResult(undefined);
-    try {
-      setCommandResult(await service.reloadPlugins());
+  /**
+   * The commands, which run here and never reach the agent: `/mcp` opens the machine's MCP servers, and
+   * `/reload-plugins` reloads the plugins of the machine InfiniChat runs on.
+   */
+  const commands: Readonly<Record<InfiniChatCommandName, () => Promise<void>>> = {
+    mcp: async () => {
       setDraft(emptyDraft());
-    } catch (cause) {
-      setLocalError(cause instanceof Error ? cause.message : 'The plugins could not be reloaded. Try again.');
-    } finally {
-      setAdmitting(false);
-    }
+      router.push('/infinichat-mcp');
+    },
+    'reload-plugins': async () => {
+      setAdmitting(true);
+      setLocalError(undefined);
+      setCommandResult(undefined);
+      try {
+        setCommandResult(await service.reloadPlugins());
+        setDraft(emptyDraft());
+      } catch (cause) {
+        setLocalError(cause instanceof Error ? cause.message : 'The plugins could not be reloaded. Try again.');
+      } finally {
+        setAdmitting(false);
+      }
+    },
   };
   const sendMessage = async () => {
     const text = draft.text.trim();
     if ((!text && !draft.images.length) || admitting) return;
-    if (!draft.images.length && draftCommand(text, INFINICHAT_COMMANDS)) {
-      await runCommand();
+    const command = draft.images.length ? undefined : draftCommand(text, INFINICHAT_COMMANDS);
+    if (command) {
+      await commands[command.name]();
       return;
     }
     if (!configured || settingsError || !access.ready || !access.connected) return;

@@ -1,7 +1,7 @@
 import { hostNamed, method, remote } from '@earendil-works/chord';
-import { stringLiteral, stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
+import { stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
 import {
-  arr, bool, nul, num, obj, oneOf, opt, str, union, type Schema, type Static,
+  arr, bool, nul, num, obj, opt, str, union, type Schema, type Static,
 } from '@earendil-works/pi-schema';
 
 import { ChatMessageSchema } from '../../chat/types';
@@ -12,6 +12,7 @@ import { ScheduledInputSchema } from '../infinichat/schedule';
 import { ChatModelSettingsSchema, ModelCatalogSchema } from '../model-catalog';
 import { ProviderAccessSchema } from '../provider-credentials';
 import { UserInputSchema } from '../user-input';
+import { AuthPromptSchema } from './sign-in-attempt';
 
 /**
  * `{ type: "boolean", const: value }`, shaped as pi-ai's `stringLiteral`: TypeBox's `Literal` JSON, which pi-schema's
@@ -116,21 +117,9 @@ export type PendingHostKeys = Static<typeof PendingHostKeysSchema>;
 
 /** The provider sign-ins of the machine's own credential store, keyed by provider. */
 export const AccessSchema = stringRecord(ProviderAccessSchema);
-/** pi-ai's `AuthPrompt` without its signal, which stays on the server. */
-const AuthPromptSchema = union([
-  obj({
-    type: oneOf(['text', 'secret', 'manual_code']), message: str(),
-    placeholder: opt(str()),
-  }, { open: true }),
-  obj({
-    type: stringLiteral('select'), message: str(),
-    options: arr(obj({
-      id: str(), label: str(), description: opt(str()),
-    }, { open: true })),
-  }, { open: true }),
-]);
 /**
- * The machine's latest sign-in, until the next one starts; null before its first. `status` is the account screen's
+ * The machine's latest provider sign-in (`sign-in-attempt.ts`, its fields in their first order, which the contract's
+ * fingerprint keeps), until the next one starts; null before its first. `status` is the account screen's
  * public copy, absent once an attempt succeeded, as that screen clears its notice. While it runs, `url` is pi-ai's
  * `auth_url`, and `prompt` waits for `answer` with its `id`. An attempt that ended stays, so a phone that learns its
  * attempt's number before its state still finds how it ended.

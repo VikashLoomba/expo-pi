@@ -3,11 +3,14 @@ import {
   AccessSchema, ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, ScheduledSchema,
   SignInAttemptSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import {
+  McpServerStatusSchema, McpSignInAttemptSchema,
+} from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { ModelCatalogSchema, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
-import { nul, str, union } from '@earendil-works/pi-schema';
+import { arr, bool, nul, str, union } from '@earendil-works/pi-schema';
 
 import {
-  ConnectionSchema, MacInfiniChat, MoveStatusSchema, ShownMachineSchema, type Connection, type MacPrincipal,
+  ConnectionSchema, MacInfiniChat, MacMcp, MoveStatusSchema, ShownMachineSchema, type Connection, type MacPrincipal,
 } from '../contract';
 import type { MacAvatar } from './avatar';
 import type { MacInfiniChat as Shown } from './infinichat';
@@ -135,6 +138,53 @@ export function serveInfiniChat(host: Host<MacPrincipal>, infinichat: Shown, ava
       cancelSignIn: () => infinichat.cancelSignIn(),
       setApiKey: ({ providerId, key }) => infinichat.setApiKey(providerId, key),
       signOut: ({ providerId }) => infinichat.signOut(providerId),
+    };
+  });
+}
+
+const UnavailableSchema = union([nul(), str()]);
+
+/**
+ * Serves the shown machine's MCP servers to the windows for the composer's `/mcp` sheet, as `serveInfiniChat` serves
+ * the conversation: the cells mirror the shown client's `RemoteMcp`, and follow the next client when the conversation
+ * moves; the operations go to that client's object.
+ */
+export function serveMcp(host: Host<MacPrincipal>, infinichat: Shown): void {
+  const { mcp } = infinichat;
+  host.serve(MacMcp, (_input, _principal, self) => {
+    const currentMachine = () => infinichat.getMachine() ?? null;
+    const currentLoaded = () => mcp.getSnapshot() !== undefined;
+    const currentServers = () => [...mcp.getSnapshot()?.servers ?? []];
+    const currentProblems = () => [...mcp.getSnapshot()?.problems ?? []];
+    const currentSignIn = () => mcp.getSnapshot()?.signInAttempt ?? null;
+    const currentUnavailable = () => mcp.unavailable() ?? mcp.getSnapshot()?.unavailable ?? null;
+    const machine = self.state('machine', ShownMachineSchema, { init: currentMachine });
+    const loaded = self.state('loaded', bool(), { init: currentLoaded });
+    const servers = self.state('servers', arr(McpServerStatusSchema), { init: currentServers });
+    const problems = self.state('problems', arr(str()), { init: currentProblems });
+    const signInAttempt = self.state('signInAttempt', McpSignInAttemptSchema, { init: currentSignIn });
+    const unavailable = self.state('unavailable', UnavailableSchema, { init: currentUnavailable });
+    self.on('mcp', mcp, (_change, ctx) => {
+      machine.replace(ctx, currentMachine(), { diff: true });
+      loaded.replace(ctx, currentLoaded());
+      servers.replace(ctx, currentServers(), { diff: true });
+      problems.replace(ctx, currentProblems(), { diff: true });
+      signInAttempt.replace(ctx, currentSignIn(), { diff: true });
+      unavailable.replace(ctx, currentUnavailable());
+    });
+    return {
+      variant: 'owner',
+      machine,
+      loaded,
+      servers,
+      problems,
+      signInAttempt,
+      unavailable,
+      signIn: ({ server }) => mcp.signIn(server),
+      answer: ({ promptId, value }) => mcp.answer(promptId, value),
+      cancelSignIn: () => mcp.cancelSignIn(),
+      signOut: ({ server }) => mcp.signOut(server),
+      reconnect: ({ server }) => mcp.reconnect(server),
     };
   });
 }

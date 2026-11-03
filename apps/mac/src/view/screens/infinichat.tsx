@@ -1,5 +1,7 @@
 import type { Host } from '@earendil-works/chord';
-import { INFINICHAT_COMMANDS, type ChatCommand } from '@pi-agent/infinichat/chat/commands';
+import {
+  INFINICHAT_COMMANDS, type InfiniChatCommand, type InfiniChatCommandName,
+} from '@pi-agent/infinichat/chat/commands';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
@@ -16,6 +18,7 @@ import { Placeholder } from '../components/chat/placeholder';
 import { ThreadSourceContext } from '../components/chat/thread-source';
 import { Transcript } from '../components/chat/transcript';
 import { useSheet } from '../components/infinichat/form-sheet';
+import { McpSheet } from '../components/infinichat/mcp-sheet';
 import { ProvidersSheet } from '../components/infinichat/providers-sheet';
 import { ScheduledSheet } from '../components/infinichat/scheduled-sheet';
 import { SettingsSheet } from '../components/infinichat/settings-sheet';
@@ -54,7 +57,7 @@ export function InfiniChatScreen({ host }: { host: Host<MacPrincipal> }) {
   return (
     <InfiniChatContext value={ref}>
       <ThreadSourceContext value={ref}>
-        <InfiniChat />
+        <InfiniChat host={host} />
       </ThreadSourceContext>
     </InfiniChatContext>
   );
@@ -65,7 +68,7 @@ export function InfiniChatScreen({ host }: { host: Host<MacPrincipal> }) {
  * composer whose draft it owns. The transcript subscribes to the messages itself and is memoized, so a keystroke
  * renders only this component and the composer.
  */
-function InfiniChat() {
+function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
   const ref = useInfiniChatRef();
   const snapshot = useMember(ref.snapshot);
   const controls = useMember(ref.controls);
@@ -83,6 +86,7 @@ function InfiniChat() {
   const settingsSheet = useSheet();
   const providersSheet = useSheet();
   const scheduledSheet = useSheet();
+  const mcpSheet = useSheet();
   const [focusProvider, setFocusProvider] = useState<string>();
   const { draft, changeDraft, removeImage, choosePrompt, attach, attachFiles, attaching, localError, setLocalError,
     reset, input } = useDraft(ref);
@@ -118,8 +122,7 @@ function InfiniChat() {
     ).finally(() => setAdmitting(false));
   }, [admitting, configured, connected, draft, ref, reset, setLocalError, settingsError]);
   // Commands run here, never reaching the agent; a failed one keeps its draft, so sending it again retries.
-  const runCommand = useCallback((command: ChatCommand) => {
-    if (admitting || command.name !== 'reload-plugins') return;
+  const reloadPlugins = useCallback(() => {
     setAdmitting(true);
     setCommandResult(undefined);
     void ref.reloadPlugins().then((text) => {
@@ -128,7 +131,20 @@ function InfiniChat() {
     }, (cause: unknown) => {
       setCommandResult({ text: errorText(cause, 'The plugins could not be reloaded. Try again.'), failed: true });
     }).finally(() => setAdmitting(false));
-  }, [admitting, ref, reset]);
+  }, [ref, reset]);
+  const showMcp = mcpSheet.show;
+  const runCommand = useCallback((command: InfiniChatCommand) => {
+    if (admitting) return;
+    const commands: Record<InfiniChatCommandName, () => void> = {
+      'reload-plugins': reloadPlugins,
+      // A sheet of its own, as the coding agent's `/mcp` opens its own view of the servers.
+      mcp: () => {
+        reset();
+        showMcp();
+      },
+    };
+    commands[command.name]();
+  }, [admitting, reloadPlugins, reset, showMcp]);
   const stop = useCallback(() => {
     if (stopping) return;
     setStopping(true);
@@ -269,6 +285,7 @@ function InfiniChat() {
         <ProvidersSheet key={providersSheet.session} open={providersSheet.open} onClose={providersSheet.hide}
           focus={focusProvider} />
         <ScheduledSheet key={scheduledSheet.session} open={scheduledSheet.open} onClose={scheduledSheet.hide} />
+        <McpSheet key={mcpSheet.session} host={host} open={mcpSheet.open} onClose={mcpSheet.hide} />
       </div>
     </ChatAgentContext>
   );

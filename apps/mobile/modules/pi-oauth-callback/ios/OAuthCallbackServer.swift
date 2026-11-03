@@ -28,6 +28,7 @@ actor OAuthCallbackServer {
   private final class Session {
     let id: String
     let state: String
+    let redirect: OAuthCallbackHTTP.Redirect
     let listener: NWListener
     var startup: CheckedContinuation<String, any Error>?
     var waiter: CheckedContinuation<String, any Error>?
@@ -40,19 +41,25 @@ actor OAuthCallbackServer {
     var finished = false
     var listenerStopped = false
     var stopWaiters: [CheckedContinuation<Void, Never>] = []
-    init(id: String, state: String, listener: NWListener) {
-      self.id = id; self.state = state; self.listener = listener
+    init(id: String, state: String, redirect: OAuthCallbackHTTP.Redirect, listener: NWListener) {
+      self.id = id; self.state = state; self.redirect = redirect; self.listener = listener
     }
   }
   private let networkQueue = DispatchQueue(label: "com.vikashloomba.piagent.oauth-callback", qos: .userInitiated)
   private var session: Session?
   private var destroyed = false
 
-  func start(state: String) async throws -> String {
+  /// `host` is how the redirect names the loopback (`127.0.0.1` or `localhost`); the listener binds IPv4 loopback.
+  func start(host: String, port: Int, path: String, state: String) async throws -> String {
     try Task.checkCancellation()
     guard !destroyed else { throw Failure.cancelled }
     guard !state.isEmpty, state.utf8.count <= 1024,
       state.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { throw Failure.invalidState }
+    guard host == "127.0.0.1" || host == "localhost", let portNumber = UInt16(exactly: port), portNumber > 0,
+      let endpointPort = NWEndpoint.Port(rawValue: portNumber), path.hasPrefix("/"), path.utf8.count <= 1024,
+      !path.contains("?"), !path.contains("#"), !path.contains("\\"),
+      path.unicodeScalars.allSatisfy({ (33...126).contains($0.value) }) else { throw Failure.invalidState }
+    let redirect = OAuthCallbackHTTP.Redirect(host: host, port: portNumber, path: path)
     if let previous = session {
       guard previous.finished else { throw Failure.busy }
       await waitUntilStopped(previous)
@@ -63,13 +70,13 @@ actor OAuthCallbackServer {
       session = nil
     }
     let parameters = NWParameters.tcp
-    parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: 1455)
+    parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: endpointPort)
     parameters.allowLocalEndpointReuse = false
     let listener: NWListener
     do { listener = try NWListener(using: parameters) }
     catch { throw Failure.unavailable }
     let id = UUID().uuidString
-    let current = Session(id: id, state: state, listener: listener)
+    let current = Session(id: id, state: state, redirect: redirect, listener: listener)
     session = current
     listener.stateUpdateHandler = { [weak self] state in
       Task { await self?.listenerChanged(id: id, state: state) }
@@ -206,7 +213,7 @@ actor OAuthCallbackServer {
     guard let current = session, current.id == sessionID, !current.finished,
       let connection = current.connections[id], !connection.responding else { return }
     if let data { connection.bytes.append(data) }
-    switch OAuthCallbackHTTP.parse(connection.bytes, expectedState: current.state) {
+    switch OAuthCallbackHTTP.parse(connection.bytes, expectedState: current.state, redirect: current.redirect) {
     case .incomplete:
       if complete || failed { drop(current, connectionID: id) }
       else { receive(sessionID: sessionID, id: id) }

@@ -3,9 +3,15 @@ import Foundation
 /// Pure, bounded HTTP parsing; OAuth code exchange and PKCE stay in Pi/Expo.
 enum OAuthCallbackHTTP {
   static let maximumHeaderBytes = 16 * 1024
-  static let host = "127.0.0.1:1455"
-  static let redirectURI = "http://127.0.0.1:1455/auth/callback"
   static let headerEnd = Data([13, 10, 13, 10])
+
+  /// The loopback redirect one session receives: the `Host` header the browser sends for it and its exact path.
+  struct Redirect: Equatable {
+    let host: String
+    let port: UInt16
+    let path: String
+    var authority: String { "\(host):\(port)" }
+  }
 
   enum Request: Equatable {
     case incomplete
@@ -13,7 +19,7 @@ enum OAuthCallbackHTTP {
     case callback(String)
   }
 
-  static func parse(_ data: Data, expectedState: String) -> Request {
+  static func parse(_ data: Data, expectedState: String, redirect: Redirect) -> Request {
     guard data.count <= maximumHeaderBytes else { return .rejected(431) }
     guard let end = data.range(of: headerEnd) else {
       return data.count == maximumHeaderBytes ? .rejected(431) : .incomplete
@@ -46,27 +52,27 @@ enum OAuthCallbackHTTP {
       default: break
       }
     }
-    guard hosts == [host] else { return .rejected(400) }
+    guard hosts == [redirect.authority] else { return .rejected(400) }
     let target = String(request[1])
-    guard target.hasPrefix("/auth/callback?"), !target.contains("#"), !target.contains("\\"),
-      let components = URLComponents(string: "http://\(host)\(target)"),
-      components.percentEncodedPath == "/auth/callback", components.host == "127.0.0.1",
-      components.port == 1455, let items = components.queryItems
+    guard target.hasPrefix("\(redirect.path)?"), !target.contains("#"), !target.contains("\\"),
+      let components = URLComponents(string: "http://\(redirect.authority)\(target)"),
+      components.percentEncodedPath == redirect.path, components.host == redirect.host,
+      components.port == Int(redirect.port), let items = components.queryItems
     else { return .rejected(404) }
     func values(_ name: String) -> [String?] { items.filter { $0.name == name }.map(\.value) }
     let states = values("state")
     guard !expectedState.isEmpty, states.count == 1, states[0] == expectedState else { return .rejected(400) }
     let errors = values("error")
     let codes = values("code")
-    let clients = values("client_id")
     func singleNonempty(_ values: [String?]) -> Bool {
       values.count == 1 && values[0]?.isEmpty == false
     }
-    // Error callbacks are terminal too; Expo/Pi interprets the provider's error.
-    let authorized = errors.isEmpty && singleNonempty(codes) && singleNonempty(clients)
-    let declined = singleNonempty(errors) && codes.isEmpty && clients.count <= 1
+    // Error callbacks are terminal too; the flow that started the sign-in interprets the error and checks the rest
+    // (ChatGPT's `client_id`, an MCP server's issuer).
+    let authorized = errors.isEmpty && singleNonempty(codes)
+    let declined = singleNonempty(errors) && codes.isEmpty
     guard authorized || declined else { return .rejected(400) }
-    return .callback("http://\(host)\(target)")
+    return .callback("http://\(redirect.authority)\(target)")
   }
 
   static func response(status: Int) -> Data {

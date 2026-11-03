@@ -20,7 +20,7 @@ import { listenForWindows } from './listen';
 import { MacMachines, thisMac } from './machines';
 import { ScheduledNotifier } from './notifications';
 import { serveChats } from './serve-chats';
-import { serveInfiniChat } from './serve-infinichat';
+import { serveInfiniChat, serveMcp } from './serve-infinichat';
 import { serveMachines } from './serve-machines';
 import { readSettings, writeSettings } from './settings';
 import { SignInRelay } from './sign-in-relay';
@@ -100,6 +100,11 @@ async function main(): Promise<void> {
   // This Mac's avatar file, the browser side of a sign-in on the holder, and the scheduled tasks' notifications.
   const avatar = new MacAvatar(settings);
   const relay = new SignInRelay(infinichat, (promptId, value) => infinichat.answer(promptId, value));
+  // The browser side of a sign-in to one of the holder's MCP servers (`/mcp`), relayed the same way.
+  const mcpRelay = new SignInRelay({
+    subscribe: infinichat.mcp.subscribe,
+    getSignIn: () => infinichat.mcp.getSnapshot()?.signInAttempt,
+  }, (promptId, value) => infinichat.mcp.answer(promptId, value));
   const notifier = new ScheduledNotifier(infinichat.shown.scheduled);
   // This Mac's own providers and chats, whose tools run here in a folder per chat or on a machine. Its own sign-in
   // runs here too, so its browser opens here and pi-ai's flow catches the callback itself.
@@ -110,6 +115,7 @@ async function main(): Promise<void> {
   const ui = { openSettings: (_target?: SettingsTarget) => {} };
   const host = createMacHost({ version, userData }, ui);
   serveInfiniChat(host, infinichat, avatar);
+  serveMcp(host, infinichat);
   serveMachines(host, infinichat, machines);
   serveChats(host, chats, account, machines);
   const windows = await listenForWindows(host);
@@ -182,7 +188,12 @@ async function main(): Promise<void> {
     // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
     // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
     let failure: unknown;
-    for (const step of [async () => { relay.close(); own.close(); notifier.close(); }, () => infinichat.close(),
+    for (const step of [async () => {
+      relay.close();
+      mcpRelay.close();
+      own.close();
+      notifier.close();
+    }, () => infinichat.close(),
       () => chats.close(), async () => machines.close(), () => host.close(), async () => account.close(),
       () => windows.close()]) {
       try {

@@ -15,7 +15,9 @@ import {
 } from './contract';
 import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from './dialer';
 import type { MachinePatch, MachinesState } from './machines';
+import { RemoteMcp } from './mcp-client';
 import { compareVersions } from './release';
+import { attemptStep } from './sign-in-attempt';
 
 type ConnectionStatus =
   | { status: 'connecting'; stage?: InstallStage }
@@ -35,13 +37,13 @@ const CODE_PREFIX = /^[a-z_]+(\/[a-z_]+)?: /;
 const LOADING: ChatViewSnapshot = { status: 'loading' };
 const NO_MESSAGES: readonly ChatMessage[] = [];
 const NO_REPORT: InfiniChatSnapshot = {};
-/** A failed attempt is tried again as pi-env's watcher reconnects its daemon (`dist/watch.js:6-7` at v1.5.0). */
 /**
  * The link closed because the server speaks another Chord link protocol: Chord tells the side that has to load new
  * code with `onProtocolMismatch` (chord `docs/guide.md` "Protocol version"), which is this app or the server.
  */
 class ProtocolMismatch extends Error {}
 
+/** A failed attempt is tried again as pi-env's watcher reconnects its daemon (`dist/watch.js:6-7` at v1.5.0). */
 const RECONNECT_FIRST_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -88,8 +90,13 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private closing?: Promise<void>;
   private readonly machineListeners = new Set<() => void>();
 
+  /** The machine's MCP servers, which `/mcp` shows, over this host's link. */
+  readonly mcp: RemoteMcp;
+
   constructor(private readonly dialer: ServerDialer, private readonly directory: MachineDirectory,
-    private readonly client: InfiniChatClient, private readonly version: string) {}
+    private readonly client: InfiniChatClient, private readonly version: string) {
+    this.mcp = new RemoteMcp(this.host, () => this.name, (run) => this.root(run));
+  }
 
   /** The machine's endpoint, its ID in this app. */
   get machineId(): string {
@@ -262,29 +269,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
    */
   signInStep<T>(attempt: number, read: (shown: Exclude<SignInAttempt, null>) => T | undefined,
     signal: AbortSignal): Promise<T> {
-    return new Promise((resolve, reject) => {
-      let seen = false;
-      const settle = (finish: () => void) => {
-        stop();
-        signal.removeEventListener('abort', abort);
-        finish();
-      };
-      const check = () => {
-        const shown = this.values?.signIn ?? null;
-        if (shown?.attempt === attempt && shown.running) {
-          seen = true;
-          const value = read(shown);
-          if (value !== undefined) settle(() => resolve(value));
-        } else if (seen || (shown !== null && shown.attempt >= attempt)) {
-          settle(() => reject(new Error('Sign-in ended.')));
-        }
-      };
-      const abort = () => settle(() => reject(signal.reason));
-      const stop = this.subscribe(check);
-      signal.addEventListener('abort', abort, { once: true });
-      if (signal.aborted) abort();
-      else check();
-    });
+    return attemptStep({ subscribe: this.subscribe, getAttempt: this.getSignIn }, attempt, read, signal);
   }
 
   accept(input: UserMessage['content'], requestId: string): Promise<void> {
@@ -387,6 +372,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
       const session = this.session;
       this.session = undefined;
       this.ref?.release();
+      this.mcp.release();
       try {
         await this.host.close();
       } finally {
@@ -404,13 +390,21 @@ export class RemoteInfiniChat implements InfiniChatHost {
    * A method of the machine's InfiniChat. Acting while disconnected reconnects; the call waits for that, as a Chord
    * call on a loading reference waits until it is live, and rejects with the attempt's failure.
    */
-  private async call<T>(run: (ref: InfiniChatRef, ctx: Ctx<InfiniChatPrincipal>) => Promise<T>): Promise<T> {
+  private call<T>(run: (ref: InfiniChatRef, ctx: Ctx<InfiniChatPrincipal>) => Promise<T>): Promise<T> {
+    return this.root((ctx) => {
+      const ref = this.ref;
+      if (ref === undefined) throw new Error(`InfiniChat on ${this.name} is not connected yet.`);
+      return run(ref, ctx);
+    });
+  }
+
+  /** A call on this host's link, for InfiniChat's reference and the `/mcp` one (`call`). */
+  private async root<T>(run: (ctx: Ctx<InfiniChatPrincipal>) => Promise<T>): Promise<T> {
     this.reconnect();
-    const ref = this.ref;
-    if (this.closed || ref === undefined) throw new Error(`InfiniChat on ${this.name} is not connected yet.`);
+    if (this.closed || this.ref === undefined) throw new Error(`InfiniChat on ${this.name} is not connected yet.`);
     const { signal } = this.calls;
     try {
-      return await this.host.root((ctx) => run(ref, ctx), { signal });
+      return await this.host.root(run, { signal });
     } catch (error) {
       if (isChordError(error, 'aborted') && error.cause instanceof Error) throw error.cause;
       // The server may have received a call whose link closed under it, or whose reference it forced away; the screens
@@ -482,6 +476,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
     let mismatched = false;
     this.host.connect(link, { principal: { kind: 'host' }, onProtocolMismatch: () => { mismatched = true; } });
     const ref = this.ref === undefined || this.ref.status === 'gone' ? this.hold() : this.ref;
+    this.mcp.hold();
     const live = await new Promise<boolean>((resolve, reject) => {
       const settle = (finish: () => void) => {
         stopStatus();

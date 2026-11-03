@@ -1,13 +1,12 @@
-import type { AuthPrompt, LoginOptions, Models } from '@earendil-works/pi-ai';
+import type { AuthPrompt, LoginOptions, Models, ProviderAuthInteraction } from '@earendil-works/pi-ai';
 import { AuthPromptController } from '../chat/auth-prompt-controller';
 import type { SignInAttempt } from '../pi/infinichat-remote/contract';
+import type { ShownAttempt, ShownAuthPrompt } from '../pi/infinichat-remote/sign-in-attempt';
 import { OPENAI_PROVIDER_ID } from '../pi/openai-auth/core';
 import type { ProviderCredentialStore } from '../pi/provider-credentials';
 
-type Attempt = Exclude<SignInAttempt, null>;
-
-/** A prompt as the contract carries it: its signal stays here, and an absent field is left out, as Chord requires. */
-function shown(prompt: AuthPrompt): NonNullable<Attempt['prompt']>['prompt'] {
+/** A prompt as a contract carries it: its signal stays here, and an absent field is left out, as Chord requires. */
+function shown(prompt: AuthPrompt): ShownAuthPrompt {
   if (prompt.type === 'select') {
     return { type: prompt.type, message: prompt.message, options: prompt.options.map(({ id, label, description }) =>
       ({ id, label, ...(description === undefined ? {} : { description }) })) };
@@ -16,24 +15,27 @@ function shown(prompt: AuthPrompt): NonNullable<Attempt['prompt']>['prompt'] {
     ...(prompt.placeholder === undefined ? {} : { placeholder: prompt.placeholder }) };
 }
 
+/** What the screen says of an attempt for `subject` that failed with `error`, given whether it showed its URL. */
+export type FailureCopy<S> = (error: unknown, subject: S, shownUrl: boolean) => string | undefined;
+
 /**
- * Sign-in to this machine's providers, from the phone: the account screen's `useProviderSignIn` with its interaction
- * kept as state, so a phone that reconnects mid-attempt finds the pending prompt again. One attempt at a time. It ends
- * when it succeeds or fails, when it is cancelled, when another starts, or when the server closes; a dropped link alone
- * does not end it. API keys take the account screen's `modify` path.
+ * Sign-ins this machine runs for its clients, one at a time, kept as state, so a client that reconnects mid-attempt
+ * finds the pending prompt again. A sign-in is any flow over pi-ai's `AuthInteraction`, which the clients answer: a
+ * provider's `models.login`, or an MCP server's OAuth (the tools plugin's `mcp-oauth.ts`). `subject` names what an
+ * attempt signs in to, as its contract's field. An attempt ends when it succeeds or fails, when it is cancelled, when
+ * another starts, or when its owner closes; a dropped link alone does not end it.
  */
-export class ServerSignIn {
+export class SignInAttempts<S extends object> {
   private readonly listeners = new Set<() => void>();
   private readonly prompts = new AuthPromptController();
   private attempts = 0;
   private running?: AbortController;
   /** The latest attempt without its prompt, which the controller holds; none before the first. */
-  private latest?: Omit<Attempt, 'prompt'>;
-  private snapshot: SignInAttempt = null;
+  private latest?: S & Omit<ShownAttempt, 'prompt'>;
+  private snapshot: (S & ShownAttempt) | null = null;
 
-  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`node/credentials.ts`). */
-  constructor(private readonly models: Models, private readonly credentials: ProviderCredentialStore,
-    private readonly openAILogin: () => Promise<LoginOptions>) {
+  /** `failure` is the copy for a failed attempt; without it, or when it has none, a generic line. */
+  constructor(private readonly failure?: FailureCopy<S>) {
     this.prompts.subscribe(() => this.publish());
   }
 
@@ -43,17 +45,20 @@ export class ServerSignIn {
   };
   readonly getSnapshot = () => this.snapshot;
 
-  /** Starts an attempt, ending one under way, and returns its number. */
-  signIn(providerId: string): number {
-    const provider = this.models.getProvider(providerId);
-    if (!provider?.auth.oauth) throw new Error(`${provider?.name ?? providerId} has no sign-in.`);
+  /** Whether an attempt is under way. */
+  get busy(): boolean {
+    return this.running !== undefined;
+  }
+
+  /** Starts `run` as an attempt for `subject`, ending one under way, and returns its number. */
+  start(subject: S, run: (interaction: ProviderAuthInteraction) => Promise<unknown>): number {
     this.running?.abort();
     const controller = new AbortController();
     this.running = controller;
     const attempt = ++this.attempts;
-    this.latest = { attempt, providerId, running: true, status: 'Starting sign-in…' };
+    this.latest = { ...subject, attempt, running: true, status: 'Starting sign-in…' };
     this.publish();
-    void this.run(attempt, providerId, controller);
+    void this.run(attempt, subject, run, controller);
     return attempt;
   }
 
@@ -62,13 +67,100 @@ export class ServerSignIn {
     this.prompts.submit(promptId, value);
   }
 
-  /** Ends the attempt under way, as the phone's Cancel and the server's close do. */
+  /** Ends the attempt under way, as a client's Cancel and the owner's close do. */
   cancel(): void {
     this.running?.abort();
   }
 
+  private async run(attempt: number, subject: S, run: (interaction: ProviderAuthInteraction) => Promise<unknown>,
+    controller: AbortController): Promise<void> {
+    const { signal } = controller;
+    const current = () => this.running === controller;
+    const show = (change: Partial<Omit<ShownAttempt, 'prompt' | 'attempt'>>) => {
+      if (!current() || this.latest === undefined) return;
+      this.latest = { ...this.latest, ...change };
+      this.publish();
+    };
+    try {
+      await run({
+        signal,
+        prompt: (prompt) => {
+          show({ status: prompt.type === 'manual_code'
+            ? 'Finish sign-in with the browser return URL.' : 'Complete the next sign-in step.' });
+          return this.prompts.prompt(prompt, signal);
+        },
+        notify(event) {
+          if (signal.aborted) return;
+          // OAuth diagnostics can include callback URLs or tokens; the clients get the account screen's public copy.
+          if (event.type === 'auth_url') show({ url: event.url, status: 'Continue in your browser to sign in.' });
+          else if (event.type === 'progress' || event.type === 'info') show({ status: 'Sign-in in progress…' });
+        },
+      });
+      // No status after a sign-in, as the account screen clears its notice; the access state says it.
+      if (current()) this.latest = { ...subject, attempt, running: false };
+    } catch (error) {
+      if (current()) {
+        const copy = signal.aborted ? undefined : this.failure?.(error, subject, this.latest?.url !== undefined);
+        this.latest = { ...subject, attempt, running: false, status: signal.aborted ? 'Sign-in cancelled.'
+          : copy ?? 'Sign-in could not be completed. Please try again.' };
+      }
+    } finally {
+      if (current()) {
+        this.running = undefined;
+        this.prompts.cancel();
+        this.publish();
+      }
+    }
+  }
+
+  private publish() {
+    const pending = this.prompts.getSnapshot();
+    const prompt = pending === null ? undefined : { id: pending.id, prompt: shown(pending.prompt) };
+    this.snapshot = this.latest === undefined ? null
+      : { ...this.latest, ...(prompt === undefined || !this.latest.running ? {} : { prompt }) };
+    for (const listener of [...this.listeners]) listener();
+  }
+}
+
+/**
+ * Sign-in to this machine's providers, from a client: the account screen's `useProviderSignIn` as a `SignInAttempts`
+ * over pi-ai's `models.login`. API keys take the account screen's `modify` path.
+ */
+export class ServerSignIn {
+  private readonly attempts = new SignInAttempts<{ providerId: string }>((error, { providerId }, shownUrl) =>
+    // Before its URL, ChatGPT's flow has talked to no server (openai-chatgpt.ts:237-269), so its message is pi-ai's own
+    // setup copy, such as "Port 1455 is in use…" (:243-248), and says what to do. Later ones, and other providers'
+    // device-code requests, can carry a server's reply.
+    providerId === OPENAI_PROVIDER_ID && !shownUrl && error instanceof Error ? error.message : undefined);
+
+  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`node/credentials.ts`). */
+  constructor(private readonly models: Models, private readonly credentials: ProviderCredentialStore,
+    private readonly openAILogin: () => Promise<LoginOptions>) {}
+
+  readonly subscribe = (listener: () => void) => this.attempts.subscribe(listener);
+  readonly getSnapshot = (): SignInAttempt => this.attempts.getSnapshot();
+
+  /** Starts an attempt, ending one under way, and returns its number. */
+  signIn(providerId: string): number {
+    const provider = this.models.getProvider(providerId);
+    if (!provider?.auth.oauth) throw new Error(`${provider?.name ?? providerId} has no sign-in.`);
+    return this.attempts.start({ providerId }, async (interaction) => {
+      const options = providerId === OPENAI_PROVIDER_ID ? await this.openAILogin() : undefined;
+      interaction.signal.throwIfAborted();
+      await this.models.login(providerId, 'oauth', interaction, options);
+    });
+  }
+
+  answer(promptId: number, value: string): void {
+    this.attempts.answer(promptId, value);
+  }
+
+  cancel(): void {
+    this.attempts.cancel();
+  }
+
   async setApiKey(providerId: string, input: string): Promise<void> {
-    if (this.running) throw new Error('Finish or cancel sign-in before changing provider credentials.');
+    if (this.attempts.busy) throw new Error('Finish or cancel sign-in before changing provider credentials.');
     const key = input.trim();
     if (!key) throw new Error('Enter an API key.');
     if (!this.models.getProvider(providerId)?.auth.apiKey?.login) {
@@ -86,59 +178,5 @@ export class ServerSignIn {
       const name = this.models.getProvider(providerId)?.name ?? providerId;
       throw new Error(`Could not remove the saved ${name} key. Try again.`, { cause: error });
     }
-  }
-
-  private async run(attempt: number, providerId: string, controller: AbortController): Promise<void> {
-    const { signal } = controller;
-    const current = () => this.running === controller;
-    const show = (change: Partial<Omit<Attempt, 'prompt'>>) => {
-      if (!current() || this.latest === undefined) return;
-      this.latest = { ...this.latest, ...change };
-      this.publish();
-    };
-    try {
-      const options = providerId === OPENAI_PROVIDER_ID ? await this.openAILogin() : undefined;
-      signal.throwIfAborted();
-      await this.models.login(providerId, 'oauth', {
-        signal,
-        prompt: (prompt) => {
-          show({ status: prompt.type === 'manual_code'
-            ? 'Finish sign-in with the browser return URL.' : 'Complete the next sign-in step.' });
-          return this.prompts.prompt(prompt, signal);
-        },
-        notify(event) {
-          if (signal.aborted) return;
-          // OAuth diagnostics can include callback URLs or tokens; the phone gets the account screen's public copy.
-          if (event.type === 'auth_url') show({ url: event.url, status: 'Continue in your browser to sign in.' });
-          else if (event.type === 'progress' || event.type === 'info') show({ status: 'Sign-in in progress…' });
-        },
-      }, options);
-      // No status after a sign-in, as the account screen clears its notice; the access state says it.
-      if (current()) this.latest = { attempt, providerId, running: false };
-    } catch (error) {
-      if (current()) {
-        // Before its URL, ChatGPT's flow has talked to no server (openai-chatgpt.ts:237-269), so its message is pi-ai's
-        // own setup copy, such as "Port 1455 is in use…" (:243-248), and says what to do. Later ones, and other
-        // providers' device-code requests, can carry a server's reply.
-        const setup = providerId === OPENAI_PROVIDER_ID && this.latest?.url === undefined && error instanceof Error
-          ? error.message : undefined;
-        this.latest = { attempt, providerId, running: false, status: signal.aborted ? 'Sign-in cancelled.'
-          : setup ?? 'Sign-in could not be completed. Please try again.' };
-      }
-    } finally {
-      if (current()) {
-        this.running = undefined;
-        this.prompts.cancel();
-        this.publish();
-      }
-    }
-  }
-
-  private publish() {
-    const pending = this.prompts.getSnapshot();
-    const prompt = pending === null ? undefined : { id: pending.id, prompt: shown(pending.prompt) };
-    this.snapshot = this.latest === undefined ? null
-      : { ...this.latest, ...(prompt === undefined || !this.latest.running ? {} : { prompt }) };
-    for (const listener of [...this.listeners]) listener();
   }
 }

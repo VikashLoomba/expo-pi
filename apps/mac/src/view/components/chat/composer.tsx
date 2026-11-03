@@ -25,8 +25,8 @@ import { useChatAgentName } from './agent';
  * shows: Base UI's Autocomplete would make the field a combobox whose arrow, Home, End and Esc keys it handles even
  * while closed, which a multi-line message field must keep.
  */
-export function Composer({ value, onChange, onSend, onStop, busy, admitting, disabled, inputRef, attachments,
-  onAttach, onFiles, onRemoveAttachment, attaching, imagesSupported, commands, onCommand }: {
+export function Composer<C extends ChatCommand>({ value, onChange, onSend, onStop, busy, admitting, disabled,
+  inputRef, attachments, onAttach, onFiles, onRemoveAttachment, attaching, imagesSupported, commands, onCommand }: {
   value: string; onChange: (text: string) => void; onSend: () => void; onStop: () => void;
   busy: boolean; admitting: boolean; disabled: boolean;
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -39,8 +39,8 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
   attaching: boolean;
   imagesSupported: boolean;
   /** The commands the field completes and runs; none in an ordinary chat. */
-  commands?: readonly ChatCommand[];
-  onCommand?: (command: ChatCommand) => void;
+  commands?: readonly C[];
+  onCommand?: (command: C) => void;
 }) {
   const agentName = useChatAgentName();
   const form = useRef<HTMLFormElement>(null);
@@ -63,7 +63,7 @@ export function Composer({ value, onChange, onSend, onStop, busy, admitting, dis
     setHighlight(0);
     onChange(text);
   };
-  const complete = (command: ChatCommand) => edit(`/${command.name}`);
+  const complete = (command: C) => edit(`/${command.name}`);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (named !== undefined && onCommand !== undefined) {

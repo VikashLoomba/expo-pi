@@ -1,17 +1,17 @@
 import { createServer, type Server } from 'node:http';
 
-import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import {
-  OPENAI_DISCOVERY, OPENAI_REDIRECT_URI, validateOpenAICallback,
-} from '@pi-agent/infinichat/pi/openai-auth/core';
+  isLoopbackCallback, loopbackRedirect, type LoopbackRedirect, type ShownAttempt,
+} from '@pi-agent/infinichat/pi/infinichat-remote/sign-in-attempt';
 import { Utils } from 'electrobun/main';
 
-const CALLBACK = new URL(OPENAI_REDIRECT_URI);
-
-/** A sign-in attempt kept as state: the holder machine's, as `MacInfiniChat` mirrors it, or this Mac's own. */
+/**
+ * A sign-in attempt kept as state: the holder machine's provider or MCP sign-in, as `MacInfiniChat` mirrors them, or
+ * this Mac's own.
+ */
 export interface SignInSource {
   subscribe(listener: () => void): () => void;
-  getSignIn(): SignInAttempt | undefined;
+  getSignIn(): ShownAttempt | null | undefined;
 }
 
 /** The page the browser lands on, as the phone's receiver answers it (`OAuthCallbackHTTP.swift`). */
@@ -22,31 +22,19 @@ function page(success: boolean): string {
     + `<body><h1>${title}</h1><p>${next}</p></body></html>`;
 }
 
-/** The state a ChatGPT authorization URL expects its callback to return with; another provider's URL has none. */
-function stateOf(url: string): string | undefined {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return undefined;
-  }
-  const expected = new URL(OPENAI_DISCOVERY.authorizationEndpoint);
-  if (parsed.origin !== expected.origin || parsed.pathname !== expected.pathname
-    || parsed.searchParams.get('redirect_uri') !== OPENAI_REDIRECT_URI) return undefined;
-  return parsed.searchParams.get('state') ?? undefined;
-}
-
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /**
- * This Mac's part of a sign-in, the counterpart of the phone's flow in `useInfiniChatAccount`: the attempt's URL
- * opens in the default browser once. For an attempt on the holder machine, which runs there through pi-ai with no
- * browser and asks for the browser's return URL as a `manual_code` prompt, a receiver on ChatGPT's loopback redirect
- * catches the callback and `answer` hands it to that prompt, so nothing is pasted. The receiver listens only while
- * the attempt runs and closes with it; a callback that fails its check leaves the prompt for the providers sheet to
- * answer by hand. An attempt that runs on this Mac has no `answer`: pi-ai's own flow listens for the callback here
- * (`openai-chatgpt.js` `startCallbackServer`), so only the browser is this relay's part. It follows the attempt as
- * state, so a closed window changes nothing.
+ * This Mac's part of a sign-in, the counterpart of the phone's flow in `useInfiniChatAccount`: the attempt's URL opens
+ * in the default browser once. An attempt on the holder machine runs there with no browser and asks for the
+ * browser's return URL as a `manual_code` prompt: a provider's through pi-ai, an MCP server's through the tools
+ * plugin. When its authorization URL returns to a loopback redirect (`loopbackRedirect`), a receiver on that port and
+ * path catches the callback, and `answer` hands it to that prompt, so nothing is pasted. The receiver listens only
+ * while the attempt runs and closes with it; a callback that fails its check leaves the prompt for the sheet to
+ * answer by hand. When the holder is this Mac, its own callback server already listens there and the browser reaches
+ * it, so the port being taken is no failure. An attempt of this Mac's own account has no `answer`: pi-ai's flow
+ * listens for the callback here, so only the browser is this relay's part. It follows the attempt as state, so a
+ * closed window changes nothing.
  */
 export class SignInRelay {
   private readonly stop: () => void;
@@ -75,8 +63,8 @@ export class SignInRelay {
     if (shown.url !== undefined && this.opened !== shown.attempt) {
       this.opened = shown.attempt;
       Utils.openExternal(shown.url);
-      const state = this.answer === undefined ? undefined : stateOf(shown.url);
-      if (state !== undefined) this.listen(shown.attempt, state);
+      const redirect = this.answer === undefined ? undefined : loopbackRedirect(shown.url);
+      if (redirect !== undefined) this.listen(shown.attempt, redirect);
     }
     const receiver = this.receiver;
     const prompt = shown.prompt;
@@ -88,18 +76,16 @@ export class SignInRelay {
     });
   }
 
-  private listen(attempt: number, state: string): void {
+  private listen(attempt: number, redirect: LoopbackRedirect): void {
     const server = createServer((request, response) => {
-      const url = new URL(request.url ?? '/', CALLBACK.origin);
+      const url = new URL(request.url ?? '/', redirect.url.origin).toString();
       let success = false;
-      if (url.pathname === CALLBACK.pathname && this.receiver?.server === server
-        && this.receiver.callback === undefined) {
-        try {
-          validateOpenAICallback(url.toString(), state);
-          this.receiver.callback = url.toString();
+      if (this.receiver?.server === server && this.receiver.callback === undefined) {
+        if (isLoopbackCallback(url, redirect)) {
+          this.receiver.callback = url;
           success = true;
-        } catch (error) {
-          console.warn(`The sign-in callback was refused: ${message(error)}`);
+        } else {
+          console.warn('The sign-in callback was refused: it does not match the sign-in’s redirect and state.');
         }
       }
       const body = page(success);
@@ -110,12 +96,15 @@ export class SignInRelay {
       response.end(body);
       if (success) this.sync();
     });
-    server.on('error', (error) => {
-      console.warn(`The sign-in receiver could not listen on ${CALLBACK.host}: ${error.message}. `
-        + 'Paste the return URL in the providers sheet.');
+    server.on('error', (error: Error) => {
       if (this.receiver?.server === server) this.receiver = undefined;
+      // Taken by the holder's own callback server when it runs on this Mac, which the browser then reaches.
+      if ('code' in error && error.code === 'EADDRINUSE') return;
+      console.warn(`The sign-in receiver could not listen on ${redirect.url.host}: ${error.message}. `
+        + 'Paste the return URL in the sheet.');
     });
-    server.listen(Number(CALLBACK.port), CALLBACK.hostname);
+    // `localhost` is served on 127.0.0.1, as pi-mcp's callback server serves it; browsers fall back to it.
+    server.listen(redirect.port, redirect.url.hostname === 'localhost' ? '127.0.0.1' : redirect.url.hostname);
     this.receiver = { attempt, server };
   }
 

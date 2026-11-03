@@ -4,6 +4,7 @@ import { findCatalogModel, type ImageInput } from '@pi-agent/infinichat/pi/model
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import type { ConversationState, InfiniChatClient } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatHomeStore } from '@pi-agent/infinichat/pi/infinichat-remote/home';
+import type { McpView } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-client';
 import { InfiniChatMoves, type MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 import { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
@@ -15,6 +16,9 @@ import { macDialer, remoteDialer } from './dialer';
 import { macDirectory, type MacMachine, type MacMachines } from './machines';
 
 const MOVING = 'InfiniChat is moving. Send again once the move is done.';
+/** As the phone's `/mcp` says it of a conversation that isn't on a machine. */
+const NOT_ON_A_MACHINE = 'MCP servers run on a machine’s InfiniChat server. '
+  + 'Move InfiniChat to a machine to use them.';
 
 /**
  * InfiniChat as this app shows it: the phone's runtime without a local side (`chat-provider.tsx:136-227`). One
@@ -31,6 +35,7 @@ export class MacInfiniChat {
   private readonly remotes = new Map<string, RemoteInfiniChat>();
   private current?: { id: string; remote: RemoteInfiniChat; stop: () => void };
   private readonly listeners = new Set<() => void>();
+  private readonly mcpListeners = new Set<() => void>();
   private closed = false;
   private machines?: MacMachines;
   private following?: string;
@@ -103,6 +108,25 @@ export class MacInfiniChat {
   signOut(providerId: string): Promise<void> {
     return this.connected().signOut(providerId);
   }
+
+  /**
+   * The shown machine's MCP servers (`RemoteMcp`) as one store that follows the client shown, apart from the
+   * connection's store, since a server's state changes often and the screen needn't render for it.
+   */
+  readonly mcp = {
+    subscribe: (listener: () => void) => {
+      this.mcpListeners.add(listener);
+      return () => { this.mcpListeners.delete(listener); };
+    },
+    getSnapshot: (): McpView | undefined => this.current?.remote.mcp.getSnapshot(),
+    /** Why there are no servers to show when no machine is shown. */
+    unavailable: (): string | undefined => this.current === undefined ? NOT_ON_A_MACHINE : undefined,
+    signIn: (server: string) => this.connected().mcp.signIn(server),
+    answer: (promptId: number, value: string) => this.connected().mcp.answer(promptId, value),
+    cancelSignIn: () => this.connected().mcp.cancelSignIn(),
+    signOut: (server: string) => this.connected().mcp.signOut(server),
+    reconnect: (server: string) => this.connected().mcp.reconnect(server),
+  };
 
   private connected(): RemoteInfiniChat {
     const remote = this.current?.remote;
@@ -203,11 +227,17 @@ export class MacInfiniChat {
     if (id === undefined) return;
     this.shown.show(remote);
     this.current?.stop();
-    this.current = { id, remote, stop: remote.subscribe(() => {
+    const stopRemote = remote.subscribe(() => {
       this.notify();
       this.follow();
-    }) };
+    });
+    const stopMcp = remote.mcp.subscribe(() => this.notifyMcp());
+    this.current = { id, remote, stop: () => {
+      stopRemote();
+      stopMcp();
+    } };
     this.notify();
+    this.notifyMcp();
   }
 
   /**
@@ -239,11 +269,16 @@ export class MacInfiniChat {
       this.current.stop();
       this.current = undefined;
       this.notify();
+      this.notifyMcp();
     }
     await closing?.close();
   }
 
   private notify(): void {
     for (const listener of [...this.listeners]) listener();
+  }
+
+  private notifyMcp(): void {
+    for (const listener of [...this.mcpListeners]) listener();
   }
 }

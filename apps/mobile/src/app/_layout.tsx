@@ -34,6 +34,7 @@ export default function RootLayout() {
             <Stack.Screen name="remote-hosts" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
             <Stack.Screen name="infinichat-providers" options={{ title: 'Providers', presentation: 'modal' }} />
+            <Stack.Screen name="infinichat-mcp" options={{ title: 'MCP servers', presentation: 'modal' }} />
           </Stack>
         </ChatProvider>
       </KeyboardProvider>
