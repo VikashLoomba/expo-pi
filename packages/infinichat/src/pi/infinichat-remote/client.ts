@@ -36,6 +36,12 @@ const LOADING: ChatViewSnapshot = { status: 'loading' };
 const NO_MESSAGES: readonly ChatMessage[] = [];
 const NO_REPORT: InfiniChatSnapshot = {};
 /** A failed attempt is tried again as pi-env's watcher reconnects its daemon (`dist/watch.js:6-7` at v1.5.0). */
+/**
+ * The link closed because the server speaks another Chord link protocol: Chord tells the side that has to load new
+ * code with `onProtocolMismatch` (chord `docs/guide.md` "Protocol version"), which is this app or the server.
+ */
+class ProtocolMismatch extends Error {}
+
 const RECONNECT_FIRST_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -444,7 +450,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
         try {
           opened = await this.open(session, link, signal);
         } catch (error) {
-          if (!isChordError(error, 'upgrade_required')) throw error;
+          if (!(error instanceof ProtocolMismatch) && !isChordError(error, 'upgrade_required')) throw error;
           if (compareVersions(server.version, this.version) >= 0) {
             throw new Error(`InfiniChat on ${server.name} is newer than this app. Update this app to use it.`);
           }
@@ -468,11 +474,13 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   /**
    * Connects the client host over a dialed link, which re-holds the reference. Resolves true once the reference is
-   * live; false when the link closed first, as a stale port or a removed client file makes it.
+   * live; false when the link closed first, as a stale port or a removed client file makes it; rejects with
+   * `ProtocolMismatch` when it closed because the server speaks another link protocol.
    */
   private async open(session: Session, link: Link, signal: AbortSignal): Promise<boolean> {
     link.onClose(() => this.dropped(session));
-    this.host.connect(link, { principal: { kind: 'host' } });
+    let mismatched = false;
+    this.host.connect(link, { principal: { kind: 'host' }, onProtocolMismatch: () => { mismatched = true; } });
     const ref = this.ref === undefined || this.ref.status === 'gone' ? this.hold() : this.ref;
     const live = await new Promise<boolean>((resolve, reject) => {
       const settle = (finish: () => void) => {
@@ -486,7 +494,10 @@ export class RemoteInfiniChat implements InfiniChatHost {
       });
       const abort = () => settle(() => reject(signal.reason));
       signal.addEventListener('abort', abort, { once: true });
-      link.onClose(() => settle(() => resolve(false)));
+      // Chord reports a mismatch before the link's close reaches this listener, registered after its own.
+      link.onClose(() => settle(() => mismatched
+        ? reject(new ProtocolMismatch('The server speaks another Chord protocol.'))
+        : resolve(false)));
       if (signal.aborted) abort();
     });
     return live;

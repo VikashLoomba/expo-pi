@@ -1,7 +1,10 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { bool, compile, obj, opt, str } from '@earendil-works/pi-schema';
+import {
+  ClientSchema, ConversationFilesSchema, type ConversationState,
+} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 
 /**
  * What `~/.infinichat/state.json` keeps across restarts: whether this machine holds the conversation, with the files
@@ -11,38 +14,25 @@ import type { ConversationFiles, ConversationState } from '@pi-agent/infinichat/
  */
 export type ServerState = ConversationState & { timeZone?: string; opened?: string };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-const fileOf = (value: unknown) => isRecord(value) && typeof value.sha256 === 'string'
-  && typeof value.size === 'number' ? { sha256: value.sha256, size: value.size } : undefined;
-const clientOf = (value: unknown) => isRecord(value) && typeof value.id === 'string'
-  && typeof value.name === 'string' ? { id: value.id, name: value.name } : undefined;
-
-function filesOf(value: unknown): ConversationFiles | undefined {
-  const db = isRecord(value) ? fileOf(value.db) : undefined;
-  return db && { db };
-}
+const serverState = compile(obj({
+  active: bool(), adopted: opt(ConversationFilesSchema), heldBy: opt(ClientSchema),
+  timeZone: opt(str()), opened: opt(str()),
+}, { open: true }));
 
 /** The kept state; nothing is kept before the phone's first connect. */
 export function readState(home: string): ServerState {
+  const file = join(home, 'state.json');
   let text: string;
   try {
-    text = readFileSync(join(home, 'state.json'), 'utf8');
+    text = readFileSync(file, 'utf8');
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return { active: false };
     throw error;
   }
   const state: unknown = JSON.parse(text);
-  if (!isRecord(state)) return { active: false };
-  const adopted = filesOf(state.adopted);
-  const heldBy = clientOf(state.heldBy);
-  return {
-    active: state.active === true,
-    ...(adopted === undefined ? {} : { adopted }),
-    ...(heldBy === undefined ? {} : { heldBy }),
-    ...(typeof state.timeZone === 'string' ? { timeZone: state.timeZone } : {}),
-    ...(typeof state.opened === 'string' ? { opened: state.opened } : {}),
-  };
+  // Only this module writes it, so another shape is a damaged file, as unparsable JSON is.
+  if (!serverState.check(state)) throw new Error(`${file} is not InfiniChat's state.`);
+  return state;
 }
 
 /**

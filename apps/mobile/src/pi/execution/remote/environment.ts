@@ -24,10 +24,11 @@ import {
 	type TextLineReader,
 	type WatchTarget,
 } from "@earendil-works/pi-durable/env";
+import { bool, compile, num, obj } from "@earendil-works/pi-schema";
 import { type Connection, type Json, RemoteError, type RemoteInfo } from "./connection";
 import { abortResult, toFileError } from "./errors";
 import { listFilesOver } from "./list-files";
-import { invalidReply, jsonField, numberField, stringField } from "./protocol";
+import { checked, jsonField, numberField, stringField } from "./protocol";
 import {
   Handle, READ_DEPTH, RemoteBinaryReader, RemoteDirReader, RemoteTextLineReader, readRange, toDirEntries, toInfo,
   toRemoteFileInfo, type RemoteDirEntry,
@@ -44,10 +45,11 @@ const READ_FILE_CHUNK = 512 * 1024;
 const READ_FILE_UNKNOWN_CHUNK = 64 * 1024;
 const READ_FILE_MAX = 2 ** 31 - 1;
 
+const outputSkip = compile(obj({ bytes: num(), newlines: num(), endsWithNewline: bool() }, { open: true }));
+
 function toOutputSkip(json: Json): ShellOutputSkip {
-	const { endsWithNewline } = json;
-	if (typeof endsWithNewline !== "boolean") throw invalidReply("endsWithNewline");
-	return { bytes: numberField(json, "bytes"), newlines: numberField(json, "newlines"), endsWithNewline };
+	const { bytes, newlines, endsWithNewline } = checked(outputSkip, json);
+	return { bytes, newlines, endsWithNewline };
 }
 
 export interface MobileRemoteExecutionEnvOptions {

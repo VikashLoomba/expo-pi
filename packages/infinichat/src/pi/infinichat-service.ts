@@ -121,7 +121,10 @@ export class InfiniChatService implements InfiniChatHost {
     private readonly machine?: string,
   ) {}
 
-  /** `parts` are `infiniChatExtensions`, which the Harness reads from `registry` with the host's own. */
+  /**
+   * `parts` are `infiniChatExtensions`, which the Harness reads from `registry` with the host's own. It opens paused
+   * (`openOptChat`): the host resumes `harness` once `registry` holds them all.
+   */
   static async open(options: {
     storage: Storage; models: Models; parts: OptChatParts; registry: RegistryReader;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */

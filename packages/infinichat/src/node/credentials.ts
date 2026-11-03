@@ -2,17 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 
 import type { LoginOptions } from '@earendil-works/pi-ai';
+import { compile, map, str } from '@earendil-works/pi-schema';
 
 import type { CredentialBackend } from '../pi/provider-credentials';
 
-const isStringRecord = (value: unknown): value is Record<string, string> => typeof value === 'object'
-  && value !== null && !Array.isArray(value) && Object.values(value).every((item) => typeof item === 'string');
+const items = compile(map(str()));
 
 /** Its items, or none when it is not one JSON object of strings, as pi-ai's CLI reads an unparsable `auth.json`. */
 function parsed(text: string): Record<string, string> {
   try {
-    const items: unknown = JSON.parse(text);
-    return isStringRecord(items) ? items : {};
+    const stored: unknown = JSON.parse(text);
+    return items.check(stored) ? stored : {};
   } catch {
     return {};
   }

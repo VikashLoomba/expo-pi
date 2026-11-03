@@ -1,6 +1,8 @@
 import {
   connect, isSshError, type SshAuth, type SshConnection, type SshHostKey, type SshShell,
 } from '@automatalabs/react-native-ssh';
+import { StreamDecoder } from '@earendil-works/pi-durable/env';
+
 import { BootstrapError } from './bootstrap-errors';
 import { provisionDaemon, quotePosix, type RemotePlatformState, type SshSetupStage } from './provisioning';
 import { exchangeKeys, type KeyExchange } from './ssh-keys';
@@ -15,12 +17,21 @@ export interface DaemonChannel {
   close(): Promise<void>;
 }
 
+/**
+ * How a channel ended, unless it was closed: its SSH connection failed (`error`), or the daemon's command exited, with
+ * the status SSH reported, as pi-env's client sees its child process close (`exitCode`).
+ */
+export type DaemonChannelEnd = { error: Error } | { exitCode: number | undefined };
+
 export interface DaemonChannelOpen {
   token: string;
   signal: AbortSignal;
   /** The receiver may retain these bytes. Factories must transfer or copy native-owned buffers. */
   onData(bytes: Uint8Array): void;
-  onClosed(error?: Error): void;
+  /** The daemon's stderr as text, which pi-env's client keeps until the daemon is ready. */
+  onStderr(text: string): void;
+  /** Once; nothing when the channel was closed. */
+  onClosed(end?: DaemonChannelEnd): void;
 }
 
 export type DaemonChannelFactory = (options: DaemonChannelOpen) => Promise<DaemonChannel>;
@@ -77,7 +88,7 @@ export function connectionFailure(error: unknown): Error {
 export function createSshChannelFactory(options: SshChannelOptions): DaemonChannelFactory {
   const snapshot = { ...options, auth: { ...options.auth }, hostKeyAlgorithms: options.hostKeyAlgorithms?.slice() };
   const platform: RemotePlatformState = options.platform ?? {};
-  return async ({ token, signal, onData, onClosed }) => {
+  return async ({ token, signal, onData, onStderr, onClosed }) => {
     if (signal.aborted) throw aborted();
     if (!/^[a-f0-9]{32}$/.test(token)) throw new Error('Invalid Pi synchronization token.');
     let connection: SshConnection | undefined;
@@ -90,10 +101,10 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
     // refused frames wait here, in order, and are offered again every 10 ms, as `command-channel.ts` retries.
     const waiting: Uint8Array[] = [];
     let retry: ReturnType<typeof setTimeout> | undefined;
-    const notifyClosed = (error?: Error) => {
+    const notifyClosed = (end?: DaemonChannelEnd) => {
       if (notified) return;
       notified = true;
-      onClosed(error);
+      onClosed(end);
     };
     // Disconnect concurrently with channel close: a peer that stopped answering channel
     // requests must not prevent disposal of the transport that owns the channel.
@@ -115,7 +126,7 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
           verifyHostKey: snapshot.verifyHostKey, hostKeyAlgorithms: snapshot.hostKeyAlgorithms,
           signal, connectTimeoutMs: snapshot.connectTimeoutMs, onBanner: signIn.onBanner,
           onDisconnected: () =>
-            notifyClosed(new Error('SSH connection lost. Check the Tailscale VPN and remote host.')),
+            notifyClosed({ error: new Error('SSH connection lost. Check the Tailscale VPN and remote host.') }),
         });
       } finally {
         signIn.settled();
@@ -137,16 +148,18 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
         // each other until the app was quit).
         void snapshot.keys.store(keys).catch(() => {});
       }
-      // Through the login shell, as pi-env's `loginShell` starts its daemon (`launchCommand`, `dist/ssh.js:392-403` at
-      // v1.4.0), so commands see the PATH the account's profile sets up. The decoder skips what the profile prints.
+      // Through the login shell, as pi-env's `loginShell` starts its daemon (`launchCommand`, `src/ssh.ts:475-483` at
+      // v1.5.0), so commands see the PATH the account's profile sets up. The decoder skips what the profile prints.
       const command = `exec "$SHELL" -lc 'exec "$0" "$@"' ${quotePosix(daemonPath)} serve --token ${token}`;
+      // As pi-env reads its child's stderr as UTF-8, a character split across chunks included.
+      const stderr = new StreamDecoder();
       const daemon = await connection.openShell({ term: '', command }, {
         // Native owns callback buffers. Copy immediately, before the callback returns.
         onData: (bytes) => onData(new Uint8Array(bytes).slice()),
-        // Mandatory: omitting this causes native stderr to enter framed stdout.
-        // Diagnostics may contain arbitrary shell startup text and are deliberately not logged.
-        onStderr: () => {},
-        onClosed: () => notifyClosed(closingRequested ? undefined : new Error('The Pi daemon SSH channel closed.')),
+        // Mandatory: omitting this causes native stderr to enter framed stdout. The connection keeps its end, which the
+        // remote machine wrote, only for a start that fails, as pi-env does.
+        onStderr: (bytes) => onStderr(stderr.decode(new Uint8Array(bytes))),
+        onClosed: (exitCode) => notifyClosed(closingRequested ? undefined : { exitCode }),
       });
       shell = daemon;
       if (signal.aborted || closingRequested || notified) {
@@ -166,7 +179,7 @@ export function createSshChannelFactory(options: SshChannelOptions): DaemonChann
               try {
                 flush();
               } catch {
-                notifyClosed(new Error('SSH could not send the Pi request.'));
+                notifyClosed({ error: new Error('SSH could not send the Pi request.') });
               }
             }, 10);
             return;

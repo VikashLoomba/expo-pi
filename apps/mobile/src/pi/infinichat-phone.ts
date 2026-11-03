@@ -46,6 +46,8 @@ export async function openPhoneInfiniChat(options: {
     authError: options.authError,
     onClosed: options.onClosed,
   });
+  // Its registry already holds every extension, so recovered work resumes now.
+  service.harness.resume();
   const detachKeepAlive = options.keepAlive?.observe(service.harness, infiniChatTasks) ?? (() => {});
   options.notifications.follow({ tasks: service.scheduled, runsOn: 'phone',
     report: (error) => service.report(error) });

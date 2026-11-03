@@ -130,7 +130,7 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
           onClosed: (end) => {
             if (end.kind === 'failed') proc().fail(end.error);
           },
-        }));
+        }), proc().loaded);
         await held.start();
         return held;
       },

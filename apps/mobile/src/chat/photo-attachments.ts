@@ -40,6 +40,6 @@ async function takePhoto(): Promise<ImagePickerResult> {
 async function prepare(asset: ImagePickerAsset, limits: ImageInput): Promise<PhotoAttachment> {
   const fitted = await fitImage(asset.uri, asset.mimeType ?? 'image/jpeg', limits,
     { quality: limits.jpegQuality, original: { width: asset.width, height: asset.height } });
-  if (!fitted) throw new Error('The photo is too large to send to this model.');
+  if (!fitted) throw new Error('The photo could not be read or made small enough to send to this model.');
   return { id: uuidv7(), uri: fitted.uri, data: fitted.data, mimeType: fitted.mimeType };
 }

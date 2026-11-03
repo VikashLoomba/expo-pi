@@ -12,7 +12,7 @@ Native completion, not a delayed coordinator status update, determines whether a
 
 Inputs arriving while a fresh turn is being prepared remain distinct inputs in its reserved epoch. Notes can enter semantic memory and trigger summaries without implicitly dispatching a new main-model request.
 
-A run that fails can leave inputs queued, which pi-durable would place in a later run’s context. As UniiChat’s next call takes the messages its last one didn’t, the Harness sets `afterFailedRun: "withdraw"`, so pi-durable settles them `unanswered` with reason `run_failed` in the commit that ends the failed run, and their epoch stays open. Once the run has ended, the coordinator submits them anew in the next turn, after the failed turn’s note, the first as that fresh turn’s message: each input counts its next attempt, and attempt `n` is submitted as `optchat:<requestId>:<n>`, the first keeping `optchat:<requestId>`. An input accepted while a turn ran but not submitted before it ended, prepared for that turn or not, starts the next turn the same way. A run whose task faulted keeps its queue, since `afterFailedRun` covers only runs that end `model_error`, `no_model`, `interrupted`, `restart_limit`, `nothing_to_answer` or `turn_limit`, and an aborted, faulted or orphaned run keeps its inbox (pi-durable’s spec), so once such a run has ended the coordinator withdraws what is still queued with an abort, counting each input’s next attempt first, and submits it anew the same way. `waitForAnswer` follows an input across its resubmissions.
+A run that fails can leave inputs queued, which pi-durable would place in a later run’s context. As UniiChat’s next call takes the messages its last one didn’t, the Harness sets `afterFailedRun: "withdraw"`, so pi-durable settles them `unanswered` with reason `run_failed` in the commit that ends the failed run, and their epoch stays open. Once the run has ended, the coordinator submits them anew in the next turn, after the failed turn’s note, the first as that fresh turn’s message: each input counts its next attempt, and attempt `n` is submitted as `optchat:<requestId>:<n>`, the first keeping `optchat:<requestId>`. An input accepted while a turn runs is admitted as a steer in the coordinator's own commit, which reads the run: `submit(tx, …)` with `whenBusy: "steer"` and `whenIdle: "reject"`, as [pi-durable's example 34](https://github.com/earendil-works/pi/blob/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/durable/test/examples/34-submit-in-commit.ts#L64-L85) admits a message that must join the current run, so it never starts a run of its own. One whose turn ended before the coordinator reached it is refused with `ConversationIdle` and starts the next turn the same way. A fresh turn's message is submitted after the commit that appends its reset, since an idle admission places its input at once and `submit(tx, …)` must come before a commit's table writes. A run whose task faulted keeps its queue, since `afterFailedRun` covers only runs that end `model_error`, `no_model`, `interrupted`, `restart_limit`, `nothing_to_answer` or `turn_limit`, and an aborted, faulted or orphaned run keeps its inbox (pi-durable’s spec), so once such a run has ended the coordinator withdraws what is still queued with an abort, counting each input’s next attempt first, and submits it anew the same way. `waitForAnswer` follows an input across its resubmissions.
 
 ## Projection and wakeups
 
@@ -234,6 +234,7 @@ import type { Models, ImageContent } from "@earendil-works/pi-ai";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import {
   AgentDoc as NativeAgentDoc,
+  ConversationIdle,
   Harness,
   configure,
   createRegistry,
@@ -254,6 +255,7 @@ import {
   type Tx,
   type TaskId,
   type Submission,
+  type SubmissionId,
   type SubmissionRecord,
   type Storage,
   type ToolRegistration,
@@ -436,7 +438,8 @@ const withdrawn = (receipt: SubmissionRecord): boolean =>
 
 /**
  * The native run and its real receipts decide whether an epoch is still open. A run that failed leaves UniiChat's
- * note for the turn, once its last entries are logged.
+ * note for the turn, once its last entries are logged: why, from `pi.live.runFailure`, which names a missing model
+ * where an input's settlement doesn't (pi-durable README "Busy Conversations").
  */
 async function closeSettledEpoch(tx: Tx, root: ConversationId): Promise<void> {
   const app = await tx.doc(AppDoc, root),
@@ -449,7 +452,7 @@ async function closeSettledEpoch(tx: Tx, root: ConversationId): Promise<void> {
     inbox.items.some((i) => i.mode !== "write")
   )
     return;
-  let failed: string | undefined;
+  const submissions: SubmissionId[] = [];
   for (const id of app.requests) {
     const receipt = await tx.submissionByRequest(
       root,
@@ -464,12 +467,17 @@ async function closeSettledEpoch(tx: Tx, root: ConversationId): Promise<void> {
       withdrawn(receipt)
     )
       return;
-    if (receipt.status === "unanswered" && receipt.reason !== "aborted")
-      failed ??=
-        typeof receipt.detail === "string" ? receipt.detail : receipt.reason;
+    submissions.push(receipt.id);
   }
-  if (failed !== undefined)
-    app.endNote ??= `No reply: ${failed.replace(/\.$/, "")}. Send a message to try again.`;
+  const failure = live.runFailure;
+  if (
+    failure &&
+    failure.reason !== "aborted" &&
+    failure.inputs.some((id) => submissions.includes(id))
+  ) {
+    const why = failure.detail ?? failure.reason;
+    app.endNote ??= `No reply: ${why.replace(/\.$/, "")}. Send a message to try again.`;
+  }
   app.open = false;
   app.requests = [];
   app.revision++;
@@ -831,6 +839,8 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
               runtime.report(error);
               return "";
             });
+        const conversation = await runtime.conversation(root, invocation);
+        if (!conversation) throw new Error("OptChat root conversation is missing");
         const acquired = await Promise.all([
           runtime.watchDoc(AppDoc, root, invocation),
           runtime.watchDoc(MemoryDoc, root, invocation),
@@ -938,52 +948,66 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
                 app.pending.shift();
                 app.revision++;
                 progressed = true;
-              } else if (
-                !input.fresh &&
-                !running &&
-                app.started &&
-                projection.caughtUp &&
-                (input.phase !== "prepared" ||
-                  !(await tx.submissionByRequest(root, nativeRequest(input))))
-              ) {
-                // Its turn ended before it reached it; one prepared but not submitted is prepared anew.
-                await carryOver(
-                  tx,
-                  root,
-                  app.requests.filter((id) => app.pending.includes(id)),
-                );
-                progressed = true;
+              } else if (!input.fresh) {
+                if (projection.caughtUp) {
+                  // A message sent while a turn runs goes to it as it is, between its tool calls: admitted as a steer
+                  // in this commit, which checks the run, so it never starts a run of its own (pi-durable example
+                  // 34). Before this commit's first table write; a known request ID returns its submission.
+                  await settleViews(tx, root);
+                  try {
+                    await conversation.submit(tx, {
+                      type: "input",
+                      requestId: nativeRequest(input),
+                      content: input.content,
+                      whenBusy: "steer",
+                      whenIdle: "reject",
+                      entry: {
+                        kind: DeliveryEntry.kind,
+                        data: { requestId: input.requestId, kind: input.kind },
+                      },
+                    });
+                    input.phase = "submitted";
+                    input.envelope = null;
+                    app.pending.shift();
+                    app.started = true;
+                    app.revision++;
+                  } catch (error) {
+                    if (!(error instanceof ConversationIdle)) throw error;
+                    // Its turn ended before it reached it, so it starts the next, with the inputs after it.
+                    await carryOver(
+                      tx,
+                      root,
+                      app.requests.filter((id) => app.pending.includes(id)),
+                    );
+                  }
+                  progressed = true;
+                }
               } else if (input.phase === "prepared") dispatchId = input.requestId;
-              else if (input.fresh && !read)
+              else if (!read)
                 // Accepted after the turn state was skipped: the next tick reads it.
                 progressed = true;
-              else if (
-                projection.caughtUp &&
-                (!input.fresh || (await memoryReady(tx, root)))
-              ) {
+              else if (projection.caughtUp && (await memoryReady(tx, root))) {
                 await settleViews(tx, root);
-                // The view is frozen here; the original enters memory once pi-durable places the delivery. A message
-                // sent while a turn runs goes to it as it is, between its tool calls.
-                input.envelope = input.fresh
-                  ? envelope(
-                      await renderMain(tx, root),
-                      input.content,
-                      state,
-                      await agentsAtWork(tx, root),
-                    )
-                  : input.content;
+                // The view is frozen here; the original enters memory once pi-durable places the delivery.
+                input.envelope = envelope(
+                  await renderMain(tx, root),
+                  input.content,
+                  state,
+                  await agentsAtWork(tx, root),
+                );
                 input.phase = "prepared";
                 app.started = true;
                 app.revision++;
-                if (input.fresh)
-                  await tx.appendEntry(ResetEntry, root, { head: "self" });
+                await tx.appendEntry(ResetEntry, root, { head: "self" });
                 dispatchId = input.requestId;
                 progressed = true;
               }
             }
             const launched = await pumpBuilds(tx, root);
             if (launched.length > 0) progressed = true;
-            // Effect must run outside this native commit; checkpoint the preparation first.
+            // A fresh turn is submitted after this commit: an idle admission places its input at once, after the
+            // reset this commit appends, and `submit(tx)` must come before a commit's table writes (durable
+            // `src/harness/submissions.ts`). So the preparation is checkpointed first.
             if (dispatchId !== undefined || withdraw || progressed)
               return {
                 status: "running",
@@ -994,9 +1018,6 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
               };
           }, context);
           if (withdraw) {
-            const conversation = await runtime.conversation(root, context);
-            if (!conversation)
-              throw new Error("OptChat root conversation is missing");
             // With no run, an abort only withdraws the queued inputs.
             await conversation.abort(context);
             await runtime.commit(async (tx) => {
@@ -1010,9 +1031,6 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
               };
             }, context);
           } else if (stop) {
-            const conversation = await runtime.conversation(root, context);
-            if (!conversation)
-              throw new Error("OptChat root conversation is missing");
             await conversation.abort(context);
             await runtime.commit(async (tx) => {
               const app = await tx.doc(AppDoc, root);
@@ -1034,9 +1052,6 @@ const coordinatorTask = (turnState: () => Promise<string>) =>
             )?.value;
             if (!prepared?.envelope)
               throw new Error(`Prepared input has no envelope: ${requestId}`);
-            const conversation = await runtime.conversation(root, context);
-            if (!conversation)
-              throw new Error("OptChat root conversation is missing");
             await conversation.submit(
               {
                 type: "input",

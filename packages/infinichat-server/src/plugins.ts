@@ -19,13 +19,18 @@ const nameOf = (url: string) => basename(dirname(fileURLToPath(url)));
  * The plugins Chord's hot reload takes on this machine: the runtime's built-ins (the tools plugin, `tools-facet.ts`),
  * and those the user installs outside the runtime, so updates leave them be: each folder in `folder`
  * (`~/.infinichat/plugins`) with a server facet (chord `docs/guide.md` "Plugins"), loaded after the built-ins. Their
- * imports of Chord, pi and TypeBox resolve through `node_modules` there, a link to the runtime's `modules`, so a plugin
- * shares the host's single instances, which Chord's loader keeps outside a facet's folder (chord
+ * imports of Chord, pi and pi-schema resolve through `node_modules` there, a link to the runtime's `modules`, so a
+ * plugin shares the host's single instances, which Chord's loader keeps outside a facet's folder (chord
  * `src/loader.ts:17-21`). InfiniChat's own plugin is not among them: only a release changes it (`update.ts`).
  */
 export class ServerPlugins {
   /** The facets loaded, by name. */
   private readonly loaded = new Set<string>();
+  /**
+   * The user's facets whose last load failed. Chord leaves a facet installed when its object fails to start (chord
+   * `docs/guide.md` "Startup readiness"), and a reload reports no such failure, so each is removed and loaded anew.
+   */
+  private readonly failed = new Set<string>();
   private queue: Promise<unknown> = Promise.resolve();
   private reloading?: Promise<string>;
 
@@ -43,6 +48,7 @@ export class ServerPlugins {
         } catch (error) {
           // A user plugin may fail on its own; a built-in that fails is a broken release.
           if (this.builtins.includes(url)) throw error;
+          this.failed.add(url);
           failed.push(`Plugin ${nameOf(url)} failed to load: ${message(error)}`);
         }
       }
@@ -52,19 +58,23 @@ export class ServerPlugins {
 
   /**
    * Chord's explicit reload (`docs/spec.md` §7), which the user runs from an app's `/reload-plugins`: the plugins
-   * still there in one reload, which removes those whose folder is gone, then each plugin added since. What it did,
-   * for the app to show, with what the tools plugin's reload did to the MCP servers.
+   * still there in one reload, which removes those whose folder is gone, then each plugin added since or that failed
+   * before, on its own, so one that still fails leaves the others. What it did, for the app to show, with what the
+   * tools plugin's reload did to the MCP servers.
    */
   reload(): Promise<string> {
     // Two clients share the operation: a queued old-version caller would otherwise block Chord's next retirement.
     this.reloading ??= this.run(async () => {
       const found = await this.found();
-      const gone = [...this.loaded].filter((url) => !found.includes(url));
+      const gone = [...this.loaded, ...this.failed].filter((url) => !found.includes(url));
       const kept = found.filter((url) => this.loaded.has(url));
       const lines: string[] = [];
       try {
         const report = await this.host.reload(kept, { remove: gone });
-        for (const url of gone) this.loaded.delete(url);
+        for (const url of gone) {
+          this.loaded.delete(url);
+          this.failed.delete(url);
+        }
         const removed = gone.length ? `; removed ${gone.map(nameOf).join(', ')}` : '';
         lines.push(`Reloaded ${kept.map(nameOf).join(', ')}; changed types: `
           + `${report.changed.join(', ') || 'none'}${removed}.`);
@@ -73,10 +83,14 @@ export class ServerPlugins {
       }
       for (const url of found.filter((candidate) => !this.loaded.has(candidate))) {
         try {
+          // A load awaits the facet's objects and rejects with what failed, which a reload of it never reports.
+          if (this.failed.has(url)) await this.host.reload([], { remove: [url] });
           await this.host.load([url]);
+          this.failed.delete(url);
           this.loaded.add(url);
           lines.push(`Loaded ${nameOf(url)}.`);
         } catch (error) {
+          this.failed.add(url);
           lines.push(`Plugin ${nameOf(url)} failed to load: ${message(error)}`);
         }
       }

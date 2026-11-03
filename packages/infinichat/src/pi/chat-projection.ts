@@ -5,13 +5,13 @@ import {
   type InboxState, type LiveState, type RunFailure, type TaskId, type TranscriptItem,
 } from '@earendil-works/pi-durable';
 
-import { fileToolPresentation, withFileToolDetails } from '../chat/file-tool-presentation';
 import type { ChatControls, ChatMessage, ChatSummary } from '../chat/types';
 import type { WebSearchPresentation } from '../chat/web-search-types';
 import type { ChatMetadata } from './chat-metadata';
 import {
   DEFAULT_LOCAL_ROOT, executionSettings, type ExecutionTargetState, type LocalRoot,
 } from './execution/document';
+import { fileToolPresentation, withFileToolDetails } from './file-tool-presentation';
 import type { ChatModelSettings } from './model-catalog';
 import type { SearchPresentationsState } from './native-web-search/documents';
 import { isSearchObservationEntry } from './native-web-search/entries';

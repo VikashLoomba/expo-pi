@@ -1,4 +1,5 @@
 import type { Credential, OAuthCredential } from '@earendil-works/pi-ai';
+import { arr, compile, lit, num, obj, opt, str, union } from '@earendil-works/pi-schema';
 
 // Protocol constants from Pi's openai ChatGPT OAuth provider (pi-ai 1.1.0).
 export const OPENAI_PROVIDER_ID = 'openai';
@@ -65,32 +66,34 @@ export function isPermanentOpenAIAuthError(error: unknown): boolean {
   return false;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+/** Text with something besides whitespace. */
+const filled = () => str({ pattern: '\\S' });
+/** OpenAI's token response, as pi-ai's ChatGPT provider reads it; a refresh may omit the refresh token and scope. */
+const tokenResponse = compile(obj({
+  access_token: filled(), refresh_token: opt(filled()), expires_in: num({ exclusiveMinimum: 0 }),
+  scope: opt(str()), id_token: opt(str()),
+}, { open: true }));
+const scopeList = compile(arr(str()));
+/** A refused grant, as OpenAI's token endpoint names it: a code, or an object with one. */
+const refusedGrant = compile(obj({
+  error: union([lit('invalid_grant'), obj({ code: lit('invalid_grant') }, { open: true })]),
+}, { open: true }));
 
 export function openAICredentialFromToken(value: unknown, clientId: string, previous?: OAuthCredential, now = Date.now()): OAuthCredential {
-  if (!isRecord(value)) throw new Error('OpenAI returned an invalid token response.');
-  const token = value;
-  const refresh = token.refresh_token === undefined ? previous?.refresh : token.refresh_token;
-  const scopes = token.scope === undefined && previous ? previous.scopes
-    : typeof token.scope === 'string' ? token.scope.trim().split(/\s+/).filter(Boolean) : undefined;
-  if (typeof token.access_token !== 'string' || !token.access_token.trim()
-    || typeof refresh !== 'string' || !refresh.trim()
-    || typeof token.expires_in !== 'number' || !Number.isFinite(token.expires_in) || token.expires_in <= 0
-    || !Number.isFinite(now + token.expires_in * 1000)) {
-    throw new Error('OpenAI returned an incomplete token response.');
-  }
-  if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === 'string') || !scopes.includes(OPENAI_DIRECT_SCOPE)) {
+  if (!tokenResponse.check(value)) throw new Error('OpenAI returned an incomplete token response.');
+  const refresh = value.refresh_token ?? previous?.refresh;
+  const expires = now + value.expires_in * 1000;
+  if (!refresh?.trim() || !Number.isFinite(expires)) throw new Error('OpenAI returned an incomplete token response.');
+  const scopes = value.scope === undefined ? previous?.scopes : value.scope.trim().split(/\s+/).filter(Boolean);
+  if (!scopeList.check(scopes) || !scopes.includes(OPENAI_DIRECT_SCOPE)) {
     throw new Error('ChatGPT plan access was not granted. Sign in again and allow plan access.');
   }
   // Like Pi, use only the access token for inference. No unverified ID-token
   // claims are used as identity or displayed as an authenticated profile.
-  if (!previous && (typeof token.id_token !== 'string' || !token.id_token.trim())) {
+  if (!previous && !value.id_token?.trim()) {
     throw new Error('OpenAI did not return a complete sign-in response.');
   }
-  return { type: 'oauth', access: token.access_token, refresh, expires: now + token.expires_in * 1000,
-    clientId, scopes: [...scopes] };
+  return { type: 'oauth', access: value.access_token, refresh, expires, clientId, scopes: [...scopes] };
 }
 
 /** Expo builds OAuth grants; a cancellable fetch carries them. */
@@ -113,9 +116,7 @@ export async function requestOpenAIToken(
     let code: 'invalid_grant' | undefined;
     try {
       const body: unknown = await response.json();
-      const error = isRecord(body) ? body.error : undefined;
-      if ([400, 401].includes(response.status)
-        && (error === 'invalid_grant' || (isRecord(error) && error.code === 'invalid_grant'))) code = 'invalid_grant';
+      if ([400, 401].includes(response.status) && refusedGrant.check(body)) code = 'invalid_grant';
     } catch { /* Remote error bodies can contain secrets; never surface them. */ }
     signal.throwIfAborted();
     throw new OpenAITokenRequestError(response.status, code);

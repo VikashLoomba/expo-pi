@@ -49,8 +49,10 @@ export class ServerConversation {
   private unfollow = noop;
   private readonly data: string;
 
+  /** `loaded` is the host's (`ServerProcess.loaded`): the core's Harness resumes once it settles. */
   constructor(private readonly home: string,
-    private readonly openCore: (storage: Storage) => Promise<InfiniChatService>) {
+    private readonly openCore: (storage: Storage) => Promise<InfiniChatService>,
+    private readonly loaded: Promise<void>) {
     this.data = join(home, 'data');
     const { active, adopted, heldBy } = readState(home);
     this.state = { active, ...(adopted === undefined ? {} : { adopted }), ...(heldBy === undefined ? {} : { heldBy }) };
@@ -241,15 +243,22 @@ export class ServerConversation {
 
   private async open() {
     const storage = await openNodeSqliteStorage(join(this.data, DATABASE));
+    let core: InfiniChatService;
     try {
-      this.core = await this.openCore(storage);
+      core = await this.openCore(storage);
     } catch (error) {
       // The Harness closes its storage; this closes it when the Harness never opened.
       await storage.close(BACKGROUND_CONTEXT).catch(noop);
       throw error;
     }
+    this.core = core;
     updateState(this.home, (kept) => ({ ...kept, opened: INFINICHAT_SERVER_VERSION }));
     this.changed();
+    // Paused until every plugin's extensions are installed, which a start waits for and an adopt finds done, so a tool
+    // call a restart cut off reruns instead of ending interrupted (durable `src/harness/tool.ts`, recovery).
+    void this.loaded.then(() => {
+      if (this.core === core) core.harness.resume();
+    });
   }
 
   private setState(state: ConversationState) {

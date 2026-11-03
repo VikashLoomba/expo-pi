@@ -1,5 +1,5 @@
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai';
-import { bool, obj, oneOf, opt, str, type Static } from '@earendil-works/pi-schema';
+import { bool, compile, lit, map, num, obj, oneOf, opt, str, union, type Static } from '@earendil-works/pi-schema';
 
 /** Asynchronous string storage for secrets. The phone's is its Keychain; a machine's server keeps a file. */
 export interface CredentialBackend {
@@ -46,29 +46,20 @@ export function providerCredentialKey(providerId: string) {
   return `pi.provider.api-key.v1.${codePoints.join('-')}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
-}
+/** pi-ai's `Credential` as `save` writes it; pi permits provider-specific OAuth fields, such as clientId and scopes. */
+const savedCredential = compile(obj({
+  version: lit(1),
+  credential: union([
+    obj({ type: lit('api_key'), key: opt(str()), env: opt(map(str())) }, { open: true }),
+    obj({ type: lit('oauth'), access: str(), refresh: str(), expires: num() }, { open: true }),
+  ]),
+}, { open: true }));
 
 /** Decodes a SecureStore entry, the one place credential data arrives untyped. */
 function decodeSavedCredential(raw: string): Credential {
   const saved: unknown = JSON.parse(raw);
-  const value = isRecord(saved) && saved.version === 1 ? saved.credential : undefined;
-  if (!isRecord(value)) throw new Error('Invalid saved credential.');
-  const { type, key, env, access, refresh, expires } = value;
-  if (type === 'api_key' && (key === undefined || typeof key === 'string')
-      && (env === undefined || isStringRecord(env))) {
-    return { type, ...(key === undefined ? {} : { key }), ...(env === undefined ? {} : { env }) };
-  }
-  // Pi permits provider-specific OAuth fields, for example clientId and scopes.
-  if (type === 'oauth' && typeof access === 'string' && typeof refresh === 'string' && typeof expires === 'number') {
-    return { ...value, type, access, refresh, expires };
-  }
-  throw new Error('Invalid saved credential.');
+  if (!savedCredential.check(saved)) throw new Error('Invalid saved credential.');
+  return saved.credential;
 }
 
 class InvalidSavedCredentialError extends Error {

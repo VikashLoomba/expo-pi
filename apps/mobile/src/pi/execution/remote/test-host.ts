@@ -2,7 +2,7 @@ import { machineIdentity } from '@pi-agent/infinichat/pi/infinichat-remote/insta
 
 import type { MachinesAccess } from '../../infinichat-remote/phone-machines';
 import { createSshChannelFactory, type SshSetupStage } from './channel';
-import { Connection, RemoteError } from './connection';
+import { Connection, isConnectionLost, RemoteError } from './connection';
 import { MobileRemoteExecutionEnv } from './environment';
 import { hostKeyPolicy, PHONE_DEVICE, type RemoteHostRepository } from './hosts';
 import { machineKeyExchange } from './ssh-keys';
@@ -24,7 +24,11 @@ export const setupStageLabels: Record<SshSetupStage, string> = {
 export const failureCode = (error: unknown): string | undefined =>
   error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
 
-/** Stable, sanitized user feedback. Never display native errors containing secret input or remote stderr. */
+/**
+ * Stable, sanitized user feedback. Native errors may contain secret input, so only their codes become messages. A
+ * daemon start that failed shows pi-env's own start error, with the end of the daemon's stderr cleaned of terminal
+ * escapes and control characters, as pi-env 1.5.0 reports it (`connection.ts`).
+ */
 function remoteHostConnectionMessage(error: unknown): string {
   const code = failureCode(error);
   if (code === 'AUTH_FAILED') return 'SSH authentication failed. Check the SSH username and password or private key in this machine’s settings.';
@@ -55,6 +59,8 @@ function remoteHostConnectionMessage(error: unknown): string {
     return 'The SSH account can neither write nor read its ~/.ssh/authorized_keys on the machine, so the other '
       + 'machines’ keys can’t be authorized there. Make that file the account’s own, then test again.';
   }
+  // The connection's own lost errors carry no native text: an SSH failure is their cause, read above.
+  if (error instanceof RemoteError && isConnectionLost(error)) return error.message;
   return 'Remote execution could not be prepared or verified. Check the connection and try again.';
 }
 

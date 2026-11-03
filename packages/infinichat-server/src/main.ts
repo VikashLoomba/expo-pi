@@ -65,12 +65,13 @@ async function serve(): Promise<number> {
     closes.push(() => host.close());
     const plugins = new ServerPlugins(host, join(home, 'plugins'), join(runtime, 'node_modules'),
       [pathToFileURL(join(runtime, TOOLS)).href]);
+    const loaded = Promise.withResolvers<void>();
     // The process, for every plugin, before any loads.
     await host.install({
       name: 'infinichat.process',
       ...defineFacet<InfiniChatPrincipal>((api) => api.serve(InfiniChatProcess, () => ({
         process: {
-          home, device, description,
+          home, device, description, loaded: loaded.promise,
           fail: (error: unknown) => stopping.resolve({ failed: error }),
           reloadPlugins: () => plugins.reload(),
         },
@@ -79,6 +80,9 @@ async function serve(): Promise<number> {
     // InfiniChat's first, so its extensions come first; only a release changes it, so `/reload-plugins` leaves it.
     await host.load([pathToFileURL(join(runtime, PLUGIN)).href]);
     for (const failure of await plugins.load()) console.error(failure);
+    // Durable resumes once every extension is installed (its `docs/spec.md` §2.2), as chord's v2 design has base code
+    // resume after `host.load` (`docs/next/design.md`), so a tool call a restart cut off finds its tool and reruns.
+    loaded.resolve();
     const installed = await installedRelease(runtime);
     const server = await listen(host, home, installed?.version ?? INFINICHAT_SERVER_VERSION);
     // Stops accepting first; the host closes the connections already accepted.

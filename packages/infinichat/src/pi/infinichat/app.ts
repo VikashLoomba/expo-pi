@@ -2,11 +2,11 @@ import type { Context, JsonRepresentation } from '@earendil-works/chord';
 import { awaitWithContext, withAbortSignal } from '@earendil-works/chord/context';
 import type { ImageContent, Models } from '@earendil-works/pi-ai';
 import {
-  AgentDoc as NativeAgentDoc, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID, ResetEntry,
+  AgentDoc as NativeAgentDoc, ConversationIdle, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID, ResetEntry,
   configure, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask, section,
   type Conversation, type ConversationId, type ConversationInit, type EntryId, type EnvTarget, type Extension,
-  type HarnessOptions, type RegistryReader, type Storage, type Submission, type SubmissionRecord, type TaskId,
-  type ToolHookCall, type ToolRegistration, type Tx, type UserInput,
+  type HarnessOptions, type RegistryReader, type Storage, type SubmissionId, type SubmissionRecord,
+  type TaskId, type ToolHookCall, type ToolRegistration, type Tx, type UserInput,
 } from '@earendil-works/pi-durable';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
@@ -147,24 +147,29 @@ const withdrawn = (receipt: SubmissionRecord): boolean =>
 
 /**
  * The native run and its real receipts decide whether an epoch is still open. A run that failed leaves UniiChat's
- * note for the turn, once its last entries are logged.
+ * note for the turn, once its last entries are logged: why, from `pi.live.runFailure`, which names a missing model
+ * where an input's settlement doesn't (durable README "Busy Conversations"). A Continue's turn has no input of its
+ * own, so its run is the one that ended it.
  */
 async function closeSettledEpoch(tx: Tx, root: ConversationId): Promise<void> {
   const app = await tx.doc(AppDoc, root);
   const live = await tx.doc(LiveDoc, root);
   const inbox = await tx.doc(InboxDoc, root);
   if (!app.open || !app.started || live.run || inbox.items.some((i) => i.mode !== 'write')) return;
-  let failed: string | undefined;
+  const submissions: SubmissionId[] = [];
   for (const id of app.requests) {
     const receipt = await tx.submissionByRequest(root, nativeRequest(await storedInput(tx, root, id)));
     // A prepared effect with a lost acknowledgement is not pending if its receipt settled. A withdrawn one is, until
     // it is submitted anew.
     if (!receipt || receipt.status === 'queued' || receipt.status === 'placed' || withdrawn(receipt)) return;
-    if (receipt.status === 'unanswered' && receipt.reason !== 'aborted') {
-      failed ??= typeof receipt.detail === 'string' ? receipt.detail : receipt.reason;
-    }
+    submissions.push(receipt.id);
   }
-  if (failed !== undefined) app.endNote ??= `No reply: ${failed.replace(/\.$/, '')}. Send a message to try again.`;
+  const failure = live.runFailure;
+  if (failure && failure.reason !== 'aborted' && failure.reason !== 'nothing_to_answer'
+    && (app.requests.length === 0 || failure.inputs.some((id) => submissions.includes(id)))) {
+    const why = failure.detail ?? failure.reason;
+    app.endNote ??= `No reply: ${why.replace(/\.$/, '')}. Send a message to try again.`;
+  }
   app.open = false;
   app.requests = [];
   app.revision++;
@@ -446,6 +451,8 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
         runtime.report(error);
         return '';
       });
+      const conversation = await runtime.conversation(root, invocation);
+      if (!conversation) throw new Error('OptChat root conversation is missing');
       const acquired = await Promise.all([
         runtime.watchDoc(AppDoc, root, invocation),
         runtime.watchDoc(MemoryDoc, root, invocation),
@@ -531,34 +538,56 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
               app.pending.shift();
               app.revision++;
               progressed = true;
-            } else if (!input.fresh && !running && app.started && projection.caughtUp
-              && (input.phase !== 'prepared' || !(await tx.submissionByRequest(root, nativeRequest(input))))) {
-              // Its turn ended before it reached it; one prepared but not submitted is prepared anew.
-              await carryOver(tx, root, app.requests.filter((id) => app.pending.includes(id)));
-              progressed = true;
+            } else if (!input.fresh) {
+              if (projection.caughtUp) {
+                // A message sent while a turn runs goes to it as it is, between its tool calls: admitted as a steer in
+                // this commit, which checks the run, so it never starts a run of its own (pi-durable example 34).
+                // Before this commit's first table write; a known request ID, one submitted before a crash, returns
+                // its submission.
+                await settleViews(tx, root);
+                try {
+                  await conversation.submit(tx, {
+                    type: 'input',
+                    requestId: nativeRequest(input),
+                    content: input.content,
+                    whenBusy: 'steer',
+                    whenIdle: 'reject',
+                    entry: { kind: DeliveryEntry.kind, data: { requestId: input.requestId, kind: input.kind } },
+                  });
+                  input.phase = 'submitted';
+                  input.envelope = null;
+                  app.pending.shift();
+                  app.started = true;
+                  app.revision++;
+                } catch (error) {
+                  if (!(error instanceof ConversationIdle)) throw error;
+                  // Its turn ended before it reached it, so it starts the next, with the inputs after it.
+                  await carryOver(tx, root, app.requests.filter((id) => app.pending.includes(id)));
+                }
+                progressed = true;
+              }
             } else if (input.phase === 'prepared') {
               dispatchId = input.requestId;
-            } else if (input.fresh && !read) {
+            } else if (!read) {
               // Accepted after the turn state was skipped: the next tick reads it.
               progressed = true;
-            } else if (projection.caughtUp && (!input.fresh || (await memoryReady(tx, root)))) {
+            } else if (projection.caughtUp && (await memoryReady(tx, root))) {
               await settleViews(tx, root);
-              // The view is frozen here; the original enters memory once pi-durable places the delivery. A message
-              // sent while a turn runs goes to it as it is, between its tool calls.
-              input.envelope = input.fresh
-                ? envelope(await renderMain(tx, root), input.content, state, await agentsAtWork(tx, root))
-                : input.content;
+              // The view is frozen here; the original enters memory once pi-durable places the delivery.
+              input.envelope = envelope(await renderMain(tx, root), input.content, state, await agentsAtWork(tx, root));
               input.phase = 'prepared';
               app.started = true;
               app.revision++;
-              if (input.fresh) await tx.appendEntry(ResetEntry, root, { head: 'self' });
+              await tx.appendEntry(ResetEntry, root, { head: 'self' });
               dispatchId = input.requestId;
               progressed = true;
             }
           }
           const launched = await pumpBuilds(tx, root);
           if (launched.length > 0) progressed = true;
-          // Effect must run outside this native commit; checkpoint the preparation first.
+          // A fresh turn is submitted after this commit: an idle admission places its input at once, after the reset
+          // this commit appends, and `submit(tx)` must come before a commit's table writes (durable
+          // `src/harness/submissions.ts`). So the preparation is checkpointed first.
           if (dispatchId !== undefined || withdraw || progressed) {
             return {
               status: 'running',
@@ -567,8 +596,6 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
           }
         }, context);
         if (withdraw) {
-          const conversation = await runtime.conversation(root, context);
-          if (!conversation) throw new Error('OptChat root conversation is missing');
           // With no run, an abort only withdraws the queued inputs.
           await conversation.abort(context);
           await runtime.commit(async (tx) => {
@@ -576,8 +603,6 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
             return { status: 'running', checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 2 } };
           }, context);
         } else if (stop) {
-          const conversation = await runtime.conversation(root, context);
-          if (!conversation) throw new Error('OptChat root conversation is missing');
           await conversation.abort(context);
           await runtime.commit(async (tx) => {
             const app = await tx.doc(AppDoc, root);
@@ -590,8 +615,6 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
           // The prepared admission is read back committed: a draft is not readable after its commit.
           const prepared = (await runtime.snapshot(InputDoc, root, requestId, context))?.value;
           if (!prepared?.envelope) throw new Error(`Prepared input has no envelope: ${requestId}`);
-          const conversation = await runtime.conversation(root, context);
-          if (!conversation) throw new Error('OptChat root conversation is missing');
           await conversation.submit({
             type: 'input',
             requestId: nativeRequest(prepared),
@@ -687,7 +710,6 @@ export type OptChat = {
    * settings commit; empty text clears them. The host shows them from the agent document.
    */
   setInstructions(tx: Tx, text: string): Promise<void>;
-  waitForAnswer(requestId: string, context?: Context): ReturnType<Submission['wait']>;
   /**
    * Continues the run that ended without an answer (`pi.live.runFailure`) with pi-durable's continue submission, as a
    * turn of its own: what is sent meanwhile steers it, and the coordinator closes it. Refused while a turn is open or
@@ -743,6 +765,11 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
   return { name, extensions, coordinator, scheduled };
 }
 
+/**
+ * Opens OptChat's Harness paused. Its host calls `harness.resume()` once `registry` holds every extension the host
+ * offers, so a tool call a restart cut off finds its tool and reruns (durable `docs/spec.md` §2.2, README "Persist
+ * and Resume"): a fixed registry right away, a machine's server once its plugins have loaded.
+ */
 export async function openOptChat(storage: Storage, options: OptChatOptions, context: Context): Promise<OptChat> {
   const { name, coordinator, scheduled } = options.parts;
   const opened = await Harness.open(storage, {
@@ -758,7 +785,8 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       // An input queued behind a failed run starts a fresh turn, as UniiChat's next call takes it, never the failed
       // turn's context.
       afterFailedRun: 'withdraw',
-      // The coordinator is stored running while idle, so every iOS kill of the app would count toward parking it.
+      // The coordinator is stored running while idle, so every iOS kill of the app would count toward the restart
+      // limit, which ends a task that reaches it (durable README "Crash loops").
       restartLimit: Infinity,
     },
   }, context);
@@ -786,48 +814,6 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     await configure(tx, root.id, { ...(app.promptVersion < 2 ? { instructions: null } : {}), modelTools: null });
     app.promptVersion = PROMPT_VERSION;
   }, context);
-  /** The admission once an attempt from `attempt` on is submitted, or once a stop cancelled it. */
-  async function submitted(requestId: string, attempt: number, waitContext: Context): Promise<Admission> {
-    const watch = await opened.watchDoc(InputDoc, root.id, requestId, waitContext);
-    if (!watch) throw new Error('Accept the request before waiting for its answer');
-    const accepted = watch.value.value;
-    if (!accepted) {
-      await watch.stop();
-      throw new Error('Accept the request before waiting for its answer');
-    }
-    if (accepted.kind === 'note') {
-      await watch.stop();
-      throw new Error('Notes do not dispatch a model answer');
-    }
-    const cancellation = new AbortController();
-    const waiting = withAbortSignal(cancellation.signal, waitContext);
-    const settled = new Promise<void>((resolve) => {
-      const inspect = (value: Readonly<{ value: Admission | null }>) => {
-        const phase = value.value?.phase;
-        if ((phase === 'submitted' && (value.value?.attempt ?? 0) >= attempt) || phase === 'cancelled') resolve();
-      };
-      watch.start(async (call) => {
-        if (call.kind === 'value') inspect(call.value);
-      });
-      inspect(watch.value);
-    });
-    try {
-      const ended = watch.closed.then((end) => {
-        if (end.kind === 'listener_error' || end.kind === 'failed') throw end.error;
-        throw new Error(`Admission watch ended: ${end.kind}`);
-      });
-      await awaitWithContext(Promise.race([settled, ended, coordinatorFailure(opened, root.id, waiting)]),
-        waitContext);
-    } finally {
-      cancellation.abort();
-      await watch.stop();
-    }
-    const admission = (await opened.snapshot(InputDoc, root.id, requestId, waitContext))?.value;
-    if (!admission) throw new Error(`Unknown OptChat request: ${requestId}`);
-    return admission;
-  }
-
-  opened.resume();
   return {
     harness: opened,
     root,
@@ -839,29 +825,6 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     },
     async setInstructions(tx, text) {
       await configure(tx, root.id, { instructions: text || null });
-    },
-    async waitForAnswer(requestId, waitContext = context) {
-      let attempt = 0;
-      for (;;) {
-        const admission = await submitted(requestId, attempt, waitContext);
-        if (admission.phase === 'cancelled') throw new Error('Input was cancelled before native submission');
-        const record = await opened.commit((tx) => tx.submissionByRequest(root.id, nativeRequest(admission)),
-          waitContext);
-        if (!record) throw new Error('Submitted admission is missing its native receipt');
-        const submission = await opened.submission(record.id, waitContext);
-        if (!submission) throw new Error('Submitted admission is missing its native submission');
-        const settled = await submission.wait(waitContext);
-        // Withdrawn, by pi-durable after a failed run or by the coordinator after a faulted one, it is submitted anew
-        // as its next attempt; the coordinator counts that attempt before its withdrawal settles this one.
-        const now = (await opened.snapshot(InputDoc, root.id, requestId, waitContext))?.value;
-        const aborted = settled.status === 'unanswered' && settled.reason === 'aborted'
-          && now !== undefined && now !== null && now.attempt > admission.attempt;
-        if (withdrawn(settled) || aborted) {
-          attempt = admission.attempt + 1;
-          continue;
-        }
-        return settled;
-      }
     },
     async continue() {
       await opened.commit(async (tx) => {

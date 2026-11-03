@@ -11,11 +11,20 @@ The Chord host (`main.js`) loads, in order: InfiniChat's plugin (`plugins/infini
 tools plugin (`plugins/tools/server.js`, `src/tools-facet.ts`: code mode and MCP), and the user's plugins, each a
 folder of `~/.infinichat/plugins` with a `server.ts`, `server.mts`, `server.js` or `server.mjs` facet.
 
+The conversation's Harness opens paused, inside InfiniChat's plugin, and resumes only once the host has loaded all of
+them (`ServerProcess.loaded`, which `main.ts` settles after the last plugin): Durable reruns a replay-safe tool call
+that a restart cut off only if its tool is installed when the call is recovered (Durable `docs/spec.md` §2.2,
+`src/harness/tool.ts`). A conversation moved in later resumes at once. MCP tools appear only once their server has
+connected and listed them, so an MCP call a script makes right after a restart can still fail.
+
 ## Reload from a client
 
 `/reload-plugins` from the Mac or iOS client reloads the tools plugin and the user's plugins in one Chord reload,
-removes plugins whose folder is gone, then loads new folders. InfiniChat's own plugin is not reloaded: only a release
-changes it, and a release restarts the server. The conversation, its Harness and the clients' links stay as they are.
+removes plugins whose folder is gone, then loads new folders. A plugin that failed to load, which Chord leaves
+installed (Chord `docs/guide.md` "Startup readiness"), is removed and loaded again on its own, so the reply says
+whether it starts now, and one that still fails leaves the others' reload as it is. InfiniChat's own plugin is not
+reloaded: only a release changes it, and a release restarts the server. The conversation, its Harness and the
+clients' links stay as they are.
 The reply says which types Chord changed and what happened to the MCP servers: connected, reconnected, closed,
 failed or unchanged, and which entries were skipped and why. A refused reload leaves everything as it was.
 

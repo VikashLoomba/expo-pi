@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { compile, map, num, obj, opt, str } from '@earendil-works/pi-schema';
 import { Utils } from 'electrobun/main';
 
 export interface WindowFrame { x: number; y: number; width: number; height: number }
@@ -16,30 +17,22 @@ export interface Settings {
 }
 
 const FILE = 'settings.json';
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-const isFrame = (value: unknown): value is WindowFrame => isRecord(value)
-  && [value.x, value.y, value.width, value.height].every((field) => typeof field === 'number');
+const stored = compile(obj({
+  windowFrame: opt(obj({ x: num(), y: num(), width: num(), height: num() }, { open: true })),
+  clientId: opt(str()), identities: opt(map(str())), avatar: opt(str()),
+}, { open: true }));
 
 export function readSettings(): Settings {
   let text: string;
   try {
     text = readFileSync(join(Utils.paths.userData, FILE), 'utf8');
   } catch (error) {
-    if (isRecord(error) && error.code === 'ENOENT') return {};
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return {};
     throw error;
   }
   const parsed: unknown = JSON.parse(text);
-  if (!isRecord(parsed)) return {};
-  const identities = isRecord(parsed.identities)
-    ? Object.fromEntries(Object.entries(parsed.identities).filter((entry): entry is [string, string] =>
-      typeof entry[1] === 'string'))
-    : undefined;
-  return {
-    ...(isFrame(parsed.windowFrame) ? { windowFrame: parsed.windowFrame } : {}),
-    ...(typeof parsed.clientId === 'string' ? { clientId: parsed.clientId } : {}),
-    ...(identities === undefined ? {} : { identities }),
-    ...(typeof parsed.avatar === 'string' ? { avatar: parsed.avatar } : {}),
-  };
+  // Only `writeSettings` writes it; another shape starts over, as no file does.
+  return stored.check(parsed) ? parsed : {};
 }
 
 /** Written aside and renamed into place; the user data directory is not created for the app (Electrobun "Paths"). */

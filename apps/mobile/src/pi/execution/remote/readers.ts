@@ -4,11 +4,12 @@ import {
   err, ok, FileError, StreamDecoder, type BinaryReader, type DirReader, type FileInfo, type FileKind,
   type LineScan, type Result, type TextLine, type TextLineReader,
 } from '@earendil-works/pi-durable/env';
+import { arr, compile, num, obj, oneOf, opt, str } from '@earendil-works/pi-schema';
 import { type Json, RemoteError } from './connection';
 import type { MobileRemoteExecutionEnv } from './environment';
 import { abortResult, toFileError } from './errors';
 import { posix, type PlatformPath } from './paths';
-import { invalidReply, isJson, jsonField, listField, numberField, stringField } from './protocol';
+import { checked, invalidReply } from './protocol';
 
 export const READ_DEPTH = 8;
 const READ_CHUNK = 256 * 1024;
@@ -19,43 +20,38 @@ export type RemoteFileInfo = { name: string; kind: FileKind | "other"; size: num
 /** A `readdir` entry: its `info`, or the `error` of its lstat. */
 export type RemoteDirEntry = { name: string; raw?: number[] } & ({ info: RemoteFileInfo } | { error: Json });
 
-export function toRemoteFileInfo(json: Json): RemoteFileInfo {
-	const { kind } = json;
-	if (kind !== "file" && kind !== "directory" && kind !== "symlink" && kind !== "other") throw invalidReply("kind");
-	return {
-		name: stringField(json, "name"),
-		kind,
-		size: numberField(json, "size"),
-		mtimeSec: numberField(json, "mtimeSec"),
-		mtimeNsec: numberField(json, "mtimeNsec"),
-	};
-}
+const FileInfoSchema = obj({
+	name: str(), kind: oneOf(["file", "directory", "symlink", "other"]), size: num(), mtimeSec: num(), mtimeNsec: num(),
+}, { open: true });
+const fileInfo = compile(FileInfoSchema);
+/** A `readdir` reply; an entry has its `info`, or the `error` of its lstat. */
+const dirEntries = compile(obj({
+	entries: arr(obj({ name: str(), raw: opt(arr(num())), info: opt(FileInfoSchema), error: opt(obj({}, { open: true })) },
+		{ open: true })),
+}, { open: true }));
+const lineScan = compile(obj({
+	newlines: num(), start: num(), end: num(), firstLineEnd: num(), lastLineStart: num(), selectedBytes: num(),
+	firstLineBytes: num(),
+}, { open: true }));
 
-function toDirEntry(json: Json): RemoteDirEntry {
-	const entry = {
-		name: stringField(json, "name"),
-		...(json.raw === undefined ? {} : { raw: listField(json, "raw", (byte) => typeof byte === "number") }),
-	};
-	return json.error === undefined
-		? { ...entry, info: toRemoteFileInfo(jsonField(json, "info")) }
-		: { ...entry, error: jsonField(json, "error") };
+export function toRemoteFileInfo(json: unknown): RemoteFileInfo {
+	const { name, kind, size, mtimeSec, mtimeNsec } = checked(fileInfo, json);
+	return { name, kind, size, mtimeSec, mtimeNsec };
 }
 
 /** The `entries` of a `readdir` reply. */
 export function toDirEntries(json: Json): RemoteDirEntry[] {
-	return listField(json, "entries", isJson).map(toDirEntry);
+	return checked(dirEntries, json).entries.map(({ name, raw, info, error }) => {
+		const entry = { name, ...(raw === undefined ? {} : { raw }) };
+		if (error !== undefined) return { ...entry, error };
+		if (info === undefined) throw invalidReply("info");
+		return { ...entry, info: toRemoteFileInfo(info) };
+	});
 }
 
 function toLineScan(json: Json): LineScan {
-	return {
-		newlines: numberField(json, "newlines"),
-		start: numberField(json, "start"),
-		end: numberField(json, "end"),
-		firstLineEnd: numberField(json, "firstLineEnd"),
-		lastLineStart: numberField(json, "lastLineStart"),
-		selectedBytes: numberField(json, "selectedBytes"),
-		firstLineBytes: numberField(json, "firstLineBytes"),
-	};
+	const { newlines, start, end, firstLineEnd, lastLineStart, selectedBytes, firstLineBytes } = checked(lineScan, json);
+	return { newlines, start, end, firstLineEnd, lastLineStart, selectedBytes, firstLineBytes };
 }
 
 export function toInfo(path: string, remote: RemoteFileInfo, paths: PlatformPath): Result<FileInfo, FileError> {

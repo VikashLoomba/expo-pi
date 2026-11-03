@@ -10,6 +10,11 @@ export interface ServerProcess {
   readonly home: string;
   readonly device: string;
   readonly description: string;
+  /**
+   * Settles once the host has loaded InfiniChat's plugin, the tools plugin and the user's plugins, so every extension
+   * they register is in `Extensions`: the conversation's Harness resumes then (`conversation.ts`).
+   */
+  readonly loaded: Promise<void>;
   /** Ends the process as failed, so its service manager starts it again: reopening is how pi-durable recovers. */
   fail(error: unknown): void;
   /** Reloads the tools plugin and the user's plugins (`plugins.ts`); says what happened, the MCP servers' too. */

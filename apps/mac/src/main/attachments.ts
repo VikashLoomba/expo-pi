@@ -8,10 +8,12 @@ import { Utils } from 'electrobun/main';
 
 import type { Attachment } from '../contract';
 
-const TOO_LARGE = 'The photo is too large to send to this model.';
+/** pi-durable's processor contract: `undefined` is an image it can't decode or make fit (`image-processor.ts`). */
+const UNFIT = 'The photo could not be read or made small enough to send to this model.';
+/** What the Photon processor decodes: not HEIC, which macOS's Photos exports by default (pi-durable `src/images`). */
 const TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
-  '.heic': 'image/heic', '.heif': 'image/heif', '.bmp': 'image/bmp',
+  '.bmp': 'image/bmp',
 };
 
 /**
@@ -23,7 +25,7 @@ export class Attachments {
 
   async fit(bytes: Uint8Array, mimeType: string, limits: ImageInput): Promise<Attachment> {
     const prepared = await this.images.prepare(bytes, mimeType, limits);
-    if (prepared === undefined) throw new Error(TOO_LARGE);
+    if (prepared === undefined) throw new Error(UNFIT);
     return { id: uuidv7(), data: prepared.data, mimeType: prepared.mimeType };
   }
 

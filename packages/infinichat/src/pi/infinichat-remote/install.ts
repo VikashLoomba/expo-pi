@@ -1,5 +1,6 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
+import { compile, num, obj, str } from '@earendil-works/pi-schema';
 
 import type { CredentialBackend } from '../provider-credentials';
 import type { InstallStage } from './dialer';
@@ -268,6 +269,8 @@ const LIVE = `[ -f "$s" ] && grep -q '"version":' "$s" && pid=$(${PID}) && [ -n 
  */
 const READY = ['s="$HOME/.infinichat/server.json"', `until ${LIVE}; do sleep 1; done`, PRINT_MARKER, 'cat "$s"'];
 
+const serverJson = compile(obj({ port: num(), version: str() }, { open: true }));
+
 /** The port and release `server.json` names, or undefined when it doesn't name both. */
 function serverInfo(line: string | undefined): { port: number; version: string } | undefined {
   let info: unknown;
@@ -276,9 +279,7 @@ function serverInfo(line: string | undefined): { port: number; version: string }
   } catch {
     return undefined;
   }
-  if (typeof info !== 'object' || info === null || !('port' in info) || !('version' in info)) return undefined;
-  return typeof info.port === 'number' && typeof info.version === 'string'
-    ? { port: info.port, version: info.version } : undefined;
+  return serverJson.check(info) ? { port: info.port, version: info.version } : undefined;
 }
 
 /**

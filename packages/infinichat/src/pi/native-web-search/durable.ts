@@ -4,6 +4,7 @@ import {
 } from '@earendil-works/pi-durable';
 
 import { bindNativeWebSearch, type NativeWebSearchWriter } from './bindings';
+import { withWebSearchTool } from './provider';
 
 export { SearchPresentationsDoc } from './documents';
 export type {
@@ -11,9 +12,10 @@ export type {
 } from './documents';
 
 /**
- * Binds each generation request's own signal to its conversation, so the OpenAI provider decorator knows which
- * chat a stream belongs to. Only generation requests bind: compaction runs a CompactionTask whose hooks never
- * fire here, and every other Models call carries an unbound signal, so only chat requests get the hosted tool.
+ * Adds OpenAI's hosted search to each generation request's body, and binds the request's own signal to its
+ * conversation, so the OpenAI provider decorator knows which chat a stream's searches belong to. Only generation
+ * requests do: compaction runs a CompactionTask, which neither hook reaches, and every other Models call carries an
+ * unbound signal, so only chat requests get the hosted tool.
  */
 export function createNativeWebSearchBridge(report: (error: unknown) => void, current: () => Harness | undefined) {
   /** The Harness running the request: a hook fires only inside it, so it is open whenever a writer is used. */
@@ -42,6 +44,11 @@ export function createNativeWebSearchBridge(report: (error: unknown) => void, cu
           bindNativeWebSearch(context.abortSignal, { conversationId: api.conversationId, taskId: api.taskId,
             write: writerFor(api.conversationId), report });
         }
+      },
+      // pi-durable's hook for a provider-specific field (README "Hooks"); the body is in the model's API's format.
+      beforeProviderRequest({ model, payload }) {
+        if (model.provider !== 'openai' || model.api !== 'openai-responses') return undefined;
+        return { payload: withWebSearchTool(payload) };
       },
     })],
   });

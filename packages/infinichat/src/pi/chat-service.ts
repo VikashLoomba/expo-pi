@@ -347,18 +347,18 @@ export class DurableChatService {
     if (!text && !images) throw new Error('Enter a message or attach a photo.');
     const conversation = await this.conversation(id);
     await this.requireAuth(settingsOf(await this.harness.snapshot(AgentDoc, id, context)));
-    const submission = await conversation.submit({ type: 'input', content, requestId }, context);
-    // pi-durable has no public way to write this in the submission's own commit, so it follows in the next one, and
-    // a retry of the same request writes it again. The list shows it without reading the transcript; an untitled
-    // chat is named after its first message.
     const photos = images === 1 ? 'Photo' : `${images} photos`;
-    await conversation.commit(async (tx) => {
+    // The submission and the list's title and preview in one commit (pi-durable's `34-submit-in-commit.ts`), the
+    // admission before the commit's table writes; a retry of the same request returns its submission and writes them
+    // again. The list shows them without reading the transcript; an untitled chat is named after its first message.
+    return conversation.commit(async (tx) => {
+      const submitted = await conversation.submit(tx, { type: 'input', content, requestId });
       const chat = await tx.doc(ChatMetadataDoc, id);
       chat.title ||= oneLine(text, 64) || photos;
       chat.preview = oneLine(text, 120) || photos;
       chat.updatedAt = this.options.now();
+      return submitted;
     }, context);
-    return submission.id;
   }
 
   /**
@@ -374,8 +374,8 @@ export class DurableChatService {
     if (result === 'already_placed') return;
     if (result === 'settled' || result === 'not_found') throw new Error('That message already left the queue.');
     // A new request ID: the withdrawn submission is settled, and its ID would return that aborted submission.
-    await conversation.submit({ type: 'input', content, whenBusy: 'steer', requestId: uuidv7() }, context);
     await conversation.commit(async (tx) => {
+      await conversation.submit(tx, { type: 'input', content, whenBusy: 'steer', requestId: uuidv7() });
       (await tx.doc(ChatMetadataDoc, id)).updatedAt = this.options.now();
     }, context);
   }

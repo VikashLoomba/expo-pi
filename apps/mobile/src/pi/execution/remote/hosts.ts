@@ -1,4 +1,5 @@
 import type { SshHostKey } from '@automatalabs/react-native-ssh';
+import { arr, compile, lit, map, num, obj, oneOf, opt, str, union } from '@earendil-works/pi-schema';
 import { machineEndpoint } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 
@@ -40,11 +41,28 @@ interface SecretRecord { version: 1; auth: RemoteCredential; trustedHostKey?: Ss
 /** InfiniChat lists the phone as a device under this name, beside the machines under theirs. */
 export const PHONE_DEVICE = 'phone';
 const INDEX_KEY = 'pi.remote-hosts.v1';
-const CREDENTIAL_REF = /^pi\.ssh\.v1\.[a-zA-Z0-9._-]+$/;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const credentialRef = () => str({ pattern: '^pi\\.ssh\\.v1\\.[a-zA-Z0-9._-]+$' });
+const CredentialSchema = union([
+  obj({ type: lit('password'), password: str({ minLength: 1 }) }, { open: true }),
+  obj({ type: lit('privateKey'), privateKey: str({ pattern: '\\S' }), passphrase: opt(str()) }, { open: true }),
+]);
+const HostKeySchema = obj({
+  algorithm: str({ minLength: 1 }),
+  fingerprint: str({ pattern: '^SHA256:[A-Za-z0-9+/]+={0,2}$' }),
+  publicKey: str({ pattern: '^[A-Za-z0-9+/]+={0,2}$' }),
+}, { open: true });
+const validCredential = compile(CredentialSchema);
+const validHostKey = compile(HostKeySchema);
+/** A record's fields that both versions store; version 1 also had a name and keys, which the document holds now. */
+const StoredHostSchema = obj({ credentialRef: credentialRef(), credentialType: oneOf(['password', 'privateKey']),
+  hostname: str(), port: num(), username: str(), id: opt(str()) }, { open: true });
+const storedIndex = compile(union([
+  obj({ version: lit(1), hosts: arr(StoredHostSchema), pendingDelete: arr(credentialRef()) }, { open: true }),
+  obj({ version: lit(2), hosts: arr(StoredHostSchema), pendingDelete: arr(credentialRef()), legacy: map(str()) },
+    { open: true }),
+]));
+const storedSecret = compile(obj({ version: lit(1), auth: CredentialSchema, trustedHostKey: opt(HostKeySchema) },
+  { open: true }));
 
 function text(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`Enter a valid ${label}.`);
@@ -57,29 +75,16 @@ export function validateRemoteHost(input: RemoteHostInput): RemoteHostInput {
   return { hostname, port: input.port, username: text(input.username, 'SSH username') };
 }
 function credential(value: unknown): RemoteCredential {
-  if (isRecord(value)) {
-    const { type, password, privateKey, passphrase } = value;
-    if (type === 'password' && typeof password === 'string' && password.length > 0) {
-      return Object.freeze({ type: 'password', password });
-    }
-    if (type === 'privateKey' && typeof privateKey === 'string' && privateKey.trim() &&
-        (passphrase === undefined || typeof passphrase === 'string')) {
-      return Object.freeze({ type: 'privateKey', privateKey: privateKey.trim(),
-        ...(passphrase ? { passphrase } : {}) });
-    }
-  }
-  throw new Error('Enter an SSH password or private key.');
+  if (!validCredential.check(value)) throw new Error('Enter an SSH password or private key.');
+  return Object.freeze(value.type === 'password'
+    ? { type: 'password', password: value.password }
+    : { type: 'privateKey', privateKey: value.privateKey.trim(),
+      ...(value.passphrase ? { passphrase: value.passphrase } : {}) });
 }
 function hostKey(value: unknown): Readonly<SshHostKey> {
-  if (isRecord(value)) {
-    const { algorithm, fingerprint, publicKey } = value;
-    if (typeof algorithm === 'string' && algorithm &&
-        typeof fingerprint === 'string' && /^SHA256:[A-Za-z0-9+/]+={0,2}$/.test(fingerprint) &&
-        typeof publicKey === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(publicKey)) {
-      return Object.freeze({ algorithm, fingerprint, publicKey });
-    }
-  }
-  throw new Error('The SSH server returned an invalid host key.');
+  if (!validHostKey.check(value)) throw new Error('The SSH server returned an invalid host key.');
+  const { algorithm, fingerprint, publicKey } = value;
+  return Object.freeze({ algorithm, fingerprint, publicKey });
 }
 export function matchesHostKey(trusted: Readonly<SshHostKey> | undefined, observed: SshHostKey): boolean {
   return !!trusted && trusted.algorithm === observed.algorithm && trusted.fingerprint === observed.fingerprint && trusted.publicKey === observed.publicKey;
@@ -104,38 +109,18 @@ export function hostKeyPolicy(repository: RemoteHostRepository, { host, trustedH
   };
 }
 
-/** A record's fields that both versions store; version 1 also had a name and keys, which the document holds now. */
-function storedFields(value: unknown): Omit<RemoteHost, 'id'> {
-  if (!isRecord(value)) throw new Error();
-  const { credentialRef, credentialType, hostname, port, username } = value;
-  if (typeof credentialRef !== 'string' || !CREDENTIAL_REF.test(credentialRef) ||
-      (credentialType !== 'password' && credentialType !== 'privateKey') ||
-      typeof hostname !== 'string' || typeof port !== 'number' || typeof username !== 'string') throw new Error();
-  return { ...validateRemoteHost({ hostname, port, username }), credentialRef, credentialType };
-}
 function hostIndex(raw: string): HostIndex {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed) || !Array.isArray(parsed.hosts) || !Array.isArray(parsed.pendingDelete)) throw new Error();
-  const pendingDelete = parsed.pendingDelete.map((ref: unknown) => {
-    if (typeof ref !== 'string' || !CREDENTIAL_REF.test(ref)) throw new Error();
-    return ref;
-  });
+  if (!storedIndex.check(parsed)) throw new Error();
+  const pendingDelete = [...parsed.pendingDelete];
   const hosts: RemoteHost[] = [];
-  const legacy: Record<string, string> = {};
-  if (parsed.version === 2) {
-    if (!isRecord(parsed.legacy)) throw new Error();
-    for (const [old, endpoint] of Object.entries(parsed.legacy)) {
-      if (typeof endpoint !== 'string') throw new Error();
-      legacy[old] = endpoint;
-    }
-  } else if (parsed.version !== 1) {
-    throw new Error();
-  }
+  const legacy: Record<string, string> = parsed.version === 2 ? { ...parsed.legacy } : {};
   for (const value of parsed.hosts) {
-    const fields = storedFields(value);
-    const id = parsed.version === 1 ? machineEndpoint(fields) : isRecord(value) ? value.id : undefined;
-    if (typeof id !== 'string' || !id) throw new Error();
-    if (parsed.version === 1 && isRecord(value) && typeof value.id === 'string') legacy[value.id] = id;
+    const { credentialRef: ref, credentialType, hostname, port, username } = value;
+    const fields = { ...validateRemoteHost({ hostname, port, username }), credentialRef: ref, credentialType };
+    const id = parsed.version === 1 ? machineEndpoint(fields) : value.id;
+    if (!id) throw new Error();
+    if (parsed.version === 1 && value.id !== undefined) legacy[value.id] = id;
     // Two version 1 records of one endpoint keep the first; the other's credential is retired.
     if (hosts.some((host) => host.id === id)) {
       pendingDelete.push(fields.credentialRef);
@@ -211,7 +196,7 @@ export class RemoteHostRepository {
       const raw = await this.secrets.getItemAsync(host.credentialRef);
       if (!raw) throw new Error();
       const parsed: unknown = JSON.parse(raw);
-      if (!isRecord(parsed) || parsed.version !== 1) throw new Error();
+      if (!storedSecret.check(parsed)) throw new Error();
       const auth = credential(parsed.auth);
       if (auth.type !== host.credentialType) throw new Error();
       return { version: 1, auth, ...(parsed.trustedHostKey ? { trustedHostKey: hostKey(parsed.trustedHostKey) } : {}) };

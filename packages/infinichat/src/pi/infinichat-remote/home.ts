@@ -1,3 +1,5 @@
+import { compile, lit, obj, oneOf, opt, str, union } from '@earendil-works/pi-schema';
+
 const KEY = 'pi.infinichat.home.v1';
 
 /**
@@ -21,22 +23,16 @@ export interface InfiniChatHomeStorage {
   setItem(key: string, value: string): void;
 }
 
+const storedHome = compile(union([
+  obj({ version: lit(1), home: lit('phone'), copyOn: opt(str()) }, { open: true }),
+  obj({ version: lit(1), home: lit('machine'), machineId: str(),
+    phase: oneOf(['moving-there', 'there', 'moving-back']), from: opt(str()) }, { open: true }),
+]));
+
 function parse(text: string | null): InfiniChatHome {
   if (text === null) return PHONE_HOME;
   const value: unknown = JSON.parse(text);
-  if (typeof value === 'object' && value !== null && 'version' in value && value.version === 1 && 'home' in value) {
-    if (value.home === 'phone') {
-      return 'copyOn' in value && typeof value.copyOn === 'string'
-        ? { version: 1, home: 'phone', copyOn: value.copyOn } : PHONE_HOME;
-    }
-    if (value.home === 'machine' && 'machineId' in value && typeof value.machineId === 'string'
-      && 'phase' in value
-      && (value.phase === 'moving-there' || value.phase === 'there' || value.phase === 'moving-back')) {
-      const from = 'from' in value && typeof value.from === 'string' && value.phase === 'moving-there'
-        ? { from: value.from } : {};
-      return { version: 1, home: 'machine', machineId: value.machineId, phase: value.phase, ...from };
-    }
-  }
+  if (storedHome.check(value)) return value;
   // Opening either side on a guess could open the conversation twice.
   throw new Error('Where InfiniChat’s conversation lives could not be read.');
 }

@@ -1,6 +1,8 @@
-import type { DaemonChannel, DaemonChannelFactory } from './channel';
+import { arr, compile, int, lit, map, obj, oneOf, opt, str } from '@earendil-works/pi-schema';
 import { getRandomValues } from 'expo-crypto';
-import { encodeFrame, FrameDecoder, FrameType, isJson, type Frame, type Json } from './protocol';
+
+import type { DaemonChannel, DaemonChannelEnd, DaemonChannelFactory } from './channel';
+import { encodeFrame, FrameDecoder, FrameType, type Frame, type Json } from './protocol';
 
 export type { Json } from './protocol';
 
@@ -9,6 +11,13 @@ const PING_INTERVAL_MS = 5_000;
 const SILENCE_LIMIT_MS = 30_000;
 /** How long the daemon may take to answer `hello` once its channel is open; provisioning bounds its own steps. */
 const START_TIMEOUT_MS = 60_000;
+/** How much of a daemon's stderr a failed start keeps, as pi-env's client does (`connection.ts` at v1.5.0). */
+const STDERR_TAIL_CHARS = 2000;
+const STDERR_TAIL_LINES = 20;
+/** Node's `stripVTControlCharacters` pattern (`lib/internal/util/inspect.js`), which Hermes has no `node:util` for. */
+const VT_CONTROL = new RegExp('[\\u001B\\u009B][[\\]()#;?]*'
+  + '(?:(?:(?:(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]*)*)?'
+  + '(?:\\u0007|\\u001B\\u005C|\\u009C))|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))', 'g');
 
 export class RemoteError extends Error {
   readonly code: string;
@@ -79,6 +88,8 @@ class Session {
   live = true;
   ready = false;
   failure?: unknown;
+  /** The end of the daemon's stderr until it is ready, for a start that fails. */
+  stderrTail = '';
 
   constructor(id: number, token: string) {
     this.id = id;
@@ -96,6 +107,33 @@ function lost(message = 'Pi daemon connection lost. An in-flight operation may a
 }
 function closed(): RemoteError { return new RemoteError({ code: 'unknown', message: 'Remote environment connection is closed.' }); }
 
+/**
+ * `message` plus the last lines of `stderr`, as pi-env's `withStderr` (`connection.ts` at v1.5.0). The remote machine
+ * wrote that text, so terminal escapes and control characters are removed.
+ */
+function withStderr(message: string, stderr: string): string {
+  let text = '';
+  for (const char of stderr.replace(/\r\n?/g, '\n').replace(VT_CONTROL, '')) {
+    const code = char.charCodeAt(0);
+    if (char === '\n' || char === '\t' || (code >= 0x20 && (code < 0x7f || code > 0x9f))) text += char;
+  }
+  const lines = text.split('\n').map((line) => line.trimEnd()).filter((line) => line !== '');
+  if (lines.length === 0) return message;
+  return `${message}\nremote stderr:\n${lines.slice(-STDERR_TAIL_LINES).join('\n')}`;
+}
+
+/**
+ * Why a session's channel ended, as pi-env's client tells a daemon that exits before it answers `hello` from a
+ * connection lost later.
+ */
+function ended(session: Session, end: DaemonChannelEnd | undefined): RemoteError {
+  if (session.ready || end === undefined) return lost();
+  if ('error' in end) return lost(end.error.message);
+  return lost(end.exitCode === undefined
+    ? 'pi-env exited before it was ready'
+    : `pi-env exited with code ${end.exitCode} before it was ready`);
+}
+
 export function isConnectionLost(error: unknown): boolean {
   return error instanceof RemoteError && error.fields.lost === true;
 }
@@ -105,27 +143,17 @@ function secureToken(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/** The daemon's `hello` reply (pi-env `docs/protocol.md`), which the upstream client takes as `RemoteInfo`. */
+const hello = compile(obj({
+  protocol: lit(1), version: str(), os: str(), arch: str(), home: str(), tmpdir: str(),
+  separator: oneOf(['/', '\\']), cwd: str(), driveCwds: map(str()), pid: int({ minimum: 1 }),
+  features: opt(arr(str())),
+}, { open: true }));
+
 function remoteInfo(json: Json): RemoteInfo {
-  const incompatible = () => lost(
+  if (hello.check(json)) return json;
+  throw lost(
     'Pi daemon returned an incompatible hello response. Test this machine again to verify automatic remote setup.');
-  const { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds, pid, features } = json;
-  if (protocol !== 1 || typeof version !== 'string' || typeof os !== 'string' || typeof arch !== 'string'
-    || typeof home !== 'string' || typeof tmpdir !== 'string' || typeof cwd !== 'string'
-    || (separator !== '/' && separator !== '\\') || typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1
-    || !isJson(driveCwds)) {
-    throw incompatible();
-  }
-  const drives: Record<string, string> = {};
-  for (const [drive, value] of Object.entries(driveCwds)) {
-    if (typeof value !== 'string') throw incompatible();
-    drives[drive] = value;
-  }
-  const info: RemoteInfo = { protocol, version, os, arch, home, tmpdir, separator, cwd, driveCwds: drives, pid };
-  if (features !== undefined) {
-    if (!Array.isArray(features) || !features.every((feature) => typeof feature === 'string')) throw incompatible();
-    info.features = features;
-  }
-  return info;
 }
 
 /**
@@ -190,7 +218,10 @@ export class Connection {
     session.opening = Promise.resolve().then(() => this.#options.openChannel({
       token: session.token, signal: session.controller.signal,
       onData: (bytes) => this.#onData(session, bytes),
-      onClosed: () => this.#teardown(session, lost()),
+      onStderr: (text) => {
+        if (!session.ready) session.stderrTail = (session.stderrTail + text).slice(-STDERR_TAIL_CHARS);
+      },
+      onClosed: (end) => this.#teardown(session, ended(session, end)),
     }));
     try {
       session.channel = await Promise.race([session.opening, session.failed]);
@@ -210,12 +241,16 @@ export class Connection {
       const info = remoteInfo(reply.json);
       if (!session.live) throw session.failure ?? lost();
       session.ready = true;
+      session.stderrTail = '';
       return { info, session };
     } catch (error) {
-      // pi-env marks every start that fails lost (`dist/connection.js:215-240` at v1.5.0): a watcher keeps retrying,
-      // and a caller can tell the connection failed, not the request. The SSH or setup failure stays as the cause.
-      const failure = error instanceof RemoteError ? error
-        : Object.assign(lost(error instanceof Error ? error.message : String(error)), { cause: error });
+      // A start that fails is lost, so a watcher keeps retrying and a caller can tell the connection failed, not the
+      // request, and says what the daemon wrote to stderr meanwhile (pi-env `connection.ts:345-354` at v1.5.0). The
+      // SSH or setup failure, which pi-env's `ssh` reports as its exit and stderr, stays as the cause.
+      const failure = error instanceof RemoteError
+        ? new RemoteError({ ...error.fields, message: withStderr(error.message, session.stderrTail) })
+        : Object.assign(lost(withStderr(error instanceof Error ? error.message : String(error), session.stderrTail)),
+          { cause: error });
       this.#teardown(session, failure);
       throw failure;
     } finally { clearTimeout(timer); }

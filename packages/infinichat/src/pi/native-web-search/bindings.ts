@@ -7,8 +7,8 @@ export interface NativeWebSearchWriter {
 }
 
 /** Correlation only: canonical data lives in pi-durable. The generation hook's `context.abortSignal` is the
- * stream options' `signal` (verified in pi-durable v1.4.0's scheduler/generation), so the request's own
- * signal keys what its provider stream may write. */
+ * stream options' `signal` (pi-durable v1.5.0's `src/harness/generation.ts`), so the request's own signal keys what
+ * its provider stream may write. */
 export type NativeWebSearchBinding = {
   conversationId: ConversationId;
   /** The generation task, so the live row shows only while its own run is busy. */

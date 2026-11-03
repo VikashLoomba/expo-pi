@@ -9,14 +9,15 @@ import {
 import { SearchPresentationsDoc, type SearchPresentation, type SearchSource } from './documents';
 import { SearchObservationEntry, searchObservationMessage } from './entries';
 
-/** Native hosted tools belong on the Responses request, outside pi's function-tool registry. pi-ai sets
- * `include` itself for active reasoning (`reasoning.encrypted_content`); this only unions the web search parts. */
+/** pi-ai sets `include` itself for active reasoning (`reasoning.encrypted_content`); this only unions the web search
+ * parts. */
 const INCLUDES = ['web_search_call.results', 'web_search_call.action.sources'];
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-function withWebSearchTool(payload: unknown): unknown {
+/** The Responses request with OpenAI's hosted search, which belongs on the request outside pi's function tools. */
+export function withWebSearchTool(payload: unknown): unknown {
   if (!isObject(payload)) throw new Error('OpenAI Responses requires an object request.');
   const tools = Array.isArray(payload.tools) ? payload.tools : [];
   const hasSearch = tools.some((tool) =>
@@ -144,12 +145,9 @@ function decorate<TOptions extends StreamOptions>(
   delegate: (options: TOptions | undefined) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
   const observer = new SearchObserver(binding, signal);
+  // The request gets its tool from the bridge's `beforeProviderRequest` hook (`durable.ts`); pi-durable has no hook
+  // for the provider's raw events, which only the stream's options see.
   const next = Object.assign({}, options, {
-    async onPayload(payload: unknown, requestModel: Model<Api>) {
-      const request = withWebSearchTool(payload);
-      const replacement = await options?.onPayload?.(request, requestModel);
-      return replacement === undefined ? request : replacement;
-    },
     async onProviderStreamEvent(event: unknown, requestModel: Model<Api>) {
       observer.accept(event);
       await options?.onProviderStreamEvent?.(event, requestModel);
@@ -163,7 +161,7 @@ function decorate<TOptions extends StreamOptions>(
   return stream;
 }
 
-/** Decorate pi's provider, preserving its auth, catalog, transport, and parser. */
+/** Decorate pi's provider, preserving its auth, catalog, transport, and parser, to observe its searches. */
 export function withNativeWebSearch(provider: Provider<'openai-responses'>): Provider<'openai-responses'> {
   if (provider.id !== 'openai') throw new Error('Native web search requires the modern OpenAI provider.');
   return {

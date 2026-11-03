@@ -1,3 +1,4 @@
+import type { Validator } from '@earendil-works/pi-schema';
 import { Buffer } from 'buffer';
 
 export type Json = Record<string, unknown>;
@@ -11,6 +12,12 @@ export function isJson(value: unknown): value is Json {
 /** The daemon broke its reply contract (pi-env docs/protocol.md). */
 export function invalidReply(key: string): Error {
   return new Error(`The Pi daemon sent an invalid "${key}" field.`);
+}
+
+/** A reply record checked by its schema; the error names the first field that breaks it. */
+export function checked<T>(reply: Validator<T>, json: unknown): T {
+  if (reply.check(json)) return json;
+  throw invalidReply(reply.errors(json)[0]?.path.slice(1) ?? '');
 }
 
 export function numberField(json: Json, key: string): number {
