@@ -4,6 +4,8 @@ import {
   type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord,
   type InboxState, type LiveState, type RunFailure, type TaskId, type TranscriptItem,
 } from '@earendil-works/pi-durable';
+import { CODEMODE_TOOL_NAME } from '@earendil-works/pi-durable/codemode';
+import { compile, obj, str } from '@earendil-works/pi-schema';
 
 import type { ChatControls, ChatMessage, ChatSummary } from '../chat/types';
 import type { WebSearchPresentation } from '../chat/web-search-types';
@@ -17,6 +19,14 @@ import type { SearchPresentationsState } from './native-web-search/documents';
 import { isSearchObservationEntry } from './native-web-search/entries';
 import { hasSearchActivity, toWebSearchPresentation } from './native-web-search/presentation';
 import { imagesOf, textOf } from './user-input';
+
+/** Code mode's arguments, `{ code }` (durable `src/codemode/codemode.ts`). */
+const codemodeArguments = compile(obj({ code: str() }, { open: true }));
+
+/** A call's input as its step shows it: a code mode script as the source the model wrote, any other as JSON. */
+function toolInput(name: string, args: unknown): string {
+  return name === CODEMODE_TOOL_NAME && codemodeArguments.check(args) ? args.code : JSON.stringify(args, null, 2);
+}
 
 /** Committed state of one chat: its conversation view's documents and the chat's app documents. */
 export type ChatState = {
@@ -154,7 +164,7 @@ function assistantRows(message: AssistantMessage, key: string, streaming: boolea
   for (const part of message.content) {
     if (part.type !== 'toolCall') continue;
     const file = fileToolPresentation(part.name, part.arguments);
-    const args = file ? '' : JSON.stringify(part.arguments, null, 2);
+    const args = file ? '' : toolInput(part.name, part.arguments);
     rows.push({ id: `${key}-tool-${part.id}`, role: 'tool', text: '', createdAt: message.timestamp,
       tool: { name: part.name, args, output: '', status: 'running', ...(file ? { file } : {}) } });
   }
