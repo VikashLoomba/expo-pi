@@ -4,7 +4,6 @@ import {
   type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord,
   type InboxState, type LiveState, type RunFailure, type TaskId, type TranscriptItem,
 } from '@earendil-works/pi-durable';
-import { CODEMODE_TOOL_NAME } from '@earendil-works/pi-durable/codemode';
 import { compile, obj, str } from '@earendil-works/pi-schema';
 
 import type { ChatControls, ChatMessage, ChatSummary } from '../chat/types';
@@ -20,6 +19,11 @@ import { isSearchObservationEntry } from './native-web-search/entries';
 import { hasSearchActivity, toWebSearchPresentation } from './native-web-search/presentation';
 import { imagesOf, textOf } from './user-input';
 
+/**
+ * pi-durable's `CODEMODE_TOOL_NAME`, written out: `@earendil-works/pi-durable/codemode` loads Durable's search module,
+ * which constructs an `Intl.Segmenter` as it loads, and the phone's Hermes has none, so the app crashed at launch.
+ */
+const CODEMODE_TOOL_NAME = 'codemode';
 /** Code mode's arguments, `{ code }` (durable `src/codemode/codemode.ts`). */
 const codemodeArguments = compile(obj({ code: str() }, { open: true }));
 
