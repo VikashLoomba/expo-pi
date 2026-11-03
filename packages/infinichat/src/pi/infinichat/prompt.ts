@@ -1,7 +1,8 @@
 /**
- * UniiChat's prompt.txt (VictorTaelin/UniiChat 0500bf6) without the `ai` kind of its chat imports; `sharedPrompt`
- * makes only the substitutions Taelin's design gist allows a port: the agent's name, and no device paragraph without
- * device tools.
+ * UniiChat's prompt.txt (VictorTaelin/UniiChat 0500bf6) without the `ai` kind of its chat imports, and with a tool's
+ * `device` optional (the owner's choice, 2026-11-03): one naming none runs on the device holding the chat.
+ * `sharedPrompt` makes only the substitutions Taelin's design gist allows a port: the agent's name, and no device
+ * paragraph without device tools.
  */
 const originalPrompt = `You are Unii, an AI agent that works for one user in a single chat that never
 ends. Each call to you is a turn or a compaction: the view below is followed by
@@ -55,8 +56,9 @@ is running.
 
 The user's computers that have unii open now are listed at the start of each
 message. Your shell, read, write and edit tools run on the one their \`device\`
-field names; computer tasks, on one marked "computer use". A task that needs a
-computer not listed can't be done now: tell the user.
+field names, or on the one holding this chat when they name none; computer
+tasks, on one marked "computer use". A task that needs a computer not listed
+can't be done now: tell the user.
 
 # Compactions
 
@@ -141,8 +143,8 @@ an agent's whole chat.
 
 Devices: the user's computers that have unii open now, by name, listed
 at the start of each message. Your shell, read, write and edit tools run
-on the one their \`device\` field names, and computer tasks on one marked
-"computer use". A computer is listed only while the user runs unii on
+on the one their \`device\` field names, or on the one holding this chat
+when they name none, and computer tasks on one marked "computer use". A computer is listed only while the user runs unii on
 it, and leaves the list when they close it: a task that needs one not
 listed can't be done now, so tell the user it isn't available.`;
 

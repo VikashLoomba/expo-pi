@@ -5,7 +5,7 @@ import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/conte
 import type { Models } from '@earendil-works/pi-ai';
 import { obj } from '@earendil-works/pi-schema';
 import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/node/credentials';
-import { machineEnvironment, serverDevices } from '@pi-agent/infinichat/node/devices';
+import { serverDevices } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
 import { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
@@ -120,15 +120,17 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
       open: () => durableRegistry(facet.registry(Extensions), report),
       close: (reader) => reader.close(),
     });
+    // This machine, holding the chat, then the other machines: the device tools' devices and the conversation's
+    // environment. They read the machines when they run, which is only while the conversation is open.
+    const devices = serverDevices(() => ({ name: proc().device, description: proc().description }),
+      () => machines.value);
     const conversation = self.resource('conversation', {
       version: 1,
       deps: [host, account, machines, registry],
       open: async () => {
         const { home, device } = proc();
         const held = new ServerConversation(home, (storage) => InfiniChatService.open({
-          storage, models: account.value.models, parts, registry: registry.value, machine: device,
-          // In the conversation's folder, `main` or a subagent's name, as this machine's device tools run.
-          env: ({ cwd }) => machineEnvironment(cwd ?? 'main'),
+          storage, models: account.value.models, parts, registry: registry.value, machine: device, env: devices.env,
           onClosed: (end) => {
             if (end.kind === 'failed') proc().fail(end.error);
           },
@@ -151,10 +153,8 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
     });
     // Built at every reload; the Harness reaches them through `Extensions`. They read the open conversation and the
     // machines when they run, which is only while the conversation is open.
-    const parts = infiniChatExtensions(
-      serverDevices(() => ({ name: proc().device, description: proc().description }),
-        () => machines.value),
-      () => conversation.value.current?.harness, (error) => conversation.value.current?.report(error));
+    const parts = infiniChatExtensions(devices, () => conversation.value.current?.harness,
+      (error) => conversation.value.current?.report(error));
     self.register(Extensions, Object.fromEntries(parts.extensions.map((extension) => [extension.name, extension])));
     return {
       account: self.expose(account),

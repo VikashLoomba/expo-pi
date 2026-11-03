@@ -27,26 +27,26 @@ export type Device = {
   environment(who: string, read: DocumentReader, context: Context): Promise<ExecutionEnv>;
 };
 
-/** What InfiniChat's tools need from the host it runs on. */
-export type InfiniChatDevices = Required<Pick<OptChatExtensionOptions, 'tools' | 'callEnv' | 'turnState'>>;
+/**
+ * What InfiniChat's tools need from the host it runs on, and `env`, the conversation's environment
+ * (`HarnessOptions.env`): the device holding the chat, which pi-durable's own tools, such as code mode, run on.
+ */
+export type InfiniChatDevices = Required<Pick<OptChatExtensionOptions, 'tools' | 'callEnv' | 'turnState' | 'env'>>;
 
-const deviceParameter = str({ description: 'The device to run on, from the list at the start of the message' });
+const deviceParameter = str({
+  description: 'The device to run on, from the list at the start of the message; by default the one holding this chat',
+});
 
 /**
- * A built-in tool's parameters with a required `device` first: the same JSON Schema object, as pi's built-in tools
+ * A built-in tool's parameters with an optional `device` first: the same JSON Schema object, as pi's built-in tools
  * write theirs with pi-schema (an open object, `durable/src/tools/bash.ts`), typed as the values it accepts the way
  * pi-schema's own builders type theirs. pi-schema has no combinator that adds a property to an object schema.
  */
-function withDevice<T>(parameters: Schema<T>): Schema<T & { device: string }> {
+function withDevice<T>(parameters: Schema<T>): Schema<T & { device?: string }> {
   // Its keywords as plain data, so the copy carries no value type of its own.
   const keywords = Object.fromEntries(Object.entries(parameters));
-  const { properties, required } = keywords;
-  const own = typeof properties === 'object' && properties !== null ? properties : {};
-  return {
-    ...keywords,
-    properties: { device: deviceParameter, ...own },
-    required: ['device', ...(Array.isArray(required) ? required : [])],
-  };
+  const own = typeof keywords.properties === 'object' && keywords.properties !== null ? keywords.properties : {};
+  return { ...keywords, properties: { device: deviceParameter, ...own } };
 }
 
 /**
@@ -55,32 +55,35 @@ function withDevice<T>(parameters: Schema<T>): Schema<T & { device: string }> {
  */
 const kept = ({ name, description, replay, outputLimits, structuredOutputSchema, callers }: ToolRegistration) => ({
   name,
-  description: `${description} It runs on the device named, in <work>/<who>, <work> being the work dir the devices `
-    + 'list gives for it and <who> main for the main agent, or a subagent\'s own name.',
+  description: `${description} It runs on the device named, or the one holding this chat when none is, in `
+    + '<work>/<who>, <work> being the work dir the devices list gives for it and <who> main for the main agent, or a '
+    + 'subagent\'s own name.',
   replay,
   outputLimits,
   structuredOutputSchema,
   callers,
 });
 
-/** The device a call's raw arguments name, for argument repair; an absent one fails as an unknown device. */
-const deviceArgument = (args: unknown): string =>
-  typeof args === 'object' && args !== null && 'device' in args && typeof args.device === 'string' ? args.device : '';
+/** The device a call's raw arguments name, kept through argument repair; none for the device holding the chat. */
+const deviceArgument = (args: unknown): { device?: string } =>
+  typeof args === 'object' && args !== null && 'device' in args && typeof args.device === 'string'
+    ? { device: args.device } : {};
 
 /**
- * The devices `list` returns, read at each use since they change, as InfiniChat's tools use them: pi-durable's bash,
- * read, write and edit with a required `device`, each calling the built-in's `execute` with that device's environment
- * in place of the conversation's, as the Harness injects `env` into every call. Each use builds a fresh environment,
- * as the chat service's resolver does.
+ * The devices `list` returns, read at each use since they change, the first being the one holding the chat, as
+ * InfiniChat's tools use them: pi-durable's bash, read, write and edit with an optional `device`, each calling the
+ * built-in's `execute` with that device's environment, the holder's when none is named, as the Harness injects `env`
+ * into every call. The holder is also the conversation's environment. Each use builds a fresh environment, as the chat
+ * service's resolver does.
  */
 export function infiniChatDevices(list: () => Promise<readonly Device[]>, images: ImageProcessor): InfiniChatDevices {
-  /** The device's environment in the calling conversation's folder, created as UniiChat creates one. */
+  /** The device's environment, the holder's without a name, in the calling conversation's folder as UniiChat's. */
   async function environment(
-    name: string, read: DocumentReader, conversationId: ConversationId, context: Context,
+    name: string | undefined, read: DocumentReader, conversationId: ConversationId, context: Context,
   ): Promise<ExecutionEnv> {
     const devices = await list();
     // The host keeps device names unique, so a name is one device.
-    const device = devices.find((candidate) => candidate.name === name);
+    const device = name === undefined ? devices[0] : devices.find((candidate) => candidate.name === name);
     if (!device) {
       const names = devices.map((candidate) => JSON.stringify(candidate.name)).join(', ');
       throw new Error(`Unknown device ${JSON.stringify(name)}. The devices are ${names}.`);
@@ -98,7 +101,8 @@ export function infiniChatDevices(list: () => Promise<readonly Device[]>, images
   const write = createWriteTool();
   const edit = createEditTool();
   const prepareEdit = edit.prepareArguments;
-  const envFor = (device: string, api: DocumentReader & { conversationId: ConversationId }, context: Context) =>
+  const envFor = (device: string | undefined, api: DocumentReader & { conversationId: ConversationId },
+    context: Context) =>
     environment(device, api, api.conversationId, context);
   return {
     tools: [
@@ -123,21 +127,22 @@ export function infiniChatDevices(list: () => Promise<readonly Device[]>, images
       defineTool({
         ...kept(edit),
         parameters: withDevice(edit.parameters),
-        prepareArguments: prepareEdit && ((args) => ({ ...prepareEdit(args), device: deviceArgument(args) })),
+        prepareArguments: prepareEdit && ((args) => ({ ...prepareEdit(args), ...deviceArgument(args) })),
         execute: async ({ device, ...args }, api, context) =>
           edit.execute(args, { ...api, env: await envFor(device, api, context) }, context),
       }),
     ],
-    /** The device a completed call named, so its spilled output is read on the machine that produced it. */
+    /** The device a completed call ran on, so its spilled output is read on the machine that produced it. */
     callEnv(call, target, context) {
       const { device } = call.arguments;
-      if (typeof device !== 'string') throw new Error(`The ${call.name} call names no device.`);
-      return environment(device, target.read, target.conversationId, context);
+      return environment(typeof device === 'string' ? device : undefined, target.read, target.conversationId, context);
     },
+    env: (target, context) => environment(undefined, target.read, target.conversationId, context),
     /** The device list at the start of each message; it changes, so it stays out of the cached prompt. */
     async turnState() {
       const devices = await list();
-      return ['Devices:', ...devices.map((device) => `${JSON.stringify(device.name)}: ${device.description}`)]
+      return ['Devices:', ...devices.map((device, index) =>
+        `${JSON.stringify(device.name)}${index === 0 ? ' (holds this chat, the default)' : ''}: ${device.description}`)]
         .join('\n');
     },
   };

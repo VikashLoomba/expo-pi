@@ -33,7 +33,9 @@ export async function openPhoneInfiniChat(options: {
   // The machines are the service's own document; the list reads it once the service is open.
   let service: InfiniChatService | undefined;
   const devices = createDevices(options.workspaces, options.remote, () => service?.machines.getSnapshot());
-  const parts = infiniChatExtensions(infiniChatDevices(devices, createExpoImages()), () => service?.harness,
+  // The phone, holding the chat, is also the conversation's environment.
+  const deviceTools = infiniChatDevices(devices, createExpoImages());
+  const parts = infiniChatExtensions(deviceTools, () => service?.harness,
     (error) => service?.report(error));
   // The phone's code ships inside the app, so its registry is fixed: nothing reloads it, unlike a machine's server.
   const registry = createRegistry();
@@ -44,6 +46,7 @@ export async function openPhoneInfiniChat(options: {
     parts,
     registry,
     authError: options.authError,
+    env: deviceTools.env,
     onClosed: options.onClosed,
   });
   // Code mode is a machine's (its server's tools plugin), so here the model calls every tool itself, also in a
