@@ -1,6 +1,9 @@
 import type { Link } from '@earendil-works/chord';
+import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
+import type { CredentialBackend } from '../provider-credentials';
 import type { Machine } from './contract';
+import { installServer, machineSecret, requestUpdate, runningServer, savedSecret } from './install';
 
 /** The steps of an install a dial runs, as the connection status shows them. */
 export type InstallStage = 'connecting' | 'checking' | 'installing' | 'starting';
@@ -39,6 +42,63 @@ export interface DialedServer {
   requestUpdate(): Promise<void>;
   /** Closes the link, then its transport. */
   close(): Promise<void>;
+}
+
+/** A server to open a link to: its port on the machine's loopback, this app's secret for it, and its release. */
+export interface ServerTarget { port: number; secret: string; version: string }
+
+/** What a dialer gives `dialServer`: the machine as the app knows it, and its own transport to the server. */
+export interface DialTransport {
+  /** The machine's ID in this app, which its secret is kept under. */
+  machineId: string;
+  /** Its name, for messages, and the account an install's advice names. */
+  name: string;
+  username: string;
+  /** This app's client ID, which its secret is written under on the machine. */
+  client: string;
+  /** The machine's files and commands, borrowed from their owner, for the check and an install. */
+  environment(): Promise<ExecutionEnv>;
+  credentials: CredentialBackend;
+  randomBytes(count: number): Promise<Uint8Array>;
+  /** Opens a link to the server at `target`, closing the one it opened before. */
+  open(target: ServerTarget): Link | Promise<Link>;
+  /** Closes the link, then what carries it. */
+  close(): Promise<void>;
+}
+
+/**
+ * What every dialer decides, whatever carries its link: with a secret for the machine and a live server named in
+ * `server.json`, it opens a link to that server; otherwise it writes the secret as this app's client file there and
+ * starts the server, setting one up first on a machine with none (`installServer`). A dial that fails closes what
+ * the transport opened.
+ */
+export async function dialServer(transport: DialTransport,
+  { signal, onStage, onInstalled }: Pick<DialOptions, 'signal' | 'onStage' | 'onInstalled'>): Promise<DialedServer> {
+  const { machineId, name, credentials } = transport;
+  const install = async (): Promise<ServerTarget> => {
+    const secret = await machineSecret(credentials, transport.randomBytes, machineId);
+    const server = await installServer({ machine: await transport.environment(), name, username: transport.username },
+      transport.client, secret, { signal, onProgress: onStage });
+    onInstalled(server.notice);
+    return server;
+  };
+  try {
+    const secret = await savedSecret(credentials, machineId);
+    const running = secret === undefined ? undefined
+      : await runningServer(await transport.environment(), name, signal);
+    const target = secret !== undefined && running !== undefined ? { ...running, secret } : await install();
+    return {
+      link: await transport.open(target),
+      name,
+      version: target.version,
+      install: async () => transport.open(await install()),
+      requestUpdate: async () => requestUpdate(await transport.environment(), name, signal),
+      close: () => transport.close(),
+    };
+  } catch (error) {
+    await transport.close();
+    throw error;
+  }
 }
 
 /**

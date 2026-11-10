@@ -1,10 +1,7 @@
 import { webSocketLink, type Link } from '@earendil-works/chord';
 import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import { connect, type SshConnection, type SshLocalForward } from '@automatalabs/react-native-ssh';
-import type { ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
-import {
-  installServer, machineSecret, requestUpdate, runningServer, savedSecret,
-} from '@pi-agent/infinichat/pi/infinichat-remote/install';
+import { dialServer, type ServerDialer } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { getRandomBytesAsync } from 'expo-crypto';
 
 import { connectionFailure } from '../execution/remote/channel';
@@ -13,8 +10,6 @@ import { tailscaleSignIn } from '../execution/remote/tailscale';
 import type { RemoteExecution } from '../execution/remote/owner';
 import { createCredentialBackend } from '../secure-storage';
 import { phoneClient } from './phone-client';
-
-type Target = { port: number; secret: string; version: string };
 
 /**
  * React Native's own declaration of its WebSocket constructor, restated from
@@ -47,11 +42,10 @@ function connectAdmitted(hosts: RemoteHostRepository, admission: RemoteHostAdmis
 /**
  * How this phone reaches a configured machine's InfiniChat server: one SSH connection with the machine's admission,
  * and a WebSocket tunnelled over it to the server's loopback port (`server/listen.ts`), carrying this phone's secret.
- * It writes the secret as this phone's client file there and starts the server, setting one up first on a machine
- * with none (`installServer`), when this phone has no secret for the machine or `server.json` names no live server.
- * That check and setup go through the environment owner.ts keeps for the machine: one daemon connection, shared with
- * the chats' tools, which the provider closes. It borrows that, the machine record and the phone's secret, and closes
- * only the SSH connection and tunnel it opened.
+ * Whether it uses the server running there or sets one up is `dialServer`'s, as for every dialer. That check and setup
+ * go through the environment owner.ts keeps for the machine: one daemon connection, shared with the chats' tools, which
+ * the provider closes. It borrows that, the machine record and the phone's secret, and closes only the SSH connection
+ * and tunnel it opened.
  */
 export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution, machineId: string): ServerDialer {
   return {
@@ -62,59 +56,38 @@ export function phoneDialer(hosts: RemoteHostRepository, remote: RemoteExecution
         throw new Error('This iPhone has no credentials for the machine InfiniChat’s conversation is on. Add them in '
           + 'Remote machines.');
       }
-      const credentials = createCredentialBackend();
-      const secret = await savedSecret(credentials, machineId);
       const admission = await hosts.admit(machineId);
       const { host } = admission;
       const connection = await connectAdmitted(hosts, admission, { signal, onDisconnected: onDropped });
-      // A dial that is cancelled stops waiting for it; the owner keeps the connection it opens.
-      const machine = () => awaitWithContext(remote.environment(machineId, undefined),
-        withAbortSignal(signal, BACKGROUND_CONTEXT));
-      const name = host.hostname;
       let forward: SshLocalForward | undefined;
       let link: Link | undefined;
-      const install = async (): Promise<Target> => {
-        const installing = await machineSecret(credentials, getRandomBytesAsync, machineId);
-        const server = await installServer({ machine: await machine(), name, username: host.username },
-          phoneClient().id, installing, { signal, onProgress: onStage });
-        onInstalled(server.notice);
-        return server;
-      };
-      // Tunnels to the server's port and opens a new socket over it, closing the previous ones first.
-      const open = async (target: Target): Promise<Link> => {
-        link?.close();
-        await forward?.close().catch(() => {});
-        forward = await connection.forwardLocal({ remoteHost: '127.0.0.1', remotePort: target.port },
-          { onClosed: (reason) => { if (reason !== undefined) onDropped(); } })
-          .catch((error: unknown) => {
-            throw connectionFailure(error);
-          });
-        const socket = new NativeWebSocket(`ws://127.0.0.1:${forward.localPort}`, undefined,
-          { headers: { authorization: `Bearer ${target.secret}` } });
-        // The client side of a link never deflates, which Hermes could not inflate anyway.
-        link = webSocketLink(socket);
-        return link;
-      };
-      const close = async () => {
-        link?.close();
-        await forward?.close().catch(() => {});
-        await connection.disconnect().catch(() => {});
-      };
-      try {
-        const running = secret === undefined ? undefined : await runningServer(await machine(), name, signal);
-        const target = secret !== undefined && running !== undefined ? { ...running, secret } : await install();
-        return {
-          link: await open(target),
-          name,
-          version: target.version,
-          install: async () => open(await install()),
-          requestUpdate: async () => requestUpdate(await machine(), name, signal),
-          close,
-        };
-      } catch (error) {
-        await close();
-        throw error;
-      }
+      return dialServer({
+        machineId, name: host.hostname, username: host.username, client: phoneClient().id,
+        credentials: createCredentialBackend(), randomBytes: getRandomBytesAsync,
+        // A dial that is cancelled stops waiting for it; the owner keeps the connection it opens.
+        environment: () => awaitWithContext(remote.environment(machineId, undefined),
+          withAbortSignal(signal, BACKGROUND_CONTEXT)),
+        // Tunnels to the server's port and opens a new socket over it, closing the previous ones first.
+        open: async (target) => {
+          link?.close();
+          await forward?.close().catch(() => {});
+          forward = await connection.forwardLocal({ remoteHost: '127.0.0.1', remotePort: target.port },
+            { onClosed: (reason) => { if (reason !== undefined) onDropped(); } })
+            .catch((error: unknown) => {
+              throw connectionFailure(error);
+            });
+          const socket = new NativeWebSocket(`ws://127.0.0.1:${forward.localPort}`, undefined,
+            { headers: { authorization: `Bearer ${target.secret}` } });
+          // The client side of a link never deflates, which Hermes could not inflate anyway.
+          link = webSocketLink(socket);
+          return link;
+        },
+        close: async () => {
+          link?.close();
+          await forward?.close().catch(() => {});
+          await connection.disconnect().catch(() => {});
+        },
+      }, { signal, onStage, onInstalled });
     },
   };
 }
