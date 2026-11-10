@@ -6,5 +6,9 @@ declare module '*.wasm' {
   export default bytes;
 }
 
-/** This server's release, defined at build time from package.json. */
+/**
+ * This server's release, defined at build time from package.json. Only InfiniChat's plugin reads it (`facet.ts` and
+ * what it imports): a runtime that held it would differ in every release, and no machine could keep its runtime
+ * (`update.ts`).
+ */
 declare const INFINICHAT_SERVER_VERSION: string;

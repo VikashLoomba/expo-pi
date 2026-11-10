@@ -31,9 +31,9 @@ export class McpServers {
   private stops: (() => void)[] = [];
   private readonly listeners = new Set<() => void>();
 
-  /** `roots` are the folders each server is given, as the coding agent gives its session's. */
+  /** `roots` are the folders each server is given, as the coding agent gives its session's; `version` the release. */
   constructor(private readonly backend: CredentialBackend, readonly log: McpLog,
-    private readonly roots: readonly Root[]) {}
+    private readonly roots: readonly Root[], private readonly version: string) {}
 
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -108,7 +108,7 @@ export class McpServers {
     const oauth = 'url' in connection && connection.oauth !== undefined ? {
       serverUrl: connection.url, settings: connection.oauth, credentials: this.credentials(name, connection.url),
     } : undefined;
-    return new McpServer(name, connection, oauth, this.log, this.roots);
+    return new McpServer(name, connection, oauth, this.log, this.roots, this.version);
   }
 
   statuses(): McpServerStatus[] {

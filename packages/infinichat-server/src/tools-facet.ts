@@ -46,14 +46,14 @@ const report = (error: unknown) => console.error('InfiniChat:', error instanceof
  * clients hold, `/mcp`'s, re-exposes the object's members (§6, "shared store, per-principal views"). At shutdown the
  * host closes these natives before or with InfiniChat's, whose Harness then aborts what still runs: a script finds its
  * sandbox closed and waits for that abort (durable `src/codemode/codemode.ts`), and a server closes once its requests
- * settle (`McpServer.retire`).
+ * settle (`McpServer.retire`). `version` is the release the servers are told is connecting, InfiniChat's plugin's.
  */
-export default () => defineFacet<InfiniChatPrincipal>((host) => {
+export default (version: string) => defineFacet<InfiniChatPrincipal>((host) => {
   host.serve(InfiniChatTools, (_params, self) => {
     const sandbox = self.open(async () => new CodemodeSandbox(), (value) => value.close());
     // One backend for the file, so its writes run one at a time (`node/credentials.ts`).
     const servers = self.open(async () => new McpServers(fileCredentialBackend(join(HOME, 'mcp-auth.json')),
-      new McpLog(join(HOME, 'mcp.log')), ROOTS), (opened) => opened.close());
+      new McpLog(join(HOME, 'mcp.log')), ROOTS, version), (opened) => opened.close());
     const extensions = self.writable<readonly Extension[]>([]);
     self.contribute(Extensions, extensions);
     const shown = self.writable(NO_SERVERS);

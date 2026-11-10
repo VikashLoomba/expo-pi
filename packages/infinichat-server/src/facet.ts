@@ -71,6 +71,9 @@ export const InfiniChatMachine = local('infinichat.machine', {
 const callContext = (ctx: Ctx<InfiniChatPrincipal>) =>
   ctx.abortSignal === undefined ? BACKGROUND_CONTEXT : withAbortSignal(ctx.abortSignal, BACKGROUND_CONTEXT);
 
+/** This plugin's release, which the runtime it runs on reads here, holding none of its own (`main.ts`). */
+export const version = INFINICHAT_SERVER_VERSION;
+
 /**
  * InfiniChat's server plugin: the facet a server host loads from its runtime (`main.ts`), given the process as start
  * data (design §18), and replaces on update.
@@ -212,7 +215,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       machines: self.derive([view], ([shown]) => shown.machines),
       conversation: self.derive([view], ([shown]) => shown.conversation),
       // This code's release.
-      server: constant({ version: INFINICHAT_SERVER_VERSION }),
+      server: constant({ version }),
       catalog: self.derive([accountView], ([shown]) => shown.catalog),
       access: self.derive([accountView], ([shown]) => shown.access),
       signInAttempt: self.derive([accountView], ([shown]) => shown.signInAttempt),

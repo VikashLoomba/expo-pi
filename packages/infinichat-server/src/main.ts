@@ -42,11 +42,16 @@ function hostError(error: HostError): string {
 type ProcessPlugin = (process: ServerProcess) => Facet<InfiniChatPrincipal>;
 const isProcessPlugin = (value: unknown): value is ProcessPlugin => typeof value === 'function';
 
-/** InfiniChat's server plugin, the one module a release replaces without its runtime (`update.ts`). */
-async function infiniChatPlugin(path: string): Promise<ProcessPlugin> {
+/**
+ * InfiniChat's server plugin, the one module a release replaces without its runtime (`update.ts`), and the release it
+ * is of. The runtime reads the version here and holds none itself, so a release that changes only the plugin leaves
+ * the runtime's bytes, and so its key, as they were.
+ */
+async function infiniChatPlugin(path: string): Promise<{ version: string; facet: ProcessPlugin }> {
   const module: unknown = await import(pathToFileURL(path).href);
-  if (typeof module === 'object' && module !== null && 'default' in module && isProcessPlugin(module.default)) {
-    return module.default;
+  if (typeof module === 'object' && module !== null && 'default' in module && isProcessPlugin(module.default)
+    && 'version' in module && typeof module.version === 'string') {
+    return { version: module.version, facet: module.default };
   }
   throw new Error(`${path} is not InfiniChat’s server plugin.`);
 }
@@ -103,14 +108,15 @@ async function serve(): Promise<number> {
     // InfiniChat's and the tools plugin, then the user's, in one publication. Only a release changes the first two,
     // so `/reload-plugins` passes them as they are.
     const failures = await plugins.load([
-      { name: '@infinichat/core', facet: infinichat(proc) }, { name: '@infinichat/tools', facet: tools() },
+      { name: '@infinichat/core', facet: infinichat.facet(proc) },
+      { name: '@infinichat/tools', facet: tools(infinichat.version) },
     ]);
     for (const failure of failures) console.error(failure);
     // Durable resumes once every extension is installed (its `docs/spec.md` §2.2), as chord's design has base code
     // resume after `host.load` (`docs/design.md` §24), so a tool call a restart cut off finds its tool and reruns.
     loaded.resolve();
     const installed = await installedRelease(runtime);
-    const server = await listen(host, home, installed?.version ?? INFINICHAT_SERVER_VERSION);
+    const server = await listen(host, home, infinichat.version);
     // Stops accepting first; the host closes the connections already accepted.
     closes.push(() => server.close());
     if (installed !== undefined) {

@@ -181,7 +181,10 @@ runtime.
 
 The tools plugin is part of the runtime's `main.js`. The runtime tarball also holds
 `plugins/infinichat/inert-mcp.mjs`, and the runtime key hashes `package-lock.json`, `main.js` and that script, so a
-server whose runtime differs downloads the new one and restarts into it. `release.json` keeps its schema (`version`,
+server whose runtime differs downloads the new one and restarts into it. `main.js` holds no version: the runtime
+reads its release's from InfiniChat's plugin, which exports it (`version` in `src/facet.ts`), so a release that
+changes only the plugin keeps the runtime key, and a server on that runtime downloads the plugin alone and replaces
+it in place. `release.json` keeps its schema (`version`,
 `runtime.key`/`sha256`, `plugin.sha256`). Run the server package's lint, typecheck, build and `check`, commit and
 push, then run `pnpm release` there. `--latest=false` is intentional: GitHub Latest belongs to the Mac app, not the
 server.

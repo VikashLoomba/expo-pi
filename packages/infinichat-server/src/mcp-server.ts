@@ -79,7 +79,7 @@ export class McpServer {
   private closed = false;
 
   constructor(readonly name: string, private readonly connection: McpConnection, readonly oauth: McpOAuth | undefined,
-    private readonly log: McpLog, private readonly roots: readonly Root[]) {
+    private readonly log: McpLog, private readonly roots: readonly Root[], private readonly version: string) {
     void this.readSignIn();
     // Its failure says what happened (`connectFailed`), and `/mcp` shows it.
     void this.connect().catch(report);
@@ -268,7 +268,7 @@ export class McpServer {
   }
 
   private async connectOnce(): Promise<McpClient> {
-    const client = new McpClient({ name: 'infinichat', version: INFINICHAT_SERVER_VERSION,
+    const client = new McpClient({ name: 'infinichat', version: this.version,
       requestTimeoutMs: (this.connection.timeout ?? DEFAULT_TIMEOUT) * 1000, roots: this.roots });
     client.onNotification('notifications/message', (params) => this.log.write(this.name, params));
     let closing: Promise<void> | undefined;
