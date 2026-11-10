@@ -1,8 +1,8 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import {
   ConversationTranscript,
-  type ConversationId, type ConversationWatch, type DocumentWatch, type Harness, type TranscriptItem,
-  type TranscriptView,
+  type ConversationId, type ConversationView, type ConversationWatch, type DocumentWatch, type Harness,
+  type TranscriptItem, type TranscriptView, type WatchHandle,
 } from '@earendil-works/pi-durable';
 import { obj, oneOf, opt, str, type Static } from '@earendil-works/pi-schema';
 
@@ -41,34 +41,43 @@ export const gapOf = (view: TranscriptView | undefined, { after, upTo }: Transcr
   view?.items.find((item): item is Gap => item.kind === 'gap' && item.after === after && item.upTo === upTo);
 
 /**
- * A chat while something shows it. The first subscriber attaches watches of pi-durable's conversation view and of the
- * chat's app documents — every one of them exists from the creating commit, so nothing attaches late; the last one to
- * leave stops them. With `transcript`, a `ConversationTranscript` keeps what the chat showed beyond the view's window
- * across attachments, resumes after it, and loads earlier and missed entries when their rows scroll into view
- * (pi-durable's `31-transcript.ts`).
+ * A conversation while something shows it: the lifecycle `ChatView` and `InfiniChatView` share. The first subscriber
+ * attaches pi-durable's conversation view and the view's own watches (`attach`); the last one to leave stops them. A
+ * commit reaches the view and each document in its own call, so they are coalesced into one projection (`project`).
+ * With `transcript`, a `ConversationTranscript` keeps what was shown beyond the view's window across attachments,
+ * resumes after it, and loads earlier and missed entries when their rows scroll into view (pi-durable's
+ * `31-transcript.ts`).
  */
-export class ChatView implements ChatViewSource {
+export abstract class WatchedView<C extends ChatControls, W> implements ChatViewSource<C> {
   private readonly listeners = new Set<() => void>();
   /** Each connection counts up; asynchronous work from a disposed connection is dropped. */
   private connection = 0;
   private view?: ConversationWatch;
-  private metadata?: DocumentWatch<ChatMetadata>;
-  private target?: DocumentWatch<ExecutionTargetState>;
-  private search?: DocumentWatch<SearchPresentationsState>;
+  /** The view's own watches while it is attached. */
+  protected watches?: W;
   private history?: ConversationTranscript;
-  private shown?: TranscriptView;
+  protected shown?: TranscriptView;
   private loaded = false;
   private scheduled = false;
   private snapshot: ChatViewSnapshot = { status: 'loading' };
-  private controls?: ChatControls;
-  private messages: readonly ChatMessage[] = [];
+  protected controls?: C;
+  protected messages: readonly ChatMessage[] = [];
 
-  constructor(
-    private readonly harness: Harness,
-    readonly id: ConversationId,
-    private readonly transcript: boolean,
-    private readonly localRoot: LocalRoot = DEFAULT_LOCAL_ROOT,
-  ) {}
+  constructor(protected readonly harness: Harness, readonly id: ConversationId, private readonly transcript: boolean) {}
+
+  /** Opens the view's own watches. */
+  protected abstract attach(): Promise<W>;
+  /** Every watch of `watches`, to follow and to stop. */
+  protected abstract handles(watches: W): readonly (WatchHandle<unknown> | undefined)[];
+  /** Whether the conversation is there to show, by its watches as they attached. */
+  protected abstract present(watches: W): boolean;
+  /** Reads what the first projection needs before the view counts as loaded. */
+  protected prepare?(): Promise<void>;
+  /**
+   * Sets `controls` and `messages` from the conversation view and the watches, and says what to publish; undefined
+   * leaves the last snapshot.
+   */
+  protected abstract project(view: ConversationView, watches: W): 'ready' | 'missing' | undefined;
 
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -95,6 +104,11 @@ export class ChatView implements ChatViewSource {
     this.schedule();
   };
 
+  /** The conversation view's latest value while attached. */
+  protected get conversation(): ConversationView | undefined {
+    return this.view?.value;
+  }
+
   private async connect() {
     const connection = ++this.connection;
     const current = () => connection === this.connection;
@@ -109,21 +123,14 @@ export class ChatView implements ChatViewSource {
         this.history ??= new ConversationTranscript((query, limit, loadContext) =>
           conversation.entries(query, limit, undefined, loadContext));
       }
-      const [view, metadata, target, search] = await Promise.all([
-        conversation.watch(context, this.history?.resume),
-        this.harness.watchDoc(ChatMetadataDoc, this.id, context),
-        this.harness.watchDoc(ExecutionTargetDoc, this.id, context),
-        this.harness.watchDoc(SearchPresentationsDoc, this.id, context),
-      ]);
-      const docs = [metadata, target, search];
+      const [view, watches] = await Promise.all([conversation.watch(context, this.history?.resume), this.attach()]);
+      const handles = this.handles(watches);
       if (!current()) {
-        await Promise.all([view.stop(), ...docs.map((watch) => watch?.stop())]);
+        await Promise.all([view.stop(), ...handles.map((watch) => watch?.stop())]);
         return;
       }
       this.view = view;
-      this.metadata = metadata;
-      this.target = target;
-      this.search = search;
+      this.watches = watches;
       this.shown = this.history?.merge(view.value);
       view.start(async (call) => {
         if (call.kind !== 'value') return;
@@ -131,15 +138,18 @@ export class ChatView implements ChatViewSource {
         this.shown = this.history?.merge(call.value);
         this.schedule();
       });
-      for (const watch of docs) {
+      for (const watch of handles) {
         watch?.start(async (call) => {
           if (call.kind === 'value') this.schedule();
         });
       }
-      const chat = metadata?.value;
-      if (!chat || chat.deleted) {
+      if (!this.present(watches)) {
         this.publish({ status: 'missing' });
         return;
+      }
+      if (this.prepare) {
+        await this.prepare();
+        if (!current()) return;
       }
       this.loaded = true;
       this.update();
@@ -153,18 +163,17 @@ export class ChatView implements ChatViewSource {
     // the next one is published once every watch is attached again.
     this.connection++;
     this.loaded = false;
-    for (const watch of [this.view, this.metadata, this.target, this.search]) void watch?.stop();
+    void this.view?.stop();
+    for (const watch of this.watches === undefined ? [] : this.handles(this.watches)) void watch?.stop();
     this.view = undefined;
-    this.metadata = undefined;
-    this.target = undefined;
-    this.search = undefined;
+    this.watches = undefined;
   }
 
   /**
-   * The view and each app document deliver a commit in their own call. Coalesce them into one projection; entries and
-   * the built-in documents always come from the same view revision.
+   * The view and each document deliver a commit in their own call. Coalesce them into one projection; entries and the
+   * built-in documents always come from the same view revision.
    */
-  private readonly schedule = () => {
+  protected readonly schedule = () => {
     if (this.scheduled) return;
     this.scheduled = true;
     queueMicrotask(() => {
@@ -175,20 +184,17 @@ export class ChatView implements ChatViewSource {
 
   private update() {
     const view = this.view?.value;
-    if (!this.loaded || !view) return;
-    const metadata = this.metadata?.value;
-    if (metadata?.deleted) {
-      this.controls = undefined;
-      this.messages = [];
-      this.publish({ status: 'missing' });
-      return;
-    }
-    const state: ChatState = { id: this.id, ...readConversationView(view), metadata,
-      execution: this.target?.value, search: this.search?.value };
-    // The window holds the newest entries, which include the last run's.
-    this.controls = projectControls(state, view.entries, this.localRoot);
-    if (this.shown) this.messages = projectMessages(state, this.shown.items);
-    this.publish({ status: 'ready' });
+    if (!this.loaded || !view || this.watches === undefined) return;
+    const status = this.project(view, this.watches);
+    if (status !== undefined) this.publish({ status });
+  }
+
+  /** Reports a failure of work this attachment started, unless the view detached meanwhile. */
+  protected failing(): (error: unknown) => void {
+    const connection = this.connection;
+    return (error) => {
+      if (connection === this.connection) this.fail(error);
+    };
   }
 
   private fail(error: unknown) {
@@ -198,5 +204,55 @@ export class ChatView implements ChatViewSource {
   private publish(snapshot: ChatViewSnapshot) {
     this.snapshot = snapshot;
     for (const listener of [...this.listeners]) listener();
+  }
+}
+
+type ChatWatches = {
+  metadata: DocumentWatch<ChatMetadata> | undefined;
+  target: DocumentWatch<ExecutionTargetState> | undefined;
+  search: DocumentWatch<SearchPresentationsState> | undefined;
+};
+
+/**
+ * A chat while something shows it (`WatchedView`): pi-durable's conversation view and the chat's app documents, every
+ * one of which exists from the creating commit, so nothing attaches late.
+ */
+export class ChatView extends WatchedView<ChatControls, ChatWatches> {
+  constructor(harness: Harness, id: ConversationId, transcript: boolean,
+    private readonly localRoot: LocalRoot = DEFAULT_LOCAL_ROOT) {
+    super(harness, id, transcript);
+  }
+
+  protected async attach(): Promise<ChatWatches> {
+    const [metadata, target, search] = await Promise.all([
+      this.harness.watchDoc(ChatMetadataDoc, this.id, context),
+      this.harness.watchDoc(ExecutionTargetDoc, this.id, context),
+      this.harness.watchDoc(SearchPresentationsDoc, this.id, context),
+    ]);
+    return { metadata, target, search };
+  }
+
+  protected handles({ metadata, target, search }: ChatWatches) {
+    return [metadata, target, search];
+  }
+
+  protected present({ metadata }: ChatWatches) {
+    const chat = metadata?.value;
+    return chat !== undefined && !chat.deleted;
+  }
+
+  protected project(view: ConversationView, watches: ChatWatches) {
+    const metadata = watches.metadata?.value;
+    if (metadata?.deleted) {
+      this.controls = undefined;
+      this.messages = [];
+      return 'missing';
+    }
+    const state: ChatState = { id: this.id, ...readConversationView(view), metadata,
+      execution: watches.target?.value, search: watches.search?.value };
+    // The window holds the newest entries, which include the last run's.
+    this.controls = projectControls(state, view.entries, this.localRoot);
+    if (this.shown) this.messages = projectMessages(state, this.shown.items);
+    return 'ready';
   }
 }

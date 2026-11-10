@@ -136,6 +136,13 @@ export const AppDoc = defineDoc<AppState>({
   }),
 });
 
+/**
+ * A turn is open or still being closed: an input waits for the coordinator, or the turn's end is not logged yet. Until
+ * then a Continue is refused, and the screens show the conversation at work.
+ */
+export const turnOpen = (app: AppState): boolean =>
+  app.open || app.pending.length > 0 || app.cut !== null || app.endNote !== null;
+
 const textOf = (input: UserInput): string => typeof input === 'string'
   ? input
   : input.filter((x) => x.type === 'text').map((x) => x.text).join('');
@@ -862,7 +869,7 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     async continue() {
       await opened.commit(async (tx) => {
         const app = await tx.doc(AppDoc, root.id);
-        if (app.open || app.pending.length > 0 || app.cut !== null || app.endNote !== null) {
+        if (turnOpen(app)) {
           throw new Error(`${name} is still finishing its turn. Try again in a moment.`);
         }
         // Admitted in this commit, before its table writes, with the turn it opens (pi-durable's
