@@ -4,7 +4,7 @@ import {
 import { disabled as disable, font, foregroundStyle, textSelection } from '@expo/ui/swift-ui/modifiers';
 import type { Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { forgetSecret, removeClient, savedSecret } from '@pi-agent/infinichat/pi/infinichat-remote/install';
-import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
+import { moveError, type MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move-status';
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, AppState, StyleSheet } from 'react-native';
@@ -27,7 +27,7 @@ const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
 
 /** The move back a removal runs first, worded as the InfiniChat header words its steps. */
 function movingBack(move: MoveStatus, name: string): string {
-  if (move.undoing) return `Cancelling the move to ${name}…`;
+  if (move.phase !== 'moving') return `Cancelling the move to ${name}…`;
   const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
   return move.step === 'copying' ? `Copying InfiniChat from ${name}${copied}`
     : move.step === 'opening' ? 'Opening InfiniChat on this iPhone…' : `Closing InfiniChat on ${name}…`;
@@ -217,7 +217,7 @@ export default function RemoteHostsScreen() {
           </HStack>
           <Button label="Cancel connection check" onPress={() => active.current?.abort()} />
         </Section>}
-        {releasing && move?.running && <Section title={`Removing ${releasing.name}`}>
+        {releasing && move && moveError(move) === undefined && <Section title={`Removing ${releasing.name}`}>
           <HStack spacing={10}>
             <ProgressView />
             <Text modifiers={[secondary]}>{movingBack(move, releasing.name)}</Text>

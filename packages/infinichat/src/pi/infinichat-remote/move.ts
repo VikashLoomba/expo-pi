@@ -7,6 +7,7 @@ import type { MachineDirectory } from './dialer';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
 import { keyExchangeLines } from './keys';
 import { HASH, PRINT_MARKER, runScript } from './machine';
+import { cancellable, moveError, type MoveBase, type MoveStatus, type MoveStep } from './move-status';
 import type { PagePlatform } from './pages';
 import { compareVersions } from './release';
 import {
@@ -24,25 +25,6 @@ const BACKUP = 'infinichat-backup.db';
 const COPY = `${FOLDER}/copy/infinichat.db`;
 
 type ConversationFile = ConversationFiles['db'];
-
-export type MoveStep = 'connecting' | 'closing' | 'copying' | 'opening';
-/** A move between this device and a machine, while it runs and after a failure stopped it. */
-export interface MoveStatus {
-  machineId: string;
-  /** `phone` is this device, as in the home record. */
-  to: 'machine' | 'phone';
-  /** The machine a move straight to `machineId` comes from; this device otherwise. */
-  from?: string;
-  step: MoveStep;
-  copied?: Copied;
-  running: boolean;
-  /** Why it stopped; the home record keeps its phase until it is tried again or cancelled. */
-  error?: string;
-  /** Cancel can still put the conversation back where it was. */
-  cancellable: boolean;
-  /** A Cancel is putting it back, or a failure stopped one. */
-  undoing?: boolean;
-}
 
 /** What a move does to the two sides through their owner, the app's provider. */
 export interface MoveSides {
@@ -299,7 +281,7 @@ export class InfiniChatMoves {
       const undo = home.phase === 'moving-there';
       this.run(machineId, undo ? 'machine' : 'phone', undo, undo ? home.from : undefined);
       await this.running;
-      const error = this.status?.error;
+      const error = moveError(this.status);
       if (error !== undefined) throw new Error(error);
     }
   }
@@ -307,14 +289,14 @@ export class InfiniChatMoves {
   /** Runs a move a failure stopped again, forward, also when the failure was a Cancel's. */
   retry() {
     const status = this.status;
-    if (this.attempt || status?.error === undefined) return;
+    if (this.attempt || status === undefined || moveError(status) === undefined) return;
     this.run(status.machineId, status.to, false, status.from);
   }
 
   /** Puts the conversation back where it was, before the opening step only; the only way into the undo. */
   cancel() {
     const status = this.status;
-    if (!status?.cancellable) return;
+    if (!status || !cancellable(status)) return;
     if (!this.attempt) {
       // Nothing moved yet: the failure only goes away.
       const home = this.home.getSnapshot();
@@ -347,9 +329,9 @@ export class InfiniChatMoves {
     this.attempt = attempt;
     this.machineClosed = false;
     this.notice = undefined;
-    const origin = from === undefined ? {} : { from };
-    this.status = { machineId, to, ...origin, step: to === 'machine' ? 'connecting' : 'closing', running: true,
-      cancellable: !cancelling };
+    const base = { machineId, to, ...(from === undefined ? {} : { from }) };
+    const first: MoveStep = to === 'machine' ? 'connecting' : 'closing';
+    this.status = { ...base, step: first, phase: cancelling ? 'undoing' : 'moving' };
     this.notify();
     this.running = (async () => {
       await refreshed;
@@ -364,16 +346,16 @@ export class InfiniChatMoves {
         } catch (error) {
           if (this.closed) return;
           if (!attempt.cancelled) {
-            const status = this.status ?? { machineId, to, ...origin, step: 'connecting', cancellable: true };
-            this.status = { ...status, running: false, cancellable: true, error: this.failure(status, error) };
+            const stopped = { ...base, step: this.status?.step ?? first };
+            this.status = { ...stopped, phase: 'failed', error: this.failure(stopped, error) };
             return;
           }
         }
       }
       // Cancelled, with a new signal, which only closing aborts.
       attempt.controller = new AbortController();
-      const step = this.status?.step ?? 'closing';
-      this.status = { machineId, to, ...origin, step, running: true, cancellable: false, undoing: true };
+      const step = this.status?.step ?? first;
+      this.status = { ...base, step, phase: 'undoing' };
       this.notify();
       try {
         await this.undo(machineId, to, attempt.controller.signal, from);
@@ -381,8 +363,7 @@ export class InfiniChatMoves {
       } catch (error) {
         if (this.closed) return;
         const message = error instanceof Error ? error.message : String(error);
-        this.status = { machineId, to, ...origin, step, running: false, cancellable: true, undoing: true,
-          error: `The move could not be cancelled. ${message}` };
+        this.status = { ...base, step, phase: 'undo-failed', error: `The move could not be cancelled. ${message}` };
       }
     })().finally(() => {
       this.attempt = undefined;
@@ -401,7 +382,7 @@ export class InfiniChatMoves {
     await remote.connected(signal);
     await this.receives(remote, this.version, name);
     if (this.home.getSnapshot().home === 'phone') {
-      this.step({ step: 'closing' });
+      this.step('closing');
       this.home.set({ version: 1, home: 'machine', machineId, phase: 'moving-there' });
       this.sides.hold();
       await this.sides.closeLocal();
@@ -412,11 +393,11 @@ export class InfiniChatMoves {
     if (!adopted(held, files)) {
       if (held?.active) throw new Error(`InfiniChat on ${name} already has another conversation open.`);
       this.machineClosed = true;
-      this.step({ step: 'copying' });
-      await upload(await this.copy(machineId, signal), files, (copied) => this.step({ step: 'copying', copied }));
+      this.step('copying');
+      await upload(await this.copy(machineId, signal), files, (copied) => this.step('copying', copied));
       signal.throwIfAborted();
       this.machineClosed = false;
-      this.step({ step: 'opening' }, false);
+      this.step('opening');
       await remote.adopt(files);
     }
     await this.arrived(machineId, remote);
@@ -435,7 +416,7 @@ export class InfiniChatMoves {
     await awaitWithContext(this.environment(toId), withAbortSignal(signal, BACKGROUND_CONTEXT));
     await this.authorize(fromId, toId, signal);
     await target.connected(signal);
-    this.step({ step: 'closing' });
+    this.step('closing');
     // A source that can't be reached can't hand the conversation on; it stays there, shown as it was.
     await source.connected(signal);
     await this.receives(target, source.serverVersion(), this.name(toId));
@@ -450,13 +431,13 @@ export class InfiniChatMoves {
     if (!adopted(held, files)) {
       if (held?.active) throw new Error(`InfiniChat on ${this.name(toId)} already has another conversation open.`);
       this.machineClosed = true;
-      this.step({ step: 'copying' });
+      this.step('copying');
       const record = this.directory(fromId).machine();
       if (record === undefined) throw new Error(`${this.name(fromId)} is no longer among the machines.`);
       await target.pull(record, files);
       signal.throwIfAborted();
       this.machineClosed = false;
-      this.step({ step: 'opening' }, false);
+      this.step('opening');
       await target.adopt(files);
     }
     await this.arrived(toId, target);
@@ -507,7 +488,7 @@ export class InfiniChatMoves {
    */
   private async back(machineId: string, signal: AbortSignal) {
     const remote = this.sides.machine(machineId);
-    this.step({ step: 'closing' });
+    this.step('closing');
     // A machine that can't be reached can't hand the conversation back; it stays there, shown as it was.
     await remote.connected(signal);
     const there = remote.serverVersion();
@@ -522,10 +503,10 @@ export class InfiniChatMoves {
     this.sides.hold();
     const files = await remote.relinquish();
     signal.throwIfAborted();
-    this.step({ step: 'copying' });
-    await download(await this.copy(machineId, signal), files, (copied) => this.step({ step: 'copying', copied }));
+    this.step('copying');
+    await download(await this.copy(machineId, signal), files, (copied) => this.step('copying', copied));
     signal.throwIfAborted();
-    this.step({ step: 'opening' }, false);
+    this.step('opening');
     await this.ownFiles.rename(INCOMING, INFINICHAT_DATABASE);
     await this.ownFiles.remove(MOVED);
     // The placed files are the conversation now, and nothing has opened them, so the record names this device before
@@ -624,7 +605,7 @@ export class InfiniChatMoves {
   }
 
   /** Names the step that failed, then why. */
-  private failure(status: Pick<MoveStatus, 'machineId' | 'to' | 'step' | 'from'>, error: unknown): string {
+  private failure(status: MoveBase, error: unknown): string {
     const name = this.name(status.machineId);
     const there = status.to === 'machine';
     const from = status.from === undefined ? this.device : this.name(status.from);
@@ -637,11 +618,13 @@ export class InfiniChatMoves {
     return `${step} ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  private step(update: Pick<MoveStatus, 'step' | 'copied'>, cancellable = true) {
+  /** The forward move reached `step`; `copied` is how far its copy is. */
+  private step(step: MoveStep, copied?: Copied) {
     const status = this.status;
     if (!status || this.closed) return;
     this.status = { machineId: status.machineId, to: status.to,
-      ...(status.from === undefined ? {} : { from: status.from }), running: true, cancellable, ...update };
+      ...(status.from === undefined ? {} : { from: status.from }), step, phase: 'moving',
+      ...(copied === undefined ? {} : { copied }) };
     this.notify();
   }
 

@@ -1,6 +1,6 @@
 import { hostNamed, method, remote } from '@earendil-works/chord';
 import { stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
-import { arr, bool, nul, num, obj, oneOf, opt, str, union, type Static } from '@earendil-works/pi-schema';
+import { arr, bool, lit, nul, num, obj, oneOf, opt, str, union, type Static } from '@earendil-works/pi-schema';
 import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
 import { ChatExecutionSettingsSchema } from '@pi-agent/infinichat/pi/execution/document';
 import {
@@ -60,18 +60,20 @@ export const ConnectionSchema = union([nul(), obj({
 export type Connection = Static<typeof ConnectionSchema>;
 /** The machine whose InfiniChat the windows show: its endpoint and its name. */
 export const ShownMachineSchema = union([nul(), obj({ id: str(), name: str() }, { open: true })]);
-/** A move between machines as `InfiniChatMoves` reports it (`move.ts`), while it runs and after a failure. */
-export const MoveStatusSchema = obj({
+const MoveFields = {
   machineId: str(),
   to: oneOf(['machine', 'phone']),
   from: opt(str()),
   step: oneOf(['connecting', 'closing', 'copying', 'opening']),
-  copied: opt(obj({ bytes: num(), total: num() }, { open: true })),
-  running: bool(),
-  error: opt(str()),
-  cancellable: bool(),
-  undoing: opt(bool()),
-}, { open: true });
+};
+/** A move between machines as `InfiniChatMoves` reports it (`move-status.ts`), by phase. */
+export const MoveStatusSchema = union([
+  obj({ ...MoveFields, phase: lit('moving'), copied: opt(obj({ bytes: num(), total: num() }, { open: true })) },
+    { open: true }),
+  obj({ ...MoveFields, phase: lit('failed'), error: str() }, { open: true }),
+  obj({ ...MoveFields, phase: lit('undoing') }, { open: true }),
+  obj({ ...MoveFields, phase: lit('undo-failed'), error: str() }, { open: true }),
+]);
 export type MoveStatus = Static<typeof MoveStatusSchema>;
 
 /**

@@ -3,6 +3,7 @@ import {
   INFINICHAT_COMMANDS, type InfiniChatCommand, type InfiniChatCommandName,
 } from '@pi-agent/infinichat/chat/commands';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
+import { chosenMachine, placement, placementOffers } from '@pi-agent/infinichat/pi/infinichat-remote/placement';
 import { getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
@@ -43,8 +44,9 @@ const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
 
 /** The step of a move, as the header's subtitle says it (the phone's `moving`), between machines only here. */
 function moving(move: MoveStatus, machine: string, stage: InstallStage | undefined, from: string): string {
-  if (move.undoing) return move.error === undefined ? 'Cancelling the move…' : 'Couldn’t cancel the move';
-  if (move.error !== undefined) return `Can’t move to ${machine}`;
+  if (move.phase === 'undoing') return 'Cancelling the move…';
+  if (move.phase === 'undo-failed') return 'Couldn’t cancel the move';
+  if (move.phase === 'failed') return `Can’t move to ${machine}`;
   const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
   return move.step === 'connecting' ? connecting(machine, stage)
     : move.step === 'closing' ? `Closing on ${from}…`
@@ -161,31 +163,35 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
       setLocalError(errorText(cause, 'The response could not continue. Try again.'));
     });
   };
-  const connectionError = connection?.status === 'failed' ? connection.error : undefined;
-  const messageError = localError || connectionError || controls?.error || snapshot?.report || snapshot?.view.error;
-  const retry = connectionError && (!localError || localError === connectionError) ? () => {
-    setLocalError(undefined);
-    void ref.reconnect();
-  } : undefined;
+  // Where the conversation is, and what that lets this screen offer, as the phone's screen reads it too.
+  const place = placement({ machineId: machine?.id ?? null, move, link: connection ?? undefined,
+    held: held ?? undefined });
+  const offers = placementOffers(place);
+  const blocked = offers.error;
+  const messageError = localError || blocked?.message || controls?.error || snapshot?.report || snapshot?.view.error;
+  const retry = blocked?.retry === 'move' && !localError ? () => { void ref.retryMove(); }
+    : blocked?.retry === 'link' && (!localError || localError === blocked.message) ? () => {
+      setLocalError(undefined);
+      void ref.reconnect();
+    } : undefined;
   const dismiss = localError ? () => setLocalError(undefined)
-    : connectionError || controls?.error ? undefined
+    : blocked || controls?.error ? undefined
       : snapshot?.report ? () => { void ref.dismissError(); } : undefined;
   const nameOf = (endpoint: string) => listed?.machines[endpoint]?.name ?? (endpoint === machine?.id ? machineName
     : 'the machine');
-  // The checkmark is on where the conversation is going during a move, back where it was during a Cancel, and where
-  // it lives otherwise.
-  const chosen = move ? (!move.undoing ? move.machineId : move.from ?? null) : machine?.id ?? null;
-  const subtitle = move ? moving(move, nameOf(move.machineId), connection?.status === 'connecting'
-    ? connection.stage : undefined, move.from === undefined ? machineName : nameOf(move.from))
+  const chosen = chosenMachine(place);
+  const subtitle = place.at === 'moving'
+    ? moving(place.move, nameOf(place.move.machineId), place.stage,
+      place.move.from === undefined ? machineName : nameOf(place.move.from))
     : connection?.status === 'failed' ? `Can’t connect to ${machineName}`
       : connection?.status === 'connecting' ? connecting(machineName, connection.stage)
         : `${machineName}${busy ? ' · Working…' : ''}`;
   // The server holds the conversation open only while it is here; its cell says where it went otherwise.
-  const away = !move && held !== null && held !== undefined && !held.active
-    ? held.heldBy ? `InfiniChat is on ${held.heldBy.name}.`
-      : `InfiniChat isn’t on ${machineName} yet. Move it here from your iPhone.` : undefined;
+  const away = place.at !== 'elsewhere' ? undefined
+    : place.holder ? `InfiniChat is on ${place.holder.name}.`
+      : `InfiniChat isn’t on ${machineName} yet. Move it here from your iPhone.`;
   const machines = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
-  const failure = !busy && !away ? controls?.runFailure : undefined;
+  const failure = !busy && offers.available ? controls?.runFailure : undefined;
   return (
     <ChatAgentContext value={agent}>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -214,14 +220,14 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {machines.map(([endpoint, record]) => (
-                  <DropdownMenuItem key={endpoint} disabled={!!move || endpoint === chosen}
+                  <DropdownMenuItem key={endpoint} disabled={place.at === 'moving' || endpoint === chosen}
                     onClick={() => { void ref.chooseMove({ machineId: endpoint }); }}>
                     {endpoint === chosen ? <CheckIcon /> : <span className="size-4" />}
                     {record.name}
                   </DropdownMenuItem>
                 ))}
                 {machines.length === 0 && <DropdownMenuItem disabled>No machines yet</DropdownMenuItem>}
-                {move?.cancellable && (
+                {offers.cancel && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onClick={() => { void ref.cancelMove(); }}>
@@ -251,11 +257,8 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
         )}
         {failure && (
           <Notice tone={failure.reason === 'aborted' ? 'neutral' : 'error'} message={failure.message}
-            action={configured && connected && settingsError === undefined && !move ? 'Continue' : undefined}
+            action={configured && connected && settingsError === undefined ? 'Continue' : undefined}
             onAction={resume} />
-        )}
-        {move?.error !== undefined && !messageError && (
-          <Notice message={move.error} action="Try Again" onAction={() => { void ref.retryMove(); }} />
         )}
         {messageError && (
           <Notice message={messageError} action={retry ? 'Try Again' : dismiss ? 'Dismiss' : undefined}
@@ -274,7 +277,7 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
             onAction={() => setCommandResult(undefined)} />
         )}
         <Composer value={draft.text} onChange={changeDraft} onSend={send} onStop={stop} busy={busy}
-          admitting={admitting} disabled={!controls || stopping || !!away || !!move
+          admitting={admitting} disabled={!controls || stopping || !offers.available
             || (!busy && (!configured || !connected || settingsError !== undefined))}
           inputRef={input}
           attachments={draft.images} onAttach={attach} onFiles={attachFiles} onRemoveAttachment={removeImage}

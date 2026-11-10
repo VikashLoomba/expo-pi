@@ -3,7 +3,8 @@ import {
   draftCommand, INFINICHAT_COMMANDS, type InfiniChatCommandName,
 } from '@pi-agent/infinichat/chat/commands';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
-import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
+import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move-status';
+import { chosenMachine, placement, placementOffers } from '@pi-agent/infinichat/pi/infinichat-remote/placement';
 import { findCatalogModel, getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { router, Stack } from 'expo-router';
@@ -37,8 +38,9 @@ const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
  * machine's install is doing while the move connects, and `from` the machine a move between machines leaves.
  */
 function moving(move: MoveStatus, machine: string, stage: InstallStage | undefined, from?: string): string {
-  if (move.undoing) return move.error === undefined ? 'Cancelling the move…' : 'Couldn’t cancel the move';
-  if (move.error !== undefined) {
+  if (move.phase === 'undoing') return 'Cancelling the move…';
+  if (move.phase === 'undo-failed') return 'Couldn’t cancel the move';
+  if (move.phase === 'failed') {
     return move.to === 'machine' ? `Can’t move to ${machine}` : `Can’t move from ${machine}`;
   }
   const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
@@ -81,18 +83,18 @@ export default function InfiniChatScreen() {
   const remote = shown !== undefined;
   // The machine the conversation is on or moving to or from, by the name the conversation's document gives it, or
   // its host name until that is read; a launch never shows a placeholder name first.
-  const machineId = move?.machineId ?? (home.home === 'machine' ? home.machineId : null);
+  const lives = home.home === 'machine' ? home.machineId : null;
+  const machineId = move?.machineId ?? lives;
   const nameOf = (endpoint: string) =>
     listed?.machines[endpoint]?.name ?? hosts.hosts.find((host) => host.id === endpoint)?.hostname;
   const machine = machineId === null ? undefined : nameOf(machineId);
   // Without credentials here, this iPhone can't reach the machine the conversation is on.
   const removed = machineId !== null && hosts.ready && !hosts.hosts.some((host) => host.id === machineId);
-  // The checkmark is on where the conversation is going during a move, back where it was during a Cancel, and where
-  // it lives otherwise.
-  const chosen = move ? ((move.to === 'machine') !== !!move.undoing ? move.machineId : move.from ?? null)
-    : home.home === 'machine' && home.phase !== 'moving-back' ? home.machineId : null;
-  const movingNow = move !== undefined || (home.home === 'machine' && home.phase !== 'there');
-  const there = home.home === 'machine' && home.phase === 'there';
+  // Where the conversation is, and what that lets this screen offer, as the Mac app's screen reads it too.
+  const place = placement({ machineId: lives, move, link: connection, removed });
+  const offers = placementOffers(place);
+  const chosen = chosenMachine(place);
+  const movingNow = place.at === 'moving';
   const [draft, setDraft] = useState(emptyDraft);
   const changeDraft = useCallback((text: string) => {
     setDraft((current) => current.text === text ? current : { ...current, text, requestId: uuidv7() });
@@ -212,30 +214,28 @@ export default function InfiniChatScreen() {
       setLocalError(cause instanceof Error ? cause.message : 'The response could not continue. Try again.');
     }
   };
-  const failure = !busy && !movingNow ? conversation?.runFailure : undefined;
+  const failure = !busy && offers.available ? conversation?.runFailure : undefined;
   // A move that failed, and a machine that can't be reached, are tried again when the user asks and when the app
   // becomes active; a send that failed with the same error offers the same. A removed machine has nothing to try again.
-  const moveError = move?.running === false ? move.error : undefined;
-  const connectionError = there && connection?.status === 'failed' ? connection.error : undefined;
-  const messageError = localError || moveError || connectionError || conversation?.error || serviceError || appError
+  const blocked = offers.error;
+  const messageError = localError || blocked?.message || conversation?.error || serviceError || appError
     || access.error;
-  const retry = moveError && !localError ? () => moves?.retry()
-    : !removed && connectionError && (!localError || localError === connectionError) ? () => {
+  const retry = blocked?.retry === 'move' && !localError ? () => moves?.retry()
+    : blocked?.retry === 'link' && (!localError || localError === blocked.message) ? () => {
       setLocalError(undefined);
       connection?.retry();
     } : undefined;
   const dismiss = localError ? () => setLocalError(undefined)
-    : connectionError || conversation?.error ? undefined
+    : blocked || conversation?.error ? undefined
       : serviceError ? () => service.dismissError()
         : appError ? dismissError : undefined;
   const working = busy ? `Working… · ${settingsLabel}` : settingsLabel;
   const subtitle = removed ? 'Machine removed'
-    : move && machine !== undefined
-      ? moving(move, machine, connection?.status === 'connecting' ? connection.stage : undefined,
-        move.from === undefined ? undefined : nameOf(move.from))
-      : !there || machine === undefined ? working
-        : connection?.status === 'failed' ? `Can’t connect to ${machine}`
-          : connection?.status === 'connecting' ? connecting(machine, connection.stage)
+    : place.at === 'here' || machine === undefined ? working
+      : place.at === 'moving'
+        ? moving(place.move, machine, place.stage, place.move.from === undefined ? undefined : nameOf(place.move.from))
+        : place.link?.status === 'failed' ? `Can’t connect to ${machine}`
+          : place.link?.status === 'connecting' ? connecting(machine, place.link.stage)
             : `${machine} · ${working}`;
   const runsOn = machineId === null || home.home === 'phone' ? PHONE
     : removed ? 'a removed machine' : machine ?? 'a remote machine';
@@ -280,7 +280,7 @@ export default function InfiniChatScreen() {
             {nameOf(host.id) ?? host.hostname}
           </Stack.Toolbar.MenuAction>)}
         </Stack.Toolbar.Menu>
-        {move?.cancellable && <Stack.Toolbar.Menu inline>
+        {offers.cancel && <Stack.Toolbar.Menu inline>
           <Stack.Toolbar.MenuAction icon="xmark" destructive onPress={() => moves?.cancel()}>
             Cancel Move
           </Stack.Toolbar.MenuAction>
@@ -334,7 +334,7 @@ export default function InfiniChatScreen() {
       <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
         onStop={() => { void stop(); }}
         onConnect={openAccount} busy={busy} admitting={admitting} connected={connected}
-        disabled={!conversation || stopping
+        disabled={!conversation || stopping || !offers.available
           || (!busy && (!configured || !access.ready || !!settingsError))}
         accountStatus={accountStatus} inputRef={input}
         attachments={draft.images} onAttach={(source) => { void attach(source); }} onRemoveAttachment={removeImage}

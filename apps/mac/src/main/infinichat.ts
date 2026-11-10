@@ -5,7 +5,8 @@ import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi
 import type { ConversationState, InfiniChatClient } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatHomeStore } from '@pi-agent/infinichat/pi/infinichat-remote/home';
 import type { McpView } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-client';
-import { InfiniChatMoves, type MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move';
+import { InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
+import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move-status';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 import { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
 import { INFINICHAT_SERVER_MANIFEST } from '@pi-agent/infinichat-server/manifest';
@@ -53,6 +54,8 @@ export class MacInfiniChat {
         show: (remote) => this.show(remote),
         closeMachine: (id) => this.closeMachine(id),
       });
+    // The connection reported follows a move's steps (`getConnection`).
+    this.moves.subscribe(() => this.notify());
   }
 
   /** The manager of the machines, which gives each record; set once it exists, since it reads the shown side. */
@@ -65,7 +68,16 @@ export class MacInfiniChat {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   };
-  readonly getConnection = (): RemoteConnection | undefined => this.current?.remote.getConnection();
+  /**
+   * The shown machine's connection; while a move connects, its target's, so the header says what that machine's
+   * install is doing, as the phone's does (`chat-provider.tsx`, `machine`).
+   */
+  readonly getConnection = (): RemoteConnection | undefined => {
+    const move = this.moves.getSnapshot();
+    const target = move?.phase === 'moving' && move.step === 'connecting' ? this.remotes.get(move.machineId)
+      : undefined;
+    return (target ?? this.current?.remote)?.getConnection();
+  };
   readonly getMachine = () => {
     const current = this.current;
     if (current === undefined) return undefined;
@@ -217,6 +229,8 @@ export class MacInfiniChat {
         : remoteDialer(id, directory.machine, machines, this.client, this.secrets);
       remote = new RemoteInfiniChat(dialer, directory, this.client, INFINICHAT_SERVER_MANIFEST.version);
       this.remotes.set(id, remote);
+      // Every client's changes reach the screens: a move's target reports its connection before it is shown.
+      remote.subscribe(() => this.notify());
     }
     return remote;
   }
@@ -227,10 +241,7 @@ export class MacInfiniChat {
     if (id === undefined) return;
     this.shown.show(remote);
     this.current?.stop();
-    const stopRemote = remote.subscribe(() => {
-      this.notify();
-      this.follow();
-    });
+    const stopRemote = remote.subscribe(() => this.follow());
     const stopMcp = remote.mcp.subscribe(() => this.notifyMcp());
     this.current = { id, remote, stop: () => {
       stopRemote();
