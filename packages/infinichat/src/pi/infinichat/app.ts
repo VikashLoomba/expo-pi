@@ -16,7 +16,7 @@ import {
 } from './agents';
 import { MemoryDoc, advanceMessageProgress, appendMessage, memoryReady, renderMain, settleViews } from './memory';
 import { sharedPrompt, subagentPrompt } from './prompt';
-import { scheduleTool, scheduledTask, type ScheduledInput } from './schedule';
+import { abortScheduled, scheduleTools, scheduledTask, type ScheduledInput } from './schedule';
 import { BuildNode, ConfigDoc, pumpBuilds } from './summary';
 import { memoryTools, toolPolicy, type NativeContracts } from './tools';
 
@@ -671,8 +671,10 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
   },
 });
 
-/** What OptChat's extensions are built from: host capabilities, none of them the Harness they run in. */
+/** What OptChat's extensions are built from: host capabilities, of which only `harness` is the Harness they run in. */
 export type OptChatExtensionOptions = {
+  /** The Harness the extensions run in, once the host has opened one: the schedule tools abort a waiting task on it. */
+  harness: () => Harness | undefined;
   /** The agent's name until the user names it in `ConfigDoc`. */
   name?: string;
   hasDeviceTools?: boolean;
@@ -766,7 +768,9 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
     turnState,
   });
   const scheduled = scheduledTask((tx, id, input) => admitInput(tx, id, { ...input, kind: 'work' }));
-  const agentCalls = [...agentTools(ROOT_CONVERSATION_ID, agents), scheduleTool(ROOT_CONVERSATION_ID, scheduled)];
+  const agentCalls = [
+    ...agentTools(ROOT_CONVERSATION_ID, agents), ...scheduleTools(ROOT_CONVERSATION_ID, scheduled, options.harness),
+  ];
   // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
   // reaches an existing conversation as pi-durable's system entry instead of staying as created. The master's prompt
   // and agent tools are an extension of their own, which a subagent's conversation goes without. The section reads the
@@ -929,8 +933,7 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       }
     },
     async cancelScheduled(id, replacement) {
-      await opened.abortTask(id, context);
-      if ((await opened.waitForTask(id, context)).state.outcome.status !== 'aborted') return false;
+      if (!await abortScheduled(opened, id, context)) return false;
       if (replacement) {
         await root.commit((tx) => tx.createTask(scheduled, replacement, {
           ownership: { kind: 'conversation' },

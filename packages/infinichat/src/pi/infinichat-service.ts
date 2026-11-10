@@ -82,6 +82,7 @@ export function infiniChatExtensions(devices: InfiniChatDevices, harness: () => 
   report: (error: unknown) => void): OptChatParts {
   return optChatParts({
     name: TITLE,
+    harness,
     hasDeviceTools: true,
     ...devices,
     nativeContracts: { bash: 'bash', read: 'read' },

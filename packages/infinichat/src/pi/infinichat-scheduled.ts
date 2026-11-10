@@ -1,22 +1,14 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import type { JsonValue } from '@earendil-works/chord/json';
 import { num, obj, type Static } from '@earendil-works/pi-schema';
 import type { Harness, TaskGraphWatch } from '@earendil-works/pi-durable';
 
-import { SCHEDULED_TASK, ScheduledInputProperties, type ScheduledInput } from './infinichat/schedule';
+import { SCHEDULED_TASK, ScheduledInputProperties, waitingTasks } from './infinichat/schedule';
 
 const context = BACKGROUND_CONTEXT;
 
 /** A scheduled task still waiting, by the number of pi-durable's own task ID. */
 export const ScheduledTaskSchema = obj({ id: num(), ...ScheduledInputProperties }, { open: true });
 export type ScheduledTask = Static<typeof ScheduledTaskSchema>;
-
-/** The input of a scheduled task, read from pi-durable's own record. */
-function scheduledInput(value: JsonValue): ScheduledInput | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const { task, until } = value;
-  return typeof task === 'string' && typeof until === 'number' ? { task, until } : undefined;
-}
 
 /**
  * The scheduled tasks still waiting, read again from pi-durable's records whenever the task graph changes. The
@@ -69,17 +61,9 @@ export class ScheduledTasks {
     for (const listener of [...this.listeners]) listener();
   }
 
-  /** The scheduled tasks still waiting for a time ahead, from pi-durable's records; a due one is about to run. */
+  /** The scheduled tasks still waiting, read only while the task graph holds one. */
   private async pending(): Promise<ScheduledTask[]> {
     const tasks = Object.values(this.graph?.value.tasks ?? {});
-    if (!tasks.some((task) => task.kind === SCHEDULED_TASK)) return [];
-    const inspection = await this.harness.inspect(context);
-    const pending: ScheduledTask[] = [];
-    for (const { record } of inspection.tasks) {
-      if (record.kind !== SCHEDULED_TASK || record.abortRequested) continue;
-      const input = scheduledInput(record.input);
-      if (input && input.until > Date.now()) pending.push({ ...input, id: record.id });
-    }
-    return pending.sort((left, right) => left.until - right.until);
+    return tasks.some((task) => task.kind === SCHEDULED_TASK) ? waitingTasks(this.harness, context) : [];
   }
 }
