@@ -33,7 +33,6 @@ import { phoneMachines, shownMachines } from '../pi/infinichat-remote/phone-mach
 import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
 import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
 import { createChatCredentialStore, createChatModels } from '../pi/models';
-import { relayMachineSignIn } from '../pi/machine-sign-in';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
 import { openExpoSqliteStorage } from '../pi/storage';
@@ -41,6 +40,7 @@ import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
 import { WorkspaceExecutionEnv } from '../pi/workspace/execution-env';
 import { createInfiniChatAvatar } from './infinichat-avatar';
 import type { ProviderAccount } from './provider-account';
+import { useMachineSignIn, useSignInPage } from './use-machine-sign-in';
 import { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
 
 const subscribeNothing = () => () => {};
@@ -328,32 +328,13 @@ function shownSignIn(shown: SignInAttempt, notice: AuthNotice | undefined) {
   };
 }
 
-/**
- * The attempt's sign-in page again in the external browser, whose address bar shows the return URL to paste; one at a
- * time.
- */
-function useSignInPage(shown: SignInAttempt, setNotice: (notice: AuthNotice) => void) {
-  const [browserOpen, setBrowserOpen] = useState(false);
-  const manual = useRef<AbortController | null>(null);
-  const closeSignInPage = useCallback(() => manual.current?.abort(), []);
-  const openSignInPage = async () => {
-    if (!shown?.running || shown.url === undefined || manual.current) return;
-    const { providerId, url } = shown;
-    const controller = new AbortController();
-    manual.current = controller;
-    setBrowserOpen(true);
-    try {
-      if (providerId === OPENAI_PROVIDER_ID) await openOpenAIManualBrowser(url, controller.signal);
-    } catch {
-      if (controller.signal.aborted) return;
-      setNotice({ providerId, message: 'Could not open the sign-in page. Please try again.' });
-    } finally {
-      if (manual.current === controller) manual.current = null;
-      setBrowserOpen(false);
-    }
-  };
-  return { browserOpen, openSignInPage, closeSignInPage };
-}
+const PAGE_FAILED = 'Could not open the sign-in page. Please try again.';
+/** A provider's sign-in page: ChatGPT's, the one this phone knows how to check and open. */
+const openProviderPage = async ({ providerId }: { providerId: string }, url: string, signal: AbortSignal) => {
+  if (providerId === OPENAI_PROVIDER_ID) await openOpenAIManualBrowser(url, signal);
+};
+/** The latest sign-in of the machine's own providers. */
+const providerAttempt = (remote: RemoteInfiniChat) => remote.getSignIn();
 
 /**
  * This iPhone's own sign-ins, run and kept as a machine keeps the ones it runs for its clients (`ProviderSignIn`): one
@@ -365,7 +346,8 @@ function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: 
   const [signIns] = useState(() => new ProviderSignIn(models, credentials, getOpenAILoginOptions, onSignedIn));
   const shown = useSyncExternalStore(signIns.subscribe, signIns.getSnapshot, signIns.getSnapshot);
   const [notice, setNotice] = useState<AuthNotice>();
-  const { browserOpen, openSignInPage, closeSignInPage } = useSignInPage(shown, setNotice);
+  const { browserOpen, openSignInPage, closeSignInPage } = useSignInPage(shown, openProviderPage,
+    ({ providerId }) => setNotice({ providerId, message: PAGE_FAILED }));
   useEffect(() => () => {
     signIns.cancel();
     closeSignInPage();
@@ -592,51 +574,29 @@ export function useInfiniChatAccount(): ProviderAccount & {
   const listed = useMachines();
   const [notice, setNotice] = useState<AuthNotice>();
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
-  const { browserOpen, openSignInPage, closeSignInPage } = useSignInPage(shown, setNotice);
+  const { browserOpen, openSignInPage, closeSignInPage } = useSignInPage(shown, openProviderPage,
+    ({ providerId }) => setNotice({ providerId, message: PAGE_FAILED }));
   // This phone's part of an attempt it started, its browser, and the manual browser; both end with the machine.
-  const flow = useRef<AbortController | null>(null);
-  useEffect(() => () => {
-    flow.current?.abort();
-    closeSignInPage();
-  }, [remote, closeSignInPage]);
+  const relay = useMachineSignIn(remote, providerAttempt);
+  const cancelRelay = relay.cancel;
+  useEffect(() => () => closeSignInPage(), [remote, closeSignInPage]);
   const cancelSignIn = useCallback(() => {
-    flow.current?.abort();
     closeSignInPage();
-    // Only an attempt under way, so leaving the screen while disconnected starts no connection.
-    if (remote?.getSignIn()?.running) void remote.cancelSignIn().catch(() => {});
-  }, [remote, closeSignInPage]);
+    cancelRelay();
+  }, [cancelRelay, closeSignInPage]);
   if (!remote) return { ...app, machine: undefined };
 
-  const signIn = async (providerId: string) => {
-    if (!remote || flow.current) return;
-    const controller = new AbortController();
-    flow.current = controller;
-    setNotice(undefined);
-    try {
-      // A sign-in the machine never started has no state there to say why.
-      const attempt = await remote.signIn(providerId).catch((error: unknown) => {
-        setNotice({ providerId, message: error instanceof Error ? error.message : String(error) });
-        throw error;
-      });
-      if (providerId !== OPENAI_PROVIDER_ID) return;
-      await relayMachineSignIn(remote, attempt, controller.signal, () => {
-        setNotice({ providerId, message: 'Sign-in could not be completed. Please try again.' });
-        void remote.cancelSignIn().catch(() => {});
-      });
-    } catch {
-      // The machine's state says how its attempt went, and a browser that failed leaves its prompt there.
-    } finally {
-      if (flow.current === controller) flow.current = null;
-      controller.abort();
-    }
-  };
+  // ChatGPT's return comes to this phone's receiver; another provider's sign-in has no browser to bring back.
+  const signIn = (providerId: string) => relay.run((machine) => machine.signIn(providerId),
+    (message) => setNotice(message === undefined ? undefined : { providerId, message }),
+    providerId === OPENAI_PROVIDER_ID);
   const disconnectProvider = async (providerId: string) => {
     if (disconnectingProvider !== undefined && disconnectingProvider !== providerId) {
       const name = catalog.find((provider) => provider.id === disconnectingProvider)?.name ?? disconnectingProvider;
       throw new Error(`Finish disconnecting ${name} before removing another provider.`);
     }
     if (!remote) throw new Error('InfiniChat is not connected yet.');
-    flow.current?.abort();
+    relay.stop();
     setDisconnectingProvider(providerId);
     // The machine cancels its own sign-in before it signs out.
     await remote.signOut(providerId);

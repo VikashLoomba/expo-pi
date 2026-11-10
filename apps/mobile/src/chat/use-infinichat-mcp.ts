@@ -1,11 +1,14 @@
-import type { McpView } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-client';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { McpView, RemoteMcp } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-client';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 
-import { openSignInPage, relayMachineSignIn } from '../pi/machine-sign-in';
+import { openSignInPage as openPage } from '../pi/machine-sign-in';
 import { useMachines, useShownMachine } from './chat-provider';
+import { useMachineSignIn, useSignInPage } from './use-machine-sign-in';
 
 const subscribeNothing = () => () => {};
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+/** The latest sign-in of the machine's MCP servers. */
+const mcpAttempt = (mcp: RemoteMcp) => mcp.getAttempt();
 
 /** What `/mcp` shows while InfiniChat runs on this iPhone, as `/reload-plugins` says (`infinichat-service.ts`). */
 export const MCP_ON_PHONE = 'MCP servers run on a machine’s InfiniChat server. Move InfiniChat to a machine to use them.';
@@ -26,37 +29,13 @@ export function useInfiniChatMcp() {
   const view = useSyncExternalStore(mcp?.subscribe ?? subscribeNothing, getView, getView);
   const [notice, setNotice] = useState<McpNotice>();
   const [busy, setBusy] = useState<string>();
-  const [browserOpen, setBrowserOpen] = useState(false);
   // This phone's part of an attempt it started; it ends with the screen and with the machine shown.
-  const flow = useRef<AbortController | null>(null);
-  useEffect(() => () => flow.current?.abort(), [mcp]);
-  const cancelSignIn = useCallback(() => {
-    flow.current?.abort();
-    if (mcp?.getAttempt()?.running) void mcp.cancelSignIn().catch(() => {});
-  }, [mcp]);
-
-  const signIn = async (server: string) => {
-    if (!mcp || flow.current) return;
-    const controller = new AbortController();
-    flow.current = controller;
-    setNotice(undefined);
-    try {
-      // A sign-in the machine never started has no state there to say why.
-      const attempt = await mcp.signIn(server).catch((error: unknown) => {
-        setNotice({ server, message: message(error) });
-        throw error;
-      });
-      await relayMachineSignIn(mcp, attempt, controller.signal, () => {
-        setNotice({ server, message: 'Sign-in could not be completed. Please try again.' });
-        void mcp.cancelSignIn().catch(() => {});
-      });
-    } catch {
-      // The machine's state says how its attempt went.
-    } finally {
-      if (flow.current === controller) flow.current = null;
-      controller.abort();
-    }
-  };
+  const relay = useMachineSignIn(mcp, mcpAttempt);
+  const attempt = view?.signInAttempt ?? null;
+  const { browserOpen, openSignInPage } = useSignInPage(attempt, (_shown, url) => openPage(url),
+    ({ server }) => setNotice({ server, message: 'Could not open the sign-in page. Please try again.' }));
+  const signIn = (server: string) => relay.run((machine) => machine.signIn(server),
+    (text) => setNotice(text === undefined ? undefined : { server, message: text }));
   /** A server action other than sign-in, one at a time, whose failure shows as the server's notice. */
   const act = async (server: string, action: () => Promise<void>) => {
     if (busy !== undefined) return;
@@ -70,7 +49,6 @@ export function useInfiniChatMcp() {
       setBusy(undefined);
     }
   };
-  const attempt = view?.signInAttempt ?? null;
   return {
     view,
     machine: remote === undefined ? undefined : listed?.machines[remote.machineId]?.name ?? 'the machine',
@@ -78,7 +56,7 @@ export function useInfiniChatMcp() {
     busy,
     browserOpen,
     signIn,
-    cancelSignIn,
+    cancelSignIn: relay.cancel,
     signOut: (server: string) => act(server, () => mcp?.signOut(server) ?? Promise.resolve()),
     reconnect: (server: string) => act(server, () => mcp?.reconnect(server) ?? Promise.resolve()),
     answer: (promptId: number, value: string) => {
@@ -88,16 +66,6 @@ export function useInfiniChatMcp() {
       });
       return true;
     },
-    openSignInPage: async () => {
-      if (!attempt?.running || attempt.url === undefined) return;
-      setBrowserOpen(true);
-      try {
-        await openSignInPage(attempt.url);
-      } catch {
-        setNotice({ server: attempt.server, message: 'Could not open the sign-in page. Please try again.' });
-      } finally {
-        setBrowserOpen(false);
-      }
-    },
+    openSignInPage,
   };
 }
