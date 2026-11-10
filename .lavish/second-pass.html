@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Second pass</title>
+<script>
+  // ?theme=dark or ?theme=light pins the page; otherwise it follows the system, as the Mac app does.
+  const pinned = new URLSearchParams(location.search).get('theme');
+  if (pinned === 'dark' || pinned === 'light') document.documentElement.setAttribute('data-theme', pinned);
+</script>
+<style>
+  /* The Mac app's palette (apps/mac/src/view/app.css): macOS system colors in shadcn's names. */
+  :root {
+    color-scheme: light dark;
+    --radius: 0.625rem;
+    --background: #ffffff; --foreground: #1d1d1f; --card: #f5f5f7; --primary: #007aff;
+    --muted: #f0f0f3; --muted-foreground: #6e6e73; --accent: #ebebf0; --destructive: #ff3b30; --border: #d2d2d7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: #1e1e1e; --foreground: #f5f5f7; --card: #2a2a2c; --primary: #0a84ff;
+      --muted: #2c2c2e; --muted-foreground: #98989d; --accent: #3a3a3c; --destructive: #ff453a; --border: #3a3a3c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --background: #1e1e1e; --foreground: #f5f5f7; --card: #2a2a2c; --primary: #0a84ff;
+    --muted: #2c2c2e; --muted-foreground: #98989d; --accent: #3a3a3c; --destructive: #ff453a; --border: #3a3a3c;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background: var(--background); }
+  body {
+    margin: 0; background: var(--background); color: var(--foreground);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 56px 24px 96px; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; }
+  p, li, td, th, h1, h2, h3, figcaption { overflow-wrap: anywhere; }
+  a { color: inherit; text-decoration: none; }
+
+  .eyebrow { color: var(--muted-foreground); font-size: 13px; letter-spacing: 0.02em; }
+  h1 { font-size: clamp(34px, 6vw, 60px); line-height: 1.02; letter-spacing: -0.03em; margin: 10px 0 14px; }
+  .lede { font-size: 19px; color: var(--muted-foreground); max-width: 46ch; margin: 0; }
+  .lede b { color: var(--foreground); font-weight: 600; }
+
+  .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 40px; }
+  .tile {
+    display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  }
+  .tile .n { font-size: 13px; color: var(--muted-foreground); }
+  .tile .what { font-weight: 600; }
+  .tile .shift { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+  .tile .shift span { color: var(--primary); }
+  .order { margin-top: 14px; color: var(--muted-foreground); font-size: 14px; }
+
+  .chip {
+    display: inline-block; align-self: flex-start; padding: 3px 9px; border-radius: 999px; font-size: 12px;
+    font-weight: 600; white-space: nowrap; background: var(--primary); color: #fff;
+  }
+  .chip.quiet { background: var(--accent); color: var(--foreground); }
+
+  .finding { margin-top: 84px; scroll-margin-top: 24px; }
+  .finding > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; align-items: start; }
+  .num { font-size: 64px; font-weight: 700; line-height: 0.9; letter-spacing: -0.04em; color: var(--primary); }
+  .finding h2 { font-size: clamp(22px, 3vw, 30px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 6px; }
+  .finding .why { margin: 0; color: var(--muted-foreground); max-width: 62ch; }
+
+  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+  figure.panel {
+    margin: 0; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 16px;
+    background: var(--background);
+  }
+  figure.panel.after { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); }
+  figcaption { display: flex; gap: 10px; align-items: baseline; margin-bottom: 10px; font-size: 14px; }
+  figcaption b {
+    flex: none; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px;
+    border-radius: 6px; background: var(--accent);
+  }
+  .after figcaption b { background: var(--primary); color: #fff; }
+  .figwrap { overflow-x: auto; }
+
+  /* Figures: color through the page's tokens, so they follow light and dark. */
+  svg.fig { display: block; width: 100%; height: auto; min-width: 460px; color: var(--foreground); }
+  svg.fig text { font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; fill: currentColor; }
+  svg.fig .t { font-size: 13px; font-weight: 600; }
+  svg.fig .s { font-size: 10.5px; fill: var(--muted-foreground); }
+  svg.fig .l { font-size: 11.5px; fill: var(--muted-foreground); }
+  svg.fig .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  svg.fig .bad-t { fill: var(--destructive); }
+  svg.fig .nd rect { fill: var(--card); stroke: var(--border); stroke-width: 1.2; }
+  svg.fig .nd.real rect { stroke: color-mix(in srgb, var(--foreground) 45%, var(--border)); }
+  svg.fig .nd.ok rect {
+    fill: color-mix(in srgb, var(--primary) 13%, var(--background)); stroke: var(--primary); stroke-width: 1.4;
+  }
+  svg.fig .nd.bad rect {
+    fill: color-mix(in srgb, var(--destructive) 9%, var(--background)); stroke: var(--destructive);
+    stroke-dasharray: 5 3;
+  }
+  svg.fig .void { fill: url(#hatch); stroke: var(--border); stroke-width: 1; }
+  svg.fig .e { fill: none; stroke: var(--muted-foreground); stroke-width: 1.4; marker-end: url(#arr); }
+  svg.fig .e.ok { stroke: var(--primary); marker-end: url(#arr-ok); }
+  svg.fig .e.bad { stroke: var(--destructive); opacity: 0.75; marker-end: url(#arr-bad); }
+  svg.fig .e.dash { stroke-dasharray: 4 3; }
+  svg.fig .frame { fill: none; stroke: var(--border); stroke-width: 1.2; }
+  svg.fig .frame.ok { stroke: var(--primary); fill: color-mix(in srgb, var(--primary) 5%, var(--background)); }
+  svg.fig .frame.bad {
+    stroke: var(--destructive); stroke-dasharray: 5 3; fill: color-mix(in srgb, var(--destructive) 4%, var(--background));
+  }
+  .arr-fill { fill: var(--muted-foreground); }
+  .arr-ok-fill { fill: var(--primary); }
+  .arr-bad-fill { fill: var(--destructive); }
+  .hatch-line { stroke: var(--border); stroke-width: 2.2; }
+
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+  .fact { min-width: 0; padding: 14px 16px; border-radius: 14px; background: var(--card); }
+  .fact h3 {
+    margin: 0 0 6px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  .fact ul { margin: 0; padding-left: 18px; }
+  .fact li { margin: 4px 0; font-size: 14px; }
+  .fact.where li { list-style: none; margin-left: -18px; font-size: 12.5px; color: var(--muted-foreground); }
+  .fact.where li b { color: var(--foreground); font-weight: 600; }
+
+  .drift { margin-top: 16px; border: 1px solid var(--border); border-radius: 14px; overflow-x: auto; }
+  .drift table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+  .drift caption { text-align: left; padding: 12px 16px 4px; font-weight: 600; }
+  .drift th, .drift td { text-align: left; vertical-align: top; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .drift th { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); border-top: 0; }
+  .drift td small { display: block; margin-top: 3px; color: var(--muted-foreground); }
+  .drift label { display: block; white-space: nowrap; }
+
+  .code { margin-top: 16px; }
+  .code .cap { font-size: 13px; color: var(--muted-foreground); margin-bottom: 6px; }
+  .code .render { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+
+  form.decide {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 16px; padding: 14px 16px;
+    border: 1px solid var(--border); border-radius: 14px;
+  }
+  form.decide .q { font-weight: 600; }
+  form.decide label { display: inline-flex; gap: 6px; align-items: center; }
+  form.decide .rec { font-size: 11px; color: var(--primary); font-weight: 600; }
+  form.decide input[type="text"] {
+    flex: 1 1 220px; min-width: 0; padding: 7px 10px; font: inherit; color: inherit; background: var(--background);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  form.decide button {
+    padding: 7px 14px; font: inherit; font-weight: 600; color: #fff; background: var(--primary); border: 0;
+    border-radius: 8px; cursor: pointer;
+  }
+  form.decide .queued { flex-basis: 100%; font-size: 13px; color: var(--muted-foreground); }
+  form.decide .queued:empty { display: none; }
+  /* Finding 2's form wraps its table too, so only its answer row is the bordered box. */
+  form.decide.wide { display: block; margin-top: 16px; padding: 0; border: 0; }
+  form.decide .answer {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 16px; padding: 14px 16px;
+    border: 1px solid var(--border); border-radius: 14px;
+  }
+  input[type="radio"] { accent-color: var(--primary); }
+
+  .rest { margin-top: 96px; }
+  .rest h2 { font-size: clamp(22px, 3vw, 30px); letter-spacing: -0.02em; margin: 0 0 4px; }
+  .rest p { margin: 0 0 16px; color: var(--muted-foreground); }
+  .rest .rows { border: 1px solid var(--border); border-radius: 14px; overflow-x: auto; }
+  .rest table { width: 100%; min-width: 680px; border-collapse: collapse; font-size: 14px; }
+  .rest td { padding: 11px 16px; border-top: 1px solid var(--border); vertical-align: top; }
+  .rest tr:first-child td { border-top: 0; }
+  .rest td:first-child { font-weight: 600; white-space: nowrap; }
+  .rest td:nth-child(2) { color: var(--muted-foreground); font-size: 12.5px; }
+  footer { margin-top: 48px; color: var(--muted-foreground); font-size: 13px; }
+
+  @media (max-width: 900px) {
+    .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pair, .facts { grid-template-columns: minmax(0, 1fr); }
+    .finding > header { grid-template-columns: auto minmax(0, 1fr); }
+    .finding > header .chip { grid-column: 2; justify-self: start; }
+    .num { font-size: 44px; }
+  }
+  @media (max-width: 520px) {
+    main { padding: 32px 16px 64px; }
+    .summary { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* The second pass: six tiles, and the coverage map. */
+  .summary.six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  svg.fig.wide { min-width: 980px; }
+  svg.fig .cv rect { stroke-width: 1.2; }
+  svg.fig .cv text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  svg.fig .cv.f rect { fill: color-mix(in srgb, var(--primary) 22%, var(--background)); stroke: var(--primary); }
+  svg.fig .cv.p rect {
+    fill: color-mix(in srgb, var(--primary) 7%, var(--background)); stroke: var(--primary); stroke-dasharray: 4 3;
+  }
+  svg.fig .cv.s rect { fill: url(#hatch); stroke: var(--border); }
+  svg.fig .cv.n rect { fill: none; stroke: var(--border); stroke-dasharray: 2 3; }
+  svg.fig .cv.n text { fill: var(--muted-foreground); }
+  @media (max-width: 900px) { .summary.six { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .summary.six { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+
+<!-- Shared arrowheads and the hatch for combinations that never happen. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arr-fill"/>
+    </marker>
+    <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arr-ok-fill"/>
+    </marker>
+    <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arr-bad-fill"/>
+    </marker>
+    <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="7" class="hatch-line"/>
+    </pattern>
+  </defs>
+</svg>
+
+<main>
+  <div class="eyebrow">pi-agent · second pass at <code>1c0e0de</code></div>
+  <h1>What the first audit never opened</h1>
+  <p class="lede">Five areas read this time. <b>Three things worth doing, three to leave for now.</b>
+    Nothing in the core agent code. Read from code; nothing was run.</p>
+
+  <nav class="summary six" aria-label="Findings">
+    <a class="tile" href="#f5"><span class="n">5 · Chat views</span>
+      <span class="shift">2 lifecycles <span>→</span> 1</span><span class="chip">Do · deletes code</span></a>
+    <a class="tile" href="#f6"><span class="n">6 · “Turn finishing?”</span>
+      <span class="shift">2 lists <span>→</span> 1 check</span><span class="chip">Do · tiny</span></a>
+    <a class="tile" href="#f8"><span class="n">8 · Dialers</span>
+      <span class="shift">3 copies <span>→</span> 1</span><span class="chip">Do · small</span></a>
+    <a class="tile" href="#f7"><span class="n">7 · Mac machine check</span>
+      <span class="shift">4 optionals <span>→</span> 1 state</span><span class="chip quiet">Optional</span></a>
+    <a class="tile" href="#f9"><span class="n">9 · Host-key trust</span>
+      <span class="shift">2 copies <span>→</span> 1</span><span class="chip quiet">Not now</span></a>
+    <a class="tile" href="#f10"><span class="n">10 · Phone sign-in relay</span>
+      <span class="shift">2 hooks <span>→</span> 1</span><span class="chip quiet">Optional</span></a>
+  </nav>
+  <p class="order">Numbers continue from the first page. 5 to 7 are state kept in several places; 8 to 10 are the
+    same procedure written more than once.</p>
+
+  <!-- ───────────────────────── coverage ───────────────────────── -->
+  <section class="finding" id="coverage">
+    <header>
+      <span class="num">✓</span>
+      <div>
+        <h2>What was read, file by file</h2>
+        <p class="why">The first page said “eleven lifecycles read” and listed nothing it skipped. This is the list.</p>
+      </div>
+    </header>
+    <figure class="panel" style="margin-top:24px">
+      <div class="figwrap">
+      <svg class="fig wide" viewBox="0 0 1120 432" role="img" aria-labelledby="cov-title">
+        <title id="cov-title">Each file of the second pass by how much of it was read</title>
+        <g id="cov-core">
+          <text class="t" x="16" y="24">Core agent</text>
+          <g class="cv f"><rect x="16" y="40" width="168" height="22" rx="6"/><text x="26" y="55">app.ts</text></g>
+          <g class="cv f"><rect x="16" y="66" width="168" height="22" rx="6"/><text x="26" y="81">agents.ts</text></g>
+          <g class="cv f"><rect x="16" y="92" width="168" height="22" rx="6"/><text x="26" y="107">summary.ts</text></g>
+          <g class="cv f"><rect x="16" y="118" width="168" height="22" rx="6"/><text x="26" y="133">schedule.ts</text></g>
+          <g class="cv p"><rect x="16" y="144" width="168" height="22" rx="6"/><text x="26" y="159">memory.ts</text></g>
+          <g class="cv s"><rect x="16" y="170" width="168" height="22" rx="6"/><text x="26" y="185">tools.ts</text></g>
+          <g class="cv s"><rect x="16" y="196" width="168" height="22" rx="6"/><text x="26" y="211">device-tools.ts</text></g>
+          <g class="cv n"><rect x="16" y="222" width="168" height="22" rx="6"/><text x="26" y="237">prompt.ts</text></g>
+        </g>
+        <g id="cov-views">
+          <text class="t" x="200" y="24">Views and services</text>
+          <g class="cv p"><rect x="200" y="40" width="168" height="22" rx="6"/><text x="210" y="55">infinichat-view.ts</text></g>
+          <g class="cv p"><rect x="200" y="66" width="168" height="22" rx="6"/><text x="210" y="81">chat-view.ts</text></g>
+          <g class="cv p"><rect x="200" y="92" width="168" height="22" rx="6"/><text x="210" y="107">infinichat-service.ts</text></g>
+          <g class="cv s"><rect x="200" y="118" width="168" height="22" rx="6"/><text x="210" y="133">chat-service.ts</text></g>
+          <g class="cv n"><rect x="200" y="144" width="168" height="22" rx="6"/><text x="210" y="159">chat-projection.ts</text></g>
+          <g class="cv n"><rect x="200" y="170" width="168" height="22" rx="6"/><text x="210" y="185">native-web-search/*</text></g>
+        </g>
+        <g id="cov-install">
+          <text class="t" x="384" y="24">Install and update</text>
+          <g class="cv f"><rect x="384" y="40" width="168" height="22" rx="6"/><text x="394" y="55">install.ts</text></g>
+          <g class="cv f"><rect x="384" y="66" width="168" height="22" rx="6"/><text x="394" y="81">server update.ts</text></g>
+          <g class="cv f"><rect x="384" y="92" width="168" height="22" rx="6"/><text x="394" y="107">server main.ts</text></g>
+          <g class="cv f"><rect x="384" y="118" width="168" height="22" rx="6"/><text x="394" y="133">phone-dialer.ts</text></g>
+          <g class="cv f"><rect x="384" y="144" width="168" height="22" rx="6"/><text x="394" y="159">mac dialer.ts</text></g>
+          <g class="cv f"><rect x="384" y="170" width="168" height="22" rx="6"/><text x="394" y="185">dialer.ts</text></g>
+          <g class="cv p"><rect x="384" y="196" width="168" height="22" rx="6"/><text x="394" y="211">mac updater.ts</text></g>
+        </g>
+        <g id="cov-mcp">
+          <text class="t" x="568" y="24">MCP sign-in</text>
+          <g class="cv f"><rect x="568" y="40" width="168" height="22" rx="6"/><text x="578" y="55">mcp-oauth.ts</text></g>
+          <g class="cv f"><rect x="568" y="66" width="168" height="22" rx="6"/><text x="578" y="81">mcp-servers.ts</text></g>
+          <g class="cv f"><rect x="568" y="92" width="168" height="22" rx="6"/><text x="578" y="107">mcp-client.ts</text></g>
+          <g class="cv f"><rect x="568" y="118" width="168" height="22" rx="6"/><text x="578" y="133">use-infinichat-mcp.ts</text></g>
+          <g class="cv f"><rect x="568" y="144" width="168" height="22" rx="6"/><text x="578" y="159">mac sign-in-relay.ts</text></g>
+          <g class="cv p"><rect x="568" y="170" width="168" height="22" rx="6"/><text x="578" y="185">mcp-contract.ts</text></g>
+          <g class="cv p"><rect x="568" y="196" width="168" height="22" rx="6"/><text x="578" y="211">infinichat-mcp.tsx</text></g>
+          <g class="cv s"><rect x="568" y="222" width="168" height="22" rx="6"/><text x="578" y="237">mac mcp-sheet.tsx</text></g>
+          <g class="cv n"><rect x="568" y="248" width="168" height="22" rx="6"/><text x="578" y="263">mcp-tools.ts</text></g>
+          <g class="cv n"><rect x="568" y="274" width="168" height="22" rx="6"/><text x="578" y="289">tools-facet.ts</text></g>
+          <g class="cv n"><rect x="568" y="300" width="168" height="22" rx="6"/><text x="578" y="315">mcp-config.ts</text></g>
+        </g>
+        <g id="cov-mac">
+          <text class="t" x="752" y="24">Mac machines</text>
+          <g class="cv f"><rect x="752" y="40" width="168" height="22" rx="6"/><text x="762" y="55">main/machines.ts</text></g>
+          <g class="cv f"><rect x="752" y="66" width="168" height="22" rx="6"/><text x="762" y="81">tunnel.ts</text></g>
+          <g class="cv f"><rect x="752" y="92" width="168" height="22" rx="6"/><text x="762" y="107">node/machines.ts</text></g>
+          <g class="cv f"><rect x="752" y="118" width="168" height="22" rx="6"/><text x="762" y="133">remote/machines.ts</text></g>
+          <g class="cv p"><rect x="752" y="144" width="168" height="22" rx="6"/><text x="762" y="159">settings/machines.tsx</text></g>
+          <g class="cv n"><rect x="752" y="170" width="168" height="22" rx="6"/><text x="762" y="185">mac main/index.ts</text></g>
+          <g class="cv n"><rect x="752" y="196" width="168" height="22" rx="6"/><text x="762" y="211">mac chats code</text></g>
+          <g class="cv n"><rect x="752" y="222" width="168" height="22" rx="6"/><text x="762" y="237">mac sheets</text></g>
+        </g>
+        <g id="cov-phone">
+          <text class="t" x="936" y="24">Phone remote execution</text>
+          <g class="cv f"><rect x="936" y="40" width="168" height="22" rx="6"/><text x="946" y="55">owner.ts</text></g>
+          <g class="cv f"><rect x="936" y="66" width="168" height="22" rx="6"/><text x="946" y="81">channel.ts</text></g>
+          <g class="cv f"><rect x="936" y="92" width="168" height="22" rx="6"/><text x="946" y="107">hosts.ts</text></g>
+          <g class="cv f"><rect x="936" y="118" width="168" height="22" rx="6"/><text x="946" y="133">command-channel.ts</text></g>
+          <g class="cv f"><rect x="936" y="144" width="168" height="22" rx="6"/><text x="946" y="159">provisioning.ts</text></g>
+          <g class="cv f"><rect x="936" y="170" width="168" height="22" rx="6"/><text x="946" y="185">test-host.ts</text></g>
+          <g class="cv f"><rect x="936" y="196" width="168" height="22" rx="6"/><text x="946" y="211">watch.ts</text></g>
+          <g class="cv f"><rect x="936" y="222" width="168" height="22" rx="6"/><text x="946" y="237">tailscale.ts</text></g>
+          <g class="cv f"><rect x="936" y="248" width="168" height="22" rx="6"/><text x="946" y="263">connection.ts</text></g>
+          <g class="cv p"><rect x="936" y="274" width="168" height="22" rx="6"/><text x="946" y="289">environment.ts</text></g>
+          <g class="cv s"><rect x="936" y="300" width="168" height="22" rx="6"/><text x="946" y="315">readers.ts</text></g>
+          <g class="cv s"><rect x="936" y="326" width="168" height="22" rx="6"/><text x="946" y="341">protocol.ts</text></g>
+          <g class="cv n"><rect x="936" y="352" width="168" height="22" rx="6"/><text x="946" y="367">local workspace code</text></g>
+        </g>
+        <g id="cov-legend">
+          <g class="cv f"><rect x="16" y="400" width="16" height="16" rx="4"/></g><text class="s" x="38" y="412">read in full</text>
+          <g class="cv p"><rect x="140" y="400" width="16" height="16" rx="4"/></g><text class="s" x="162" y="412">read in part</text>
+          <g class="cv s"><rect x="268" y="400" width="16" height="16" rx="4"/></g><text class="s" x="290" y="412">searched, not read</text>
+          <g class="cv n"><rect x="428" y="400" width="16" height="16" rx="4"/></g><text class="s" x="450" y="412">not opened</text>
+          <text class="s" x="1104" y="412" text-anchor="end">The Rust SSH engine is left out, as you asked.</text>
+        </g>
+      </svg>
+      </div>
+    </figure>
+  </section>
+
+  <!-- ───────────────────────── 5 ───────────────────────── -->
+  <section class="finding" id="f5">
+    <header>
+      <span class="num">5</span>
+      <div>
+        <h2>The chat view’s lifecycle is written twice</h2>
+        <p class="why">Both views attach on the first reader, detach on the last and coalesce updates, in 77
+          identical lines each.</p>
+      </div>
+      <span class="chip">Do · deletes code</span>
+    </header>
+    <div class="pair">
+      <figure class="panel before" id="f5-before">
+        <figcaption><b>Before</b><span>Two classes, the same lifecycle inside each.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f5a-title">
+          <title id="f5a-title">ChatView and InfiniChatView each contain the same 77-line lifecycle</title>
+          <g id="f5a-chat"><title>ChatView: the ordinary chats' view</title>
+            <rect class="frame" x="16" y="16" width="254" height="308" rx="12"/>
+            <text class="t m" x="30" y="40">ChatView</text>
+            <text class="s m" x="30" y="56">chat-view.ts · 165 lines</text>
+            <rect class="frame bad" x="28" y="70" width="230" height="128" rx="10"/>
+            <text class="t" x="40" y="92">lifecycle</text>
+            <text class="s bad-t" x="246" y="92" text-anchor="end">77 lines</text>
+            <g class="nd"><rect x="40" y="104" width="66" height="24" rx="12"/><text class="s" x="73" y="120" text-anchor="middle">detached</text></g>
+            <g class="nd"><rect x="112" y="104" width="68" height="24" rx="12"/><text class="s" x="146" y="120" text-anchor="middle">attaching</text></g>
+            <g class="nd"><rect x="186" y="104" width="60" height="24" rx="12"/><text class="s" x="216" y="120" text-anchor="middle">loaded</text></g>
+            <text class="s" x="40" y="148">or missing · failed</text>
+            <text class="s" x="40" y="164">generation counter · coalesced updates</text>
+            <text class="s" x="40" y="180">attach on first reader · detach on last</text>
+            <text class="s" x="30" y="222">its own</text>
+            <g class="nd"><rect x="28" y="232" width="92" height="26" rx="13"/><text class="s" x="74" y="249" text-anchor="middle">4 watches</text></g>
+            <g class="nd"><rect x="128" y="232" width="98" height="26" rx="13"/><text class="s" x="177" y="249" text-anchor="middle">projection</text></g>
+            <text class="s" x="30" y="284">view · metadata · target · search</text>
+          </g>
+          <text class="t bad-t" id="f5a-same" x="280" y="140" text-anchor="middle" style="font-size:20px">=</text>
+          <g id="f5a-infinichat"><title>InfiniChatView: InfiniChat's view</title>
+            <rect class="frame" x="290" y="16" width="254" height="308" rx="12"/>
+            <text class="t m" x="304" y="40">InfiniChatView</text>
+            <text class="s m" x="304" y="56">infinichat-view.ts · 260 lines</text>
+            <rect class="frame bad" x="302" y="70" width="230" height="128" rx="10"/>
+            <text class="t" x="314" y="92">lifecycle</text>
+            <text class="s bad-t" x="520" y="92" text-anchor="end">77 lines</text>
+            <g class="nd"><rect x="314" y="104" width="66" height="24" rx="12"/><text class="s" x="347" y="120" text-anchor="middle">detached</text></g>
+            <g class="nd"><rect x="386" y="104" width="68" height="24" rx="12"/><text class="s" x="420" y="120" text-anchor="middle">attaching</text></g>
+            <g class="nd"><rect x="460" y="104" width="60" height="24" rx="12"/><text class="s" x="490" y="120" text-anchor="middle">loaded</text></g>
+            <text class="s" x="314" y="148">or missing · failed</text>
+            <text class="s" x="314" y="164">generation counter · coalesced updates</text>
+            <text class="s" x="314" y="180">attach on first reader · detach on last</text>
+            <text class="s" x="304" y="222">its own</text>
+            <g class="nd"><rect x="302" y="232" width="92" height="26" rx="13"/><text class="s" x="348" y="249" text-anchor="middle">6 watches</text></g>
+            <g class="nd"><rect x="402" y="232" width="98" height="26" rx="13"/><text class="s" x="451" y="249" text-anchor="middle">projection</text></g>
+            <text class="s" x="304" y="284">view · metadata · app · config</text>
+            <text class="s" x="304" y="300">search · tasks</text>
+          </g>
+        </svg>
+        </div>
+      </figure>
+      <figure class="panel after" id="f5-after">
+        <figcaption><b>After</b><span>One lifecycle. Each view keeps its watches and its projection.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f5b-title">
+          <title id="f5b-title">One shared lifecycle that both views use</title>
+          <g id="f5b-lifecycle"><title>The shared lifecycle: detached, attaching, loaded, or missing or failed</title>
+            <rect class="frame ok" x="120" y="16" width="320" height="150" rx="12"/>
+            <text class="t" x="136" y="40">view lifecycle</text>
+            <text class="s" x="424" y="40" text-anchor="end">one copy, in the package</text>
+            <g class="nd ok"><rect x="136" y="56" width="84" height="26" rx="13"/><text class="s" style="fill:currentColor" x="178" y="73" text-anchor="middle">detached</text></g>
+            <text class="l" x="226" y="74" text-anchor="middle">→</text>
+            <g class="nd ok"><rect x="232" y="56" width="84" height="26" rx="13"/><text class="s" style="fill:currentColor" x="274" y="73" text-anchor="middle">attaching</text></g>
+            <text class="l" x="322" y="74" text-anchor="middle">→</text>
+            <g class="nd ok"><rect x="328" y="56" width="96" height="26" rx="13"/><text class="s" style="fill:currentColor" x="376" y="73" text-anchor="middle">loaded</text></g>
+            <text class="s" x="136" y="110">or missing · failed</text>
+            <text class="s" x="136" y="128">generation counter · coalesced updates</text>
+            <text class="s" x="136" y="146">attach on first reader · detach on last</text>
+          </g>
+          <path class="e ok" d="M143 236C143 200 220 204 220 168"/>
+          <path class="e ok" d="M417 236C417 200 340 204 340 168"/>
+          <text class="l" x="128" y="216" text-anchor="end">uses</text>
+          <text class="l" x="432" y="216">uses</text>
+          <g class="nd" id="f5b-chat"><rect x="16" y="236" width="254" height="84" rx="10"/>
+            <text class="t m" x="30" y="260">ChatView</text>
+            <text class="s" x="30" y="278">4 watches + its projection</text>
+            <text class="s" x="30" y="296">about 90 lines</text></g>
+          <g class="nd" id="f5b-infinichat"><rect x="290" y="236" width="254" height="84" rx="10"/>
+            <text class="t m" x="304" y="260">InfiniChatView</text>
+            <text class="s" x="304" y="278">6 watches + its projection</text>
+            <text class="s" x="304" y="296">about 185 lines</text></g>
+        </svg>
+        </div>
+      </figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><h3>Buys</h3><ul>
+        <li>About 75 fewer lines.</li>
+        <li>A fix to attaching or detaching lands once.</li>
+      </ul></div>
+      <div class="fact"><h3>Costs</h3><ul>
+        <li>No behaviour change intended.</li>
+        <li>It is the transcript of both apps: check both on a device.</li>
+        <li>The copies have not drifted yet, so nothing is broken today.</li>
+      </ul></div>
+      <div class="fact where"><h3>Where</h3><ul>
+        <li><b>state</b> <code>chat-view.ts:53–61</code> · <code>infinichat-view.ts:94–106</code></li>
+        <li><b>attach</b> <code>chat-view.ts:98</code> · <code>infinichat-view.ts:141</code></li>
+        <li><b>detach</b> <code>chat-view.ts:151</code> · <code>infinichat-view.ts:201</code></li>
+        <li><b>coalesce</b> <code>chat-view.ts:167</code> · <code>infinichat-view.ts:236</code></li>
+        <li><b>public status</b> <code>chat-view.ts:20</code></li>
+      </ul></div>
+    </div>
+    <form class="decide" data-lavish-question="5-view-lifecycle" data-title="5 · One view lifecycle">
+      <span class="q">5 · Share the lifecycle?</span>
+      <label><input type="radio" name="answer" value="Do it" checked> Do it <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Not now"> Not now</label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 5">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 6 ───────────────────────── -->
+  <section class="finding" id="f6">
+    <header>
+      <span class="num">6</span>
+      <div>
+        <h2>“Is the turn still finishing?” is listed twice</h2>
+        <p class="why">Continue is refused, and the screens show busy, from the same four fields. Each keeps its
+          own list of them.</p>
+      </div>
+      <span class="chip">Do · tiny</span>
+    </header>
+    <div class="pair">
+      <figure class="panel before" id="f6-before">
+        <figcaption><b>Before</b><span>Two readers, two lists of the same four fields.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 300" role="img" aria-labelledby="f6a-title">
+          <title id="f6a-title">continue() and the screens' busy each list the same four fields</title>
+          <g class="nd bad" id="f6a-continue"><title>continue() refuses while the turn is still finishing</title>
+            <rect x="16" y="24" width="236" height="92" rx="10"/>
+            <text class="t" x="30" y="46">Continue is refused</text>
+            <text class="s m" x="30" y="62">app.ts:865</text>
+            <text class="s m bad-t" x="30" y="86">open || pending || cut || endNote</text>
+            <text class="s" x="30" y="102">its own list</text></g>
+          <g class="nd bad" id="f6a-busy"><title>The screens show busy while the turn is still finishing</title>
+            <rect x="308" y="24" width="236" height="92" rx="10"/>
+            <text class="t" x="322" y="46">the screens show busy</text>
+            <text class="s m" x="322" y="62">infinichat-view.ts:280</text>
+            <text class="s m bad-t" x="322" y="86">pending || open || endNote || cut</text>
+            <text class="s" x="322" y="102">its own list</text></g>
+          <path class="e bad" d="M134 116C134 160 230 152 230 194"/>
+          <path class="e bad" d="M426 116C426 160 330 152 330 194"/>
+          <g class="nd" id="f6a-state"><title>The stored turn state</title>
+            <rect x="160" y="196" width="240" height="84" rx="10"/>
+            <text class="t m" x="280" y="218" text-anchor="middle">AppState</text>
+            <g class="nd real"><rect x="169" y="230" width="54" height="22" rx="11"/><text class="s m" x="196" y="245" text-anchor="middle">open</text></g>
+            <g class="nd real"><rect x="225" y="230" width="54" height="22" rx="11"/><text class="s m" x="252" y="245" text-anchor="middle">pending</text></g>
+            <g class="nd real"><rect x="281" y="230" width="54" height="22" rx="11"/><text class="s m" x="308" y="245" text-anchor="middle">cut</text></g>
+            <g class="nd real"><rect x="337" y="230" width="54" height="22" rx="11"/><text class="s m" x="364" y="245" text-anchor="middle">endNote</text></g>
+          </g>
+        </svg>
+        </div>
+      </figure>
+      <figure class="panel after" id="f6-after">
+        <figcaption><b>After</b><span>One check, exported beside the state. Both call it.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 300" role="img" aria-labelledby="f6b-title">
+          <title id="f6b-title">One predicate over the state that both readers call</title>
+          <g class="nd" id="f6b-continue"><rect x="16" y="20" width="200" height="52" rx="10"/>
+            <text class="t" x="30" y="42">Continue is refused</text><text class="s" x="30" y="58">calls it</text></g>
+          <g class="nd" id="f6b-busy"><rect x="344" y="20" width="200" height="52" rx="10"/>
+            <text class="t" x="358" y="42">the screens show busy</text><text class="s" x="358" y="58">calls it</text></g>
+          <path class="e ok" d="M116 72C116 110 150 132 188 132"/>
+          <path class="e ok" d="M444 72C444 110 410 132 372 132"/>
+          <g class="nd ok" id="f6b-check"><title>One exported predicate: is the turn open or still being closed</title>
+            <rect x="190" y="108" width="180" height="48" rx="10"/>
+            <text class="t m" x="280" y="130" text-anchor="middle">turnOpen(app)</text>
+            <text class="s" x="280" y="146" text-anchor="middle">in app.ts, exported</text></g>
+          <path class="e ok" d="M280 156V194"/>
+          <g class="nd" id="f6b-state">
+            <rect x="160" y="196" width="240" height="84" rx="10"/>
+            <text class="t m" x="280" y="218" text-anchor="middle">AppState</text>
+            <g class="nd real"><rect x="169" y="230" width="54" height="22" rx="11"/><text class="s m" x="196" y="245" text-anchor="middle">open</text></g>
+            <g class="nd real"><rect x="225" y="230" width="54" height="22" rx="11"/><text class="s m" x="252" y="245" text-anchor="middle">pending</text></g>
+            <g class="nd real"><rect x="281" y="230" width="54" height="22" rx="11"/><text class="s m" x="308" y="245" text-anchor="middle">cut</text></g>
+            <g class="nd real"><rect x="337" y="230" width="54" height="22" rx="11"/><text class="s m" x="364" y="245" text-anchor="middle">endNote</text></g>
+          </g>
+        </svg>
+        </div>
+      </figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><h3>Buys</h3><ul>
+        <li>The two can’t drift: a screen never offers a Continue that would be refused.</li>
+      </ul></div>
+      <div class="fact"><h3>Costs</h3><ul>
+        <li>Three lines. No behaviour change.</li>
+      </ul></div>
+      <div class="fact where"><h3>Where</h3><ul>
+        <li><b>refusal</b> <code>infinichat/app.ts:865</code></li>
+        <li><b>busy</b> <code>infinichat-view.ts:280–281</code></li>
+        <li><b>fields</b> <code>infinichat/app.ts:61–84</code></li>
+      </ul></div>
+    </div>
+    <div class="code">
+      <div class="cap"><code>packages/infinichat/src/pi/infinichat/app.ts</code> — the check, before and after</div>
+      <div class="render" id="diff-turn"></div>
+    </div>
+    <form class="decide" data-lavish-question="6-turn-open" data-title="6 · One turn-open check">
+      <span class="q">6 · One check?</span>
+      <label><input type="radio" name="answer" value="Do it" checked> Do it <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Not now"> Not now</label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 6">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 7 ───────────────────────── -->
+  <section class="finding" id="f7">
+    <header>
+      <span class="num">7</span>
+      <div>
+        <h2>The Mac’s machine check is four optionals</h2>
+        <p class="why">The same shape as finding 1 on a smaller scale: one writer and one reader.</p>
+      </div>
+      <span class="chip quiet">Optional</span>
+    </header>
+    <div class="pair">
+      <figure class="panel before" id="f7-before">
+        <figcaption><b>Before</b><span>16 combinations fit the type. 4 happen.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 344" role="img" aria-labelledby="f7a-title">
+          <title id="f7a-title">Sixteen combinations of four optional fields; four are real</title>
+          <text class="s" x="179" y="44" text-anchor="middle">no error</text>
+          <text class="s m" x="281" y="44" text-anchor="middle">error</text>
+          <text class="s m" x="383" y="32" text-anchor="middle">error</text>
+          <text class="s m" x="383" y="46" text-anchor="middle">+ pendingKey</text>
+          <text class="s m" x="485" y="44" text-anchor="middle">pendingKey</text>
+          <text class="s m" x="120" y="97" text-anchor="end">stage</text>
+          <text class="s m" x="120" y="159" text-anchor="end">result</text>
+          <text class="s m" x="120" y="214" text-anchor="end">stage</text>
+          <text class="s m" x="120" y="228" text-anchor="end">+ result</text>
+          <text class="s" x="120" y="283" text-anchor="end">neither</text>
+
+          <g class="nd real" id="f7a-checking"><title>Only a stage: the check is running</title>
+            <rect x="130" y="64" width="98" height="58" rx="8"/><text class="t" x="179" y="97" text-anchor="middle">checking</text></g>
+          <rect class="void" x="232" y="64" width="98" height="58" rx="8"/>
+          <rect class="void" x="334" y="64" width="98" height="58" rx="8"/>
+          <rect class="void" x="436" y="64" width="98" height="58" rx="8"/>
+
+          <g class="nd real" id="f7a-passed"><title>Only a result: the check passed</title>
+            <rect x="130" y="126" width="98" height="58" rx="8"/><text class="t" x="179" y="159" text-anchor="middle">passed</text></g>
+          <rect class="void" x="232" y="126" width="98" height="58" rx="8"/>
+          <rect class="void" x="334" y="126" width="98" height="58" rx="8"/>
+          <rect class="void" x="436" y="126" width="98" height="58" rx="8"/>
+
+          <rect class="void" x="130" y="188" width="98" height="58" rx="8"/>
+          <rect class="void" x="232" y="188" width="98" height="58" rx="8"/>
+          <rect class="void" x="334" y="188" width="98" height="58" rx="8"/>
+          <rect class="void" x="436" y="188" width="98" height="58" rx="8"/>
+
+          <rect class="void" x="130" y="250" width="98" height="58" rx="8"/>
+          <g class="nd real" id="f7a-failed"><title>Only an error: the check failed</title>
+            <rect x="232" y="250" width="98" height="58" rx="8"/><text class="t" x="281" y="283" text-anchor="middle">failed</text></g>
+          <g class="nd real" id="f7a-key"><title>An error and a pending key: the host key changed</title>
+            <rect x="334" y="250" width="98" height="58" rx="8"/><text class="t" x="383" y="283" text-anchor="middle">key changed</text></g>
+          <rect class="void" x="436" y="250" width="98" height="58" rx="8"/>
+
+          <g class="nd real"><rect x="130" y="321" width="14" height="14" rx="3"/></g>
+          <text class="s" x="150" y="332">4 happen</text>
+          <rect class="void" x="232" y="321" width="14" height="14" rx="3"/>
+          <text class="s" x="252" y="332">12 fit the type and never happen</text>
+        </svg>
+        </div>
+      </figure>
+      <figure class="panel after" id="f7-after">
+        <figcaption><b>After</b><span>One <code>state</code>, with the fields each state has.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 344" role="img" aria-labelledby="f7b-title">
+          <title id="f7b-title">Three states of a machine check and their transitions</title>
+          <path class="e" d="M8 172H38"><title>Check Connection starts a check</title></path>
+          <g class="nd ok" id="f7b-checking"><title>checking: carries the stage</title>
+            <rect x="40" y="146" width="170" height="52" rx="10"/>
+            <text class="t" x="125" y="168" text-anchor="middle">checking</text>
+            <text class="s m" x="125" y="184" text-anchor="middle">stage ×4</text></g>
+          <g class="nd ok" id="f7b-passed"><title>passed: carries what the machine reported</title>
+            <rect x="380" y="48" width="160" height="52" rx="10"/>
+            <text class="t" x="460" y="70" text-anchor="middle">passed</text>
+            <text class="s m" x="460" y="86" text-anchor="middle">result</text></g>
+          <g class="nd ok" id="f7b-failed"><title>failed: carries the error and, when the key changed, the key</title>
+            <rect x="380" y="244" width="160" height="52" rx="10"/>
+            <text class="t" x="460" y="266" text-anchor="middle">failed</text>
+            <text class="s m" x="460" y="282" text-anchor="middle">error · key?</text></g>
+          <path class="e" d="M210 160L378 82"/><text class="l" x="300" y="136">found</text>
+          <path class="e" d="M210 184L378 262"/><text class="l" x="300" y="216">error</text>
+          <path class="e" d="M380 60C300 26 180 58 140 144"/><text class="l" x="230" y="44" text-anchor="middle">Check Connection</text>
+          <path class="e" d="M380 284C300 318 180 288 140 200"/>
+          <text class="l" x="232" y="322" text-anchor="middle">Check Connection · Trust new key</text>
+        </svg>
+        </div>
+      </figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><h3>Buys</h3><ul>
+        <li>3 states instead of 16 combinations.</li>
+        <li>The reader switches on one field.</li>
+      </ul></div>
+      <div class="fact"><h3>Costs</h3><ul>
+        <li>About 15 lines in 3 files, Mac only, in the same build.</li>
+        <li>Low value: the one reader already tests each field on its own.</li>
+      </ul></div>
+      <div class="fact where"><h3>Where</h3><ul>
+        <li><b>type</b> <code>mac/src/contract.ts:173–182</code></li>
+        <li><b>written</b> <code>mac/src/main/machines.ts:161, 164, 167, 270</code></li>
+        <li><b>read</b> <code>settings/machines.tsx:89, 172–177</code></li>
+      </ul></div>
+    </div>
+    <div class="code">
+      <div class="cap"><code>apps/mac/src/contract.ts</code> — the schema’s shape, before and after;
+        <code>PendingKeySchema</code> stands for the key’s fields</div>
+      <div class="render" id="diff-check"></div>
+    </div>
+    <form class="decide" data-lavish-question="7-mac-check" data-title="7 · Mac machine check as one state">
+      <span class="q">7 · Worth it?</span>
+      <label><input type="radio" name="answer" value="Do it"> Do it</label>
+      <label><input type="radio" name="answer" value="Not now" checked> Not now <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 7">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 8 ───────────────────────── -->
+  <section class="finding" id="f8">
+    <header>
+      <span class="num">8</span>
+      <div>
+        <h2>Three dialers decide the same thing</h2>
+        <p class="why">Each asks: do I have a secret, is the server running, then uses it or installs. Only the
+          transport differs.</p>
+      </div>
+      <span class="chip">Do · small</span>
+    </header>
+    <div class="pair">
+      <figure class="panel before" id="f8-before">
+        <figcaption><b>Before</b><span>The same four steps, three times.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f8a-title">
+          <title id="f8a-title">Three dialers each contain the same decision and differ only in transport</title>
+          <g id="f8a-phone">
+            <rect class="frame" x="16" y="16" width="168" height="308" rx="12"/>
+            <text class="t" x="28" y="40">iPhone → machine</text>
+            <text class="s m" x="28" y="56">phone-dialer.ts:104</text>
+            <rect class="frame bad" x="26" y="70" width="148" height="146" rx="10"/>
+            <g class="nd"><rect x="36" y="82" width="128" height="24" rx="12"/><text class="s" x="100" y="98" text-anchor="middle">saved secret?</text></g>
+            <g class="nd"><rect x="36" y="114" width="128" height="24" rx="12"/><text class="s" x="100" y="130" text-anchor="middle">server running?</text></g>
+            <g class="nd"><rect x="36" y="146" width="128" height="24" rx="12"/><text class="s" x="100" y="162" text-anchor="middle">yes: use it</text></g>
+            <g class="nd"><rect x="36" y="178" width="128" height="24" rx="12"/><text class="s" x="100" y="194" text-anchor="middle">no: install</text></g>
+            <text class="s" x="28" y="242">its transport</text>
+            <g class="nd real"><rect x="26" y="252" width="148" height="28" rx="14"/><text class="s" style="fill:currentColor" x="100" y="270" text-anchor="middle">SSH forward</text></g>
+          </g>
+          <text class="t bad-t" x="190" y="150" text-anchor="middle" style="font-size:18px">=</text>
+          <g id="f8a-self">
+            <rect class="frame" x="196" y="16" width="168" height="308" rx="12"/>
+            <text class="t" x="208" y="40">Mac → this Mac</text>
+            <text class="s m" x="208" y="56">mac dialer.ts:54</text>
+            <rect class="frame bad" x="206" y="70" width="148" height="146" rx="10"/>
+            <g class="nd"><rect x="216" y="82" width="128" height="24" rx="12"/><text class="s" x="280" y="98" text-anchor="middle">saved secret?</text></g>
+            <g class="nd"><rect x="216" y="114" width="128" height="24" rx="12"/><text class="s" x="280" y="130" text-anchor="middle">server running?</text></g>
+            <g class="nd"><rect x="216" y="146" width="128" height="24" rx="12"/><text class="s" x="280" y="162" text-anchor="middle">yes: use it</text></g>
+            <g class="nd"><rect x="216" y="178" width="128" height="24" rx="12"/><text class="s" x="280" y="194" text-anchor="middle">no: install</text></g>
+            <text class="s" x="208" y="242">its transport</text>
+            <g class="nd real"><rect x="206" y="252" width="148" height="28" rx="14"/><text class="s" style="fill:currentColor" x="280" y="270" text-anchor="middle">loopback socket</text></g>
+          </g>
+          <text class="t bad-t" x="370" y="150" text-anchor="middle" style="font-size:18px">=</text>
+          <g id="f8a-remote">
+            <rect class="frame" x="376" y="16" width="168" height="308" rx="12"/>
+            <text class="t" x="388" y="40">Mac → machine</text>
+            <text class="s m" x="388" y="56">mac dialer.ts:113</text>
+            <rect class="frame bad" x="386" y="70" width="148" height="146" rx="10"/>
+            <g class="nd"><rect x="396" y="82" width="128" height="24" rx="12"/><text class="s" x="460" y="98" text-anchor="middle">saved secret?</text></g>
+            <g class="nd"><rect x="396" y="114" width="128" height="24" rx="12"/><text class="s" x="460" y="130" text-anchor="middle">server running?</text></g>
+            <g class="nd"><rect x="396" y="146" width="128" height="24" rx="12"/><text class="s" x="460" y="162" text-anchor="middle">yes: use it</text></g>
+            <g class="nd"><rect x="396" y="178" width="128" height="24" rx="12"/><text class="s" x="460" y="194" text-anchor="middle">no: install</text></g>
+            <text class="s" x="388" y="242">its transport</text>
+            <g class="nd real"><rect x="386" y="252" width="148" height="28" rx="14"/><text class="s" style="fill:currentColor" x="460" y="270" text-anchor="middle">ssh -W tunnel</text></g>
+          </g>
+        </svg>
+        </div>
+      </figure>
+      <figure class="panel after" id="f8-after">
+        <figcaption><b>After</b><span>One decision. Each app hands it a way to open and close.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f8b-title">
+          <title id="f8b-title">One shared dial decision with three transports plugged in</title>
+          <g id="f8b-dial"><title>The shared decision: use the running server, or install</title>
+            <rect class="frame ok" x="40" y="16" width="480" height="124" rx="12"/>
+            <text class="t" x="56" y="40">dial</text>
+            <text class="s" x="504" y="40" text-anchor="end">one copy, in the package</text>
+            <g class="nd ok"><rect x="56" y="64" width="104" height="28" rx="14"/><text class="s" style="fill:currentColor" x="108" y="82" text-anchor="middle">saved secret?</text></g>
+            <text class="l" x="166" y="83" text-anchor="middle">→</text>
+            <g class="nd ok"><rect x="172" y="64" width="112" height="28" rx="14"/><text class="s" style="fill:currentColor" x="228" y="82" text-anchor="middle">server running?</text></g>
+            <text class="l" x="290" y="83" text-anchor="middle">→</text>
+            <g class="nd ok"><rect x="296" y="64" width="80" height="28" rx="14"/><text class="s" style="fill:currentColor" x="336" y="82" text-anchor="middle">use it</text></g>
+            <text class="l" x="382" y="83" text-anchor="middle">/</text>
+            <g class="nd ok"><rect x="388" y="64" width="116" height="28" rx="14"/><text class="s" style="fill:currentColor" x="446" y="82" text-anchor="middle">or install</text></g>
+            <text class="s" x="56" y="120">the same answer wherever an app connects from</text>
+          </g>
+          <path class="e ok" d="M100 248C100 200 160 190 160 142"/>
+          <path class="e ok" d="M280 248V142"/>
+          <path class="e ok" d="M460 248C460 200 400 190 400 142"/>
+          <text class="l" x="290" y="200">open · close</text>
+          <g class="nd"><rect x="24" y="248" width="152" height="56" rx="10"/>
+            <text class="t" x="36" y="271">iPhone → machine</text><text class="s" x="36" y="288">SSH forward</text></g>
+          <g class="nd"><rect x="204" y="248" width="152" height="56" rx="10"/>
+            <text class="t" x="216" y="271">Mac → this Mac</text><text class="s" x="216" y="288">loopback socket</text></g>
+          <g class="nd"><rect x="384" y="248" width="152" height="56" rx="10"/>
+            <text class="t" x="396" y="271">Mac → machine</text><text class="s" x="396" y="288">ssh -W tunnel</text></g>
+        </svg>
+        </div>
+      </figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><h3>Buys</h3><ul>
+        <li>About 40 fewer lines.</li>
+        <li>One rule for when an app installs a server.</li>
+      </ul></div>
+      <div class="fact"><h3>Costs</h3><ul>
+        <li>No behaviour change intended.</li>
+        <li>Both apps change: check a connect from each, and one first install.</li>
+      </ul></div>
+      <div class="fact where"><h3>Where</h3><ul>
+        <li><b>iPhone</b> <code>phone-dialer.ts:76–83, 104–112</code></li>
+        <li><b>Mac, itself</b> <code>mac/src/main/dialer.ts:35–41, 54–62</code></li>
+        <li><b>Mac, a machine</b> <code>mac/src/main/dialer.ts:89–95, 113–121</code></li>
+      </ul></div>
+    </div>
+    <form class="decide" data-lavish-question="8-dialers" data-title="8 · One dial decision">
+      <span class="q">8 · Share the decision?</span>
+      <label><input type="radio" name="answer" value="Do it" checked> Do it <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Not now"> Not now</label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 8">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 9 ───────────────────────── -->
+  <section class="finding" id="f9">
+    <header>
+      <span class="num">9</span>
+      <div>
+        <h2>Host-key trust is written twice</h2>
+        <p class="why">The Mac app and the server each pool connections and trust a new key on first use.</p>
+      </div>
+      <span class="chip quiet">Not now</span>
+    </header>
+    <div class="pair">
+      <figure class="panel before" id="f9-before">
+        <figcaption><b>Before</b><span>The same pool and trust rule in two places.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f9a-title">
+          <title id="f9a-title">The Mac app and the server each implement the connection pool and the trust rule</title>
+          <g id="f9a-mac">
+            <rect class="frame" x="16" y="16" width="254" height="308" rx="12"/>
+            <text class="t" x="30" y="40">Mac app</text>
+            <text class="s m" x="30" y="56">main/machines.ts:299–351</text>
+            <rect class="frame bad" x="28" y="70" width="230" height="116" rx="10"/>
+            <g class="nd"><rect x="40" y="82" width="206" height="24" rx="12"/><text class="s" x="143" y="98" text-anchor="middle">one connection per machine</text></g>
+            <g class="nd"><rect x="40" y="114" width="206" height="24" rx="12"/><text class="s" x="143" y="130" text-anchor="middle">new key → trust it, connect</text></g>
+            <g class="nd"><rect x="40" y="146" width="206" height="24" rx="12"/><text class="s" x="143" y="162" text-anchor="middle">changed key → wait for you</text></g>
+            <text class="s" x="30" y="212">its own</text>
+            <g class="nd real"><rect x="28" y="222" width="206" height="26" rx="13"/><text class="s" style="fill:currentColor" x="131" y="239" text-anchor="middle">Tailscale sign-in first</text></g>
+            <g class="nd real"><rect x="28" y="256" width="206" height="26" rx="13"/><text class="s" style="fill:currentColor" x="131" y="273" text-anchor="middle">its own daemon file</text></g>
+          </g>
+          <text class="t bad-t" x="280" y="134" text-anchor="middle" style="font-size:20px">=</text>
+          <g id="f9a-server">
+            <rect class="frame" x="290" y="16" width="254" height="308" rx="12"/>
+            <text class="t" x="304" y="40">Server</text>
+            <text class="s m" x="304" y="56">node/machines.ts:200–249</text>
+            <rect class="frame bad" x="302" y="70" width="230" height="116" rx="10"/>
+            <g class="nd"><rect x="314" y="82" width="206" height="24" rx="12"/><text class="s" x="417" y="98" text-anchor="middle">one connection per machine</text></g>
+            <g class="nd"><rect x="314" y="114" width="206" height="24" rx="12"/><text class="s" x="417" y="130" text-anchor="middle">new key → trust it, connect</text></g>
+            <g class="nd"><rect x="314" y="146" width="206" height="24" rx="12"/><text class="s" x="417" y="162" text-anchor="middle">changed key → wait for you</text></g>
+            <text class="s" x="304" y="212">its own</text>
+            <g class="nd real"><rect x="302" y="222" width="206" height="26" rx="13"/><text class="s" style="fill:currentColor" x="405" y="239" text-anchor="middle">prefers a pinned key</text></g>
+            <g class="nd real"><rect x="302" y="256" width="206" height="26" rx="13"/><text class="s" style="fill:currentColor" x="405" y="273" text-anchor="middle">one retry after a drop</text></g>
+          </g>
+        </svg>
+        </div>
+      </figure>
+      <figure class="panel after" id="f9-after">
+        <figcaption><b>After</b><span>One pool and rule. Each side keeps what is its own.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f9b-title">
+          <title id="f9b-title">One shared connection pool and trust rule used by the Mac app and the server</title>
+          <g id="f9b-shared">
+            <rect class="frame ok" x="100" y="16" width="360" height="146" rx="12"/>
+            <text class="t" x="116" y="40">machine connections</text>
+            <text class="s" x="444" y="40" text-anchor="end">one copy, Node side</text>
+            <g class="nd ok"><rect x="116" y="54" width="328" height="26" rx="13"/><text class="s" style="fill:currentColor" x="280" y="71" text-anchor="middle">one connection per machine</text></g>
+            <g class="nd ok"><rect x="116" y="88" width="328" height="26" rx="13"/><text class="s" style="fill:currentColor" x="280" y="105" text-anchor="middle">new key → trust it, connect</text></g>
+            <g class="nd ok"><rect x="116" y="122" width="328" height="26" rx="13"/><text class="s" style="fill:currentColor" x="280" y="139" text-anchor="middle">changed key → wait for you</text></g>
+          </g>
+          <path class="e ok" d="M143 240C143 204 200 204 200 164"/>
+          <path class="e ok" d="M417 240C417 204 360 204 360 164"/>
+          <g class="nd"><rect x="16" y="240" width="254" height="80" rx="10"/>
+            <text class="t" x="30" y="264">Mac app</text>
+            <text class="s" x="30" y="282">Tailscale sign-in first</text>
+            <text class="s" x="30" y="298">its own daemon file</text></g>
+          <g class="nd"><rect x="290" y="240" width="254" height="80" rx="10"/>
+            <text class="t" x="304" y="264">Server</text>
+            <text class="s" x="304" y="282">prefers a pinned key</text>
+            <text class="s" x="304" y="298">one retry after a drop</text></g>
+        </svg>
+        </div>
+      </figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><h3>Buys</h3><ul>
+        <li>One copy of a security rule.</li>
+        <li>About 50 fewer lines.</li>
+      </ul></div>
+      <div class="fact"><h3>Costs</h3><ul>
+        <li>The server’s copy changes, so it needs a server release.</li>
+        <li>The two differ on purpose, so the shared part needs two options.</li>
+      </ul></div>
+      <div class="fact where"><h3>Where</h3><ul>
+        <li><b>Mac</b> <code>mac/src/main/machines.ts:42–47, 299–351</code></li>
+        <li><b>server</b> <code>infinichat/src/node/machines.ts:31–38, 200–249</code></li>
+      </ul></div>
+    </div>
+    <form class="decide" data-lavish-question="9-host-keys" data-title="9 · One host-key trust and pool">
+      <span class="q">9 · Worth a server release?</span>
+      <label><input type="radio" name="answer" value="Do it"> Do it</label>
+      <label><input type="radio" name="answer" value="Not now" checked> Not now <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 9">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 10 ───────────────────────── -->
+  <section class="finding" id="f10">
+    <header>
+      <span class="num">10</span>
+      <div>
+        <h2>The phone relays a machine’s sign-in twice</h2>
+        <p class="why">Provider sign-in and MCP sign-in on a machine take the same four steps in two hooks. The Mac
+          does both with one class.</p>
+      </div>
+      <span class="chip quiet">Optional</span>
+    </header>
+    <div class="pair">
+      <figure class="panel before" id="f10-before">
+        <figcaption><b>Before</b><span>Two hooks on the phone. One class on the Mac.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f10a-title">
+          <title id="f10a-title">Two phone hooks relay a machine sign-in with the same steps; the Mac has one class</title>
+          <g id="f10a-providers">
+            <rect class="frame" x="16" y="16" width="254" height="196" rx="12"/>
+            <text class="t" x="30" y="40">providers on a machine</text>
+            <text class="s m" x="30" y="56">chat-provider.tsx:610</text>
+            <rect class="frame bad" x="28" y="68" width="230" height="132" rx="10"/>
+            <g class="nd"><rect x="40" y="78" width="206" height="22" rx="11"/><text class="s" x="143" y="93" text-anchor="middle">one at a time</text></g>
+            <g class="nd"><rect x="40" y="106" width="206" height="22" rx="11"/><text class="s" x="143" y="121" text-anchor="middle">start it on the machine</text></g>
+            <g class="nd"><rect x="40" y="134" width="206" height="22" rx="11"/><text class="s" x="143" y="149" text-anchor="middle">relay the browser’s return</text></g>
+            <g class="nd"><rect x="40" y="162" width="206" height="22" rx="11"/><text class="s" x="143" y="177" text-anchor="middle">clean up</text></g>
+          </g>
+          <text class="t bad-t" x="280" y="138" text-anchor="middle" style="font-size:20px">=</text>
+          <g id="f10a-mcp">
+            <rect class="frame" x="290" y="16" width="254" height="196" rx="12"/>
+            <text class="t" x="304" y="40">MCP on a machine</text>
+            <text class="s m" x="304" y="56">use-infinichat-mcp.ts:38</text>
+            <rect class="frame bad" x="302" y="68" width="230" height="132" rx="10"/>
+            <g class="nd"><rect x="314" y="78" width="206" height="22" rx="11"/><text class="s" x="417" y="93" text-anchor="middle">one at a time</text></g>
+            <g class="nd"><rect x="314" y="106" width="206" height="22" rx="11"/><text class="s" x="417" y="121" text-anchor="middle">start it on the machine</text></g>
+            <g class="nd"><rect x="314" y="134" width="206" height="22" rx="11"/><text class="s" x="417" y="149" text-anchor="middle">relay the browser’s return</text></g>
+            <g class="nd"><rect x="314" y="162" width="206" height="22" rx="11"/><text class="s" x="417" y="177" text-anchor="middle">clean up</text></g>
+          </g>
+          <g class="nd ok" id="f10a-mac"><title>The Mac's relay follows either attempt as state</title>
+            <rect x="16" y="236" width="528" height="84" rx="10"/>
+            <text class="t" x="30" y="262">The Mac already has one</text>
+            <text class="s m" x="30" y="280">sign-in-relay.ts:39</text>
+            <text class="s" x="30" y="298">one class follows a provider’s or an MCP server’s attempt</text></g>
+        </svg>
+        </div>
+      </figure>
+      <figure class="panel after" id="f10-after">
+        <figcaption><b>After</b><span>One hook on the phone, as on the Mac.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 340" role="img" aria-labelledby="f10b-title">
+          <title id="f10b-title">One phone hook relays either kind of machine sign-in</title>
+          <g id="f10b-shared">
+            <rect class="frame ok" x="100" y="16" width="360" height="176" rx="12"/>
+            <text class="t" x="116" y="40">phone sign-in relay</text>
+            <text class="s" x="444" y="40" text-anchor="end">one hook</text>
+            <g class="nd ok"><rect x="116" y="54" width="328" height="24" rx="12"/><text class="s" style="fill:currentColor" x="280" y="70" text-anchor="middle">one at a time</text></g>
+            <g class="nd ok"><rect x="116" y="86" width="328" height="24" rx="12"/><text class="s" style="fill:currentColor" x="280" y="102" text-anchor="middle">start it on the machine</text></g>
+            <g class="nd ok"><rect x="116" y="118" width="328" height="24" rx="12"/><text class="s" style="fill:currentColor" x="280" y="134" text-anchor="middle">relay the browser’s return</text></g>
+            <g class="nd ok"><rect x="116" y="150" width="328" height="24" rx="12"/><text class="s" style="fill:currentColor" x="280" y="166" text-anchor="middle">clean up</text></g>
+          </g>
+          <path class="e ok" d="M143 250C143 220 200 224 200 194"/>
+          <path class="e ok" d="M417 250C417 220 360 224 360 194"/>
+          <g class="nd"><rect x="16" y="250" width="254" height="60" rx="10"/>
+            <text class="t" x="30" y="274">providers screen</text><text class="s" x="30" y="292">passes the machine’s attempt</text></g>
+          <g class="nd"><rect x="290" y="250" width="254" height="60" rx="10"/>
+            <text class="t" x="304" y="274">MCP screen</text><text class="s" x="304" y="292">passes the machine’s attempt</text></g>
+        </svg>
+        </div>
+      </figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><h3>Buys</h3><ul>
+        <li>About 20 fewer lines.</li>
+        <li>“Open the sign-in page” written once; MCP’s copy has no one-at-a-time guard.</li>
+      </ul></div>
+      <div class="fact"><h3>Costs</h3><ul>
+        <li>Phone only. Small.</li>
+        <li>The relay itself is already shared; only the glue around it repeats.</li>
+      </ul></div>
+      <div class="fact where"><h3>Where</h3><ul>
+        <li><b>providers</b> <code>chat-provider.tsx:610–633</code></li>
+        <li><b>MCP</b> <code>use-infinichat-mcp.ts:38–58, 91–100</code></li>
+        <li><b>shared relay</b> <code>machine-sign-in.ts</code></li>
+        <li><b>Mac</b> <code>mac/src/main/sign-in-relay.ts:39</code></li>
+      </ul></div>
+    </div>
+    <form class="decide" data-lavish-question="10-phone-relay" data-title="10 · One phone sign-in relay hook">
+      <span class="q">10 · Worth it?</span>
+      <label><input type="radio" name="answer" value="Do it"> Do it</label>
+      <label><input type="radio" name="answer" value="Not now" checked> Not now <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 10">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── the rest ───────────────────────── -->
+  <section class="rest" id="rest">
+    <h2>Read this time, left alone</h2>
+    <p>Each was read, not searched. Nothing here gets clearer or shorter with a tag.</p>
+    <div class="rows">
+      <table>
+        <tbody>
+          <tr><td>The five agent tasks</td>
+            <td><code>app.ts:444</code> · <code>agents.ts:84, 105</code> · <code>summary.ts:199</code> · <code>schedule.ts:23</code></td>
+            <td>Every one already has explicit phases.</td></tr>
+          <tr><td>The turn, agents at work, summary nodes</td>
+            <td><code>app.ts:61–84</code> · <code>agents.ts:412–428</code> · <code>memory.ts:75–87</code></td>
+            <td>Derived from pi-durable’s own run and task records on purpose. A stored tag could lag them, and would
+              need a migration of your conversation.</td></tr>
+          <tr><td>Server install</td>
+            <td><code>install.ts:293–375</code></td>
+            <td>A linear pipeline with a stage type; the machine’s answers are checked one by one.</td></tr>
+          <tr><td>MCP OAuth</td>
+            <td><code>infinichat-server/src/mcp-oauth.ts</code></td>
+            <td>A port of the coding agent’s; its sign-ins already run through the shared attempts class.</td></tr>
+          <tr><td>Phone daemon channel</td>
+            <td><code>remote/channel.ts:97–98</code></td>
+            <td>Three “dead” flags that differ in why. Readability only, and its failures show only on a device.</td></tr>
+          <tr><td>Phone environment and watcher</td>
+            <td><code>remote/environment.ts</code> · <code>watch.ts</code></td>
+            <td>Declared ports of pi-env. Staying close to upstream wins.</td></tr>
+          <tr><td>Phone host credentials</td>
+            <td><code>remote/hosts.ts</code></td>
+            <td>A serialized queue with a journal of deletions. Already explicit.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>Same styling as the first page. Click any box, arrow or row to comment on it; the radios queue an answer,
+    and <b>Send to Agent</b> delivers them.</footer>
+</main>
+
+<script>
+  // One prompt per question, sent only when its button is pressed; the radios only select.
+  for (const form of document.querySelectorAll('form.decide')) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const answer = data.get('answer');
+      if (!answer) return;
+      const question = form.getAttribute('data-lavish-question');
+      const title = form.getAttribute('data-title');
+      const note = String(data.get('note') ?? '').trim();
+      const text = `${title}: ${answer}${note ? ` — ${note}` : ''}`;
+      const status = form.querySelector('.queued');
+      if (window.lavish && typeof window.lavish.queuePrompt === 'function') {
+        window.lavish.queuePrompt(text, { tag: 'choice', text, element: form, queueKey: question,
+          data: { question, answer, note } });
+        status.textContent = `Queued: ${answer}. Press Send to Agent when you are done.`;
+      } else {
+        status.textContent = 'Open this page through Lavish to send answers.';
+      }
+    });
+  }
+</script>
+
+<script type="module">
+  import { FileDiff } from "https://esm.sh/@pierre/diffs@1.2.10?bundle";
+
+  const pinnedTheme = document.documentElement.getAttribute('data-theme');
+  const dark = pinnedTheme ? pinnedTheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const options = {
+    theme: { light: 'github-light', dark: 'github-dark' }, themeType: dark ? 'dark' : 'light', overflow: 'wrap',
+    diffStyle: innerWidth < 900 ? 'unified' : 'split',
+  };
+
+  const app = 'packages/infinichat/src/pi/infinichat/app.ts';
+  new FileDiff(options).render({
+    containerWrapper: document.querySelector('#diff-turn'),
+    oldFile: { name: app, contents: `const app = await tx.doc(AppDoc, root.id);
+if (app.open || app.pending.length > 0 || app.cut !== null || app.endNote !== null) {
+  throw new Error(\`\${name} is still finishing its turn. Try again in a moment.\`);
+}
+` },
+    newFile: { name: app, contents: `/** A turn is open or still being closed. */
+export const turnOpen = (app: AppState): boolean =>
+  app.open || app.pending.length > 0 || app.cut !== null || app.endNote !== null;
+
+const app = await tx.doc(AppDoc, root.id);
+if (turnOpen(app)) {
+  throw new Error(\`\${name} is still finishing its turn. Try again in a moment.\`);
+}
+` },
+  });
+
+  const contract = 'apps/mac/src/contract.ts';
+  new FileDiff(options).render({
+    containerWrapper: document.querySelector('#diff-check'),
+    oldFile: { name: contract, contents: `export const CheckSchema = obj({
+  stage: opt(oneOf(['connecting', 'approving', 'checking', 'exchanging'])),
+  result: opt(obj({ version: str(), os: str(), arch: str(), name: str() }, { open: true })),
+  error: opt(str()),
+  pendingKey: opt(PendingKeySchema),
+}, { open: true });
+` },
+    newFile: { name: contract, contents: `export const CheckSchema = union([
+  obj({ state: lit('checking'),
+    stage: oneOf(['connecting', 'approving', 'checking', 'exchanging']) }, { open: true }),
+  obj({ state: lit('passed'),
+    result: obj({ version: str(), os: str(), arch: str(), name: str() }, { open: true }) }, { open: true }),
+  obj({ state: lit('failed'), error: str(), pendingKey: opt(PendingKeySchema) }, { open: true }),
+]);
+` },
+  });
+</script>
+</body>
+</html>

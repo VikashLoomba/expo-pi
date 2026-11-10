@@ -210,8 +210,11 @@
 <main>
   <div class="eyebrow">pi-agent · audit at <code>3b1439d</code></div>
   <h1>Where state hides in flags</h1>
-  <p class="lede">Eleven lifecycles read. <b>Four are worth making explicit.</b> Seven are fine as they are.
+  <p class="lede">Eleven lifecycles looked at. <b>Four are worth making explicit.</b> Seven are fine as they are.
     Read from code; nothing was run.</p>
+  <p class="order">This pass did not open the core agent code, server install and update, MCP sign-in, the Mac’s
+    machines or the phone’s remote execution. <a href="second-pass.html"><b>The second pass</b></a> read those and
+    lists every file.</p>
 
   <nav class="summary" aria-label="Findings">
     <a class="tile" href="#f1" id="tile-1">
@@ -836,7 +839,8 @@
               <code>adopt</code> drops <code>heldBy</code> (<code>conversation.ts:105–109</code>); rare.</td></tr>
           <tr id="rest-durable"><td>Durable tasks</td>
             <td><code>infinichat/app.ts:30</code> · <code>summary.ts:199</code></td>
-            <td>Already tagged with <code>phase</code>, as pi-durable prescribes.</td></tr>
+            <td>Already tagged with <code>phase</code>, as pi-durable prescribes. A search hit here; read in full
+              in the second pass, which confirmed it.</td></tr>
           <tr id="rest-composer"><td>Composer flags</td>
             <td><code>admitting</code> · <code>stopping</code> · <code>attaching</code>, four screens</td>
             <td>Independent in-flight flags, not one machine.</td></tr>
