@@ -2,8 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
-  acceptHostKey, connectSsh, forgetHostKey, HostKeyChangedError, HostKeyUnknownError, RemoteExecutionEnv, scanHostKey,
-  type Connection, type RemoteInfo, type SshTarget,
+  acceptHostKey, connectSsh, forgetHostKey, RemoteExecutionEnv, type Connection, type RemoteInfo, type SshTarget,
 } from '@earendil-works/pi-env';
 
 import {
@@ -11,6 +10,7 @@ import {
 } from '../pi/infinichat-remote/contract';
 import type { MachinesState } from '../pi/infinichat-remote/machines';
 import { MACHINE_WORK, machineDescription, type Device } from '../pi/infinichat/device-tools';
+import { connectTrusting, ConnectionPool, type HostKeyScan } from './machine-connections';
 
 const noop = () => {};
 /**
@@ -22,19 +22,6 @@ const checked = (machine: Machine) => JSON.stringify([endpoint(machine), machine
 const without = <T>(record: Readonly<Record<string, T>>, id: string): Record<string, T> =>
   Object.fromEntries(Object.entries(record).filter(([key]) => key !== id));
 
-interface Scanned { line: string; algorithm: string; fingerprint: string }
-
-/**
- * Each known-hosts line `scanHostKey` found (`alias type key`) with its fingerprint, which pi-env reads with
- * `ssh-keygen -l` from the same file, one line per key in its order: `bits SHA256:… alias (TYPE)`.
- */
-function scanned(name: string, { lines, fingerprints }: { lines: string[]; fingerprints: string[] }): Scanned[] {
-  if (lines.length !== fingerprints.length) throw new Error(`The SSH host key of ${name} could not be read.`);
-  return lines.map((line, index) => ({
-    line, algorithm: line.split(/\s+/)[1] ?? '', fingerprint: fingerprints[index].split(/\s+/)[1] ?? '',
-  }));
-}
-
 /** Where the conversation's machines document is read from: the open core's store, or nothing while it is away. */
 export interface MachinesSource {
   subscribe(listener: () => void): () => void;
@@ -45,19 +32,18 @@ export interface MachinesSource {
  * The conversation's other machines, which InfiniChat's tools reach from here with this machine's own SSH, through
  * pi-env. The list is the conversation's machines document, read from the core while this machine holds the
  * conversation; a machine is known by its endpoint. Connections come from `connectSsh` rather than `sshConnection`,
- * because only its failures say when the host key is why (`HostKeyUnknownError`, `HostKeyChangedError`); a lazy start
- * reports them as a message. So a connection whose start fails is let go, and the next start goes through
- * `connectSsh`. A host key is trusted on first use, as the clients trust theirs (OpenSSH's `accept-new`; owner
- * decision, 2026-10-27): the key a client pinned when it has one, else the keys the scan found. Only a changed key
- * waits for a client, which is where an impersonation would show.
+ * because only its failures say when the host key is why; a lazy start reports them as a message. So a connection
+ * whose start fails is let go, and the next start goes through `connectSsh`. A host key is trusted on first use, as
+ * the clients trust theirs and with the Mac app's code (`connectTrusting`): the key a client pinned when it has one,
+ * else the keys the scan found. Only a changed key waits for a client, which is where an impersonation would show.
  */
 export class ServerMachines {
   private machines: readonly Machine[] = [];
-  private readonly connections = new Map<string, Promise<Connection>>();
+  private readonly connections = new ConnectionPool();
   /** Connections that answered once: a later failed start may be a changed host key, which only `connectSsh` names. */
   private readonly answered = new WeakSet<Connection>();
   /** The scans waiting for a client, whose lines its accept trusts. */
-  private readonly waiting = new Map<string, { keys: Scanned[]; changed: boolean }>();
+  private readonly waiting = new Map<string, HostKeyScan>();
   private reach: Reach = {};
   private pending: PendingHostKeys = {};
   private readonly listeners = new Set<() => void>();
@@ -115,8 +101,8 @@ export class ServerMachines {
     const before = new Map(this.machines.map((machine) => [endpoint(machine), checked(machine)]));
     this.machines = machines;
     const kept = new Set(machines.map(endpoint));
-    for (const key of [...this.connections.keys()]) {
-      if (!kept.has(key)) this.drop(key);
+    for (const key of this.connections.keys()) {
+      if (!kept.has(key)) this.connections.drop(key);
     }
     // A machine as it was keeps what was found of it, and its uses keep that current: the document changes with
     // every check a client runs, and checking an unauthorized machine each time costs it failed logins, for which
@@ -166,7 +152,7 @@ export class ServerMachines {
     await acceptHostKey(target, waiting.keys.map(({ line }) => line));
     this.pend(key, undefined);
     // A check from before the accept would end with the key pending again; this one starts afresh.
-    this.drop(key);
+    this.connections.drop(key);
     this.reach = without(this.reach, key);
     this.publish();
     void this.started(machine).catch(noop);
@@ -177,7 +163,7 @@ export class ServerMachines {
   /** At shutdown, once the conversation's tools stopped: stops each machine's daemon, also one still connecting. */
   close(): void {
     this.closed = true;
-    for (const key of [...this.connections.keys()]) this.drop(key);
+    for (const key of this.connections.keys()) this.connections.drop(key);
   }
 
   /**
@@ -197,18 +183,11 @@ export class ServerMachines {
     return connectSsh({ ...this.target(machine), loginShell: true });
   }
 
-  private drop(key: string) {
-    const opening = this.connections.get(key);
-    this.connections.delete(key);
-    void opening?.then((connection) => connection.close(), noop);
-  }
-
   /** Its connection, started, and what its daemon reported: what each use needs, and what `reach` shows of it. */
   private async started(machine: Machine, again = false): Promise<{ connection: Connection; info: RemoteInfo }> {
     if (this.closed) throw new Error(`InfiniChat is stopping on ${this.self}.`);
     const key = endpoint(machine);
-    const opening = this.connections.get(key) ?? this.open(machine);
-    this.connections.set(key, opening);
+    const opening = this.connections.get(key, () => this.open(machine));
     let connection: Connection | undefined;
     try {
       connection = await opening;
@@ -217,7 +196,7 @@ export class ServerMachines {
       this.record(machine, undefined);
       return { connection, info };
     } catch (error) {
-      if (this.connections.get(key) === opening) this.drop(key);
+      if (this.connections.holds(key, opening)) this.connections.drop(key);
       // A restart reports a changed host key as pi-env's own advice to remove the old key, which a model with a shell
       // here could follow; one fresh `connectSsh` names it, and the key waits for a client instead.
       if (!again && connection !== undefined && this.answered.has(connection)) return this.started(machine, true);
@@ -226,25 +205,16 @@ export class ServerMachines {
     }
   }
 
-  /** `connectSsh`, trusting the machine's host key first when it is the one the client pinned. */
-  private async open(machine: Machine): Promise<Connection> {
-    const target = this.target(machine);
-    try {
-      return (await this.connect(machine)).connection;
-    } catch (error) {
-      if (!(error instanceof HostKeyUnknownError) && !(error instanceof HostKeyChangedError)) throw error;
-      const changed = error instanceof HostKeyChangedError;
-      const keys = scanned(machine.name, await scanHostKey(target));
-      const pinned = keys.filter(({ fingerprint }) => fingerprint === machine.hostKey?.fingerprint);
-      if (changed && pinned.length === 0) {
-        if (this.listed(machine)) this.pend(endpoint(machine), { keys, changed });
-        throw new Error(`The SSH host key ${machine.name} presents to ${this.self} changed. Trust it in Remote `
+  /** `connectSsh`, trusting the machine's host key on first use, the one a client pinned when it has one. */
+  private open(machine: Machine): Promise<Connection> {
+    return connectTrusting(this.target(machine), machine.name, async () => (await this.connect(machine)).connection, {
+      pinned: machine.hostKey?.fingerprint,
+      changed: (scan) => {
+        if (this.listed(machine)) this.pend(endpoint(machine), scan);
+        return new Error(`The SSH host key ${machine.name} presents to ${this.self} changed. Trust it in Remote `
           + 'machines on the phone only if you know why it changed.');
-      }
-      if (changed) await forgetHostKey(target);
-      await acceptHostKey(target, (pinned.length > 0 ? pinned : keys).map(({ line }) => line));
-      return (await this.connect(machine)).connection;
-    }
+      },
+    });
   }
 
   private listed(machine: Machine): boolean {
@@ -262,7 +232,7 @@ export class ServerMachines {
   }
 
   /** Keeps a scan for a client, or lets it go, with what `pendingHostKeys` shows of it. */
-  private pend(key: string, scan: { keys: Scanned[]; changed: boolean } | undefined) {
+  private pend(key: string, scan: HostKeyScan | undefined) {
     if (scan === undefined) {
       if (this.waiting.delete(key)) this.pending = without(this.pending, key);
       return;

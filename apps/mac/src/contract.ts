@@ -169,17 +169,22 @@ export const MacMcp = remote('infinichat.mac.mcp', {
   },
 });
 
+const CheckStageSchema = oneOf(['connecting', 'approving', 'checking', 'exchanging']);
+export type CheckStage = Static<typeof CheckStageSchema>;
+const CheckResultSchema = obj({ version: str(), os: str(), arch: str(), name: str() }, { open: true });
+export type CheckResult = Static<typeof CheckResultSchema>;
 /** What a check of a machine from this Mac is doing, found, or ran into; one per endpoint while it matters. */
-export const CheckSchema = obj({
-  stage: opt(oneOf(['connecting', 'approving', 'checking', 'exchanging'])),
-  result: opt(obj({ version: str(), os: str(), arch: str(),
-    name: str() }, { open: true })),
-  error: opt(str()),
-  /** The host key the machine presents, which differs from the one trusted here; only Trust new key goes on. */
-  pendingKey: opt(obj({
-    keys: arr(obj({ algorithm: str(), fingerprint: str() }, { open: true })), changed: bool(),
-  }, { open: true })),
-}, { open: true });
+export const CheckSchema = union([
+  obj({ state: lit('checking'), stage: CheckStageSchema }, { open: true }),
+  obj({ state: lit('passed'), result: CheckResultSchema }, { open: true }),
+  obj({
+    state: lit('failed'), error: str(),
+    /** The host key the machine presents, which differs from the one trusted here; only Trust new key goes on. */
+    pendingKey: opt(obj({
+      keys: arr(obj({ algorithm: str(), fingerprint: str() }, { open: true })), changed: bool(),
+    }, { open: true })),
+  }, { open: true }),
+]);
 export type Check = Static<typeof CheckSchema>;
 /** What the Settings window saves of a machine: its endpoint's parts; the machine names itself when checked. */
 export const MachineFormSchema = obj({

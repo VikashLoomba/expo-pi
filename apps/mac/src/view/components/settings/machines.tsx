@@ -2,7 +2,7 @@ import type { Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract
 import { ServerIcon } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 
-import type { Check } from '../../../contract';
+import type { CheckStage } from '../../../contract';
 import type { MachinesRef } from '../../hooks/use-machines';
 import { errorText, useMember } from '../../hooks/use-ref';
 import {
@@ -20,7 +20,7 @@ import {
 } from '../ui/item';
 import { Spinner } from '../ui/spinner';
 
-const STAGES: Record<NonNullable<Check['stage']>, string> = {
+const STAGES: Record<CheckStage, string> = {
   connecting: 'Connecting…', approving: 'Approve the SSH sign-in in your browser…',
   checking: 'Checking the machine…', exchanging: 'Exchanging InfiniChat keys…',
 };
@@ -86,7 +86,7 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
   const identity = identities?.[endpoint];
   const reach = reaches?.[endpoint];
   const waiting = pending?.[endpoint];
-  const running = check?.stage !== undefined;
+  const running = check?.state === 'checking';
   const chooseIdentity = () => act(api.pickIdentityFile().then((path) => {
     if (path !== null) return api.setIdentity({ endpoint, path });
   }), 'The identity file could not be chosen.');
@@ -169,12 +169,12 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
         {check !== undefined && (
           <>
             <dt>Check</dt>
-            <dd className={check.error !== undefined ? 'failed' : undefined}>
-              {check.stage !== undefined && <><Spinner />{STAGES[check.stage]}</>}
-              {check.result !== undefined && `Connected to ${check.result.name}: Pi ${check.result.version} on `
+            <dd className={check.state === 'failed' ? 'failed' : undefined}>
+              {check.state === 'checking' && <><Spinner />{STAGES[check.stage]}</>}
+              {check.state === 'passed' && `Connected to ${check.result.name}: Pi ${check.result.version} on `
                 + `${check.result.os} (${check.result.arch}). InfiniChat keys exchanged.`}
-              {check.error !== undefined && check.error}
-              {check.pendingKey !== undefined && (
+              {check.state === 'failed' && check.error}
+              {check.state === 'failed' && check.pendingKey !== undefined && (
                 <Button type="button" variant="link" size="xs"
                   onClick={() => act(api.trustNewKey({ endpoint }), 'The new key could not be trusted.')}>
                   Trust new key

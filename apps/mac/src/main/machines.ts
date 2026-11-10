@@ -2,9 +2,11 @@ import { hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  acceptHostKey, connectSsh, detectPlatform, forgetHostKey, HostKeyChangedError, HostKeyUnknownError,
-  RemoteExecutionEnv, scanHostKey, type Connection, type RemotePlatform, type SshTarget,
+  connectSsh, detectPlatform, forgetHostKey, RemoteExecutionEnv, type Connection, type RemotePlatform, type SshTarget,
 } from '@earendil-works/pi-env';
+import {
+  connectTrusting, ConnectionPool, type HostKeyScan,
+} from '@pi-agent/infinichat/node/machine-connections';
 import {
   endpointMachine, machineEndpoint, type InfiniChatClient, type Machine,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
@@ -19,7 +21,7 @@ import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credent
 import type { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
 import { PATHS, Utils } from 'electrobun/main';
 
-import type { Check } from '../contract';
+import type { Check, CheckResult, CheckStage } from '../contract';
 import { writeSettings, type Settings } from './settings';
 import { touchOverSsh } from './tailscale';
 
@@ -37,29 +39,21 @@ export const thisMac = (name: string): MacMachine =>
     hostname: hostname(), port: 22, username: userInfo().username });
 
 const noop = () => {};
-/** The lines of a scan with their fingerprints, as `ServerMachines` reads them (`node/machines.ts`). */
-interface Scanned { line: string; algorithm: string; fingerprint: string }
-const scanned = (name: string, scan: { lines: string[]; fingerprints: string[] }): Scanned[] => {
-  if (scan.lines.length !== scan.fingerprints.length) throw new Error(`The SSH host key of ${name} could not be read.`);
-  return scan.lines.map((line, index) => ({
-    line, algorithm: line.split(/\s+/)[1] ?? '', fingerprint: scan.fingerprints[index].split(/\s+/)[1] ?? '',
-  }));
-};
 const without = <T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> =>
   Object.fromEntries(Object.entries(record).filter(([entry]) => entry !== key));
 
 /**
  * The conversation's machines as this Mac reaches them: the document through the shown side, as the phone reads
  * it, and this Mac's own way to each machine over pi-env with the user's SSH setup or a chosen identity file
- * (deviation 4), trusting host keys on first use as the server does (`node/machines.ts`). A check connects, names
- * the machine, exchanges the InfiniChat keys (`keys.ts`) and records what it found on the document. The connections
- * are pooled for the dialer and the moves of piece 5 and closed at quit.
+ * (deviation 4), trusting host keys on first use as the server does, with the same code (`connectTrusting`). A check
+ * connects, names the machine, exchanges the InfiniChat keys (`keys.ts`) and records what it found on the document.
+ * The connections are pooled for the dialer and the moves of piece 5 and closed at quit.
  */
 export class MacMachines {
-  private readonly connections = new Map<string, Promise<Connection>>();
+  private readonly connections = new ConnectionPool();
   private readonly running = new Map<string, AbortController>();
   /** The scans waiting for Trust new key, whose lines it trusts. */
-  private readonly waiting = new Map<string, { keys: Scanned[]; changed: boolean }>();
+  private readonly waiting = new Map<string, HostKeyScan>();
   private checks: Record<string, Check> = {};
   private readonly listeners = new Set<() => void>();
   private readonly knownHosts: string;
@@ -68,7 +62,7 @@ export class MacMachines {
   private readonly logins = new TailscaleLogins((url) => {
     Utils.openExternal(url);
     for (const [endpoint, check] of Object.entries(this.checks)) {
-      if (check.stage !== undefined) this.stage(endpoint, 'approving');
+      if (check.state === 'checking') this.stage(endpoint, 'approving');
     }
   });
 
@@ -124,7 +118,7 @@ export class MacMachines {
     const previous = form.previous === undefined ? undefined : listed?.[form.previous];
     if (form.previous !== undefined && form.previous !== endpoint && previous !== undefined) {
       await this.shown.removeMachine(form.previous);
-      this.drop(form.previous);
+      this.connections.drop(form.previous);
       const identity = this.getIdentities()[form.previous];
       this.setIdentity(form.previous, null);
       if (identity !== undefined) this.setIdentity(endpoint, identity);
@@ -146,7 +140,7 @@ export class MacMachines {
       await forgetSecret(this.secrets, endpoint).catch(noop);
     }
     await this.shown.removeMachine(endpoint);
-    this.drop(endpoint);
+    this.connections.drop(endpoint);
     this.waiting.delete(endpoint);
     this.checks = without(this.checks, endpoint);
     this.setIdentity(endpoint, null);
@@ -158,13 +152,14 @@ export class MacMachines {
     if (this.running.has(endpoint)) return;
     const controller = new AbortController();
     this.running.set(endpoint, controller);
-    this.checks = { ...this.checks, [endpoint]: { stage: 'connecting' } };
+    this.checks = { ...this.checks, [endpoint]: { state: 'checking', stage: 'connecting' } };
     this.publish();
     void this.run(endpoint, controller.signal).then((result) => {
-      this.checks = { ...this.checks, [endpoint]: { result } };
+      this.checks = { ...this.checks, [endpoint]: { state: 'passed', result } };
     }, (error: unknown) => {
       const pending = this.waiting.get(endpoint);
       this.checks = { ...this.checks, [endpoint]: {
+        state: 'failed',
         error: controller.signal.aborted ? 'Connection check cancelled.'
           : error instanceof Error ? error.message : String(error),
         ...(pending === undefined ? {} : { pendingKey: { changed: pending.changed,
@@ -184,7 +179,7 @@ export class MacMachines {
   async trustNewKey(endpoint: string): Promise<void> {
     const machine = this.shown.machines.getSnapshot()?.machines[endpoint];
     if (machine === undefined) throw new Error('That machine is no longer among the machines.');
-    this.drop(endpoint);
+    this.connections.drop(endpoint);
     await forgetHostKey(this.target(machine));
     this.waiting.delete(endpoint);
     this.check(endpoint);
@@ -194,7 +189,7 @@ export class MacMachines {
     const identities = this.getIdentities();
     this.settings.identities = path === null ? without(identities, endpoint) : { ...identities, [endpoint]: path };
     writeSettings(this.settings);
-    this.drop(endpoint);
+    this.connections.drop(endpoint);
     this.publish();
   }
 
@@ -233,10 +228,10 @@ export class MacMachines {
   close(): void {
     this.closed = true;
     for (const controller of this.running.values()) controller.abort();
-    for (const key of [...this.connections.keys()]) this.drop(key);
+    for (const key of this.connections.keys()) this.connections.drop(key);
   }
 
-  private async run(endpoint: string, signal: AbortSignal): Promise<NonNullable<Check['result']>> {
+  private async run(endpoint: string, signal: AbortSignal): Promise<CheckResult> {
     const machine = this.shown.machines.getSnapshot()?.machines[endpoint];
     if (machine === undefined) throw new Error('That machine is no longer among the machines.');
     const connection = await this.started(machine, signal);
@@ -266,8 +261,8 @@ export class MacMachines {
     return { version: info.version, os: info.os, arch: info.arch, name: identity.name };
   }
 
-  private stage(endpoint: string, stage: NonNullable<Check['stage']>) {
-    this.checks = { ...this.checks, [endpoint]: { stage } };
+  private stage(endpoint: string, stage: CheckStage) {
+    this.checks = { ...this.checks, [endpoint]: { state: 'checking', stage } };
     this.publish();
   }
 
@@ -296,58 +291,36 @@ export class MacMachines {
       `pi-env-${remote.platform}-${remote.arch}.bin`);
   }
 
-  private drop(key: string) {
-    const opening = this.connections.get(key);
-    this.connections.delete(key);
-    void opening?.then((connection) => connection.close(), noop);
-  }
-
   /** Its connection, started; the pool keeps it for the next use. */
   private started(machine: Machine, signal: AbortSignal): Promise<Connection> {
     if (this.closed) throw new Error('InfiniChat is quitting.');
-    const key = machineEndpoint(machine);
-    let opening = this.connections.get(key);
-    if (opening === undefined) {
-      opening = this.open(machine, signal);
-      this.connections.set(key, opening);
-      opening.catch(() => {
-        if (this.connections.get(key) === opening) this.connections.delete(key);
-      });
-    }
-    return opening;
+    return this.connections.get(machineEndpoint(machine), () => this.open(machine, signal));
   }
 
   /** The sign-in Tailscale SSH may ask for, seen in `ssh` output as it comes. */
   readonly watchTailscale = (text: string): void => { this.logins.watch(text); };
 
   /**
-   * `connectSsh` with the daemon this app ships, trusting the machine's host key on first use. A touch goes first,
-   * so a Tailscale sign-in opens in the browser and is waited for (`tailscale.ts`).
+   * `connectSsh` with the daemon this app ships, trusting the machine's host key on first use (`connectTrusting`); a
+   * changed one waits for Trust new key. A touch goes first, so a Tailscale sign-in opens in the browser and is waited
+   * for (`tailscale.ts`).
    */
-  private async open(machine: Machine, signal: AbortSignal): Promise<Connection> {
+  private open(machine: Machine, signal: AbortSignal): Promise<Connection> {
     const target = this.target(machine);
-    const connect = async () => {
+    return connectTrusting(target, machine.name, async () => {
       await touchOverSsh(target, this.logins, signal);
       signal.throwIfAborted();
       const remote = await detectPlatform(target);
       signal.throwIfAborted();
       return (await connectSsh({ ...target, binary: this.daemon(remote), loginShell: true,
         onLog: this.watchTailscale })).connection;
-    };
-    try {
-      return await connect();
-    } catch (error) {
-      if (!(error instanceof HostKeyUnknownError) && !(error instanceof HostKeyChangedError)) throw error;
-      const changed = error instanceof HostKeyChangedError;
-      const keys = scanned(machine.name, await scanHostKey(target));
-      if (changed) {
-        this.waiting.set(machineEndpoint(machine), { keys, changed });
-        throw new Error(`The SSH host key ${machine.name} presents changed since it was trusted here. Trust the new `
-          + 'key only if you reinstalled or replaced the machine.');
-      }
-      await acceptHostKey(target, keys.map(({ line }) => line));
-      return connect();
-    }
+    }, {
+      changed: (scan) => {
+        this.waiting.set(machineEndpoint(machine), scan);
+        return new Error(`The SSH host key ${machine.name} presents changed since it was trusted here. Trust the `
+          + 'new key only if you reinstalled or replaced the machine.');
+      },
+    });
   }
 
   private publish() {
