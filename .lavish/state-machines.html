@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implicit state machines</title>
+<script>
+  // ?theme=dark or ?theme=light pins the page; otherwise it follows the system, as the Mac app does.
+  const pinned = new URLSearchParams(location.search).get('theme');
+  if (pinned === 'dark' || pinned === 'light') document.documentElement.setAttribute('data-theme', pinned);
+</script>
+<style>
+  /* The Mac app's palette (apps/mac/src/view/app.css): macOS system colors in shadcn's names. */
+  :root {
+    color-scheme: light dark;
+    --radius: 0.625rem;
+    --background: #ffffff; --foreground: #1d1d1f; --card: #f5f5f7; --primary: #007aff;
+    --muted: #f0f0f3; --muted-foreground: #6e6e73; --accent: #ebebf0; --destructive: #ff3b30; --border: #d2d2d7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: #1e1e1e; --foreground: #f5f5f7; --card: #2a2a2c; --primary: #0a84ff;
+      --muted: #2c2c2e; --muted-foreground: #98989d; --accent: #3a3a3c; --destructive: #ff453a; --border: #3a3a3c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --background: #1e1e1e; --foreground: #f5f5f7; --card: #2a2a2c; --primary: #0a84ff;
+    --muted: #2c2c2e; --muted-foreground: #98989d; --accent: #3a3a3c; --destructive: #ff453a; --border: #3a3a3c;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background: var(--background); }
+  body {
+    margin: 0; background: var(--background); color: var(--foreground);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 56px 24px 96px; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; }
+  p, li, td, th, h1, h2, h3, figcaption { overflow-wrap: anywhere; }
+  a { color: inherit; text-decoration: none; }
+
+  .eyebrow { color: var(--muted-foreground); font-size: 13px; letter-spacing: 0.02em; }
+  h1 { font-size: clamp(34px, 6vw, 60px); line-height: 1.02; letter-spacing: -0.03em; margin: 10px 0 14px; }
+  .lede { font-size: 19px; color: var(--muted-foreground); max-width: 46ch; margin: 0; }
+  .lede b { color: var(--foreground); font-weight: 600; }
+
+  .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 40px; }
+  .tile {
+    display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  }
+  .tile .n { font-size: 13px; color: var(--muted-foreground); }
+  .tile .what { font-weight: 600; }
+  .tile .shift { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+  .tile .shift span { color: var(--primary); }
+  .order { margin-top: 14px; color: var(--muted-foreground); font-size: 14px; }
+
+  .chip {
+    display: inline-block; align-self: flex-start; padding: 3px 9px; border-radius: 999px; font-size: 12px;
+    font-weight: 600; white-space: nowrap; background: var(--primary); color: #fff;
+  }
+  .chip.quiet { background: var(--accent); color: var(--foreground); }
+
+  .finding { margin-top: 84px; scroll-margin-top: 24px; }
+  .finding > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; align-items: start; }
+  .num { font-size: 64px; font-weight: 700; line-height: 0.9; letter-spacing: -0.04em; color: var(--primary); }
+  .finding h2 { font-size: clamp(22px, 3vw, 30px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 6px; }
+  .finding .why { margin: 0; color: var(--muted-foreground); max-width: 62ch; }
+
+  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+  figure.panel {
+    margin: 0; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 16px;
+    background: var(--background);
+  }
+  figure.panel.after { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); }
+  figcaption { display: flex; gap: 10px; align-items: baseline; margin-bottom: 10px; font-size: 14px; }
+  figcaption b {
+    flex: none; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px;
+    border-radius: 6px; background: var(--accent);
+  }
+  .after figcaption b { background: var(--primary); color: #fff; }
+  .figwrap { overflow-x: auto; }
+
+  /* Figures: color through the page's tokens, so they follow light and dark. */
+  svg.fig { display: block; width: 100%; height: auto; min-width: 460px; color: var(--foreground); }
+  svg.fig text { font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; fill: currentColor; }
+  svg.fig .t { font-size: 13px; font-weight: 600; }
+  svg.fig .s { font-size: 10.5px; fill: var(--muted-foreground); }
+  svg.fig .l { font-size: 11.5px; fill: var(--muted-foreground); }
+  svg.fig .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  svg.fig .bad-t { fill: var(--destructive); }
+  svg.fig .nd rect { fill: var(--card); stroke: var(--border); stroke-width: 1.2; }
+  svg.fig .nd.real rect { stroke: color-mix(in srgb, var(--foreground) 45%, var(--border)); }
+  svg.fig .nd.ok rect {
+    fill: color-mix(in srgb, var(--primary) 13%, var(--background)); stroke: var(--primary); stroke-width: 1.4;
+  }
+  svg.fig .nd.bad rect {
+    fill: color-mix(in srgb, var(--destructive) 9%, var(--background)); stroke: var(--destructive);
+    stroke-dasharray: 5 3;
+  }
+  svg.fig .void { fill: url(#hatch); stroke: var(--border); stroke-width: 1; }
+  svg.fig .e { fill: none; stroke: var(--muted-foreground); stroke-width: 1.4; marker-end: url(#arr); }
+  svg.fig .e.ok { stroke: var(--primary); marker-end: url(#arr-ok); }
+  svg.fig .e.bad { stroke: var(--destructive); opacity: 0.75; marker-end: url(#arr-bad); }
+  svg.fig .e.dash { stroke-dasharray: 4 3; }
+  svg.fig .frame { fill: none; stroke: var(--border); stroke-width: 1.2; }
+  svg.fig .frame.ok { stroke: var(--primary); fill: color-mix(in srgb, var(--primary) 5%, var(--background)); }
+  svg.fig .frame.bad {
+    stroke: var(--destructive); stroke-dasharray: 5 3; fill: color-mix(in srgb, var(--destructive) 4%, var(--background));
+  }
+  .arr-fill { fill: var(--muted-foreground); }
+  .arr-ok-fill { fill: var(--primary); }
+  .arr-bad-fill { fill: var(--destructive); }
+  .hatch-line { stroke: var(--border); stroke-width: 2.2; }
+
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+  .fact { min-width: 0; padding: 14px 16px; border-radius: 14px; background: var(--card); }
+  .fact h3 {
+    margin: 0 0 6px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  .fact ul { margin: 0; padding-left: 18px; }
+  .fact li { margin: 4px 0; font-size: 14px; }
+  .fact.where li { list-style: none; margin-left: -18px; font-size: 12.5px; color: var(--muted-foreground); }
+  .fact.where li b { color: var(--foreground); font-weight: 600; }
+
+  .drift { margin-top: 16px; border: 1px solid var(--border); border-radius: 14px; overflow-x: auto; }
+  .drift table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+  .drift caption { text-align: left; padding: 12px 16px 4px; font-weight: 600; }
+  .drift th, .drift td { text-align: left; vertical-align: top; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .drift th { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); border-top: 0; }
+  .drift td small { display: block; margin-top: 3px; color: var(--muted-foreground); }
+  .drift label { display: block; white-space: nowrap; }
+
+  .code { margin-top: 16px; }
+  .code .cap { font-size: 13px; color: var(--muted-foreground); margin-bottom: 6px; }
+  .code .render { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+
+  form.decide {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 16px; padding: 14px 16px;
+    border: 1px solid var(--border); border-radius: 14px;
+  }
+  form.decide .q { font-weight: 600; }
+  form.decide label { display: inline-flex; gap: 6px; align-items: center; }
+  form.decide .rec { font-size: 11px; color: var(--primary); font-weight: 600; }
+  form.decide input[type="text"] {
+    flex: 1 1 220px; min-width: 0; padding: 7px 10px; font: inherit; color: inherit; background: var(--background);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  form.decide button {
+    padding: 7px 14px; font: inherit; font-weight: 600; color: #fff; background: var(--primary); border: 0;
+    border-radius: 8px; cursor: pointer;
+  }
+  form.decide .queued { flex-basis: 100%; font-size: 13px; color: var(--muted-foreground); }
+  form.decide .queued:empty { display: none; }
+  /* Finding 2's form wraps its table too, so only its answer row is the bordered box. */
+  form.decide.wide { display: block; margin-top: 16px; padding: 0; border: 0; }
+  form.decide .answer {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 16px; padding: 14px 16px;
+    border: 1px solid var(--border); border-radius: 14px;
+  }
+  input[type="radio"] { accent-color: var(--primary); }
+
+  .rest { margin-top: 96px; }
+  .rest h2 { font-size: clamp(22px, 3vw, 30px); letter-spacing: -0.02em; margin: 0 0 4px; }
+  .rest p { margin: 0 0 16px; color: var(--muted-foreground); }
+  .rest .rows { border: 1px solid var(--border); border-radius: 14px; overflow-x: auto; }
+  .rest table { width: 100%; min-width: 680px; border-collapse: collapse; font-size: 14px; }
+  .rest td { padding: 11px 16px; border-top: 1px solid var(--border); vertical-align: top; }
+  .rest tr:first-child td { border-top: 0; }
+  .rest td:first-child { font-weight: 600; white-space: nowrap; }
+  .rest td:nth-child(2) { color: var(--muted-foreground); font-size: 12.5px; }
+  footer { margin-top: 48px; color: var(--muted-foreground); font-size: 13px; }
+
+  @media (max-width: 900px) {
+    .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pair, .facts { grid-template-columns: minmax(0, 1fr); }
+    .finding > header { grid-template-columns: auto minmax(0, 1fr); }
+    .finding > header .chip { grid-column: 2; justify-self: start; }
+    .num { font-size: 44px; }
+  }
+  @media (max-width: 520px) {
+    main { padding: 32px 16px 64px; }
+    .summary { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Shared arrowheads and the hatch for combinations that never happen. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arr-fill"/>
+    </marker>
+    <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arr-ok-fill"/>
+    </marker>
+    <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arr-bad-fill"/>
+    </marker>
+    <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="7" class="hatch-line"/>
+    </pattern>
+  </defs>
+</svg>
+
+<main>
+  <div class="eyebrow">pi-agent · audit at <code>3b1439d</code></div>
+  <h1>Where state hides in flags</h1>
+  <p class="lede">Eleven lifecycles read. <b>Four are worth making explicit.</b> Seven are fine as they are.
+    Read from code; nothing was run.</p>
+
+  <nav class="summary" aria-label="Findings">
+    <a class="tile" href="#f1" id="tile-1">
+      <span class="n">1 · A move’s status</span>
+      <span class="shift">4 flags <span>→</span> 1 phase</span>
+      <span class="chip">Do · small</span>
+    </a>
+    <a class="tile" href="#f2" id="tile-2">
+      <span class="n">2 · Where InfiniChat is</span>
+      <span class="shift">3 ladders <span>→</span> 1 function</span>
+      <span class="chip">Do · fixes drift</span>
+    </a>
+    <a class="tile" href="#f3" id="tile-3">
+      <span class="n">3 · iPhone sign-in</span>
+      <span class="shift">2 copies <span>→</span> 1 class</span>
+      <span class="chip">Do · deletes code</span>
+    </a>
+    <a class="tile" href="#f4" id="tile-4">
+      <span class="n">4 · The machine link</span>
+      <span class="shift">5 fields <span>→</span> 1 state</span>
+      <span class="chip quiet">Optional</span>
+    </a>
+  </nav>
+  <p class="order" id="order">Order: <b>1</b>, then <b>2</b> (it builds on 1). <b>3</b> is independent.
+    <b>4</b> only when reconnect is next edited.</p>
+
+  <!-- ───────────────────────── 1 ───────────────────────── -->
+  <section class="finding" id="f1">
+    <header>
+      <span class="num">1</span>
+      <div>
+        <h2>A move’s status is four flags</h2>
+        <p class="why">Every screen that shows a move rebuilds its phase from <code>running</code>,
+          <code>error</code>, <code>cancellable</code> and <code>undoing</code>.</p>
+      </div>
+      <span class="chip">Do · small</span>
+    </header>
+
+    <div class="pair">
+      <figure class="panel before" id="f1-before">
+        <figcaption><b>Before</b><span>16 combinations fit the type. 5 happen.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 344" role="img" aria-labelledby="f1a-title">
+          <title id="f1a-title">Sixteen combinations of four flags; five are real</title>
+          <text class="s m" x="179" y="44" text-anchor="middle">cancellable</text>
+          <text class="s" x="281" y="44" text-anchor="middle">neither</text>
+          <text class="s m" x="383" y="32" text-anchor="middle">cancellable</text>
+          <text class="s m" x="383" y="46" text-anchor="middle">+ undoing</text>
+          <text class="s m" x="485" y="44" text-anchor="middle">undoing</text>
+          <text class="s m" x="120" y="97" text-anchor="end">running</text>
+          <text class="s m" x="120" y="152" text-anchor="end">running</text>
+          <text class="s m" x="120" y="166" text-anchor="end">+ error</text>
+          <text class="s" x="120" y="221" text-anchor="end">neither</text>
+          <text class="s m" x="120" y="283" text-anchor="end">error</text>
+
+          <g class="nd real" id="f1a-moving"><title>running, cancellable: the move runs and can be cancelled</title>
+            <rect x="130" y="64" width="98" height="58" rx="8"/><text class="t" x="179" y="97" text-anchor="middle">moving</text></g>
+          <g class="nd real" id="f1a-opening"><title>running, not cancellable: the opening step</title>
+            <rect x="232" y="64" width="98" height="58" rx="8"/><text class="t" x="281" y="97" text-anchor="middle">opening</text></g>
+          <rect class="void" x="334" y="64" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <g class="nd real" id="f1a-undoing"><title>running, undoing: a Cancel is putting it back</title>
+            <rect x="436" y="64" width="98" height="58" rx="8"/><text class="t" x="485" y="97" text-anchor="middle">undoing</text></g>
+
+          <rect class="void" x="130" y="126" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <rect class="void" x="232" y="126" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <rect class="void" x="334" y="126" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <rect class="void" x="436" y="126" width="98" height="58" rx="8"><title>never happens</title></rect>
+
+          <rect class="void" x="130" y="188" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <rect class="void" x="232" y="188" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <rect class="void" x="334" y="188" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <rect class="void" x="436" y="188" width="98" height="58" rx="8"><title>never happens</title></rect>
+
+          <g class="nd real" id="f1a-failed"><title>stopped with an error, cancellable: a failed move</title>
+            <rect x="130" y="250" width="98" height="58" rx="8"/><text class="t" x="179" y="283" text-anchor="middle">failed</text></g>
+          <rect class="void" x="232" y="250" width="98" height="58" rx="8"><title>never happens</title></rect>
+          <g class="nd real" id="f1a-undo-failed"><title>stopped with an error while undoing: the Cancel failed</title>
+            <rect x="334" y="250" width="98" height="58" rx="8"/><text class="t" x="383" y="283" text-anchor="middle">undo failed</text></g>
+          <rect class="void" x="436" y="250" width="98" height="58" rx="8"><title>never happens</title></rect>
+
+          <g class="nd real"><rect x="130" y="321" width="14" height="14" rx="3"/></g>
+          <text class="s" x="150" y="332">5 happen</text>
+          <rect class="void" x="232" y="321" width="14" height="14" rx="3"/>
+          <text class="s" x="252" y="332">11 fit the type and never happen</text>
+        </svg>
+        </div>
+      </figure>
+
+      <figure class="panel after" id="f1-after">
+        <figcaption><b>After</b><span>One <code>phase</code>. Cancel is computed, not stored.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 344" role="img" aria-labelledby="f1b-title">
+          <title id="f1b-title">Four phases of a move and the transitions between them</title>
+          <g class="nd" id="f1b-none"><title>No move is running</title>
+            <rect x="16" y="48" width="40" height="248" rx="10"/>
+            <text class="s" transform="translate(40 172) rotate(-90)" text-anchor="middle">no move</text></g>
+
+          <path class="e" id="f1b-e-choose" d="M56 62H168"><title>choose or resume starts a move</title></path>
+          <text class="l" x="112" y="54" text-anchor="middle">choose · resume</text>
+          <path class="e" id="f1b-e-arrived" d="M170 84H58"><title>the move arrived</title></path>
+          <text class="l" x="112" y="100" text-anchor="middle">arrived</text>
+
+          <g class="nd ok" id="f1b-moving"><title>moving: carries the step and the bytes copied</title>
+            <rect x="170" y="48" width="120" height="48" rx="10"/>
+            <text class="t" x="230" y="68" text-anchor="middle">moving</text>
+            <text class="s m" x="230" y="84" text-anchor="middle">step · copied</text></g>
+          <g class="nd ok" id="f1b-failed"><title>failed: carries the error</title>
+            <rect x="410" y="48" width="130" height="48" rx="10"/>
+            <text class="t" x="475" y="68" text-anchor="middle">failed</text>
+            <text class="s m" x="475" y="84" text-anchor="middle">error</text></g>
+          <g class="nd ok" id="f1b-undoing"><title>undoing: a Cancel is putting it back</title>
+            <rect x="170" y="248" width="120" height="48" rx="10"/>
+            <text class="t" x="230" y="277" text-anchor="middle">undoing</text></g>
+          <g class="nd ok" id="f1b-undo-failed"><title>undo-failed: the Cancel failed; carries the error</title>
+            <rect x="410" y="248" width="130" height="48" rx="10"/>
+            <text class="t" x="475" y="268" text-anchor="middle">undo-failed</text>
+            <text class="s m" x="475" y="284" text-anchor="middle">error</text></g>
+
+          <path class="e" id="f1b-e-error" d="M290 62H408"><title>an error stops the move</title></path>
+          <text class="l" x="349" y="54" text-anchor="middle">error</text>
+          <path class="e" id="f1b-e-retry" d="M410 84H292"><title>Try Again runs it forward again</title></path>
+          <text class="l" x="349" y="100" text-anchor="middle">Try Again</text>
+
+          <path class="e" id="f1b-e-cancel" d="M215 96V246"><title>Cancel, before the opening step</title></path>
+          <text class="l" x="207" y="176" text-anchor="end">Cancel</text>
+          <path class="e" id="f1b-e-cancel-failed" d="M440 96L290 246"><title>Cancel after a failure</title></path>
+          <text class="l" x="424" y="132">Cancel</text>
+          <path class="e" id="f1b-e-retry-undo" d="M440 248L290 98"><title>Try Again after a failed Cancel runs forward</title></path>
+          <text class="l" x="421" y="222">Try Again</text>
+
+          <path class="e" id="f1b-e-undo-error" d="M290 262H408"><title>the undo failed</title></path>
+          <text class="l" x="349" y="254" text-anchor="middle">error</text>
+          <path class="e" id="f1b-e-undo-again" d="M410 284H292"><title>Cancel again</title></path>
+          <text class="l" x="349" y="300" text-anchor="middle">Cancel</text>
+          <path class="e" id="f1b-e-back" d="M170 272H58"><title>put back where it was</title></path>
+          <text class="l" x="112" y="264" text-anchor="middle">put back</text>
+        </svg>
+        </div>
+      </figure>
+    </div>
+
+    <div class="facts">
+      <div class="fact" id="f1-buys"><h3>Buys</h3><ul>
+        <li>Readers switch on <code>phase</code>. No more <code>running === false ? error</code> or
+          <code>(to === 'machine') !== !!undoing</code>.</li>
+        <li><code>cancellable</code> becomes one expression instead of 7 hand-set values.</li>
+        <li>Matches the home record beside it, which already has a <code>phase</code>.</li>
+      </ul></div>
+      <div class="fact" id="f1-costs"><h3>Costs</h3><ul>
+        <li>No behaviour change.</li>
+        <li>About 40 lines across 5 files.</li>
+        <li>The Mac’s main↔view schema changes with it, in the same build.</li>
+      </ul></div>
+      <div class="fact where" id="f1-where"><h3>Where</h3><ul>
+        <li><b>type</b> <code>move.ts:30–45</code> · <code>home.ts:16</code></li>
+        <li><b>written</b> <code>move.ts:352, 368, 376, 384, 419, 459, 528</code></li>
+        <li><b>read</b> <code>(infinichat)/index.tsx:40, 92, 218, 283</code></li>
+        <li><b>read</b> <code>mac …/screens/infinichat.tsx:46, 177, 224, 257</code></li>
+        <li><b>read</b> <code>remote-hosts/index.tsx:30, 220</code></li>
+        <li><b>schema</b> <code>mac/src/contract.ts:64–74</code></li>
+      </ul></div>
+    </div>
+
+    <div class="code">
+      <div class="cap"><code>packages/infinichat/src/pi/infinichat-remote/move.ts</code> — the type, before and after</div>
+      <div class="render" id="diff-move"></div>
+    </div>
+
+    <form class="decide" data-lavish-question="1-move-phase" data-title="1 · Move status as one phase">
+      <span class="q">1 · Make it one phase?</span>
+      <label><input type="radio" name="answer" value="Do it" checked> Do it <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Not now"> Not now</label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 1">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 2 ───────────────────────── -->
+  <section class="finding" id="f2">
+    <header>
+      <span class="num">2</span>
+      <div>
+        <h2>“Where is InfiniChat?” is answered three times</h2>
+        <p class="why">Each screen crosses the same five sources itself. The iPhone and the Mac have drifted apart.</p>
+      </div>
+      <span class="chip">Do · fixes drift</span>
+    </header>
+
+    <div class="pair">
+      <figure class="panel before" id="f2-before">
+        <figcaption><b>Before</b><span>Five sources. Three screens. Three if-ladders.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 356" role="img" aria-labelledby="f2a-title">
+          <title id="f2a-title">Three screens each read the same sources and derive the state themselves</title>
+          <g class="nd" id="f2a-home"><title>The home record: where the conversation lives, and a move's durable phase</title>
+            <rect x="16" y="22" width="150" height="40" rx="9"/><text class="t" x="28" y="39">home record</text>
+            <text class="s m" x="28" y="53">home.ts</text></g>
+          <g class="nd" id="f2a-move"><title>The running move's status</title>
+            <rect x="16" y="86" width="150" height="40" rx="9"/><text class="t" x="28" y="103">move status</text>
+            <text class="s m" x="28" y="117">move.ts</text></g>
+          <g class="nd" id="f2a-link"><title>The connection to the machine's server</title>
+            <rect x="16" y="150" width="150" height="40" rx="9"/><text class="t" x="28" y="167">machine link</text>
+            <text class="s m" x="28" y="181">client.ts</text></g>
+          <g class="nd" id="f2a-held"><title>What the server says: active, or handed to someone</title>
+            <rect x="16" y="214" width="150" height="40" rx="9"/><text class="t" x="28" y="231">who holds it</text>
+            <text class="s m" x="28" y="245">server state</text></g>
+          <g class="nd" id="f2a-hosts"><title>The machines this device has credentials for</title>
+            <rect x="16" y="278" width="150" height="40" rx="9"/><text class="t" x="28" y="295">saved machines</text>
+            <text class="s m" x="28" y="309">credentials</text></g>
+
+          <path class="e bad" d="M166 42C275 42 275 40 382 40"/>
+          <path class="e bad" d="M166 106C275 106 275 56 382 56"/>
+          <path class="e bad" d="M166 170C275 170 275 72 382 72"/>
+          <path class="e bad" d="M166 298C275 298 275 88 382 88"/>
+          <path class="e bad" d="M166 106C275 106 275 160 382 160"/>
+          <path class="e bad" d="M166 170C275 170 275 178 382 178"/>
+          <path class="e bad" d="M166 234C275 234 275 196 382 196"/>
+          <path class="e bad" d="M166 42C275 42 275 276 382 276"/>
+          <path class="e bad" d="M166 106C275 106 275 300 382 300"/>
+
+          <g class="nd bad" id="f2a-phone"><title>The iPhone's InfiniChat screen derives subtitle, checkmark, banner, retry and menu lock</title>
+            <rect x="384" y="22" width="160" height="92" rx="10"/>
+            <text class="t" x="396" y="42">iPhone · InfiniChat</text>
+            <text class="s m" x="396" y="58">index.tsx:84–241</text>
+            <text class="s" x="396" y="78">subtitle · checkmark</text>
+            <text class="s" x="396" y="94">banner · retry · menu</text></g>
+          <g class="nd bad" id="f2a-mac"><title>The Mac's InfiniChat screen derives the same, plus the composer lock</title>
+            <rect x="384" y="132" width="160" height="92" rx="10"/>
+            <text class="t" x="396" y="152">Mac · InfiniChat</text>
+            <text class="s m" x="396" y="168">infinichat.tsx:164–188</text>
+            <text class="s" x="396" y="188">subtitle · checkmark</text>
+            <text class="s" x="396" y="204">banner · retry · composer</text></g>
+          <g class="nd bad" id="f2a-machines"><title>The iPhone's Machines screen words a move back during a removal</title>
+            <rect x="384" y="242" width="160" height="92" rx="10"/>
+            <text class="t" x="396" y="262">iPhone · Machines</text>
+            <text class="s m" x="396" y="278">remote-hosts:29–34</text>
+            <text class="s" x="396" y="298">removal progress</text></g>
+        </svg>
+        </div>
+      </figure>
+
+      <figure class="panel after" id="f2-after">
+        <figcaption><b>After</b><span>One function, five states. Screens only word them.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 356" role="img" aria-labelledby="f2b-title">
+          <title id="f2b-title">The five sources feed one shared function whose result the three screens render</title>
+          <g class="nd"><rect x="16" y="22" width="134" height="40" rx="9"/><text class="t" x="28" y="47">home record</text></g>
+          <g class="nd"><rect x="16" y="86" width="134" height="40" rx="9"/><text class="t" x="28" y="111">move status</text></g>
+          <g class="nd"><rect x="16" y="150" width="134" height="40" rx="9"/><text class="t" x="28" y="175">machine link</text></g>
+          <g class="nd"><rect x="16" y="214" width="134" height="40" rx="9"/><text class="t" x="28" y="239">who holds it</text></g>
+          <g class="nd"><rect x="16" y="278" width="134" height="40" rx="9"/><text class="t" x="28" y="303">saved machines</text></g>
+
+          <path class="e" d="M150 42C182 42 174 110 204 110"/>
+          <path class="e" d="M150 106C182 106 174 144 204 144"/>
+          <path class="e" d="M150 170C178 170 178 178 204 178"/>
+          <path class="e" d="M150 234C182 234 174 212 204 212"/>
+          <path class="e" d="M150 298C182 298 174 246 204 246"/>
+
+          <g id="f2b-placement"><title>One shared function in packages/infinichat returns one of five states</title>
+            <rect class="frame ok" x="206" y="70" width="148" height="216" rx="12"/>
+            <text class="t m" x="280" y="94" text-anchor="middle">placement()</text>
+            <g class="nd ok" id="f2b-here"><rect x="220" y="106" width="120" height="24" rx="12"/>
+              <text class="l" style="fill:currentColor" x="280" y="122" text-anchor="middle">here</text></g>
+            <g class="nd ok" id="f2b-machine"><rect x="220" y="136" width="120" height="24" rx="12"/>
+              <text class="l" style="fill:currentColor" x="280" y="152" text-anchor="middle">on a machine</text></g>
+            <g class="nd ok" id="f2b-moving"><rect x="220" y="166" width="120" height="24" rx="12"/>
+              <text class="l" style="fill:currentColor" x="280" y="182" text-anchor="middle">moving</text></g>
+            <g class="nd ok" id="f2b-elsewhere"><rect x="220" y="196" width="120" height="24" rx="12"/>
+              <text class="l" style="fill:currentColor" x="280" y="212" text-anchor="middle">elsewhere</text></g>
+            <g class="nd ok" id="f2b-removed"><rect x="220" y="226" width="120" height="24" rx="12"/>
+              <text class="l" style="fill:currentColor" x="280" y="242" text-anchor="middle">removed</text></g>
+            <text class="s m" x="280" y="272" text-anchor="middle">packages/infinichat</text>
+          </g>
+
+          <path class="e ok" d="M354 140C386 140 378 68 408 68"/>
+          <path class="e ok" d="M354 178H408"/>
+          <path class="e ok" d="M354 216C386 216 378 288 408 288"/>
+
+          <g class="nd" id="f2b-phone"><rect x="410" y="40" width="134" height="56" rx="10"/>
+            <text class="t" x="422" y="63">iPhone · InfiniChat</text><text class="s" x="422" y="80">words it</text></g>
+          <g class="nd" id="f2b-mac"><rect x="410" y="150" width="134" height="56" rx="10"/>
+            <text class="t" x="422" y="173">Mac · InfiniChat</text><text class="s" x="422" y="190">words it</text></g>
+          <g class="nd" id="f2b-machines"><rect x="410" y="260" width="134" height="56" rx="10"/>
+            <text class="t" x="422" y="283">iPhone · Machines</text><text class="s" x="422" y="300">words it</text></g>
+        </svg>
+        </div>
+      </figure>
+    </div>
+
+    <form class="decide wide" data-lavish-question="2-placement" data-title="2 · One placement function">
+      <div class="drift" style="margin-top:0">
+        <table>
+          <caption>Same question, different answers today</caption>
+          <thead><tr><th>Question</th><th>iPhone</th><th>Mac</th><th>Keep</th></tr></thead>
+          <tbody>
+            <tr id="drift-send">
+              <td>Send while a move runs</td>
+              <td>Allowed, then fails: “InfiniChat is moving…”<small><code>index.tsx:337</code> · <code>shown-infinichat.ts:131</code></small></td>
+              <td>Composer disabled<small><code>infinichat.tsx:277</code></small></td>
+              <td><label><input type="radio" name="send" value="iPhone"> iPhone</label>
+                <label><input type="radio" name="send" value="Mac" checked> Mac <span class="rec">rec.</span></label></td>
+            </tr>
+            <tr id="drift-errors">
+              <td>A move failed and the link is down</td>
+              <td>Move error first; Try Again retries the move, which reconnects<small><code>index.tsx:220–222</code></small></td>
+              <td>Link error first; the move’s error waits behind it<small><code>infinichat.tsx:165, 257</code></small></td>
+              <td><label><input type="radio" name="errors" value="iPhone" checked> iPhone <span class="rec">rec.</span></label>
+                <label><input type="radio" name="errors" value="Mac"> Mac</label></td>
+            </tr>
+            <tr id="drift-failure">
+              <td>A run failed, then a move starts</td>
+              <td>Notice hidden<small><code>index.tsx:215</code></small></td>
+              <td>Notice stays, without Continue<small><code>infinichat.tsx:188, 254</code></small></td>
+              <td><label><input type="radio" name="failure" value="iPhone" checked> iPhone <span class="rec">rec.</span></label>
+                <label><input type="radio" name="failure" value="Mac"> Mac</label></td>
+            </tr>
+            <tr id="drift-install">
+              <td>The target needs an install mid-move</td>
+              <td>“Installing InfiniChat on X…”<small><code>chat-provider.tsx:151</code></small></td>
+              <td>“Connecting to X…” — it reads the source’s link<small><code>main/infinichat.ts:68, 210–222</code></small></td>
+              <td><label><input type="radio" name="install" value="iPhone" checked> iPhone <span class="rec">rec.</span></label>
+                <label><input type="radio" name="install" value="Mac"> Mac</label></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="facts">
+        <div class="fact" id="f2-buys"><h3>Buys</h3><ul>
+          <li>One answer per row above, on both apps.</li>
+          <li>A new state is added in one place.</li>
+        </ul></div>
+        <div class="fact" id="f2-costs"><h3>Costs</h3><ul>
+          <li>Line-neutral: about 45 shared lines replace about 45 in three screens.</li>
+          <li>Needs 1 first: <code>moving</code> carries the phase.</li>
+          <li>The last row also needs the Mac to report the target’s link.</li>
+        </ul></div>
+        <div class="fact where" id="f2-where"><h3>Where</h3><ul>
+          <li><b>iPhone</b> <code>(infinichat)/index.tsx:84–95, 215–241</code></li>
+          <li><b>Mac</b> <code>screens/infinichat.tsx:164–188</code></li>
+          <li><b>Machines</b> <code>remote-hosts/index.tsx:29–34</code></li>
+          <li><b>wording ×3</b> <code>moving()</code> / <code>movingBack()</code></li>
+        </ul></div>
+      </div>
+
+      <div class="code">
+        <div class="cap">Sketch of the shared result — names are placeholders</div>
+        <div class="render" id="file-placement"></div>
+      </div>
+
+      <div class="answer">
+        <span class="q">2 · One shared function?</span>
+        <label><input type="radio" name="answer" value="Do it" checked> Do it <span class="rec">recommended</span></label>
+        <label><input type="radio" name="answer" value="Not now"> Not now</label>
+        <label><input type="radio" name="answer" value="Differently"> Differently</label>
+        <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 2">
+        <button type="submit">Queue answer + the four rows</button>
+        <span class="queued" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 3 ───────────────────────── -->
+  <section class="finding" id="f3">
+    <header>
+      <span class="num">3</span>
+      <div>
+        <h2>The iPhone runs its own copy of sign-in</h2>
+        <p class="why">A shared class already runs three sign-ins as one record. The iPhone’s account runs a
+          fourth by hand, in eight pieces of hook state.</p>
+      </div>
+      <span class="chip">Do · deletes code</span>
+    </header>
+
+    <div class="pair">
+      <figure class="panel before" id="f3-before">
+        <figcaption><b>Before</b><span>One flow, written twice.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 356" role="img" aria-labelledby="f3a-title">
+          <title id="f3a-title">The shared sign-in class and the iPhone's separate hook run the same flow</title>
+          <g id="f3a-class"><title>SignInAttempts: one record per attempt, used by three callers</title>
+            <rect class="frame" x="16" y="16" width="528" height="140" rx="12"/>
+            <text class="t m" x="32" y="40">SignInAttempts</text>
+            <text class="s m" x="528" y="40" text-anchor="end">node/sign-in.ts:28</text>
+            <g class="nd"><rect x="32" y="56" width="104" height="32" rx="8"/><text class="t" x="84" y="77" text-anchor="middle">starting</text></g>
+            <g class="nd"><rect x="162" y="56" width="104" height="32" rx="8"/><text class="t" x="214" y="77" text-anchor="middle">browser</text></g>
+            <g class="nd"><rect x="292" y="56" width="104" height="32" rx="8"/><text class="t" x="344" y="77" text-anchor="middle">prompt</text></g>
+            <g class="nd"><rect x="422" y="56" width="104" height="32" rx="8"/><text class="t" x="474" y="77" text-anchor="middle">ended</text></g>
+            <path class="e" d="M136 72H160"/><path class="e" d="M266 72H290"/><path class="e" d="M396 72H420"/>
+            <g class="nd"><rect x="32" y="106" width="136" height="26" rx="13"/><text class="s" x="100" y="123" text-anchor="middle">server · providers</text></g>
+            <g class="nd"><rect x="176" y="106" width="110" height="26" rx="13"/><text class="s" x="231" y="123" text-anchor="middle">server · MCP</text></g>
+            <g class="nd"><rect x="294" y="106" width="110" height="26" rx="13"/><text class="s" x="349" y="123" text-anchor="middle">Mac account</text></g>
+            <text class="s" x="528" y="123" text-anchor="end">one record</text>
+          </g>
+
+          <text class="l bad-t" id="f3a-same" x="280" y="186" text-anchor="middle">same flow · same 7 status lines, typed twice</text>
+
+          <g id="f3a-hook"><title>useProviderSignIn: the same flow as three useState, four refs and a controller</title>
+            <rect class="frame bad" x="16" y="206" width="528" height="140" rx="12"/>
+            <text class="t m" x="32" y="230">useProviderSignIn</text>
+            <text class="s m" x="528" y="230" text-anchor="end">chat-provider.tsx:314–409</text>
+            <g class="nd"><rect x="32" y="246" width="104" height="32" rx="8"/><text class="t" x="84" y="267" text-anchor="middle">starting</text></g>
+            <g class="nd"><rect x="162" y="246" width="104" height="32" rx="8"/><text class="t" x="214" y="267" text-anchor="middle">browser</text></g>
+            <g class="nd"><rect x="292" y="246" width="104" height="32" rx="8"/><text class="t" x="344" y="267" text-anchor="middle">prompt</text></g>
+            <g class="nd"><rect x="422" y="246" width="104" height="32" rx="8"/><text class="t" x="474" y="267" text-anchor="middle">ended</text></g>
+            <path class="e" d="M136 262H160"/><path class="e" d="M266 262H290"/><path class="e" d="M396 262H420"/>
+            <g class="nd"><rect x="32" y="296" width="120" height="26" rx="13"/><text class="s" x="92" y="313" text-anchor="middle">iPhone account</text></g>
+            <g class="nd bad"><rect x="176" y="296" width="96" height="26" rx="13"/><text class="s" x="224" y="313" text-anchor="middle">3 useState</text></g>
+            <g class="nd bad"><rect x="280" y="296" width="70" height="26" rx="13"/><text class="s" x="315" y="313" text-anchor="middle">4 refs</text></g>
+            <g class="nd bad"><rect x="358" y="296" width="100" height="26" rx="13"/><text class="s" x="408" y="313" text-anchor="middle">1 controller</text></g>
+          </g>
+        </svg>
+        </div>
+      </figure>
+
+      <figure class="panel after" id="f3-after">
+        <figcaption><b>After</b><span>Four callers, one class. The hook keeps the phone’s browser.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 356" role="img" aria-labelledby="f3b-title">
+          <title id="f3b-title">All four sign-ins run through the shared class and show one record</title>
+          <g id="f3b-class"><title>SignInAttempts, moved out of node/ since it imports nothing from Node</title>
+            <rect class="frame ok" x="16" y="56" width="528" height="150" rx="12"/>
+            <text class="t m" x="32" y="80">SignInAttempts</text>
+            <text class="s" x="528" y="80" text-anchor="end">shared · no Node imports</text>
+            <g class="nd"><rect x="32" y="96" width="104" height="32" rx="8"/><text class="t" x="84" y="117" text-anchor="middle">starting</text></g>
+            <g class="nd"><rect x="162" y="96" width="104" height="32" rx="8"/><text class="t" x="214" y="117" text-anchor="middle">browser</text></g>
+            <g class="nd"><rect x="292" y="96" width="104" height="32" rx="8"/><text class="t" x="344" y="117" text-anchor="middle">prompt</text></g>
+            <g class="nd"><rect x="422" y="96" width="104" height="32" rx="8"/><text class="t" x="474" y="117" text-anchor="middle">ended</text></g>
+            <path class="e" d="M136 112H160"/><path class="e" d="M266 112H290"/><path class="e" d="M396 112H420"/>
+            <g class="nd"><rect x="32" y="152" width="132" height="28" rx="14"/><text class="s" x="98" y="170" text-anchor="middle">server · providers</text></g>
+            <g class="nd"><rect x="172" y="152" width="108" height="28" rx="14"/><text class="s" x="226" y="170" text-anchor="middle">server · MCP</text></g>
+            <g class="nd"><rect x="288" y="152" width="108" height="28" rx="14"/><text class="s" x="342" y="170" text-anchor="middle">Mac account</text></g>
+            <g class="nd ok" id="f3b-iphone"><rect x="404" y="152" width="124" height="28" rx="14"/>
+              <text class="s" style="fill:currentColor;font-weight:600" x="466" y="170" text-anchor="middle">iPhone account</text></g>
+          </g>
+          <path class="e ok" d="M280 206V248"/>
+          <g class="nd" id="f3b-screen"><title>The account screens read the same attempt record, local or on a machine</title>
+            <rect x="150" y="250" width="260" height="44" rx="10"/>
+            <text class="t" x="280" y="277" text-anchor="middle">account screens read one record</text></g>
+          <text class="s" x="280" y="322" text-anchor="middle">local and on-a-machine accounts map it the same way</text>
+        </svg>
+        </div>
+      </figure>
+    </div>
+
+    <div class="facts">
+      <div class="fact" id="f3-buys"><h3>Buys</h3><ul>
+        <li>About 60 fewer lines on the iPhone.</li>
+        <li>7 status lines stop being typed twice.</li>
+        <li>A sign-in fix lands once for all four.</li>
+      </ul></div>
+      <div class="fact" id="f3-costs"><h3>What users would see change</h3><ul>
+        <li>A second sign-in replaces the first instead of being ignored.</li>
+        <li>A ChatGPT failure before the browser opens shows pi-ai’s own message.</li>
+        <li>One seam to keep: refetching models after success.</li>
+      </ul></div>
+      <div class="fact where" id="f3-where"><h3>Where</h3><ul>
+        <li><b>class</b> <code>node/sign-in.ts:28–123</code></li>
+        <li><b>callers</b> <code>facet.ts:92</code> · <code>mcp-servers.ts:22</code> · <code>mac/main/account.ts:35</code></li>
+        <li><b>iPhone copy</b> <code>chat-provider.tsx:314–409</code></li>
+        <li><b>strings</b> <code>chat-provider.tsx:347, 357, 367, 378</code> ↔ <code>sign-in.ts:59, 89, 95, 96, 104, 105</code></li>
+        <li><b>replace vs ignore</b> <code>sign-in.ts:55</code> ↔ <code>chat-provider.tsx:342</code></li>
+        <li><b>pi-ai’s message</b> <code>sign-in.ts:130–134</code> · <b>refetch</b> <code>chat-provider.tsx:373</code></li>
+      </ul></div>
+    </div>
+
+    <form class="decide" data-lavish-question="3-sign-in" data-title="3 · iPhone sign-in through the shared class">
+      <span class="q">3 · Run the iPhone through the class?</span>
+      <label><input type="radio" name="answer" value="Do it" checked> Do it <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Not now"> Not now</label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 3">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── 4 ───────────────────────── -->
+  <section class="finding" id="f4">
+    <header>
+      <span class="num">4</span>
+      <div>
+        <h2>The machine link’s state is spread over five fields</h2>
+        <p class="why">It works. The state is just never written down, so every method re-derives it.</p>
+      </div>
+      <span class="chip quiet">Optional</span>
+    </header>
+
+    <div class="pair">
+      <figure class="panel before" id="f4-before">
+        <figcaption><b>Before</b><span>The state is the row. The code stores the columns.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 280" role="img" aria-labelledby="f4a-title">
+          <title id="f4a-title">Five real link states and the field values that encode each</title>
+          <text class="s m" x="194" y="38" text-anchor="middle">status</text>
+          <text class="s m" x="274" y="38" text-anchor="middle">attempt</text>
+          <text class="s m" x="354" y="38" text-anchor="middle">session.live</text>
+          <text class="s m" x="434" y="38" text-anchor="middle">retry</text>
+          <text class="s m" x="514" y="38" text-anchor="middle">closed</text>
+
+          <g id="f4a-idle"><title>Not started: status already says connecting</title>
+            <g class="nd"><rect x="16" y="56" width="134" height="38" rx="8"/><text class="t" x="28" y="80">not started</text></g>
+            <g class="nd bad"><rect x="156" y="56" width="76" height="38" rx="8"/><text class="s m bad-t" x="194" y="79" text-anchor="middle">connecting</text></g>
+            <g class="nd"><rect x="236" y="56" width="76" height="38" rx="8"/><text class="s m" x="274" y="79" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="316" y="56" width="76" height="38" rx="8"/><text class="s m" x="354" y="79" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="396" y="56" width="76" height="38" rx="8"/><text class="s m" x="434" y="79" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="476" y="56" width="76" height="38" rx="8"/><text class="s m" x="514" y="79" text-anchor="middle">false</text></g></g>
+          <g id="f4a-connecting"><title>Connecting: an attempt and a session that is not live yet</title>
+            <g class="nd"><rect x="16" y="98" width="134" height="38" rx="8"/><text class="t" x="28" y="122">connecting</text></g>
+            <g class="nd"><rect x="156" y="98" width="76" height="38" rx="8"/><text class="s m" x="194" y="121" text-anchor="middle">connecting</text></g>
+            <g class="nd"><rect x="236" y="98" width="76" height="38" rx="8"/><text class="s m" x="274" y="121" text-anchor="middle">set</text></g>
+            <g class="nd"><rect x="316" y="98" width="76" height="38" rx="8"/><text class="s m" x="354" y="121" text-anchor="middle">false</text></g>
+            <g class="nd"><rect x="396" y="98" width="76" height="38" rx="8"/><text class="s m" x="434" y="121" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="476" y="98" width="76" height="38" rx="8"/><text class="s m" x="514" y="121" text-anchor="middle">false</text></g></g>
+          <g id="f4a-connected"><title>Connected: a live session, no attempt</title>
+            <g class="nd"><rect x="16" y="140" width="134" height="38" rx="8"/><text class="t" x="28" y="164">connected</text></g>
+            <g class="nd"><rect x="156" y="140" width="76" height="38" rx="8"/><text class="s m" x="194" y="163" text-anchor="middle">connected</text></g>
+            <g class="nd"><rect x="236" y="140" width="76" height="38" rx="8"/><text class="s m" x="274" y="163" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="316" y="140" width="76" height="38" rx="8"/><text class="s m" x="354" y="163" text-anchor="middle">true</text></g>
+            <g class="nd"><rect x="396" y="140" width="76" height="38" rx="8"/><text class="s m" x="434" y="163" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="476" y="140" width="76" height="38" rx="8"/><text class="s m" x="514" y="163" text-anchor="middle">false</text></g></g>
+          <g id="f4a-waiting"><title>Waiting to retry: a timer, and status failed</title>
+            <g class="nd"><rect x="16" y="182" width="134" height="38" rx="8"/><text class="t" x="28" y="206">waiting to retry</text></g>
+            <g class="nd"><rect x="156" y="182" width="76" height="38" rx="8"/><text class="s m" x="194" y="205" text-anchor="middle">failed</text></g>
+            <g class="nd"><rect x="236" y="182" width="76" height="38" rx="8"/><text class="s m" x="274" y="205" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="316" y="182" width="76" height="38" rx="8"/><text class="s m" x="354" y="205" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="396" y="182" width="76" height="38" rx="8"/><text class="s m" x="434" y="205" text-anchor="middle">timer</text></g>
+            <g class="nd"><rect x="476" y="182" width="76" height="38" rx="8"/><text class="s m" x="514" y="205" text-anchor="middle">false</text></g></g>
+          <g id="f4a-closed"><title>Closed: status keeps whatever it last said</title>
+            <g class="nd"><rect x="16" y="224" width="134" height="38" rx="8"/><text class="t" x="28" y="248">closed</text></g>
+            <g class="nd bad"><rect x="156" y="224" width="76" height="38" rx="8"/><text class="s m bad-t" x="194" y="247" text-anchor="middle">last value</text></g>
+            <g class="nd"><rect x="236" y="224" width="76" height="38" rx="8"/><text class="s m" x="274" y="247" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="316" y="224" width="76" height="38" rx="8"/><text class="s m" x="354" y="247" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="396" y="224" width="76" height="38" rx="8"/><text class="s m" x="434" y="247" text-anchor="middle">–</text></g>
+            <g class="nd"><rect x="476" y="224" width="76" height="38" rx="8"/><text class="s m" x="514" y="247" text-anchor="middle">true</text></g></g>
+        </svg>
+        </div>
+      </figure>
+
+      <figure class="panel after" id="f4-after">
+        <figcaption><b>After</b><span>One tag. The public status is derived from it.</span></figcaption>
+        <div class="figwrap">
+        <svg class="fig" viewBox="0 0 560 280" role="img" aria-labelledby="f4b-title">
+          <title id="f4b-title">Five link states and their transitions</title>
+          <g class="nd ok" id="f4b-idle"><rect x="16" y="60" width="84" height="40" rx="10"/>
+            <text class="t" x="58" y="85" text-anchor="middle">idle</text></g>
+          <g class="nd ok" id="f4b-connecting"><title>connecting: owns the attempt and its session</title>
+            <rect x="160" y="60" width="124" height="40" rx="10"/>
+            <text class="t" x="222" y="85" text-anchor="middle">connecting</text></g>
+          <g class="nd ok" id="f4b-connected"><title>connected: owns the live session</title>
+            <rect x="404" y="60" width="124" height="40" rx="10"/>
+            <text class="t" x="466" y="85" text-anchor="middle">connected</text></g>
+          <g class="nd ok" id="f4b-waiting"><title>waiting: owns the retry timer and the error</title>
+            <rect x="160" y="190" width="124" height="40" rx="10"/>
+            <text class="t" x="222" y="215" text-anchor="middle">waiting</text></g>
+          <g class="nd ok" id="f4b-closed"><rect x="404" y="190" width="124" height="40" rx="10"/>
+            <text class="t" x="466" y="215" text-anchor="middle">closed</text></g>
+
+          <path class="e" d="M100 80H158"/><text class="l" x="129" y="52" text-anchor="middle">reconnect</text>
+          <path class="e" d="M284 72H402"/><text class="l" x="343" y="64" text-anchor="middle">live</text>
+          <path class="e" d="M404 90H286"/><text class="l" x="343" y="107" text-anchor="middle">dropped · resume</text>
+          <path class="e" d="M206 100V188"/><text class="l" x="198" y="149" text-anchor="end">error</text>
+          <path class="e" d="M238 190V102"/><text class="l" x="246" y="149">timer · Try Again</text>
+          <path class="e dash" d="M466 100V188"/><text class="l" x="476" y="149">close()</text>
+          <text class="s" x="466" y="250" text-anchor="middle">from any state</text>
+        </svg>
+        </div>
+      </figure>
+    </div>
+
+    <div class="facts">
+      <div class="fact" id="f4-buys"><h3>Buys</h3><ul>
+        <li><code>closed || attempt || session?.live</code> becomes one check.</li>
+        <li>A link that hasn’t started stops reporting “connecting”.</li>
+      </ul></div>
+      <div class="fact" id="f4-costs"><h3>Costs</h3><ul>
+        <li>No behaviour change, and no reader outside the class.</li>
+        <li>About 60 lines of a file that works.</li>
+      </ul></div>
+      <div class="fact where" id="f4-where"><h3>Where</h3><ul>
+        <li><b>fields</b> <code>infinichat-remote/client.ts:69–90</code></li>
+        <li><b>guards</b> <code>client.ts:329, 404, 412, 525, 545</code></li>
+        <li><b>starts as connecting</b> <code>client.ts:87</code></li>
+      </ul></div>
+    </div>
+
+    <form class="decide" data-lavish-question="4-link" data-title="4 · Machine link as one state">
+      <span class="q">4 · Worth it?</span>
+      <label><input type="radio" name="answer" value="Do it"> Do it</label>
+      <label><input type="radio" name="answer" value="Not now" checked> Not now <span class="rec">recommended</span></label>
+      <label><input type="radio" name="answer" value="Differently"> Differently</label>
+      <input type="text" name="note" placeholder="Note (optional)" aria-label="Note for finding 4">
+      <button type="submit">Queue answer</button>
+      <span class="queued" role="status" aria-live="polite"></span>
+    </form>
+  </section>
+
+  <!-- ───────────────────────── the rest ───────────────────────── -->
+  <section class="rest" id="rest">
+    <h2>Looked at, left alone</h2>
+    <p>Flags here too, but a tag would buy nothing or cost more than it gives.</p>
+    <div class="rows">
+      <table>
+        <tbody>
+          <tr id="rest-daemon"><td>Daemon connection</td>
+            <td><code>mobile …/remote/connection.ts:76–103</code></td>
+            <td>A port of pi-env’s client at v1.5.0. Staying diffable with upstream wins.</td></tr>
+          <tr id="rest-mcp"><td>MCP server</td>
+            <td><code>infinichat-server/src/mcp-server.ts:21, 78–79</code></td>
+            <td>Already has a <code>state</code> tag, and mirrors the coding agent’s connection class.</td></tr>
+          <tr id="rest-keepalive"><td>Keep-alive</td>
+            <td><code>keep-alive/controller.ts:114–153</code></td>
+            <td>Reconciles to a target on every sync. That is the right shape, not a machine.</td></tr>
+          <tr id="rest-shown"><td>Shown side</td>
+            <td><code>pi/shown-infinichat.ts:28–31</code></td>
+            <td>Three fields, one reader, 184 lines.</td></tr>
+          <tr id="rest-server"><td>Server’s conversation state</td>
+            <td><code>infinichat-remote/contract.ts:63–64</code></td>
+            <td>A tag would read better, but it is the wire contract released apps bind to. One gap seen: a failed
+              <code>adopt</code> drops <code>heldBy</code> (<code>conversation.ts:105–109</code>); rare.</td></tr>
+          <tr id="rest-durable"><td>Durable tasks</td>
+            <td><code>infinichat/app.ts:30</code> · <code>summary.ts:199</code></td>
+            <td>Already tagged with <code>phase</code>, as pi-durable prescribes.</td></tr>
+          <tr id="rest-composer"><td>Composer flags</td>
+            <td><code>admitting</code> · <code>stopping</code> · <code>attaching</code>, four screens</td>
+            <td>Independent in-flight flags, not one machine.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>Styled with the Mac app’s tokens (<code>apps/mac/src/view/app.css</code>). Click any box, arrow or row to
+    comment on it; the radios queue an answer, and <b>Send to Agent</b> delivers them.</footer>
+</main>
+
+<script>
+  // One prompt per question, sent only when its button is pressed; the radios only select.
+  for (const form of document.querySelectorAll('form.decide')) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const answer = data.get('answer');
+      if (!answer) return;
+      const question = form.getAttribute('data-lavish-question');
+      const title = form.getAttribute('data-title');
+      const note = String(data.get('note') ?? '').trim();
+      const rows = {};
+      for (const name of ['send', 'errors', 'failure', 'install']) {
+        const value = data.get(name);
+        if (value) rows[name] = value;
+      }
+      const kept = Object.entries(rows).map(([name, value]) => `${name}: ${value}`).join(', ');
+      const text = `${title}: ${answer}${kept ? ` (keep — ${kept})` : ''}${note ? ` — ${note}` : ''}`;
+      const status = form.querySelector('.queued');
+      if (window.lavish && typeof window.lavish.queuePrompt === 'function') {
+        window.lavish.queuePrompt(text, { tag: 'choice', text, element: form, queueKey: question,
+          data: { question, answer, note, rows } });
+        status.textContent = `Queued: ${answer}. Press Send to Agent when you are done.`;
+      } else {
+        status.textContent = 'Open this page through Lavish to send answers.';
+      }
+    });
+  }
+</script>
+
+<script type="module">
+  import { File, FileDiff } from "https://esm.sh/@pierre/diffs@1.2.10?bundle";
+
+  const pinnedTheme = document.documentElement.getAttribute('data-theme');
+  const dark = pinnedTheme ? pinnedTheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const options = {
+    theme: { light: 'github-light', dark: 'github-dark' }, themeType: dark ? 'dark' : 'light', overflow: 'wrap',
+  };
+  const name = 'packages/infinichat/src/pi/infinichat-remote/move.ts';
+  const before = `export interface MoveStatus {
+  machineId: string;
+  to: 'machine' | 'phone';
+  from?: string;
+  step: MoveStep;
+  copied?: Copied;
+  running: boolean;
+  error?: string;
+  cancellable: boolean;
+  undoing?: boolean;
+}
+`;
+  const after = `type MoveBase = {
+  machineId: string;
+  to: 'machine' | 'phone';
+  from?: string;
+  step: MoveStep;
+};
+export type MoveStatus = MoveBase & (
+  | { phase: 'moving'; copied?: Copied }
+  | { phase: 'failed'; error: string }
+  | { phase: 'undoing' }
+  | { phase: 'undo-failed'; error: string }
+);
+
+/** Offered until the opening step. */
+export const cancellable = (move: MoveStatus) =>
+  move.phase !== 'undoing'
+  && !(move.phase === 'moving' && move.step === 'opening');
+`;
+  new FileDiff({ ...options, diffStyle: innerWidth < 900 ? 'unified' : 'split' }).render({
+    containerWrapper: document.querySelector('#diff-move'),
+    oldFile: { name, contents: before },
+    newFile: { name, contents: after },
+  });
+
+  const placement = `export type Placement =
+  | { at: 'here' }
+  | { at: 'machine'; id: string; link: RemoteConnection }
+  | { at: 'moving'; move: MoveStatus; stage?: InstallStage }
+  | { at: 'elsewhere'; holder?: InfiniChatClient }
+  | { at: 'removed'; id: string };
+
+/** What a screen may offer, decided once for both apps. */
+export interface PlacementActions {
+  send: boolean;
+  choose: boolean;
+  cancel: boolean;
+  retry?: 'move' | 'link';
+}
+`;
+  new File(options).render({
+    containerWrapper: document.querySelector('#file-placement'),
+    file: { name: 'packages/infinichat/src/pi/infinichat-remote/placement.ts', contents: placement },
+  });
+</script>
+</body>
+</html>
