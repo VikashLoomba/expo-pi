@@ -80,7 +80,7 @@ the coding agent's Client ID Metadata Documents on pi.dev name pi, so `clientReg
 `/mcp` in the Mac or iOS app opens a sheet with the machine's servers (`InfiniChatMcp`, which the tools plugin serves):
 each one's state, tools and resources, its error with a stdio server's stderr tail, sign-in and sign-out for OAuth
 servers, and reconnect; and the entries the configuration skipped. A sign-in runs on the machine, as a provider
-sign-in does (`SignInAttempts`, `node/sign-in.ts`): the machine holds the PKCE verifier, the registration and the
+sign-in does (`SignInAttempts`, `pi/sign-in.ts`): the machine holds the PKCE verifier, the registration and the
 tokens, in `~/.infinichat/mcp-auth.json` keyed by server name and URL, and refreshes them (pi-mcp's
 `adaptOAuthProvider`). Its authorization URL redirects to the machine's own loopback, which its callback server
 answers when the browser runs there. A client's browser runs elsewhere, so the client listens on the same loopback

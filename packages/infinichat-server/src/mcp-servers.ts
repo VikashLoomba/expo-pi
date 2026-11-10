@@ -1,8 +1,8 @@
 import { local, opaque } from '@earendil-works/chord';
 import { obj } from '@earendil-works/pi-schema';
-import { SignInAttempts } from '@pi-agent/infinichat/node/sign-in';
 import type { McpServerStatus } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
+import { SignInAttempts } from '@pi-agent/infinichat/pi/sign-in';
 
 import type { McpDisabledServer } from './mcp-config';
 import type { McpLog } from './mcp-log';

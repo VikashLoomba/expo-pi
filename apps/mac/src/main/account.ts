@@ -1,10 +1,10 @@
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 import { openAILoginOptions } from '@pi-agent/infinichat/node/credentials';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
-import { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 import { validateOpenAICredential } from '@pi-agent/infinichat/pi/openai-auth/core';
 import { ProviderCredentialStore, type CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
+import { ProviderSignIn } from '@pi-agent/infinichat/pi/sign-in';
 
 const ADVICE = 'Check that credentials.json in the app’s data folder can be read and written, then try again.';
 
@@ -23,7 +23,7 @@ export class MacAccount {
   readonly credentials: ProviderCredentialStore;
   readonly models: ReturnType<typeof createServerModels>;
   /** Sign-ins and API keys, one attempt at a time; a ChatGPT attempt's browser is this Mac's (`index.ts`). */
-  readonly signIn: ServerSignIn;
+  readonly signIn: ProviderSignIn;
   private catalog: ModelCatalog;
   private readonly listeners = new Set<() => void>();
 
@@ -32,7 +32,7 @@ export class MacAccount {
     this.models = createServerModels(this.credentials);
     this.credentials.registerProviders(this.models.getProviders().map((provider) => provider.id));
     this.catalog = buildModelCatalog(this.models);
-    this.signIn = new ServerSignIn(this.models, this.credentials, openAILoginOptions(secrets));
+    this.signIn = new ProviderSignIn(this.models, this.credentials, openAILoginOptions(secrets));
     // A provider whose credential cannot be read reports it in its own access state.
     void this.credentials.restore().catch(() => {});
     // A provider whose fetch fails keeps the models it has; Refresh Models tries again and says so.

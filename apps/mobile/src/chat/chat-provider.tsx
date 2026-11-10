@@ -1,11 +1,11 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
 import type { ConversationId, Storage } from '@earendil-works/pi-durable';
-import { AuthPromptController } from '@pi-agent/infinichat/chat/auth-prompt-controller';
 import type { ChatControls, ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { chatTasks, DurableChatService, type ChatServiceSnapshot } from '@pi-agent/infinichat/pi/chat-service';
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
+import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { INFINICHAT_DATABASE, InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
@@ -13,6 +13,7 @@ import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/ma
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 import { NEW_CHAT_DEFAULTS } from '@pi-agent/infinichat/pi/new-chat';
 import type { ProviderAccess, ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
+import { ProviderSignIn } from '@pi-agent/infinichat/pi/sign-in';
 import { INFINICHAT_SERVER_MANIFEST } from '@pi-agent/infinichat-server/manifest';
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
@@ -310,102 +311,81 @@ function useChatRuntime() {
     moves, infiniChatClient, openError, setOpenError };
 }
 
-/** Browser sign-in for the account screen: one attempt at a time, cancellable, with its own prompts. */
+type AuthNotice = NonNullable<ProviderAccount['authNotice']>;
+
+/**
+ * A sign-in attempt as the providers screens show it, whichever store runs it: this iPhone's, or the machine's that
+ * InfiniChat runs on. `notice` is what this phone's own part ran into, which the attempt's state doesn't say.
+ */
+function shownSignIn(shown: SignInAttempt, notice: AuthNotice | undefined) {
+  const running = shown?.running ? shown : undefined;
+  const status = shown?.status === undefined ? undefined : { providerId: shown.providerId, message: shown.status };
+  return {
+    signingIn: running !== undefined,
+    signingInProvider: running?.providerId ?? null,
+    authNotice: notice ?? status,
+    authPrompt: running?.prompt ?? null,
+  };
+}
+
+/**
+ * The attempt's sign-in page again in the external browser, whose address bar shows the return URL to paste; one at a
+ * time.
+ */
+function useSignInPage(shown: SignInAttempt, setNotice: (notice: AuthNotice) => void) {
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const manual = useRef<AbortController | null>(null);
+  const closeSignInPage = useCallback(() => manual.current?.abort(), []);
+  const openSignInPage = async () => {
+    if (!shown?.running || shown.url === undefined || manual.current) return;
+    const { providerId, url } = shown;
+    const controller = new AbortController();
+    manual.current = controller;
+    setBrowserOpen(true);
+    try {
+      if (providerId === OPENAI_PROVIDER_ID) await openOpenAIManualBrowser(url, controller.signal);
+    } catch {
+      if (controller.signal.aborted) return;
+      setNotice({ providerId, message: 'Could not open the sign-in page. Please try again.' });
+    } finally {
+      if (manual.current === controller) manual.current = null;
+      setBrowserOpen(false);
+    }
+  };
+  return { browserOpen, openSignInPage, closeSignInPage };
+}
+
+/**
+ * This iPhone's own sign-ins, run and kept as a machine keeps the ones it runs for its clients (`ProviderSignIn`): one
+ * attempt at a time, with its prompts, which the account screen answers.
+ */
 function useProviderSignIn({ models, credentials, signOutPending, onSignedIn }: {
   models: Models; credentials: ProviderCredentialStore; signOutPending: boolean; onSignedIn: () => void;
 }) {
-  const [signingInProvider, setSigningInProvider] = useState<string | null>(null);
-  const [authNotice, setAuthNotice] = useState<{ providerId: string; message: string }>();
-  const [prompts] = useState(() => new AuthPromptController());
-  const authPrompt = useSyncExternalStore(prompts.subscribe, prompts.getSnapshot, prompts.getSnapshot);
-  const [browserOpen, setBrowserOpen] = useState(false);
-  const login = useRef<AbortController | null>(null);
-  const browser = useRef<AbortController | null>(null);
-  const authUrl = useRef<string | null>(null);
-  const mounted = useRef(false);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      login.current?.abort();
-      browser.current?.abort();
-      prompts.cancel();
-    };
-  }, [prompts]);
-
+  const [signIns] = useState(() => new ProviderSignIn(models, credentials, getOpenAILoginOptions, onSignedIn));
+  const shown = useSyncExternalStore(signIns.subscribe, signIns.getSnapshot, signIns.getSnapshot);
+  const [notice, setNotice] = useState<AuthNotice>();
+  const { browserOpen, openSignInPage, closeSignInPage } = useSignInPage(shown, setNotice);
+  useEffect(() => () => {
+    signIns.cancel();
+    closeSignInPage();
+  }, [signIns, closeSignInPage]);
   const cancelSignIn = useCallback(() => {
-    login.current?.abort();
-    browser.current?.abort();
-  }, []);
-  const signIn = useCallback(async (providerId: string) => {
-    if (login.current || signOutPending || !credentials.getProviderSnapshot(providerId).ready) return;
-    if (!models.getProvider(providerId)?.auth.oauth) return;
-    const controller = new AbortController();
-    login.current = controller;
-    setSigningInProvider(providerId);
-    setAuthNotice({ providerId, message: 'Starting sign-in…' });
-    authUrl.current = null;
-    try {
-      const options = providerId === OPENAI_PROVIDER_ID ? await getOpenAILoginOptions() : undefined;
-      controller.signal.throwIfAborted();
-      // Pi's store replaces the credential atomically; work in progress keeps the auth it resolved.
-      await models.login(providerId, 'oauth', {
-        signal: controller.signal,
-        prompt: (prompt) => {
-          setAuthNotice({ providerId, message: prompt.type === 'manual_code'
-            ? 'Finish sign-in with the browser return URL.' : 'Complete the next sign-in step.' });
-          return prompts.prompt(prompt, controller.signal);
-        },
-        notify(event) {
-          if (!mounted.current || controller.signal.aborted) return;
-          if (event.type === 'auth_url') authUrl.current = event.url;
-          // OAuth diagnostics can include callback URLs or tokens. The account
-          // screen uses public status copy and never renders raw server payloads.
-          if (event.type === 'progress' || event.type === 'info' || event.type === 'auth_url') {
-            setAuthNotice({ providerId,
-              message: event.type === 'auth_url' ? 'Continue in your browser to sign in.' : 'Sign-in in progress…' });
-          }
-        },
-      }, options);
-      if (mounted.current && !controller.signal.aborted) {
-        setAuthNotice(undefined);
-        onSignedIn();
-      }
-    } catch {
-      if (mounted.current) {
-        setAuthNotice({ providerId, message: controller.signal.aborted
-          ? 'Sign-in cancelled.' : 'Sign-in could not be completed. Please try again.' });
-      }
-    } finally {
-      if (login.current === controller) login.current = null;
-      browser.current?.abort();
-      authUrl.current = null;
-      prompts.cancel();
-      if (mounted.current) setSigningInProvider(null);
-    }
-  }, [credentials, models, onSignedIn, prompts, signOutPending]);
-  const openSignInPage = useCallback(async () => {
-    if (!login.current || browser.current || !signingInProvider) return;
-    const controller = new AbortController();
-    browser.current = controller;
-    setBrowserOpen(true);
-    try {
-      if (signingInProvider === OPENAI_PROVIDER_ID && authUrl.current) {
-        await openOpenAIManualBrowser(authUrl.current, controller.signal);
-      }
-    } catch {
-      if (mounted.current && !controller.signal.aborted) {
-        setAuthNotice({ providerId: signingInProvider, message: 'Could not open the sign-in page. Please try again.' });
-      }
-    } finally {
-      if (browser.current === controller) browser.current = null;
-      if (mounted.current) setBrowserOpen(false);
-    }
-  }, [signingInProvider]);
-
-  return { signingIn: signingInProvider !== null, signingInProvider, authNotice, setAuthNotice, browserOpen,
-    authPrompt, submitAuthPrompt: prompts.submit, signIn, cancelSignIn, openSignInPage };
+    closeSignInPage();
+    signIns.cancel();
+  }, [signIns, closeSignInPage]);
+  const signIn = async (providerId: string) => {
+    if (signOutPending || !credentials.getProviderSnapshot(providerId).ready) return;
+    setNotice(undefined);
+    signIns.signIn(providerId);
+  };
+  const submitAuthPrompt = (id: number, value: string) => {
+    if (shown?.prompt?.id !== id || !value.trim()) return false;
+    signIns.answer(id, value);
+    return true;
+  };
+  return { ...shownSignIn(shown, notice), signIns, setAuthNotice: setNotice, signIn, cancelSignIn, submitAuthPrompt,
+    openSignInPage, browserOpen };
 }
 
 function useChatController() {
@@ -433,8 +413,7 @@ function useChatController() {
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
   const signOutPending = disconnectingProvider !== undefined;
   const onSignedIn = fetchModels;
-  const { setAuthNotice, ...signIn } = useProviderSignIn({ models, credentials, signOutPending, onSignedIn });
-  const { signingIn, cancelSignIn } = signIn;
+  const { setAuthNotice, signIns, ...signIn } = useProviderSignIn({ models, credentials, signOutPending, onSignedIn });
 
   const providerAccess = (providerId: string): ProviderAccess => {
     const state = credentialState.providers[providerId] ?? { ready: false, connected: false };
@@ -452,15 +431,8 @@ function useChatController() {
     setAuthNotice(undefined);
     await credentials.restoreProvider(providerId);
   };
-  const saveProviderKey = async (providerId: string, input: string) => {
-    if (signingIn) throw new Error('Finish or cancel sign-in before changing provider credentials.');
-    const key = input.trim();
-    if (!key) throw new Error('Enter an API key.');
-    if (!models.getProvider(providerId)?.auth.apiKey?.login) {
-      throw new Error('This provider does not support API key sign-in.');
-    }
-    // Pi's store contract has one write path, the same `modify` that `models.login` ends in.
-    await credentials.modify(providerId, async () => ({ type: 'api_key', key }));
+  const saveProviderKey = async (providerId: string, key: string) => {
+    await signIns.setApiKey(providerId, key);
     await refreshCatalog();
   };
   /** Removes the saved credential. A failed removal stays pending so the account screen can retry it. */
@@ -468,13 +440,9 @@ function useChatController() {
     if (disconnectingProvider !== undefined && disconnectingProvider !== providerId) {
       throw new Error(`Finish disconnecting ${providerName(disconnectingProvider)} before removing another provider.`);
     }
-    cancelSignIn();
     setDisconnectingProvider(providerId);
-    try {
-      await models.logout(providerId);
-    } catch (error) {
-      throw new Error(`Could not remove the saved ${providerName(providerId)} key. Try again.`, { cause: error });
-    }
+    // It cancels a sign-in under way before it signs out.
+    await signIns.signOut(providerId);
     setDisconnectingProvider(undefined);
   };
   const providerOAuth = (providerId: string) => {
@@ -622,22 +590,21 @@ export function useInfiniChatAccount(): ProviderAccount & {
   const access = useSyncExternalStore(subscribe, getAccess, getAccess);
   const shown = useSyncExternalStore(subscribe, getSignIn, getSignIn);
   const listed = useMachines();
-  const [notice, setNotice] = useState<{ providerId: string; message: string }>();
-  const [browserOpen, setBrowserOpen] = useState(false);
+  const [notice, setNotice] = useState<AuthNotice>();
   const [disconnectingProvider, setDisconnectingProvider] = useState<string>();
+  const { browserOpen, openSignInPage, closeSignInPage } = useSignInPage(shown, setNotice);
   // This phone's part of an attempt it started, its browser, and the manual browser; both end with the machine.
   const flow = useRef<AbortController | null>(null);
-  const manual = useRef<AbortController | null>(null);
   useEffect(() => () => {
     flow.current?.abort();
-    manual.current?.abort();
-  }, [remote]);
+    closeSignInPage();
+  }, [remote, closeSignInPage]);
   const cancelSignIn = useCallback(() => {
     flow.current?.abort();
-    manual.current?.abort();
+    closeSignInPage();
     // Only an attempt under way, so leaving the screen while disconnected starts no connection.
     if (remote?.getSignIn()?.running) void remote.cancelSignIn().catch(() => {});
-  }, [remote]);
+  }, [remote, closeSignInPage]);
   if (!remote) return { ...app, machine: undefined };
 
   const signIn = async (providerId: string) => {
@@ -663,22 +630,6 @@ export function useInfiniChatAccount(): ProviderAccount & {
       controller.abort();
     }
   };
-  const openSignInPage = async () => {
-    if (!shown?.running || shown.url === undefined || manual.current) return;
-    const { providerId, url } = shown;
-    const controller = new AbortController();
-    manual.current = controller;
-    setBrowserOpen(true);
-    try {
-      if (providerId === OPENAI_PROVIDER_ID) await openOpenAIManualBrowser(url, controller.signal);
-    } catch {
-      if (controller.signal.aborted) return;
-      setNotice({ providerId, message: 'Could not open the sign-in page. Please try again.' });
-    } finally {
-      if (manual.current === controller) manual.current = null;
-      setBrowserOpen(false);
-    }
-  };
   const disconnectProvider = async (providerId: string) => {
     if (disconnectingProvider !== undefined && disconnectingProvider !== providerId) {
       const name = catalog.find((provider) => provider.id === disconnectingProvider)?.name ?? disconnectingProvider;
@@ -692,7 +643,6 @@ export function useInfiniChatAccount(): ProviderAccount & {
     setDisconnectingProvider(undefined);
   };
   const signOutPending = disconnectingProvider !== undefined;
-  const status = shown?.status === undefined ? undefined : { providerId: shown.providerId, message: shown.status };
   return {
     catalog,
     machine: listed?.machines[remote.machineId]?.name ?? 'the machine',
@@ -711,12 +661,9 @@ export function useInfiniChatAccount(): ProviderAccount & {
     disconnectProvider,
     signOutPending,
     disconnectingProvider,
-    signingIn: !!shown?.running,
-    signingInProvider: shown?.running ? shown.providerId : null,
+    ...shownSignIn(shown, notice),
     signIn,
     cancelSignIn,
-    authNotice: notice ?? status,
-    authPrompt: shown?.running && shown.prompt ? shown.prompt : null,
     submitAuthPrompt: (id, value) => {
       if (!remote || shown?.prompt?.id !== id || !value.trim()) return false;
       void remote.answer(id, value).catch(() => {});

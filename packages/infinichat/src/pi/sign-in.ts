@@ -1,9 +1,9 @@
 import type { AuthPrompt, LoginOptions, Models, ProviderAuthInteraction } from '@earendil-works/pi-ai';
 import { AuthPromptController } from '../chat/auth-prompt-controller';
-import type { SignInAttempt } from '../pi/infinichat-remote/contract';
-import type { ShownAttempt, ShownAuthPrompt } from '../pi/infinichat-remote/sign-in-attempt';
-import { OPENAI_PROVIDER_ID } from '../pi/openai-auth/core';
-import type { ProviderCredentialStore } from '../pi/provider-credentials';
+import type { SignInAttempt } from './infinichat-remote/contract';
+import type { ShownAttempt, ShownAuthPrompt } from './infinichat-remote/sign-in-attempt';
+import { OPENAI_PROVIDER_ID } from './openai-auth/core';
+import type { ProviderCredentialStore } from './provider-credentials';
 
 /** A prompt as a contract carries it: its signal stays here, and an absent field is left out, as Chord requires. */
 function shown(prompt: AuthPrompt): ShownAuthPrompt {
@@ -19,11 +19,12 @@ function shown(prompt: AuthPrompt): ShownAuthPrompt {
 export type FailureCopy<S> = (error: unknown, subject: S, shownUrl: boolean) => string | undefined;
 
 /**
- * Sign-ins this machine runs for its clients, one at a time, kept as state, so a client that reconnects mid-attempt
- * finds the pending prompt again. A sign-in is any flow over pi-ai's `AuthInteraction`, which the clients answer: a
- * provider's `models.login`, or an MCP server's OAuth (the tools plugin's `mcp-oauth.ts`). `subject` names what an
- * attempt signs in to, as its contract's field. An attempt ends when it succeeds or fails, when it is cancelled, when
- * another starts, or when its owner closes; a dropped link alone does not end it.
+ * Sign-ins run one at a time and kept as state, so whoever shows one finds the pending prompt again: a machine's
+ * clients after they reconnect mid-attempt, and an app's own account screen. A sign-in is any flow over pi-ai's
+ * `AuthInteraction`, which the screens answer: a provider's `models.login`, or an MCP server's OAuth (the tools
+ * plugin's `mcp-oauth.ts`). `subject` names what an attempt signs in to, as its contract's field. An attempt ends when
+ * it succeeds or fails, when it is cancelled, when another starts, or when its owner closes; a dropped link alone does
+ * not end it.
  */
 export class SignInAttempts<S extends object> {
   private readonly listeners = new Set<() => void>();
@@ -123,19 +124,22 @@ export class SignInAttempts<S extends object> {
 }
 
 /**
- * Sign-in to this machine's providers, from a client: the account screen's `useProviderSignIn` as a `SignInAttempts`
- * over pi-ai's `models.login`. API keys take the account screen's `modify` path.
+ * Sign-in to a credential store's providers, as a `SignInAttempts` over pi-ai's `models.login`: a machine's own
+ * store for its clients, the Mac app's account, and the iPhone's. API keys take the store's `modify` path.
  */
-export class ServerSignIn {
+export class ProviderSignIn {
   private readonly attempts = new SignInAttempts<{ providerId: string }>((error, { providerId }, shownUrl) =>
     // Before its URL, ChatGPT's flow has talked to no server (openai-chatgpt.ts:237-269), so its message is pi-ai's own
     // setup copy, such as "Port 1455 is in use…" (:243-248), and says what to do. Later ones, and other providers'
     // device-code requests, can carry a server's reply.
     providerId === OPENAI_PROVIDER_ID && !shownUrl && error instanceof Error ? error.message : undefined);
 
-  /** `openAILogin` gives ChatGPT's sign-in this machine's installation ID (`node/credentials.ts`). */
+  /**
+   * `openAILogin` gives ChatGPT's sign-in this installation's ID (`node/credentials.ts`, the iPhone's
+   * `openai-auth/installation.ts`). `signedIn` runs once a sign-in has stored its credential.
+   */
   constructor(private readonly models: Models, private readonly credentials: ProviderCredentialStore,
-    private readonly openAILogin: () => Promise<LoginOptions>) {}
+    private readonly openAILogin: () => Promise<LoginOptions>, private readonly signedIn?: () => void) {}
 
   readonly subscribe = (listener: () => void) => this.attempts.subscribe(listener);
   readonly getSnapshot = (): SignInAttempt => this.attempts.getSnapshot();
@@ -148,6 +152,7 @@ export class ServerSignIn {
       const options = providerId === OPENAI_PROVIDER_ID ? await this.openAILogin() : undefined;
       interaction.signal.throwIfAborted();
       await this.models.login(providerId, 'oauth', interaction, options);
+      this.signedIn?.();
     });
   }
 

@@ -28,7 +28,7 @@ export const McpServerStatusSchema = obj({
 }, { open: true });
 export type McpServerStatus = Static<typeof McpServerStatusSchema>;
 
-/** The machine's latest MCP sign-in, until the next one starts; null before its first (`node/sign-in.ts`). */
+/** The machine's latest MCP sign-in, until the next one starts; null before its first (`pi/sign-in.ts`). */
 export const McpSignInAttemptSchema = union([nul(), obj({ ...signInAttemptFields, server: str() }, { open: true })]);
 export type McpSignInAttempt = Static<typeof McpSignInAttemptSchema>;
 

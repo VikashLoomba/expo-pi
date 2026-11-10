@@ -19,7 +19,7 @@ export const AuthPromptSchema = union([
 export type ShownAuthPrompt = Static<typeof AuthPromptSchema>;
 
 /**
- * What every sign-in a machine runs for its clients shows, whatever it signs in to (`node/sign-in.ts`): its number,
+ * What every sign-in a machine runs for its clients shows, whatever it signs in to (`pi/sign-in.ts`): its number,
  * whether it runs, the copy for the screen, pi-ai's `auth_url` while it runs, and the prompt that waits for an answer
  * with its `id`. A contract adds the field that names what it signs in to.
  */

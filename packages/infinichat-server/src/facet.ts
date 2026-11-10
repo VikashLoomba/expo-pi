@@ -8,7 +8,6 @@ import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/
 import { serverDevices } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
-import { ServerSignIn } from '@pi-agent/infinichat/node/sign-in';
 import {
   AccessSchema, ControlsSchema, ConversationSchema, InfiniChatRemote, MachinesSchema, MessagesSchema,
   PendingHostKeysSchema, ReachSchema, ScheduledSchema, SignInAttemptSchema, SnapshotSchema,
@@ -20,6 +19,7 @@ import { validateOpenAICredential } from '@pi-agent/infinichat/pi/openai-auth/co
 import {
   ProviderCredentialStore, type CredentialBackend,
 } from '@pi-agent/infinichat/pi/provider-credentials';
+import { ProviderSignIn } from '@pi-agent/infinichat/pi/sign-in';
 
 import { ServerConversation } from './conversation';
 import { InfiniChatProcess } from './process';
@@ -43,7 +43,7 @@ export const InfiniChatMachine = local('infinichat.machine', {
   input: obj({}, { open: true }),
   members: {
     account: opaque<Account>('infinichat.account@1'),
-    signIn: opaque<ServerSignIn>('infinichat.sign-in@1'),
+    signIn: opaque<ProviderSignIn>('infinichat.sign-in@1'),
     machines: opaque<ServerMachines>('infinichat.machines@1'),
     conversation: opaque<ServerConversation>('infinichat.conversation@1'),
   },
@@ -89,7 +89,7 @@ export default defineFacet<InfiniChatPrincipal>((facet) => {
     const signIn = self.resource('signIn', {
       version: 1,
       deps: [account],
-      open: () => new ServerSignIn(account.value.models, account.value.credentials,
+      open: () => new ProviderSignIn(account.value.models, account.value.credentials,
         openAILoginOptions(account.value.backend)),
       // Ends an attempt still under way.
       close: (attempts) => attempts.cancel(),
