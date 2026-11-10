@@ -168,3 +168,23 @@ design is wrong; stop and revisit it.
 `apps/mac/` holds `hutch.config.ts`, `electrobun.config.ts`, `package.json`, `tsconfig.json`, `src/main/` (the Bun
 main process), `src/view/` (the window's code and CSS), `src/contract.ts` (the Mac's Chord contract, shared by both),
 `scripts/` (the release script), `icon.iconset`, and the generated, ignored `.hutch/`, `build/`, `artifacts/`. `file:line` references in these docs are as of `18c9dd5`.
+
+## Since Chord v2 (2026-11-10)
+
+These pieces record the app as built on Chord v1 (chord 1.4.0 to 1.5.0), whose API and docs chord 1.5.1 removed. The
+app runs on Chord v2 since pi 1.5.2; where a piece names one of these, read it as follows (chord `docs/design.md`):
+
+- **The main process** is the app's one addressable host (`MacMain()`, `src/contract.ts`; design §3). It serves its
+  types from one facet it loads before it accepts windows (`src/main/host.ts`), not with `host.serve`.
+- **State** is mirrored from the app's stores with `mirror` (`src/main/serve.ts`): a `self.writable` an `onLive`
+  routine keeps current, each member a derive over it (§12, §14), where the pieces say `self.state` cells and
+  `self.on`. A method without a result answers `null`.
+- **Windows** are refused or admitted at the WebSocket upgrade, then `host.accept` takes the socket's link
+  (`src/main/listen.ts`); `acceptWebSockets` is gone.
+- **The window's code** holds and reads through chord's own React bindings, `useHold`, `useWatch` and `useRefState`
+  under a `HostProvider` (`@earendil-works/chord/react`); `hooks/use-ref.ts`, `use-machines.ts`, `use-mcp.ts` and
+  `socketLike` are gone. Every call passes a context. A link has one close listener, which the host takes, so the
+  window reconnects from its socket's own `close` (`src/view/lib/client.ts`).
+- **Contracts** declare `params` and `hostAddress`, and every object in a method's arguments is closed (§5).
+
+`docs/server-plugins.md` has the server's side.

@@ -1,5 +1,5 @@
 // Reader behavior adapted from Pi Env 1.1.0 remote-env.ts (MIT).
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import {
   err, ok, FileError, StreamDecoder, type BinaryReader, type DirReader, type FileInfo, type FileKind,
   type LineScan, type Result, type TextLine, type TextLineReader,

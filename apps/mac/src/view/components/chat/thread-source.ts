@@ -1,4 +1,5 @@
-import type { Readable } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
+import type { Watchable } from '@earendil-works/chord/watch';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import type { ChatControls, ChatMessage, TranscriptGap } from '@pi-agent/infinichat/chat/types';
 import type { ChatViewSnapshot } from '@pi-agent/infinichat/pi/chat-view';
@@ -10,14 +11,14 @@ import { createContext, use } from 'react';
  * object is a source as it is.
  */
 export interface ThreadSource {
-  readonly snapshot: Readable<{ view: ChatViewSnapshot }>;
-  readonly controls: Readable<ChatControls | null>;
-  readonly messages: Readable<readonly ChatMessage[]>;
+  readonly snapshot: Watchable<{ view: ChatViewSnapshot }>;
+  readonly controls: Watchable<ChatControls | null>;
+  readonly messages: Watchable<readonly ChatMessage[]>;
   /** Sends a queued follow-up again as a steer; InfiniChat's queue offers no such action. */
-  readonly steerQueued?: (submissionId: number, content: UserMessage['content']) => Promise<void>;
+  readonly steerQueued?: (submissionId: number, content: UserMessage['content']) => Promise<unknown>;
   /** Load the entries a history row stands for (`ChatViewSource`'s `loadEarlier` and `fillGap`). */
-  readonly loadEarlier: () => Promise<unknown>;
-  readonly fillGap: (gap: TranscriptGap) => Promise<unknown>;
+  readonly loadEarlier: (context: Context) => Promise<unknown>;
+  readonly fillGap: (gap: TranscriptGap, context: Context) => Promise<unknown>;
 }
 
 export const ThreadSourceContext = createContext<ThreadSource | undefined>(undefined);

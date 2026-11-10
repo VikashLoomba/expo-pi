@@ -11,11 +11,14 @@ export type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 /** The JPEG quality in percent when the model declares none; pi-durable's Photon processor starts at the same. */
 export const DEFAULT_JPEG_QUALITY = 80;
 
-/** The same serializable references persisted by pi-durable's AgentDoc: its `ModelRef` and pi-ai's effort. */
+/**
+ * The same serializable references persisted by pi-durable's AgentDoc: its `ModelRef` and pi-ai's effort. Closed,
+ * since the settings methods take it as an argument (chord `docs/design.md` §5, "Arguments").
+ */
 export const ChatModelSettingsSchema = obj({
-  model: obj({ provider: str(), modelId: str() }, { open: true }),
+  model: obj({ provider: str(), modelId: str() }),
   thinkingLevel: ModelThinkingLevelSchema,
-}, { open: true });
+});
 export type ChatModelSettings = Static<typeof ChatModelSettingsSchema>;
 
 /** What an attached photo is fitted to before it is sent, from the model's `inputLimits.images`. */

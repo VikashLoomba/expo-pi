@@ -1,3 +1,4 @@
+import { HostProvider } from '@earendil-works/chord/react';
 import { Electroview } from 'electrobun/view';
 import { createRoot } from 'react-dom/client';
 
@@ -31,7 +32,12 @@ const rpc = Electroview.defineRPC<WindowRPC>({
   } },
 });
 new Electroview({ rpc });
-const host = connectToMain(bootstrap);
 // Which window this page is: the main one, or Settings (`settings.html` says so on its body).
-createRoot(container).render(document.body.dataset.window === 'settings'
-  ? <SettingsWindow host={host} targets={targets} /> : <App host={host} commands={commands} />);
+const settings = document.body.dataset.window === 'settings';
+void connectToMain(bootstrap).then((host) => {
+  createRoot(container).render(
+    <HostProvider host={host}>
+      {settings ? <SettingsWindow targets={targets} /> : <App commands={commands} />}
+    </HostProvider>,
+  );
+});

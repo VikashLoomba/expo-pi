@@ -90,7 +90,7 @@ export interface McpServerConfig {
   readonly toolExposure: readonly (readonly [string, McpExposure])[];
   readonly description?: string;
   readonly connection: McpConnection;
-  /** Its resource's version, a hash of `connection`: Chord reopens a resource whose version changed. */
+  /** A hash of `connection`: a server whose version changed is connected anew (`McpServers.apply`). */
   readonly version: number;
 }
 
@@ -224,7 +224,7 @@ export function toolExposure(config: McpServerConfig, tool: string): McpExposure
 }
 
 /**
- * `file`, read synchronously, as a Chord factory declares (chord `docs/guide.md` "Serving objects"). A file that is
+ * `file`, read synchronously, as the tools plugin's object applies it (`McpServers.apply`). A file that is
  * missing configures no server; one that can't be read or parsed configures none either, and says why, as does each
  * entry that is left out.
  */

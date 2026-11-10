@@ -4,6 +4,7 @@ import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 
 import { webSocketLink, type Host } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { WebSocketServer } from 'ws';
 
@@ -23,21 +24,24 @@ async function authorized(request: IncomingMessage, clients: string): Promise<bo
 
 /**
  * Listens on the machine's loopback, where the clients' SSH tunnels arrive, and records where in `server.json`. The
- * loopback is open to every account on the machine, so each connection must also carry a client's secret; then it is
- * a client link acting as the owner, so every client shares one object (chord `docs/guide.md`, "Principals and
- * variants"). As Chord's `acceptWebSockets` does, the socket is wrapped at once, so frames sent while the secret is
- * checked wait; links send plain frames, because `acceptWebSockets` deflates large ones, which the phone's Hermes
+ * loopback is open to every account on the machine, so each connection must also carry a client's secret, checked at
+ * the upgrade, before a socket exists; then it is a link from a client acting as the owner, so every client shares
+ * one object (chord `docs/design.md` §3: an entry point authenticates and calls `accept`; §4, principals). The host
+ * sets no compression (`createHost`'s `compression`), so links send plain frames, which the phone's Hermes needs: it
  * cannot inflate. `version` tells the clients which release answers.
  */
 export async function listen(host: Host<InfiniChatPrincipal>, home: string, version: string,
 ): Promise<WebSocketServer> {
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  server.on('connection', (socket, request) => {
-    const link = webSocketLink(socket, { compress: false, acceptPacked: false });
-    authorized(request, join(home, 'clients')).then((ok) => {
-      if (ok) host.accept(link, { principal: { kind: 'owner' }, kind: 'client' });
-      else link.close('unauthorized');
-    }, () => link.close('authentication failed'));
+  const clients = join(home, 'clients');
+  const server = new WebSocketServer({
+    host: '127.0.0.1',
+    port: 0,
+    verifyClient: ({ req }, done) => {
+      authorized(req, clients).then((ok) => done(ok, 401), () => done(false, 500));
+    },
+  });
+  server.on('connection', (socket) => {
+    host.accept(webSocketLink(socket), { principal: { kind: 'owner' } }, BACKGROUND_CONTEXT);
   });
   await new Promise<void>((resolve, reject) => {
     server.once('listening', resolve);

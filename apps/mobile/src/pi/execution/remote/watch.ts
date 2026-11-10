@@ -1,5 +1,5 @@
 // Adapted from Pi Env 1.5.0 watch.ts (MIT); watches execute in the remote daemon.
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { type FileChange, FileError, type FileWatcher, type WatchTarget } from "@earendil-works/pi-durable/env";
 import { type Connection, isConnectionLost } from "./connection";
 import { toFileError } from "./errors";

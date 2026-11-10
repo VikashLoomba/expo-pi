@@ -2,7 +2,7 @@ import type {
   AssistantMessage, Context as ModelContext, ModelThinkingLevel,
 } from '@earendil-works/pi-ai';
 import { isRetryableAssistantError, retryDelayMs } from '@earendil-works/pi-ai/utils/retry';
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import {
   defineDoc, defineTask, type Agent, type ConversationId, type DocumentReader, type ModelRef, type TaskId, type Tx,
 } from '@earendil-works/pi-durable';

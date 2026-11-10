@@ -8,7 +8,7 @@ export const SCHEDULED_TASK = 'optchat.scheduled-task';
 
 /** What the main agent is sent, and when, as a Harness clock time. */
 export const ScheduledInputProperties = { task: str(), until: num() };
-export const ScheduledInputSchema = obj(ScheduledInputProperties, { open: true });
+export const ScheduledInputSchema = obj(ScheduledInputProperties);
 export type ScheduledInput = Static<typeof ScheduledInputSchema>;
 
 /** Admits a work message to the main agent in the caller's commit, as OptChat admits an agent's report. */

@@ -1,3 +1,5 @@
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { useWatch } from '@earendil-works/chord/react';
 import type { MachineAccess } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import {
   getModelSettingsError, type ChatModelSettings, type ModelCatalog,
@@ -5,7 +7,7 @@ import {
 import { useState } from 'react';
 
 import { useInfiniChatRef } from '../../hooks/use-infinichat';
-import { errorText, useMember } from '../../hooks/use-ref';
+import { errorText } from '../../lib/error-text';
 import { AgentMark, ChatAgentContext } from '../chat/agent';
 import { ModelSection } from '../chat/model-section';
 import { Notice } from '../chat/notices';
@@ -55,11 +57,11 @@ export function SettingsSheet({ open, onClose, onOpenProviders }: {
   open: boolean; onClose: () => void; onOpenProviders: (providerId: string) => void;
 }) {
   const ref = useInfiniChatRef();
-  const controls = useMember(ref.controls);
-  const catalog = useMember(ref.catalog) ?? [];
-  const accesses = useMember(ref.access) ?? {};
-  const avatar = useMember(ref.avatar) ?? undefined;
-  const machine = useMember(ref.machine)?.name ?? 'the machine';
+  const controls = useWatch(ref.controls);
+  const catalog = useWatch(ref.catalog) ?? [];
+  const accesses = useWatch(ref.access) ?? {};
+  const avatar = useWatch(ref.avatar) ?? undefined;
+  const machine = useWatch(ref.machine)?.name ?? 'the machine';
   if (!controls) {
     return (
       <FormSheet open={open} onClose={onClose} title={TITLE}>
@@ -119,7 +121,7 @@ function SettingsForm({ open, onClose, onOpenProviders, initial: opened, catalog
     // One commit on the machine: the main model and the instructions with pi-durable's `configure`, and the summary
     // and subagent models and the name in OptChat's ConfigDoc.
     void ref.updateSettings({ main: draft.main, summary: draft.summary, instructions: draft.instructions.trim(),
-      name: draft.name.trim(), subagents: draft.subagents }).then(onClose, (cause: unknown) => {
+      name: draft.name.trim(), subagents: draft.subagents }, BACKGROUND_CONTEXT).then(onClose, (cause: unknown) => {
       setError(errorText(cause, 'Could not save these settings. Try again.'));
     }).finally(() => setSaving(false));
   };
@@ -147,12 +149,12 @@ function SettingsForm({ open, onClose, onOpenProviders, initial: opened, catalog
             </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" size="sm" disabled={saving}
-                onClick={() => act(ref.setAvatar(), 'The avatar could not be chosen.')}>
+                onClick={() => act(ref.setAvatar(BACKGROUND_CONTEXT), 'The avatar could not be chosen.')}>
                 {avatar ? 'Choose Another Avatar…' : 'Choose Avatar…'}
               </Button>
               {avatar && (
                 <Button type="button" variant="outline" size="sm" className="text-destructive" disabled={saving}
-                  onClick={() => act(ref.clearAvatar(), 'The avatar could not be removed.')}>
+                  onClick={() => act(ref.clearAvatar(BACKGROUND_CONTEXT), 'The avatar could not be removed.')}>
                   Remove Avatar
                 </Button>
               )}

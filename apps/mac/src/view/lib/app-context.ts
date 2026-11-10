@@ -1,10 +1,11 @@
-import type { Ref } from '@earendil-works/chord';
+import type { Held } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { createContext, use, useCallback } from 'react';
 
 import type { MacApp, SettingsTarget } from '../../contract';
 
 /** The window's reference to the app, for the screens that open links. */
-export const AppContext = createContext<Ref<typeof MacApp> | undefined>(undefined);
+export const AppContext = createContext<Held<typeof MacApp> | undefined>(undefined);
 
 /** The Providers pane with `provider` listed first, where a Connect notice leads. */
 export const providersPane = (provider?: string): SettingsTarget =>
@@ -14,7 +15,7 @@ export const providersPane = (provider?: string): SettingsTarget =>
 export function useOpenSettings(): (target?: SettingsTarget) => void {
   const app = use(AppContext);
   return useCallback((target?: SettingsTarget) => {
-    void app?.openSettings(target === undefined ? {} : { target }).catch(() => {});
+    void app?.openSettings(target === undefined ? {} : { target }, BACKGROUND_CONTEXT).catch(() => {});
   }, [app]);
 }
 
@@ -22,6 +23,6 @@ export function useOpenSettings(): (target?: SettingsTarget) => void {
 export function useOpenExternal(): (url: string) => void {
   const app = use(AppContext);
   return useCallback((url: string) => {
-    void app?.openExternal({ url }).catch(() => {});
+    void app?.openExternal({ url }, BACKGROUND_CONTEXT).catch(() => {});
   }, [app]);
 }

@@ -35,7 +35,9 @@ export async function requireModelAuth(models: Models, settings: ChatModelSettin
     }
     throw error;
   });
-  if (!auth) throw signIn();
+  // A provider whose login another program keeps, as Claude Code's, resolves auth without one: pi-ai's availability
+  // check asks that program (`ApiKeyAuth.check`); for a stored credential it says what `getAuth` just did.
+  if (!auth || !(await models.checkAuth(provider.id))) throw signIn();
   const available = await models.getAvailable(provider.id);
   if (!available.some((model) => model.id === settings.model.modelId)) {
     throw new Error(`${settings.model.modelId} is not available for this account. `

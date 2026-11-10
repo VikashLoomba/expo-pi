@@ -1,4 +1,4 @@
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { int, obj, opt, str, union } from '@earendil-works/pi-schema';
 import {

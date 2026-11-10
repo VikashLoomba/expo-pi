@@ -1,4 +1,5 @@
-import type { Host } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { useHold, useWatch } from '@earendil-works/chord/react';
 import type { ChatControls } from '@pi-agent/infinichat/chat/types';
 import {
   sameExecution, validateExecution, type ChatExecutionSettings,
@@ -8,11 +9,10 @@ import {
 } from '@pi-agent/infinichat/pi/model-catalog';
 import { useRef, useState, type ReactNode } from 'react';
 
-import type { MacPrincipal } from '../../../contract';
+import { MacMachines } from '../../../contract';
 import { useAccountRef, type ChatRef } from '../../hooks/use-chats';
-import { useHeldMachines } from '../../hooks/use-machines';
-import { errorText, useMember } from '../../hooks/use-ref';
 import { providersPane, useOpenSettings } from '../../lib/app-context';
+import { errorText } from '../../lib/error-text';
 import { Alert, AlertAction, AlertDescription } from '../ui/alert';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -61,15 +61,16 @@ function ChoiceField({ id, label, value, choices, disabled, onChange }: {
  * (this Mac or a machine) with its working directory and folder browser, Refresh Models, and Cancel and Save, which
  * commits the execution and the model together or the model alone. The draft is the sheet's until saved.
  */
-function ChatSettingsForm({ host, chat, initial, onDone }: {
-  host: Host<MacPrincipal>; chat: ChatRef; initial: Pick<ChatControls, 'settings' | 'execution'>; onDone: () => void;
+function ChatSettingsForm({ chat, initial, onDone }: {
+  chat: ChatRef; initial: Pick<ChatControls, 'settings' | 'execution'>; onDone: () => void;
 }) {
   const account = useAccountRef();
-  const catalog = useMember(account.catalog) ?? [];
-  const accesses = useMember(account.access);
-  const machinesRef = useHeldMachines(host);
-  const listed = useMember(machinesRef.machines);
-  const self = useMember(machinesRef.self);
+  const catalog = useWatch(account.catalog) ?? [];
+  const accesses = useWatch(account.access);
+  // The machines an execution environment is chosen from, held while the form shows.
+  const machinesRef = useHold(MacMachines, {});
+  const listed = useWatch(machinesRef?.machines);
+  const self = useWatch(machinesRef?.self);
   const openSettings = useOpenSettings();
   const [settings, setSettings] = useState(initial.settings);
   const [execution, setExecution] = useState(initial.execution);
@@ -126,14 +127,14 @@ function ChatSettingsForm({ host, chat, initial, onDone }: {
       setBrowsing(true);
       return;
     }
-    void chat.chooseLocalFolder().then((path) => {
+    void chat.chooseLocalFolder(BACKGROUND_CONTEXT).then((path) => {
       if (path !== null) setExecution({ ...execution, cwd: path });
     }, (cause: unknown) => setError(errorText(cause, 'The folder could not be chosen.')));
   };
   const refresh = () => {
     setRefreshing(true);
     setError(undefined);
-    void account.refreshCatalog().catch((cause: unknown) => {
+    void account.refreshCatalog(BACKGROUND_CONTEXT).catch((cause: unknown) => {
       setError(errorText(cause, 'Could not refresh models. Try again.'));
     }).finally(() => setRefreshing(false));
   };
@@ -142,8 +143,8 @@ function ChatSettingsForm({ host, chat, initial, onDone }: {
     setSaving(true);
     setError(undefined);
     const work = executionChanged
-      ? chat.updateExecution({ execution, ...(changed ? { settings } : {}) })
-      : chat.updateSettings({ settings });
+      ? chat.updateExecution({ execution, ...(changed ? { settings } : {}) }, BACKGROUND_CONTEXT)
+      : chat.updateSettings({ settings }, BACKGROUND_CONTEXT);
     void work.then(onDone, (cause: unknown) => {
       setError(errorText(cause, 'Could not save these settings. Try again.'));
       setSaving(false);
@@ -244,13 +245,13 @@ function ChatSettingsForm({ host, chat, initial, onDone }: {
 }
 
 /** The sheet over the chat; its form mounts fresh each time it opens, so a draft never outlives the sheet. */
-export function ChatSettingsSheet({ host, chat, controls, open, onOpenChange }: {
-  host: Host<MacPrincipal>; chat: ChatRef; controls: ChatControls; open: boolean; onOpenChange: (open: boolean) => void;
+export function ChatSettingsSheet({ chat, controls, open, onOpenChange }: {
+  chat: ChatRef; controls: ChatControls; open: boolean; onOpenChange: (open: boolean) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
-        <ChatSettingsForm host={host} chat={chat} initial={controls} onDone={() => onOpenChange(false)} />
+        <ChatSettingsForm chat={chat} initial={controls} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );

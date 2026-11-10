@@ -1,12 +1,13 @@
-import type { Host } from '@earendil-works/chord';
+import type { Held } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { useHold, useWatch } from '@earendil-works/chord/react';
 import type { McpServerStatus, McpSignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { PlugIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import type { MacPrincipal } from '../../../contract';
+import { MacMcp } from '../../../contract';
 import { useInfiniChatRef } from '../../hooks/use-infinichat';
-import { useHeldMcp, type McpRef } from '../../hooks/use-mcp';
-import { errorText, useMember } from '../../hooks/use-ref';
+import { errorText } from '../../lib/error-text';
 import { AuthPromptRows } from '../chat/auth-prompt';
 import { Notice } from '../chat/notices';
 import { Badge } from '../ui/badge';
@@ -30,30 +31,30 @@ const STATES: Readonly<Record<McpServerStatus['state'], string>> = {
  * The composer's `/mcp`: the MCP servers of the machine InfiniChat runs on, as pi's coding agent's `/mcp` lists its
  * own, with their sign-ins, which run on that machine and keep its credentials there.
  */
-export function McpSheet({ host, open, onClose }: { host: Host<MacPrincipal>; open: boolean; onClose: () => void }) {
-  const machine = useMember(useInfiniChatRef().machine)?.name ?? 'the machine';
+export function McpSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const machine = useWatch(useInfiniChatRef().machine)?.name ?? 'the machine';
   return (
     <FormSheet open={open} onClose={onClose} title={`MCP servers on ${machine}`} className="sm:max-w-xl">
-      <McpServers host={host} machine={machine} />
+      <McpServers machine={machine} />
     </FormSheet>
   );
 }
 
 /** The sheet's content, which holds the servers' reference only while the sheet shows. */
-function McpServers({ host, machine }: { host: Host<MacPrincipal>; machine: string }) {
-  const api = useHeldMcp(host);
-  const loaded = useMember(api.loaded) === true;
-  const servers = useMember(api.servers) ?? [];
-  const problems = useMember(api.problems) ?? [];
-  const unavailable = useMember(api.unavailable) ?? undefined;
-  const shown = useMember(api.signInAttempt) ?? null;
+function McpServers({ machine }: { machine: string }) {
+  const api = useHold(MacMcp, {});
+  const loaded = useWatch(api?.loaded) === true;
+  const servers = useWatch(api?.servers) ?? [];
+  const problems = useWatch(api?.problems) ?? [];
+  const unavailable = useWatch(api?.unavailable) ?? undefined;
+  const shown = useWatch(api?.signInAttempt) ?? null;
   const running = useRef(false);
   useEffect(() => {
     running.current = shown?.running === true;
   }, [shown]);
   // As the providers sheet does: leaving ends the sign-in this sheet shows, and only that.
   useEffect(() => () => {
-    if (running.current) void api.cancelSignIn().catch(() => {});
+    if (running.current) void api?.cancelSignIn(BACKGROUND_CONTEXT).catch(() => {});
   }, [api]);
   return (
     <div className="-mx-4 flex max-h-[65vh] flex-col gap-5 overflow-y-auto px-4">
@@ -64,7 +65,7 @@ function McpServers({ host, machine }: { host: Host<MacPrincipal>; machine: stri
           No MCP servers yet. Add them to ~/.infinichat/mcp.json on {machine}, then type /reload-plugins.
         </p>
       )}
-      {servers.length > 0 && (
+      {api !== undefined && servers.length > 0 && (
         <ItemGroup className="gap-2">
           {servers.map((server) => <ServerRow key={server.name} api={api} server={server} attempt={shown} />)}
         </ItemGroup>
@@ -84,7 +85,9 @@ function McpServers({ host, machine }: { host: Host<MacPrincipal>; machine: stri
 }
 
 /** One server's state, what it offers, its error, and its sign-in, sign-out and reconnect. */
-function ServerRow({ api, server, attempt }: { api: McpRef; server: McpServerStatus; attempt: McpSignInAttempt }) {
+function ServerRow({ api, server, attempt }: {
+  api: Held<typeof MacMcp>; server: McpServerStatus; attempt: McpSignInAttempt;
+}) {
   const [busy, setBusy] = useState<'starting' | 'signing-out' | 'reconnecting'>();
   const [error, setError] = useState<string>();
   const run = (doing: NonNullable<typeof busy>, work: () => Promise<unknown>, fallback: string) => {
@@ -114,19 +117,21 @@ function ServerRow({ api, server, attempt }: { api: McpRef; server: McpServerSta
       <ItemActions>
         {canSignIn && signingIn === undefined && (
           <Button type="button" variant="outline" size="sm" disabled={busy !== undefined}
-            onClick={() => run('starting', () => api.signIn({ server: server.name }), 'Sign-in could not start.')}>
+            onClick={() => run('starting', () => api.signIn({ server: server.name }, BACKGROUND_CONTEXT),
+              'Sign-in could not start.')}>
             {signedIn ? 'Sign In Again' : 'Sign In'}
           </Button>
         )}
         {signedIn && signingIn === undefined && (
           <Button type="button" variant="outline" size="sm" disabled={busy !== undefined}
-            onClick={() => run('signing-out', () => api.signOut({ server: server.name }), 'Could not sign out.')}>
+            onClick={() => run('signing-out', () => api.signOut({ server: server.name }, BACKGROUND_CONTEXT),
+              'Could not sign out.')}>
             {busy === 'signing-out' ? 'Signing Out…' : 'Sign Out'}
           </Button>
         )}
         {(server.state === 'failed' || server.state === 'disconnected') && (
           <Button type="button" variant="outline" size="sm" disabled={busy !== undefined}
-            onClick={() => run('reconnecting', () => api.reconnect({ server: server.name }),
+            onClick={() => run('reconnecting', () => api.reconnect({ server: server.name }, BACKGROUND_CONTEXT),
               'The server could not connect.')}>
             {busy === 'reconnecting' ? 'Reconnecting…' : 'Reconnect'}
           </Button>
@@ -142,11 +147,13 @@ function ServerRow({ api, server, attempt }: { api: McpRef; server: McpServerSta
           {own?.status !== undefined && <p className="text-muted-foreground">{own.status}</p>}
           {signingIn?.prompt !== undefined && (
             <AuthPromptRows key={signingIn.prompt.id} pending={signingIn.prompt} url={signingIn.url}
-              submit={(promptId, value) => { void api.answer({ promptId, value }).catch(() => {}); }} />
+              submit={(promptId, value) => {
+                void api.answer({ promptId, value }, BACKGROUND_CONTEXT).catch(() => {});
+              }} />
           )}
           {signingIn !== undefined && (
             <Button type="button" variant="outline" size="sm" className="self-start"
-              onClick={() => { void api.cancelSignIn().catch(() => {}); }}>
+              onClick={() => { void api.cancelSignIn(BACKGROUND_CONTEXT).catch(() => {}); }}>
               Cancel Sign-In
             </Button>
           )}

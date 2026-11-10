@@ -6,13 +6,22 @@ packages:
 # dependencies, so two version fields could drift into two copies of pi-durable in one bundle. pi-env depends on chord
 # and pi-durable at exact versions, and they on pi-schema, so all of them move together.
 catalog:
-  '@earendil-works/chord': 1.5.0
-  '@earendil-works/pi-ai': 1.5.0
-  '@earendil-works/pi-codemode': 1.5.0
-  '@earendil-works/pi-durable': 1.5.0
-  '@earendil-works/pi-env': 1.5.0
-  '@earendil-works/pi-mcp': 1.5.0
-  '@earendil-works/pi-schema': 1.5.0
+  '@earendil-works/chord': 1.5.2
+  '@earendil-works/pi-ai': 1.5.2
+  '@earendil-works/pi-codemode': 1.5.2
+  '@earendil-works/pi-durable': 1.5.2
+  '@earendil-works/pi-env': 1.5.2
+  '@earendil-works/pi-mcp': 1.5.2
+  '@earendil-works/pi-schema': 1.5.2
+
+# pi-claude-code names pi's coding agent as a peer for one type import in its extension entry, which the server never
+# loads: it registers the provider itself (packages/infinichat-server/src/claude-code.ts). Optional, so pnpm leaves the
+# coding agent and its dependencies out.
+packageExtensions:
+  '@earendil-works/pi-claude-code':
+    peerDependenciesMeta:
+      '@earendil-works/pi-coding-agent':
+        optional: true
 
 onlyBuiltDependencies:
   - react-native-enriched-markdown

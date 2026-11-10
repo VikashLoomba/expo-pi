@@ -1,10 +1,10 @@
+import { useWatch } from '@earendil-works/chord/react';
 import { turnsOf, type Turn } from '@pi-agent/infinichat/chat/turns';
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { HashIcon, LightbulbIcon, MessageCircleDashedIcon, PencilIcon } from 'lucide-react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { useMember } from '../../hooks/use-ref';
 import { Button } from '../ui/button';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../ui/empty';
 import {
@@ -145,9 +145,9 @@ export const Transcript = memo(function Transcript({ stopping, onChoose }: {
 }) {
   const ref = useThreadSource();
   const agentName = useChatAgentName();
-  const snapshot = useMember(ref.snapshot)?.view;
-  const messages = useMember(ref.messages) ?? NO_MESSAGES;
-  const controls = useMember(ref.controls);
+  const snapshot = useWatch(ref.snapshot)?.view;
+  const messages = useWatch(ref.messages) ?? NO_MESSAGES;
+  const controls = useWatch(ref.controls);
   const status = snapshot?.status ?? 'loading';
   const busy = !!controls?.busy;
   const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'

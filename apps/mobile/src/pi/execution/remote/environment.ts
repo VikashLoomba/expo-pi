@@ -2,7 +2,7 @@
 import { uuidv7 as randomUUID } from "@earendil-works/pi-ai";
 import { Buffer } from "buffer";
 import { posix, resolveRemotePath } from "./paths";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import {
 	type BinaryReader,
 	type DirReader,

@@ -1,4 +1,7 @@
-import type { Readable } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
+import { useWatch } from '@earendil-works/chord/react';
+import type { Watchable } from '@earendil-works/chord/watch';
+import { CLAUDE_CODE_PROVIDER_ID } from '@pi-agent/infinichat/pi/claude-code';
 import type { MachineAccess } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { ModelCatalog, ProviderOption } from '@pi-agent/infinichat/pi/model-catalog';
@@ -7,7 +10,7 @@ import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credential
 import { CircleCheckIcon } from 'lucide-react';
 import { useState } from 'react';
 
-import { errorText, useMember } from '../../hooks/use-ref';
+import { errorText } from '../../lib/error-text';
 import { AuthPromptRows } from '../chat/auth-prompt';
 import { Notice } from '../chat/notices';
 import { Button } from '../ui/button';
@@ -19,14 +22,14 @@ import { Input } from '../ui/input';
  * Mac's own with piece 8. The members are the contract's account cells and methods, which both objects share.
  */
 export interface ProviderAccount {
-  readonly catalog: Readable<ModelCatalog>;
-  readonly access: Readable<MachineAccess>;
-  readonly signInAttempt: Readable<SignInAttempt>;
-  signIn(input: { providerId: string }): Promise<number>;
-  answer(input: { promptId: number; value: string }): Promise<void>;
-  cancelSignIn(): Promise<void>;
-  setApiKey(input: { providerId: string; key: string }): Promise<void>;
-  signOut(input: { providerId: string }): Promise<void>;
+  readonly catalog: Watchable<ModelCatalog>;
+  readonly access: Watchable<MachineAccess>;
+  readonly signInAttempt: Watchable<SignInAttempt>;
+  signIn(input: { providerId: string }, context: Context): Promise<number>;
+  answer(input: { promptId: number; value: string }, context: Context): Promise<null>;
+  cancelSignIn(context: Context): Promise<null>;
+  setApiKey(input: { providerId: string; key: string }, context: Context): Promise<null>;
+  signOut(input: { providerId: string }, context: Context): Promise<null>;
 }
 
 const NOT_READY: ProviderAccess = { ready: false, connected: false };
@@ -36,8 +39,8 @@ const oauthOf = (providerId: string) => providerId === OPENAI_PROVIDER_ID
 
 /** One provider's status, sign-in, API key and disconnect, the phone's `ProviderSection`. */
 function ProviderSection({ provider, account }: { provider: ProviderOption; account: ProviderAccount }) {
-  const accesses = useMember(account.access);
-  const shown = useMember(account.signInAttempt) ?? null;
+  const accesses = useWatch(account.access);
+  const shown = useWatch(account.signInAttempt) ?? null;
   const access = accesses?.[provider.id] ?? NOT_READY;
   const oauth = oauthOf(provider.id);
   const accountName = oauth?.name ?? provider.name;
@@ -71,7 +74,7 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
         + 'The provider checks your key when you send a message.',
   ].filter(Boolean).join(' ');
   const disabled = busy !== undefined || attempt !== undefined;
-  const save = () => run('saving', () => account.setApiKey({ providerId: provider.id, key }),
+  const save = () => run('saving', () => account.setApiKey({ providerId: provider.id, key }, BACKGROUND_CONTEXT),
     'Could not save this provider key.');
   return (
     <FieldSet>
@@ -89,18 +92,21 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
           <Button type="button" variant="outline" size="sm" className="self-start"
             disabled={!access.ready || busy !== undefined} onClick={() => {
               setShowKey(false);
-              run('starting', () => account.signIn({ providerId: provider.id }), 'Sign-in could not start.');
+              run('starting', () => account.signIn({ providerId: provider.id }, BACKGROUND_CONTEXT),
+                'Sign-in could not start.');
             }}>
             {access.connected && access.type === 'oauth' ? `Switch ${accountName} account` : oauth.loginLabel}
           </Button>
         )}
         {oauth && attempt?.prompt !== undefined && (
           <AuthPromptRows key={attempt.prompt.id} pending={attempt.prompt} url={attempt.url}
-            submit={(promptId, value) => { void account.answer({ promptId, value }).catch(() => {}); }} />
+            submit={(promptId, value) => {
+              void account.answer({ promptId, value }, BACKGROUND_CONTEXT).catch(() => {});
+            }} />
         )}
         {oauth && attempt !== undefined && (
           <Button type="button" variant="outline" size="sm" className="self-start"
-            onClick={() => { void account.cancelSignIn().catch(() => {}); }}>
+            onClick={() => { void account.cancelSignIn(BACKGROUND_CONTEXT).catch(() => {}); }}>
             Cancel sign-in
           </Button>
         )}
@@ -133,7 +139,8 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
         {(access.connected || access.error !== undefined) && (
           <Button type="button" variant="outline" size="sm" className="self-start text-destructive"
             disabled={disabled} onClick={() => run('removing',
-              () => account.signOut({ providerId: provider.id }), 'Could not remove this provider key.')}>
+              () => account.signOut({ providerId: provider.id }, BACKGROUND_CONTEXT),
+              'Could not remove this provider key.')}>
             {busy === 'removing' ? 'Disconnecting…' : `Disconnect ${provider.name}`}
           </Button>
         )}
@@ -143,10 +150,44 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
   );
 }
 
+/**
+ * Claude through a machine's Claude Code login (`claude-code.ts`), the phone's `ClaudeCodeSection`: the machine's
+ * `claude` program keeps the sign-in, so there is nothing to enter or remove here, only whether it is signed in. The
+ * machine reads it again whenever its models are refreshed.
+ */
+function ClaudeCodeSection({ provider, account }: { provider: ProviderOption; account: ProviderAccount }) {
+  const access = useWatch(account.access)?.[provider.id] ?? NOT_READY;
+  const status = !access.ready ? 'Checking Claude Code…'
+    : access.connected ? access.type === 'oauth' ? 'Using Claude plan' : 'Signed in with Claude Code'
+      : 'Not signed in';
+  return (
+    <FieldSet>
+      <FieldLegend>{provider.name}</FieldLegend>
+      <FieldGroup>
+        <Field orientation="horizontal">
+          <FieldLabel>Status</FieldLabel>
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            {status}
+            {access.connected && <CircleCheckIcon className="size-4 text-primary" />}
+          </span>
+        </Field>
+        <FieldDescription>
+          {access.connected
+            ? 'Requests use the machine’s Claude Code sign-in and count against its limits.'
+            : 'Claude Code keeps this sign-in on the machine. Install Claude Code there and run “claude auth login” '
+              + 'in its terminal, then refresh models to see it here.'}
+        </FieldDescription>
+      </FieldGroup>
+    </FieldSet>
+  );
+}
+
 /** A section for each provider of the catalog, the one `focus` names first, or OpenAI's. */
 export function ProviderSections({ account, focus }: { account: ProviderAccount; focus?: string }) {
-  const catalog = useMember(account.catalog) ?? [];
+  const catalog = useWatch(account.catalog) ?? [];
   const focused = catalog.find((provider) => provider.id === (focus ?? OPENAI_PROVIDER_ID));
   const providers = focused ? [focused, ...catalog.filter((provider) => provider.id !== focused.id)] : catalog;
-  return providers.map((provider) => <ProviderSection key={provider.id} provider={provider} account={account} />);
+  return providers.map((provider) => provider.id === CLAUDE_CODE_PROVIDER_ID
+    ? <ClaudeCodeSection key={provider.id} provider={provider} account={account} />
+    : <ProviderSection key={provider.id} provider={provider} account={account} />);
 }

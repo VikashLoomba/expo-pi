@@ -1,32 +1,33 @@
-import type { Host } from '@earendil-works/chord';
-import { arr, nul, str, union } from '@earendil-works/pi-schema';
-import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
+import type { Ctx, FacetHost } from '@earendil-works/chord';
 import type { DurableChatService } from '@pi-agent/infinichat/pi/chat-service';
-import {
-  AccessSchema, MessagesSchema, SignInAttemptSchema, SnapshotSchema,
-} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
-import { findCatalogModel, ModelCatalogSchema, type ImageInput } from '@pi-agent/infinichat/pi/model-catalog';
+import { findCatalogModel, type ImageInput } from '@pi-agent/infinichat/pi/model-catalog';
 import { Utils } from 'electrobun/main';
 
-import { ChatSummarySchema, MacAccount, MacChat, MacChats, type MacPrincipal } from '../contract';
+import { MacAccount, MacChat, MacChats, type ChatSummaryRecord, type MacPrincipal } from '../contract';
 import type { MacAccount as Account } from './account';
 import { Attachments } from './attachments';
 import type { MacChats as Chats } from './chats';
 import { listFolder, searchFolders } from './folders';
 import type { MacMachines } from './machines';
+import { done, mirror } from './serve';
 
-const ChatsCell = union([nul(), arr(ChatSummarySchema)]);
-const ReportCell = union([nul(), str()]);
-const ControlsCell = union([ChatControlsSchema, nul()]);
 const NOT_OPEN = 'The chats are not open on this Mac.';
 
 /**
- * Serves this Mac's chats to the windows as `serve-infinichat.ts` serves InfiniChat: the list and the account as
- * cells over their stores, and each shown chat as an object of its own whose cells mirror the service's `ChatView`.
- * The object subscribes the view, which attaches pi-durable's conversation view at the first subscriber and
- * detaches at the last, so the view lives exactly while a window holds the chat (chord guide "Lifetime").
+ * A call's cancellation, by its caller or its object's end (chord `docs/design.md` §6, "Ending"), for the work that
+ * takes a signal; a `Context` types it as optional.
  */
-export function serveChats(host: Host<MacPrincipal>, chats: Chats, account: Account, machines: MacMachines): void {
+const signalOf = (ctx: Ctx<MacPrincipal>) => ctx.abortSignal ?? new AbortController().signal;
+
+/**
+ * Serves this Mac's chats to the windows as `serve-infinichat.ts` serves InfiniChat: the list and the account as
+ * members over their stores, and each shown chat as an object of its own whose members mirror the service's
+ * `ChatView`. The object subscribes the view, which attaches pi-durable's conversation view at the first subscriber
+ * and detaches at the last, and it lives while a window holds the chat (chord `docs/design.md` §6, "Lifetime follows
+ * from kind and params"), so the view does too.
+ */
+export function serveChats(host: FacetHost<MacPrincipal>, chats: Chats, account: Account,
+  machines: MacMachines): void {
   const attachments = new Attachments(chats.images);
   const open = (): DurableChatService => {
     const service = chats.service;
@@ -39,21 +40,21 @@ export function serveChats(host: Host<MacPrincipal>, chats: Chats, account: Acco
     return found;
   };
 
-  host.serve(MacChats, (_input, _principal, self) => {
-    const list = self.state('chats', ChatsCell, { init: () => chats.getChats() ?? null });
-    const report = self.state('report', ReportCell, { init: () => chats.getError() ?? null });
-    self.on('chats', chats, (_change, ctx) => {
-      list.replace(ctx, chats.getChats() ?? null, { diff: true });
-      report.replace(ctx, chats.getError() ?? null, { diff: true });
-    });
+  host.serve(MacChats, (_params, _principal, self) => {
+    const list = mirror(self, [chats], () => ({
+      chats: chats.getChats() ?? null, report: chats.getError() ?? null,
+    }));
     return {
       variant: 'owner',
-      chats: list,
-      report,
-      createChat: async () => ({ id: String(await open().createChat()) }),
-      rename: ({ id, title }) => open().renameChat(key(id), title),
-      delete: ({ id }) => open().deleteChat(key(id)),
-      dismissError: () => { chats.dismissError(); },
+      members: {
+        // The contract's own type of a row: a JSON value, which the service's interface is not by its type.
+        chats: self.derive([list], ([value]): ChatSummaryRecord[] | null => value.chats),
+        report: self.derive([list], ([value]) => value.report),
+        createChat: async () => ({ id: String(await open().createChat()) }),
+        rename: async ({ id, title }) => done(open().renameChat(key(id), title)),
+        delete: async ({ id }) => done(open().deleteChat(key(id))),
+        dismissError: async () => done(chats.dismissError()),
+      },
     };
   });
 
@@ -65,17 +66,11 @@ export function serveChats(host: Host<MacPrincipal>, chats: Chats, account: Acco
       if (service === undefined || found === undefined) throw new Error(chats.getError() ?? NOT_OPEN);
       return { service, id: found };
     };
-    const currentSnapshot = () => ({ view: view?.getSnapshot() ?? { status: 'missing' as const } });
-    const snapshot = self.state('snapshot', SnapshotSchema, { init: currentSnapshot });
-    const controls = self.state('controls', ControlsCell, { init: () => view?.getControls() ?? null });
-    const messages = self.state('messages', MessagesSchema, { init: () => view?.getMessages() ?? [] });
-    if (view !== undefined) {
-      self.on('view', view, (_change, ctx) => {
-        messages.replace(ctx, view.getMessages(), { diff: true });
-        controls.replace(ctx, view.getControls() ?? null, { diff: true });
-        snapshot.replace(ctx, currentSnapshot(), { diff: true });
-      });
-    }
+    const shown = mirror(self, view === undefined ? [] : [view], () => ({
+      snapshot: { view: view?.getSnapshot() ?? { status: 'missing' as const } },
+      controls: view?.getControls() ?? null,
+      messages: view?.getMessages() ?? [],
+    }));
     /** The chat's model's image limits (the phone's `photo-attachments.ts`), from this Mac's catalog. */
     const imageLimits = (): ImageInput => {
       const settings = view?.getControls()?.settings;
@@ -86,56 +81,60 @@ export function serveChats(host: Host<MacPrincipal>, chats: Chats, account: Acco
     };
     return {
       variant: 'owner',
-      snapshot,
-      controls,
-      messages,
-      send: async ({ content, requestId }) => { await chat().service.send(chat().id, content, requestId); },
-      cancel: () => chat().service.cancel(chat().id),
-      steer: ({ submissionId, content }) => chat().service.steerQueued(chat().id, submissionId, content),
-      continue: () => chat().service.continue(chat().id),
-      loadEarlier: async () => { await view?.loadEarlier(); },
-      fillGap: async (gap) => { await view?.fillGap(gap); },
-      updateSettings: ({ settings }) => chat().service.updateSettings(chat().id, settings),
-      updateExecution: ({ execution, settings }) => chat().service.updateExecution(chat().id, execution, settings),
-      listFolder: async ({ machineId, path }, ctx) =>
-        listFolder(await machines.environment(machineId, ctx.signal), path, ctx.signal),
-      searchFolders: async ({ machineId, root, query }, ctx) =>
-        searchFolders(await machines.environment(machineId, ctx.signal), root, query, ctx.signal),
-      chooseLocalFolder: async () => {
-        const [path] = await Utils.openFileDialog({
-          canChooseFiles: false, canChooseDirectory: true, allowsMultipleSelection: false,
-        });
-        return path ?? null;
+      members: {
+        snapshot: self.derive([shown], ([value]) => value.snapshot),
+        controls: self.derive([shown], ([value]) => value.controls),
+        // Chord's JSON arrays are mutable types; the copy keeps its elements, which the diff compares by identity.
+        messages: self.derive([shown], ([value]) => [...value.messages]),
+        send: async ({ content, requestId }) => done(chat().service.send(chat().id, content, requestId)),
+        cancel: async () => done(chat().service.cancel(chat().id)),
+        steer: async ({ submissionId, content }) =>
+          done(chat().service.steerQueued(chat().id, submissionId, content)),
+        continue: async () => done(chat().service.continue(chat().id)),
+        loadEarlier: async () => done(view?.loadEarlier()),
+        fillGap: async (gap) => done(view?.fillGap(gap)),
+        updateSettings: async ({ settings }) => done(chat().service.updateSettings(chat().id, settings)),
+        updateExecution: async ({ execution, settings }) =>
+          done(chat().service.updateExecution(chat().id, execution, settings)),
+        listFolder: async ({ machineId, path }, ctx) => {
+          const signal = signalOf(ctx);
+          return listFolder(await machines.environment(machineId, signal), path, signal);
+        },
+        searchFolders: async ({ machineId, root, query }, ctx) => {
+          const signal = signalOf(ctx);
+          return searchFolders(await machines.environment(machineId, signal), root, query, signal);
+        },
+        chooseLocalFolder: async () => {
+          const [path] = await Utils.openFileDialog({
+            canChooseFiles: false, canChooseDirectory: true, allowsMultipleSelection: false,
+          });
+          return path ?? null;
+        },
+        pickPhotos: async () => attachments.pick(imageLimits()),
+        attach: async ({ mimeType, data }) => attachments.fit(Buffer.from(data, 'base64'), mimeType, imageLimits()),
       },
-      pickPhotos: () => attachments.pick(imageLimits()),
-      attach: ({ mimeType, data }) => attachments.fit(Buffer.from(data, 'base64'), mimeType, imageLimits()),
     };
   });
 
-  host.serve(MacAccount, (_input, _principal, self) => {
-    const catalog = self.state('catalog', ModelCatalogSchema, { init: account.getCatalog });
-    const access = self.state('access', AccessSchema, { init: () => account.credentials.getSnapshot().providers });
-    const signInAttempt = self.state('signInAttempt', SignInAttemptSchema, { init: account.signIn.getSnapshot });
-    self.on('catalog', account, (_change, ctx) => {
-      catalog.replace(ctx, account.getCatalog(), { diff: true });
-    });
-    self.on('access', account.credentials, (_change, ctx) => {
-      access.replace(ctx, account.credentials.getSnapshot().providers, { diff: true });
-    });
-    self.on('signIn', account.signIn, (_change, ctx) => {
-      signInAttempt.replace(ctx, account.signIn.getSnapshot(), { diff: true });
-    });
+  host.serve(MacAccount, (_params, _principal, self) => {
+    const shown = mirror(self, [account, account.credentials, account.signIn], () => ({
+      catalog: account.getCatalog(),
+      access: account.credentials.getSnapshot().providers,
+      signInAttempt: account.signIn.getSnapshot(),
+    }));
     return {
       variant: 'owner',
-      catalog,
-      access,
-      signInAttempt,
-      refreshCatalog: () => account.refreshCatalog(),
-      signIn: ({ providerId }) => account.signIn.signIn(providerId),
-      answer: ({ promptId, value }) => { account.signIn.answer(promptId, value); },
-      cancelSignIn: () => { account.signIn.cancel(); },
-      setApiKey: ({ providerId, key }) => account.signIn.setApiKey(providerId, key),
-      signOut: ({ providerId }) => account.signIn.signOut(providerId),
+      members: {
+        catalog: self.derive([shown], ([value]) => value.catalog),
+        access: self.derive([shown], ([value]) => value.access),
+        signInAttempt: self.derive([shown], ([value]) => value.signInAttempt),
+        refreshCatalog: async () => done(account.refreshCatalog()),
+        signIn: async ({ providerId }) => account.signIn.signIn(providerId),
+        answer: async ({ promptId, value }) => done(account.signIn.answer(promptId, value)),
+        cancelSignIn: async () => done(account.signIn.cancel()),
+        setApiKey: async ({ providerId, key }) => done(account.signIn.setApiKey(providerId, key)),
+        signOut: async ({ providerId }) => done(account.signIn.signOut(providerId)),
+      },
     };
   });
 }

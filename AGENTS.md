@@ -5,9 +5,12 @@ The repository is a pnpm workspace in Expo's monorepo layout: the iOS app is in 
 release scripts, generated manifests and the pi-env daemons both apps ship, in `packages/infinichat-server`. The
 server is published as `server/v<version>` GitHub releases (`pnpm release` there, before the apps that need it) and
 updates itself; the apps only set one up on a machine that has none. For server plugin and MCP work, read
-`docs/server-plugins.md`: `/reload-plugins` hot-reloads the tools plugin (code mode, and a Chord resource per MCP
-server) and the user's plugins; InfiniChat's own plugin changes only by a release, which restarts the service. The
-phone's SSH library, `@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
+`docs/server-plugins.md`: the server, both apps and the shared client are on Chord v2 (the package since chord 1.5.1,
+its design in chord's `docs/design.md`); `/reload-plugins` rebuilds and reloads the user's plugins and applies
+`mcp.json` again; InfiniChat's own plugin and the tools plugin (code mode and MCP) change only by a release, which
+restarts the service. On a machine, Claude goes through its Claude Code login (pi-claude-code, a pinned git
+dependency of the server) instead of an Anthropic API key. The phone's SSH library,
+`@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
 `packages/react-native-ssh` (Rust engine, C FFI, Nitro module); `pnpm install` builds its `lib/`, and its iOS
 archives are built there by `bash scripts/build-rust-ios.sh` before an iOS build, neither committed. App paths
 in this file (`src/app/`, `app.json`, `package.json`, `ios/`) are relative to `apps/mobile`.
@@ -60,7 +63,8 @@ Run lint and typecheck before declaring any task done.
   chord, pi-env, pi-codemode, pi-mcp and pi-schema take their versions from the `catalog` in `pnpm-workspace.yaml`,
   which `packages/infinichat`'s peer dependencies share, so upgrade all seven there together (pi-env depends on chord
   and pi-durable at exact versions, and they on pi-schema); `pnpm why -r @earendil-works/pi-durable` then finds one
-  version. The server's `runtime/package.json` pins the same versions (`scripts/build.mjs --check`).
+  version. The server's `runtime/package.json` pins the same versions (`scripts/build.mjs --check`), and
+  `scripts/sync-daemons.mjs` pins pi-env's daemon to the same release.
 - Keep lines under about 120 characters, no multi-statement one-liners, and comments that explain why, not what.
 - Design before code: for non-trivial work, propose which upstream example you start from, any deviations, and the rough size compared with upstream's equivalent, and get approval before implementing. Size is a signal: a feature several times larger than upstream's equivalent means the design is wrong.
 

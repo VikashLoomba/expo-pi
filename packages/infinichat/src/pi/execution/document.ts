@@ -2,9 +2,10 @@ import { stringLiteral } from '@earendil-works/pi-ai/providers/schema-builders';
 import { nul, obj, str, union, type Static } from '@earendil-works/pi-schema';
 import { defineDoc, type AgentState } from '@earendil-works/pi-durable';
 
+// Closed, as Chord requires of every object in a method's arguments (chord `docs/design.md` §5, "Arguments").
 const ExecutionTargetSchema = union([
-  obj({ kind: stringLiteral('local') }, { open: true }),
-  obj({ kind: stringLiteral('ssh'), machineId: str() }, { open: true }),
+  obj({ kind: stringLiteral('local') }),
+  obj({ kind: stringLiteral('ssh'), machineId: str() }),
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTargetSchema>;
 export type ExecutionTargetState = { target: ExecutionTarget };
@@ -12,7 +13,7 @@ export type ExecutionTargetState = { target: ExecutionTarget };
 export const ChatExecutionSettingsSchema = obj({
   target: ExecutionTargetSchema,
   cwd: union([str(), nul()]),
-}, { open: true });
+});
 export type ChatExecutionSettings = Static<typeof ChatExecutionSettingsSchema>;
 
 /**

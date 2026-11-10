@@ -1,4 +1,5 @@
-import { createHost, isChordError, type Ctx, type Link, type Ref } from '@earendil-works/chord';
+import { createHost, isChordError, type Ctx, type Held, type Link } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import type { UserMessage } from '@earendil-works/pi-ai';
 
 import type { ChatMessage } from '../../chat/types';
@@ -14,6 +15,7 @@ import {
   type Machine, type PendingHostKeys, type Reach, type SignInAttempt,
 } from './contract';
 import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from './dialer';
+import { follow, heard } from './follow';
 import type { MachinePatch, MachinesState } from './machines';
 import { RemoteMcp } from './mcp-client';
 import { compareVersions } from './release';
@@ -26,44 +28,51 @@ type ConnectionStatus =
 /** This app's connection to a machine's InfiniChat; `notice` is what the latest install said, until dismissed. */
 export type RemoteConnection = ConnectionStatus & { notice?: string };
 
-type InfiniChatRef = Ref<typeof InfiniChatRemote>;
+type InfiniChatRef = Held<typeof InfiniChatRemote>;
 /** The sign-ins of the machine's own credential store, by provider. */
 export type MachineAccess = Readonly<Record<string, ProviderAccess>>;
 /** One connection attempt's dialed server; `live` once its server's reference is. */
 interface Session { server?: DialedServer; live: boolean }
 
-/** Chord's code prefix, which `fromWireError` adds to a server's error again (chord `src/errors.ts:36`). */
-const CODE_PREFIX = /^[a-z_]+(\/[a-z_]+)?: /;
 const LOADING: ChatViewSnapshot = { status: 'loading' };
 const NO_MESSAGES: readonly ChatMessage[] = [];
 const NO_REPORT: InfiniChatSnapshot = {};
 /**
- * The link closed because the server speaks another Chord link protocol: Chord tells the side that has to load new
- * code with `onProtocolMismatch` (chord `docs/guide.md` "Protocol version"), which is this app or the server.
+ * The server and this app do not fit: its handshake failed, which the host reports as `protocol_error` (chord
+ * `docs/design.md` §3, `onError`), or it serves another version of the contract, which leaves the hold waiting with
+ * `contract_mismatch` (§5, "Compatibility"). One of the two has to load new code.
  */
-class ProtocolMismatch extends Error {}
+class Mismatch extends Error {}
 
 /** A failed attempt is tried again as pi-env's watcher reconnects its daemon (`dist/watch.js:6-7` at v1.5.0). */
 const RECONNECT_FIRST_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
-/** An error as the error notice shows a local one: a Chord error's message without its code. */
+/** An error as the error notice shows a local one: a server's error crosses the link with its message. */
 function plain(error: unknown): Error {
-  if (isChordError(error)) return new Error(error.message.replace(CODE_PREFIX, ''), { cause: error });
-  return error instanceof Error ? error : new Error(String(error));
+  return error instanceof Error ? new Error(error.message, { cause: error }) : new Error(String(error));
 }
 
 /**
- * InfiniChat running on a configured machine, shown through one Chord client host whose upstream is the link the
- * app's dialer makes to the machine's server. The host holds the contract once; after a lost link `host.connect`
- * re-holds it, and the screens keep the last values meanwhile. It closes each dialed server's link and transport
+ * InfiniChat running on a configured machine, shown through one Chord client host whose parent is the link the
+ * app's dialer makes to the machine's server (chord `docs/design.md` §3: a client has no address and loads nothing).
+ * The host holds the contract once; after a lost link `host.connect` takes the next and holds it again, and the
+ * screens keep the last values meanwhile (§7). It closes each dialed server's link and transport
  * through the dialer, and borrows the machine directory. The machine's own tools reach the conversation's other
  * machines with its own SSH, from the machines document it serves. `client` is this app as the server's client: its
  * ID and the name a move back records. `version` is the server release this app was built with, which tells which
  * side is behind when the server's contract doesn't cover this app's.
  */
 export class RemoteInfiniChat implements InfiniChatHost {
-  private readonly host = createHost<InfiniChatPrincipal>({ name: 'phone', self: { kind: 'owner' }, kind: 'client' });
+  private readonly host = createHost<InfiniChatPrincipal>({
+    onError: (error) => {
+      if (error.kind === 'protocol_error') this.mismatched?.();
+    },
+  });
+  /** A client host with nothing to load still publishes once before it may hold (design §3, "publication gate"). */
+  private readonly loaded = this.host.load([], BACKGROUND_CONTEXT);
+  /** Set while an attempt opens its link: the host reported that link's handshake as a protocol error. */
+  private mismatched?: () => void;
   private readonly listeners = new Set<() => void>();
   private readonly scheduledListeners = new Set<() => void>();
   private ref?: InfiniChatRef;
@@ -76,6 +85,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private delay = RECONNECT_FIRST_MS;
   /** Aborted with a failed attempt's error, so the calls waiting for that connection reject with it. */
   private calls = new AbortController();
+  /** Aborted at `close`: the reference's hold and its members' watches end with it. */
+  private readonly released = new AbortController();
   private notice?: string;
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
@@ -136,8 +147,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     getControls: () => this.values?.controls,
     getMessages: () => this.values?.messages ?? NO_MESSAGES,
     // The machine's view loads them into the transcript every client reads.
-    loadEarlier: () => this.call((ref, ctx) => ref.loadEarlier(ctx)),
-    fillGap: (gap) => this.call((ref, ctx) => ref.fillGap(gap, ctx)),
+    loadEarlier: () => this.act((ref, ctx) => ref.loadEarlier(ctx)),
+    fillGap: (gap) => this.act((ref, ctx) => ref.fillGap(gap, ctx)),
   };
 
   view(): ChatViewSource<InfiniChatControls> {
@@ -199,7 +210,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   /** Opens the files this phone copied to the machine, once they match these. */
   adopt(files: ConversationFiles): Promise<void> {
-    return this.call((ref, ctx) => ref.adopt(files, ctx));
+    return this.act((ref, ctx) => ref.adopt(files, ctx));
   }
 
   /**
@@ -212,11 +223,11 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   /** Has the machine bring the database the machine at `from` released into its own `data/`, once it matches. */
   pull(from: Machine, files: ConversationFiles): Promise<void> {
-    return this.call((ref, ctx) => ref.pull({ from, files }, ctx));
+    return this.act((ref, ctx) => ref.pull({ from, files }, ctx));
   }
 
   archive(): Promise<void> {
-    return this.call((ref, ctx) => ref.archive(ctx));
+    return this.act((ref, ctx) => ref.archive(ctx));
   }
 
   /** Starts a sign-in on the machine, ending one under way there, and resolves with its attempt number. */
@@ -225,41 +236,41 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   answer(promptId: number, value: string): Promise<void> {
-    return this.call((ref, ctx) => ref.answer({ promptId, value }, ctx));
+    return this.act((ref, ctx) => ref.answer({ promptId, value }, ctx));
   }
 
   cancelSignIn(): Promise<void> {
-    return this.call((ref, ctx) => ref.cancelSignIn(ctx));
+    return this.act((ref, ctx) => ref.cancelSignIn(ctx));
   }
 
   setApiKey(providerId: string, key: string): Promise<void> {
-    return this.call((ref, ctx) => ref.setApiKey({ providerId, key }, ctx));
+    return this.act((ref, ctx) => ref.setApiKey({ providerId, key }, ctx));
   }
 
   signOut(providerId: string): Promise<void> {
-    return this.call((ref, ctx) => ref.signOut({ providerId }, ctx));
+    return this.act((ref, ctx) => ref.signOut({ providerId }, ctx));
   }
 
   /** Fetches pi.dev's newer models for the machine's providers; the catalog follows. */
   refreshCatalog(): Promise<void> {
-    return this.call((ref, ctx) => ref.refreshCatalog(ctx));
+    return this.act((ref, ctx) => ref.refreshCatalog(ctx));
   }
 
   /** Trusts the host keys with these fingerprints that the machine at `endpoint` presented to this machine. */
   acceptHostKey(endpoint: string, fingerprints: string[]): Promise<void> {
-    return this.call((ref, ctx) => ref.acceptHostKey({ endpoint, fingerprints }, ctx));
+    return this.act((ref, ctx) => ref.acceptHostKey({ endpoint, fingerprints }, ctx));
   }
 
   putMachine(record: Machine): Promise<void> {
-    return this.call((ref, ctx) => ref.putMachine(record, ctx));
+    return this.act((ref, ctx) => ref.putMachine(record, ctx));
   }
 
   patchMachine(endpoint: string, patch: MachinePatch): Promise<void> {
-    return this.call((ref, ctx) => ref.patchMachine({ endpoint, patch }, ctx));
+    return this.act((ref, ctx) => ref.patchMachine({ endpoint, patch }, ctx));
   }
 
   removeMachine(endpoint: string): Promise<void> {
-    return this.call((ref, ctx) => ref.removeMachine({ endpoint }, ctx));
+    return this.act((ref, ctx) => ref.removeMachine({ endpoint }, ctx));
   }
 
   /**
@@ -273,19 +284,19 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   accept(input: UserMessage['content'], requestId: string): Promise<void> {
-    return this.call((ref, ctx) => ref.accept({ content: input, requestId }, ctx));
+    return this.act((ref, ctx) => ref.accept({ content: input, requestId }, ctx));
   }
 
   continue(): Promise<void> {
-    return this.call((ref, ctx) => ref.continue(ctx));
+    return this.act((ref, ctx) => ref.continue(ctx));
   }
 
   stop(): Promise<void> {
-    return this.call((ref, ctx) => ref.stop(ctx));
+    return this.act((ref, ctx) => ref.stop(ctx));
   }
 
   updateSettings(settings: InfiniChatSettings): Promise<void> {
-    return this.call((ref, ctx) => ref.updateSettings(settings, ctx));
+    return this.act((ref, ctx) => ref.updateSettings(settings, ctx));
   }
 
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean> {
@@ -371,10 +382,11 @@ export class RemoteInfiniChat implements InfiniChatHost {
       await this.running;
       const session = this.session;
       this.session = undefined;
+      this.released.abort();
       this.ref?.release();
       this.mcp.release();
       try {
-        await this.host.close();
+        await this.host.close(BACKGROUND_CONTEXT);
       } finally {
         if (session) await this.dispose(session);
       }
@@ -384,6 +396,11 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   private get name(): string {
     return this.directory.machine()?.name ?? 'The machine';
+  }
+
+  /** A method without a result: Chord answers `null`, its wire form (chord `docs/design.md` §5, "Methods"). */
+  private async act(run: (ref: InfiniChatRef, ctx: Ctx<InfiniChatPrincipal>) => Promise<null>): Promise<void> {
+    await this.call(run);
   }
 
   /**
@@ -404,12 +421,13 @@ export class RemoteInfiniChat implements InfiniChatHost {
     if (this.closed || this.ref === undefined) throw new Error(`InfiniChat on ${this.name} is not connected yet.`);
     const { signal } = this.calls;
     try {
-      return await this.host.root(run, { signal });
+      return await this.host.root(run, withAbortSignal(signal, BACKGROUND_CONTEXT));
     } catch (error) {
-      if (isChordError(error, 'aborted') && error.cause instanceof Error) throw error.cause;
-      // The server may have received a call whose link closed under it, or whose reference it forced away; the screens
-      // resend with the same request ID, which OptChat admits once.
-      if ((isChordError(error, 'unavailable') || isChordError(error, 'gone')) && !this.session?.live) {
+      if (isChordError(error, 'aborted') && signal.reason instanceof Error) throw signal.reason;
+      // The server may have received a call whose link closed under it; the screens resend with the same request ID,
+      // which OptChat admits once.
+      if ((isChordError(error, 'unavailable') || isChordError(error, 'gone') || isChordError(error, 'released'))
+          && !this.session?.live) {
         throw new Error(`The connection to ${this.name} was lost. Try again.`);
       }
       throw plain(error);
@@ -419,8 +437,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
   /**
    * One attempt: dials the machine's server, which sets it up only when needed, then connects the client host over its
    * link and holds the reference. When the server refuses the socket, this app's key is written again and the server
-   * started, unless this attempt already did. A server whose contract doesn't cover this app's (Chord's
-   * `upgrade_required`) is either behind this app, and asked to update itself, or ahead of it.
+   * started, unless this attempt already did. A server that doesn't fit this app (`Mismatch`) is either behind it, and
+   * asked to update itself, or ahead of it. A server behind this app that closes the link before the reference is live
+   * counts as one too: a release from before Chord v2 answers this app's handshake with its own protocol's close.
    */
   private async connect(signal: AbortSignal): Promise<void> {
     const session: Session = { live: false };
@@ -440,12 +459,14 @@ export class RemoteInfiniChat implements InfiniChatHost {
       session.server = server;
       let { link } = server;
       for (;;) {
+        const behind = compareVersions(server.version, this.version) < 0;
         let opened: boolean;
         try {
           opened = await this.open(session, link, signal);
+          if (!opened && behind) throw new Mismatch('The server closed the link.');
         } catch (error) {
-          if (!(error instanceof ProtocolMismatch) && !isChordError(error, 'upgrade_required')) throw error;
-          if (compareVersions(server.version, this.version) >= 0) {
+          if (!(error instanceof Mismatch)) throw error;
+          if (!behind) {
             throw new Error(`InfiniChat on ${server.name} is newer than this app. Update this app to use it.`);
           }
           await server.requestUpdate();
@@ -458,7 +479,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
       session.live = true;
       this.refresh();
       // The next connect sends it again, so one lost with its link changes nothing.
-      this.ref?.setTimeZone({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone }).catch(() => {});
+      this.ref?.setTimeZone({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone }, BACKGROUND_CONTEXT)
+        .catch(() => {});
     } catch (error) {
       if (this.session === session) this.session = undefined;
       await this.dispose(session);
@@ -467,55 +489,61 @@ export class RemoteInfiniChat implements InfiniChatHost {
   }
 
   /**
-   * Connects the client host over a dialed link, which re-holds the reference. Resolves true once the reference is
-   * live; false when the link closed first, as a stale port or a removed client file makes it; rejects with
-   * `ProtocolMismatch` when it closed because the server speaks another link protocol.
+   * Connects the client host over a dialed link, which holds the reference again. Resolves true once the reference is
+   * live; false when the link closed first, as a stale port or a removed client file makes it; rejects with `Mismatch`
+   * when the handshake failed or the server serves another version of the contract, and with the reference's error
+   * when it cannot be served at all.
    */
   private async open(session: Session, link: Link, signal: AbortSignal): Promise<boolean> {
-    link.onClose(() => this.dropped(session));
-    let mismatched = false;
-    this.host.connect(link, { principal: { kind: 'host' }, onProtocolMismatch: () => { mismatched = true; } });
-    const ref = this.ref === undefined || this.ref.status === 'gone' ? this.hold() : this.ref;
-    this.mcp.hold();
-    const live = await new Promise<boolean>((resolve, reject) => {
+    await this.loaded;
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      let stopState = () => {};
       const settle = (finish: () => void) => {
-        stopStatus();
+        if (settled) return;
+        settled = true;
+        stopState();
+        this.mismatched = undefined;
         signal.removeEventListener('abort', abort);
         finish();
       };
-      const stopStatus = ref.onStatus((status, error) => {
-        if (status === 'live') settle(() => resolve(true));
-        else if (status === 'gone') settle(() => reject(error));
-      });
+      const mismatch = (why: string) => settle(() => reject(new Mismatch(why)));
       const abort = () => settle(() => reject(signal.reason));
+      if (signal.aborted) {
+        abort();
+        return;
+      }
       signal.addEventListener('abort', abort, { once: true });
-      // Chord reports a mismatch before the link's close reaches this listener, registered after its own.
-      link.onClose(() => settle(() => mismatched
-        ? reject(new ProtocolMismatch('The server speaks another Chord protocol.'))
-        : resolve(false)));
-      if (signal.aborted) abort();
+      this.mismatched = () => mismatch('The server speaks another Chord protocol.');
+      // The link's close, for this attempt and for the session it becomes. The link first: a reference made on a host
+      // that never had a parent link has nowhere to go (design §3).
+      this.host.connect(heard(link, () => {
+        settle(() => resolve(false));
+        this.dropped(session);
+      }), { principal: { kind: 'host' } }, BACKGROUND_CONTEXT);
+      const ref = this.ref ?? this.hold();
+      this.mcp.hold();
+      stopState = follow(ref.state, () => {
+        const state = ref.state.value;
+        if (state.kind === 'live') settle(() => resolve(true));
+        else if (state.kind === 'ended') settle(() => reject(state.error));
+        else if (state.kind !== 'failed' || state.cause.kind === 'transient') return;
+        // Waiting for a provider that fits, or one that serves the type at all: this server has neither.
+        else if (state.cause.kind === 'waiting') mismatch(state.cause.error.message);
+        else settle(() => reject(state.cause.error));
+      }, withAbortSignal(signal, BACKGROUND_CONTEXT));
     });
-    return live;
   }
 
-  /** The one reference to the machine's InfiniChat, held again only after the server forced it away. */
+  /** The one reference to the machine's InfiniChat, which follows its object across this host's links (§7). */
   private hold(): InfiniChatRef {
-    const ref = this.host.hold(InfiniChatRemote, {});
+    const context = withAbortSignal(this.released.signal, BACKGROUND_CONTEXT);
+    const ref = this.host.hold(InfiniChatRemote, {}, context);
     this.ref = ref;
-    ref.snapshot.subscribe(this.refresh);
-    ref.controls.subscribe(this.refresh);
-    ref.messages.subscribe(this.refresh);
-    ref.scheduled.subscribe(this.refresh);
-    ref.access.subscribe(this.refresh);
-    ref.signInAttempt.subscribe(this.refresh);
-    ref.conversation.subscribe(this.refresh);
-    ref.machines.subscribe(this.refresh);
-    ref.reach.subscribe(this.refresh);
-    ref.pendingHostKeys.subscribe(this.refresh);
-    // Forced away while connected, as when the server shuts down: connecting again holds a new one.
-    ref.onStatus((status) => {
-      if (status === 'gone') this.dropped(this.session);
-    });
+    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.scheduled, ref.access, ref.signInAttempt,
+      ref.conversation, ref.machines, ref.reach, ref.pendingHostKeys]) {
+      follow(member, this.refresh, context);
+    }
     return ref;
   }
 

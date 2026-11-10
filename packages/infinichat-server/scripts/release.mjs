@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url';
 
 // Publishes the server as a release of this repository on GitHub, tagged `server/v<version>` and never marked latest:
 // `latest/download` serves the Mac app's updates (apps/mac/electrobun.config.ts). A release is a runtime, the Chord
-// host (dist/main.js) and its tools plugin (dist/plugins/tools/server.js) with the packages they and every plugin
-// share, installed exactly as runtime/package-lock.json locks them and named by a hash of the three, and InfiniChat's
-// server plugin (dist/plugins/infinichat/server.js). Each machine's server updates itself to the newest release and
+// host with its tools plugin (dist/main.js), the script pi-claude-code runs beside InfiniChat's plugin
+// (dist/plugins/infinichat/inert-mcp.mjs) and the packages they and every plugin share, installed exactly as
+// runtime/package-lock.json locks them and named by a hash of the three, and InfiniChat's server plugin
+// (dist/plugins/infinichat/server.js), which a machine places in the runtime's folder beside that script. Each machine's server updates itself to the newest release and
 // restarts into it, downloading only the plugin while its runtime is the same
 // (packages/infinichat-server/src/update.ts). Run `pnpm release` here after committing the version in package.json
 // and pushing that commit, which the tag names.
@@ -39,12 +40,13 @@ try {
     await copyFile(join(root, 'runtime', file), join(stage, file));
   }
   await copyFile(join(root, 'dist/main.js'), join(stage, 'main.js'));
-  await mkdir(join(stage, 'plugins/tools'), { recursive: true });
-  await copyFile(join(root, 'dist/plugins/tools/server.js'), join(stage, 'plugins/tools/server.js'));
+  const inert = 'plugins/infinichat/inert-mcp.mjs';
+  await mkdir(join(stage, 'plugins/infinichat'), { recursive: true });
+  await copyFile(join(root, 'dist', inert), join(stage, inert));
   // The packages as locked, without install scripts, as the workspace builds none of them either.
   run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: stage });
   const key = createHash('sha256').update(await readFile(join(stage, 'package-lock.json')))
-    .update(await readFile(join(stage, 'main.js'))).update(await readFile(join(stage, 'plugins/tools/server.js')))
+    .update(await readFile(join(stage, 'main.js'))).update(await readFile(join(stage, inert)))
     .digest('hex').slice(0, 32);
   const runtime = join(folder, `runtime-${key}.tar.gz`);
   // Without macOS's metadata, which Linux's tar would only warn about.

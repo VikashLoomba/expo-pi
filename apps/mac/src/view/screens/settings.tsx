@@ -1,8 +1,8 @@
-import type { Host } from '@earendil-works/chord';
+import { useHold } from '@earendil-works/chord/react';
 import { KeyRoundIcon, ServerIcon } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 
-import { MacApp, type MacPrincipal } from '../../contract';
+import { MacAccount, MacApp, MacMachines } from '../../contract';
 import { MachinesPane } from '../components/settings/machines';
 import { ProvidersPane } from '../components/settings/providers';
 import {
@@ -10,18 +10,19 @@ import {
   SidebarMenuItem, SidebarProvider,
 } from '../components/ui/sidebar';
 import { TooltipProvider } from '../components/ui/tooltip';
-import { useHeldAccount } from '../hooks/use-chats';
-import { useHeldMachines } from '../hooks/use-machines';
 import { AppContext } from '../lib/app-context';
 import type { SettingsTargets } from '../lib/commands';
 
-/** The Settings window: its panes in a sidebar, the one `targets` names shown, Machines by default. */
-export function SettingsWindow({ host, targets }: { host: Host<MacPrincipal>; targets: SettingsTargets }) {
+/**
+ * The Settings window: its panes in a sidebar, the one `targets` names shown, Machines by default. It holds the
+ * machines and this Mac's providers for its lifetime; a pane shows once its reference exists, the render after the
+ * first.
+ */
+export function SettingsWindow({ targets }: { targets: SettingsTargets }) {
   // The app, for the sign-in rows' Open in browser.
-  const [app] = useState(() => host.hold(MacApp, {}));
-  useEffect(() => () => app.release(), [app]);
-  const machines = useHeldMachines(host);
-  const account = useHeldAccount(host);
+  const app = useHold(MacApp, {});
+  const machines = useHold(MacMachines, {});
+  const account = useHold(MacAccount, {});
   const target = useSyncExternalStore(targets.subscribe, targets.getSnapshot);
   return (
     <AppContext value={app}>
@@ -52,8 +53,8 @@ export function SettingsWindow({ host, targets }: { host: Host<MacPrincipal>; ta
         </Sidebar>
         <SidebarInset className="pane">
           {target.pane === 'providers'
-            ? <ProvidersPane account={account} focus={target.provider} />
-            : <MachinesPane machines={machines} />}
+            ? account && <ProvidersPane account={account} focus={target.provider} />
+            : machines && <MachinesPane machines={machines} />}
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

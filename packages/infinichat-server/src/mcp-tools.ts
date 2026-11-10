@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { copyJson } from '@earendil-works/chord';
+import { copyJson } from '@earendil-works/chord/json';
 import type { CodemodeSandbox } from '@earendil-works/pi-codemode';
 import { defineExtension, defineTool, type Extension, type ToolRegistration } from '@earendil-works/pi-durable';
 import { createCodemodeExtension, type CodemodeNamespace } from '@earendil-works/pi-durable/codemode';

@@ -2,6 +2,7 @@ import {
   Button, HStack, Image, Label, LabeledContent, SecureField, Section, Text, useNativeState,
 } from '@expo/ui/swift-ui';
 import { disabled as disable, foregroundStyle } from '@expo/ui/swift-ui/modifiers';
+import { CLAUDE_CODE_PROVIDER_ID } from '@pi-agent/infinichat/pi/claude-code';
 import type { ModelCatalog, ProviderOption } from '@pi-agent/infinichat/pi/model-catalog';
 import { OPENAI_PROVIDER_ID } from '@pi-agent/infinichat/pi/openai-auth/core';
 import { useRef, useState } from 'react';
@@ -136,11 +137,38 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
   </Section>;
 }
 
+/**
+ * Claude through a machine's Claude Code login (`claude-code.ts`): the machine's `claude` program keeps the sign-in,
+ * so there is nothing to enter or remove here, only whether it is signed in. The machine reads it again whenever its
+ * models are refreshed.
+ */
+function ClaudeCodeSection({ provider, account }: { provider: ProviderOption; account: ProviderAccount }) {
+  const colors = useChatColors();
+  const access = account.providerAccess(provider.id);
+  const status = !access.ready ? 'Checking Claude Code…'
+    : access.connected ? access.type === 'oauth' ? 'Using Claude plan' : 'Signed in with Claude Code'
+      : 'Not signed in';
+  const footer = access.connected
+    ? 'Requests use the machine’s Claude Code sign-in and count against its limits.'
+    : 'Claude Code keeps this sign-in on the machine. Install Claude Code there and run “claude auth login” in its '
+      + 'terminal, then refresh models to see it here.';
+  return <Section title={provider.name} footer={<Text>{footer}</Text>}>
+    <LabeledContent label="Status">
+      <HStack spacing={6}>
+        <Text modifiers={[secondary]}>{status}</Text>
+        {access.connected && <Image systemName="checkmark.circle.fill" size={16} color={colors.accent} />}
+      </HStack>
+    </LabeledContent>
+  </Section>;
+}
+
 /** A section for each provider in `catalog`, the one `focus` names first, or OpenAI's. */
 export function ProviderSections({ catalog, focus, account }: {
   catalog: ModelCatalog; focus?: string; account: ProviderAccount;
 }) {
   const focused = catalog.find((provider) => provider.id === (focus ?? OPENAI_PROVIDER_ID));
   const providers = focused ? [focused, ...catalog.filter((provider) => provider.id !== focused.id)] : catalog;
-  return providers.map((provider) => <ProviderSection key={provider.id} provider={provider} account={account} />);
+  return providers.map((provider) => provider.id === CLAUDE_CODE_PROVIDER_ID
+    ? <ClaudeCodeSection key={provider.id} provider={provider} account={account} />
+    : <ProviderSection key={provider.id} provider={provider} account={account} />);
 }

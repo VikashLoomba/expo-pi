@@ -1,8 +1,9 @@
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { CornerLeftUpIcon, FolderIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import type { ChatRef } from '../../hooks/use-chats';
-import { errorText } from '../../hooks/use-ref';
+import { errorText } from '../../lib/error-text';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Spinner } from '../ui/spinner';
@@ -42,7 +43,7 @@ function useFolder(chat: ChatRef, machineId: string, path: string | null) {
   const key = `${machineId}\n${path ?? ''}\n${attempt}`;
   useEffect(() => {
     let current = true;
-    chat.listFolder({ machineId, path }).then(
+    chat.listFolder({ machineId, path }, BACKGROUND_CONTEXT).then(
       (folder) => { if (current) setResult({ key, state: { status: 'ready', ...folder } }); },
       (cause: unknown) => {
         if (current) setResult({ key, state: { status: 'failed', error: errorText(cause, 'Folders could not be listed.') } });
@@ -62,7 +63,7 @@ function useFolderSearch(chat: ChatRef, machineId: string, root: string | undefi
     if (root === undefined || key === undefined) return;
     let current = true;
     const timer = setTimeout(() => {
-      chat.searchFolders({ machineId, root, query: needle }).then(
+      chat.searchFolders({ machineId, root, query: needle }, BACKGROUND_CONTEXT).then(
         (found) => { if (current) setResult({ key, state: { status: 'ready', ...found } }); },
         (cause: unknown) => {
           if (current) setResult({ key, state: { status: 'failed', error: errorText(cause, 'Folders could not be searched.') } });

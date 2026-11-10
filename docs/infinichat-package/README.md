@@ -109,6 +109,19 @@ commands in "Working on a piece" then run from `apps/mobile`. Since the Mac app'
 its scripts, manifests and assets are `packages/infinichat-server`: its gates are `pnpm --filter
 @pi-agent/infinichat-server typecheck` and `pnpm --filter @pi-agent/infinichat-server check`.
 
+## Since Chord v2 (2026-11-10)
+
+These pieces record the package as built on Chord v1, whose API and docs chord 1.5.1 removed; the link seam runs on
+Chord v2 since pi 1.5.2 (chord `docs/design.md`). `RemoteInfiniChat` keeps its public methods. Underneath, its host
+is a client without an address that loads nothing and connects the dialed link as its parent (§3); it holds
+`infinichat.remote` once, and the reference follows its object across links (§7), so nothing is held again after a
+drop. `follow` watches a member or the reference's state, and `heard` wraps a link so the client hears its close:
+a link has one close listener, which the host takes (`infinichat-remote/follow.ts`). A server that does not fit
+this app shows as a handshake the host reports as `protocol_error`, or as a hold left waiting with
+`contract_mismatch`; a server behind this app that closes the link before the reference is live counts too
+(`client.ts`). Contracts declare `params` and `hostAddress: () => ServerHost()`, every object in a method's arguments
+is closed, and a method without a result answers `null` (§5). `infinichat.remote` is version 7, the server 4.0.0.
+
 ## References
 
 [references.md](references.md) lists the evidence these pieces rely on: versions, upstream contracts with `file:line`,

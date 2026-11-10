@@ -1,22 +1,27 @@
-import { local, opaque } from '@earendil-works/chord';
-import { obj } from '@earendil-works/pi-schema';
+import type { Root } from '@earendil-works/pi-mcp';
 import type { McpServerStatus } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 import { SignInAttempts } from '@pi-agent/infinichat/pi/sign-in';
 
-import type { McpDisabledServer } from './mcp-config';
+import type { McpConfiguration, McpDisabledServer, McpServerConfig } from './mcp-config';
 import type { McpLog } from './mcp-log';
 import { mcpCredentials, signInMcpServer, type McpCredentials } from './mcp-oauth';
+import { McpServer } from './mcp-server';
 import type { ConnectedServer } from './mcp-tools';
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const report = (error: unknown) => console.error('InfiniChat:', message(error));
+const counted = (name: string, server: McpServer) =>
+  `${name} (${server.tools.length} tool${server.tools.length === 1 ? '' : 's'})`;
 
 /**
- * The machine's MCP servers as `/mcp` shows and acts on them (`InfiniChatMcp`): the servers the tools plugin's object
- * connected at its last run, those its configuration turns off and what it skipped, and the sign-ins to the OAuth ones,
- * one at a time, as the provider sign-ins run (`SignInAttempts`). It holds what outlives a run: this machine's MCP
- * credentials and log, which the connections borrow. Its listeners hear of every change of any server.
+ * The machine's MCP servers, a native of the tools plugin's object (`tools-facet.ts`), which opens it once and closes
+ * it with the host: the connections of `~/.infinichat/mcp.json` as last applied, those its configuration turns off and
+ * what it skipped, and the sign-ins to the OAuth ones, one at a time, as the provider sign-ins run (`SignInAttempts`),
+ * as `/mcp` shows and acts on them (`InfiniChatMcp`). A Chord native never changes while its object lives (chord
+ * `docs/design.md` §13), and a reload restarts only the objects of plugins whose code changed (§21), so the
+ * configuration is applied here, by `apply`: at the object's start and at each `/reload-plugins`. It holds this
+ * machine's MCP credentials and log, which the connections borrow. Its listeners hear of every change of any server.
  */
 export class McpServers {
   readonly signIns = new SignInAttempts<{ server: string }>((error) => message(error));
@@ -26,7 +31,9 @@ export class McpServers {
   private stops: (() => void)[] = [];
   private readonly listeners = new Set<() => void>();
 
-  constructor(private readonly backend: CredentialBackend, readonly log: McpLog) {}
+  /** `roots` are the folders each server is given, as the coding agent gives its session's. */
+  constructor(private readonly backend: CredentialBackend, readonly log: McpLog,
+    private readonly roots: readonly Root[]) {}
 
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -38,14 +45,70 @@ export class McpServers {
     return mcpCredentials(this.backend, name, serverUrl);
   }
 
-  /** What the tools plugin's object declared at its run, once it is live. */
-  update(servers: readonly ConnectedServer[], disabled: readonly McpDisabledServer[], problems: readonly string[]) {
+  /** The servers of the configuration last applied, with their connections. */
+  connected(): readonly ConnectedServer[] {
+    return this.servers;
+  }
+
+  /**
+   * Applies the configuration as read now: connects the servers added, replaces those whose connection is made with
+   * something else (`McpServerConfig.version`), retires those removed, and connects again each that is left but isn't
+   * connected, such as one that was down. A retired connection finishes the requests it runs (`McpServer.retire`).
+   * Says which connected, reconnected, closed, failed or stayed as they were, and what the configuration skipped.
+   */
+  async apply({ servers, disabled, problems }: McpConfiguration): Promise<string> {
+    const previous = this.servers;
+    const opened = new Set<string>();
+    const next = servers.map((config): ConnectedServer => {
+      const kept = previous.find((entry) => entry.config.name === config.name);
+      if (kept !== undefined && kept.config.version === config.version) return { config, server: kept.server };
+      opened.add(config.name);
+      return { config, server: this.open(config) };
+    });
+    for (const { server } of previous) {
+      if (!next.some((entry) => entry.server === server)) void server.retire()?.catch(report);
+    }
     for (const stop of this.stops) stop();
-    this.servers = servers;
+    this.servers = next;
     this.disabled = disabled;
     this.problemList = problems;
-    this.stops = servers.map(({ server }) => server.subscribe(() => this.changed()));
+    this.stops = next.map(({ server }) => server.subscribe(() => this.changed()));
     this.changed();
+    const outcomes = await Promise.all(next.map(async ({ config: { name }, server }) => {
+      const wasConnected = server.state === 'connected';
+      const failure = await server.connect().then(() => undefined, message);
+      return { name, server, wasConnected, failure };
+    }));
+    const connected: string[] = [];
+    const reconnected: string[] = [];
+    const unchanged: string[] = [];
+    const failed: string[] = [];
+    const reasons: string[] = [];
+    for (const { name, server, wasConnected, failure } of outcomes) {
+      if (failure !== undefined) {
+        failed.push(name);
+        reasons.push(failure);
+      } else if (opened.has(name) && previous.some((entry) => entry.config.name === name)) {
+        reconnected.push(counted(name, server));
+      } else if (opened.has(name) || !wasConnected) {
+        connected.push(counted(name, server));
+      } else {
+        unchanged.push(name);
+      }
+    }
+    const closed = previous.map((entry) => entry.config.name)
+      .filter((name) => !next.some((entry) => entry.config.name === name));
+    const done = Object.entries({ connected, reconnected, closed, failed, unchanged })
+      .filter(([, names]) => names.length > 0).map(([what, names]) => `${what} ${names.join(', ')}`);
+    return [`MCP: ${done.join('; ') || 'no servers'}.`, ...reasons, ...problems].join('\n');
+  }
+
+  /** A server's connection, which connects as it is made (`McpServer`). */
+  private open({ name, connection }: McpServerConfig): McpServer {
+    const oauth = 'url' in connection && connection.oauth !== undefined ? {
+      serverUrl: connection.url, settings: connection.oauth, credentials: this.credentials(name, connection.url),
+    } : undefined;
+    return new McpServer(name, connection, oauth, this.log, this.roots);
   }
 
   statuses(): McpServerStatus[] {
@@ -103,10 +166,12 @@ export class McpServers {
     return this.find(name).reconnect();
   }
 
+  /** Ends a sign-in under way and retires every connection, as the host closes. */
   close(): void {
     this.signIns.cancel();
     for (const stop of this.stops) stop();
     this.stops = [];
+    for (const { server } of this.servers) void server.retire()?.catch(report);
   }
 
   private find(name: string) {
@@ -122,13 +187,3 @@ export class McpServers {
     for (const listener of [...this.listeners]) listener();
   }
 }
-
-/**
- * The tools plugin's registry of servers, one object of lifetime `"host"` (`tools-facet.ts`): the tools plugin's
- * object, which connects the servers, and `/mcp`'s object, which clients hold, both borrow it.
- */
-export const McpRegistry = local('infinichat.mcp-registry', {
-  version: 1,
-  input: obj({}, { open: true }),
-  members: { servers: opaque<McpServers>('infinichat.mcp-servers@1') },
-});

@@ -1,3 +1,4 @@
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { useEffect, useRef, useState } from 'react';
 
@@ -30,7 +31,8 @@ export function HistoryRow({ history }: { history: NonNullable<ChatMessage['hist
   useEffect(() => {
     if (!visible) return;
     let current = true;
-    const load = after === undefined || upTo === undefined ? source.loadEarlier() : source.fillGap({ after, upTo });
+    const load = after === undefined || upTo === undefined ? source.loadEarlier(BACKGROUND_CONTEXT)
+      : source.fillGap({ after, upTo }, BACKGROUND_CONTEXT);
     load.catch(() => {
       if (current) setFailed(true);
     });

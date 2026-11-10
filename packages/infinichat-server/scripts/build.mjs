@@ -1,15 +1,15 @@
 import { createRequire } from 'node:module';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
-// The server's runtime, its tools plugin and InfiniChat's server plugin (src/main.ts, src/tools-facet.ts,
-// src/facet.ts), each one module in dist/, all importing the packages of runtime/package.json from the runtime's
-// node_modules, so the host and every plugin share one instance of each (chord src/loader.ts:17-21). The workspace's
-// own code is bundled into each. --check verifies the generated manifest and that the runtime pins the very packages
-// the workspace builds against.
+// The server's runtime, with its tools plugin, and InfiniChat's server plugin (src/main.ts with src/tools-facet.ts,
+// and src/facet.ts), each one module in dist/, both importing the packages of runtime/package.json from the runtime's
+// node_modules, so the host and every plugin share one instance of each; the user's plugins get the same instances as
+// host packages (src/plugins.ts). The workspace's own code is bundled into each. --check verifies the generated
+// manifest and that the runtime pins the very packages the workspace builds against.
 const check = process.argv.includes('--check');
 if (process.argv.slice(2).some((arg) => arg !== '--check')) {
   throw new Error('Usage: node scripts/build.mjs [--check]');
@@ -28,9 +28,12 @@ const photon = createRequire(durable).resolve('@silvia-odwyer/photon/photon_rs_b
 const installed = async (name) =>
   JSON.parse(await readFile(join(root, 'node_modules', name, 'package.json'), 'utf8')).version;
 const pins = JSON.parse(await readFile(join(root, 'runtime/package.json'), 'utf8')).dependencies;
+// An alias pin, `npm:<package>@<version>`, counts by its version: the runtime's esbuild is esbuild-wasm, the one
+// build that runs on every machine a release's single runtime goes to; Chord's plugins component imports `esbuild`.
+const pinned = (pin) => pin.startsWith('npm:') ? pin.slice(pin.lastIndexOf('@') + 1) : pin;
 for (const name of shared) {
   const have = await installed(name);
-  if (have !== pins[name]) {
+  if (have !== pinned(pins[name])) {
     throw new Error(`runtime/package.json pins ${name} ${pins[name]}; the workspace has ${have}.`);
   }
 }
@@ -47,7 +50,6 @@ if (check) {
   const { metafile } = await build({
     entryPoints: {
       main: join(root, 'src/main.ts'),
-      'plugins/tools/server': join(root, 'src/tools-facet.ts'),
       'plugins/infinichat/server': join(root, 'src/facet.ts'),
     },
     // Paths in the bundles' comments are relative to this, so every checkout builds the same bytes.
@@ -72,6 +74,10 @@ if (check) {
       if (!shared.includes(name)) throw new Error(`The server imports ${path}, which runtime/package.json lacks.`);
     }
   }
+  // pi-claude-code starts this script, by its path beside the module that holds its code, as the MCP server through
+  // which Claude Code sees pi's tools without running them (its `src/claude-cli.ts`); a bundle cannot carry it.
+  await copyFile(require.resolve('@earendil-works/pi-claude-code/src/inert-mcp.mjs'),
+    join(root, 'dist/plugins/infinichat/inert-mcp.mjs'));
   await writeFile(manifestPath, manifest);
   console.log(`Built the InfiniChat server ${version} into dist/.`);
 }

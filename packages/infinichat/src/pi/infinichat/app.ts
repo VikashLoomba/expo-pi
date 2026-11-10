@@ -1,5 +1,5 @@
-import type { Context, JsonRepresentation } from '@earendil-works/chord';
-import { awaitWithContext, withAbortSignal } from '@earendil-works/chord/context';
+import { awaitWithContext, withAbortSignal, type Context } from '@earendil-works/chord/context';
+import type { JsonRepresentation } from '@earendil-works/chord/json';
 import type { ImageContent, Models } from '@earendil-works/pi-ai';
 import {
   AgentDoc as NativeAgentDoc, ConversationIdle, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID, ResetEntry,

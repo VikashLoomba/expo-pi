@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { fileCredentialBackend } from '@pi-agent/infinichat/node/credentials';
 import Electrobun, {
   ApplicationMenu, BrowserView, BrowserWindow, Updater, Utils, type ElectrobunEvent,
@@ -113,11 +114,12 @@ async function main(): Promise<void> {
   const chats = new MacChats(account, machines, images);
   // The Settings window opens from the menu and from the screens' notices; it exists once the windows listen.
   const ui = { openSettings: (_target?: SettingsTarget) => {} };
-  const host = createMacHost({ version, userData }, ui);
-  serveInfiniChat(host, infinichat, avatar);
-  serveMcp(host, infinichat);
-  serveMachines(host, infinichat, machines);
-  serveChats(host, chats, account, machines);
+  const host = await createMacHost({ version, userData }, ui, (served) => {
+    serveInfiniChat(served, infinichat, avatar);
+    serveMcp(served, infinichat);
+    serveMachines(served, infinichat, machines);
+    serveChats(served, chats, account, machines);
+  });
   const windows = await listenForWindows(host);
   console.log(`InfiniChat ${version}: data in ${userData}, windows on 127.0.0.1:${windows.port}`);
 
@@ -185,7 +187,7 @@ async function main(): Promise<void> {
   let quitting: Promise<void> | undefined;
   const shutDown = () => quitting ??= (async () => {
     current?.remember();
-    // The clients close first, then the host disposes its objects and closes the windows' links, then nothing
+    // The clients close first, then the host closes the windows' links and ends its objects, then nothing
     // listens; every step runs, and the first failure is reported after the rest, as the phone's teardown does.
     let failure: unknown;
     for (const step of [async () => {
@@ -194,8 +196,8 @@ async function main(): Promise<void> {
       own.close();
       notifier.close();
     }, () => infinichat.close(),
-      () => chats.close(), async () => machines.close(), () => host.close(), async () => account.close(),
-      () => windows.close()]) {
+      () => chats.close(), async () => machines.close(), () => host.close(BACKGROUND_CONTEXT),
+      async () => account.close(), () => windows.close()]) {
       try {
         await step();
       } catch (error) {

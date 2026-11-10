@@ -1,4 +1,5 @@
-import type { Host } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { useHold, useWatch } from '@earendil-works/chord/react';
 import {
   INFINICHAT_COMMANDS, type InfiniChatCommand, type InfiniChatCommandName,
 } from '@pi-agent/infinichat/chat/commands';
@@ -11,7 +12,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { CheckIcon, ChevronDownIcon, ClockIcon, PlusIcon, ServerIcon, SettingsIcon, XIcon } from 'lucide-react';
 
-import type { MacPrincipal, MoveStatus } from '../../contract';
+import { MacInfiniChat, type MoveStatus } from '../../contract';
 import { ChatAgentContext } from '../components/chat/agent';
 import { Composer } from '../components/chat/composer';
 import { Notice } from '../components/chat/notices';
@@ -29,9 +30,9 @@ import {
 } from '../components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
 import { useDraft } from '../hooks/use-draft';
-import { InfiniChatContext, useHeldInfiniChat, useInfiniChatRef } from '../hooks/use-infinichat';
-import { errorText, useMember } from '../hooks/use-ref';
+import { InfiniChatContext, useInfiniChatRef } from '../hooks/use-infinichat';
 import { useOpenSettings } from '../lib/app-context';
+import { errorText } from '../lib/error-text';
 
 const TITLE = 'InfiniChat';
 const MODELS_REQUIRED = 'Choose InfiniChat’s main and summary models in its settings to send a message.';
@@ -53,13 +54,18 @@ function moving(move: MoveStatus, machine: string, stage: InstallStage | undefin
       : move.step === 'copying' ? `Copying from ${from} to ${machine}${copied}` : `Opening on ${machine}…`;
 }
 
-/** InfiniChat's one conversation: holds the window's reference and shows it, as the thread's source too. */
-export function InfiniChatScreen({ host }: { host: Host<MacPrincipal> }) {
-  const ref = useHeldInfiniChat(host);
+/**
+ * InfiniChat's one conversation: holds the window's reference for the screen's lifetime, as the phone's provider
+ * holds its host, and shows it, as the thread's source too. The screen renders once the reference exists, the render
+ * after the first.
+ */
+export function InfiniChatScreen() {
+  const ref = useHold(MacInfiniChat, {});
+  if (ref === undefined) return null;
   return (
     <InfiniChatContext value={ref}>
       <ThreadSourceContext value={ref}>
-        <InfiniChat host={host} />
+        <InfiniChat />
       </ThreadSourceContext>
     </InfiniChatContext>
   );
@@ -70,19 +76,19 @@ export function InfiniChatScreen({ host }: { host: Host<MacPrincipal> }) {
  * composer whose draft it owns. The transcript subscribes to the messages itself and is memoized, so a keystroke
  * renders only this component and the composer.
  */
-function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
+function InfiniChat() {
   const ref = useInfiniChatRef();
-  const snapshot = useMember(ref.snapshot);
-  const controls = useMember(ref.controls);
-  const connection = useMember(ref.connection);
-  const held = useMember(ref.held);
-  const machine = useMember(ref.machine);
-  const listed = useMember(ref.machines);
-  const move = useMember(ref.move) ?? undefined;
-  const moveNotice = useMember(ref.moveNotice) ?? undefined;
-  const avatar = useMember(ref.avatar) ?? undefined;
-  const catalog = useMember(ref.catalog);
-  const accesses = useMember(ref.access);
+  const snapshot = useWatch(ref.snapshot);
+  const controls = useWatch(ref.controls);
+  const connection = useWatch(ref.connection);
+  const held = useWatch(ref.held);
+  const machine = useWatch(ref.machine);
+  const listed = useWatch(ref.machines);
+  const move = useWatch(ref.move) ?? undefined;
+  const moveNotice = useWatch(ref.moveNotice) ?? undefined;
+  const avatar = useWatch(ref.avatar) ?? undefined;
+  const catalog = useWatch(ref.catalog);
+  const accesses = useWatch(ref.access);
   const openSettings = useOpenSettings();
   const openMachines = () => openSettings({ pane: 'machines' });
   const settingsSheet = useSheet();
@@ -119,15 +125,16 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
     if ((!text && !draft.images.length) || admitting || !configured || !connected || settingsError) return;
     setAdmitting(true);
     setLocalError(undefined);
-    void ref.accept({ content: userInput(text, draft.images), requestId: draft.requestId }).then(reset,
-      (cause: unknown) => { setLocalError(errorText(cause, 'Your message could not be sent. Try again.')); },
-    ).finally(() => setAdmitting(false));
+    void ref.accept({ content: userInput(text, draft.images), requestId: draft.requestId }, BACKGROUND_CONTEXT)
+      .then(reset, (cause: unknown) => {
+        setLocalError(errorText(cause, 'Your message could not be sent. Try again.'));
+      }).finally(() => setAdmitting(false));
   }, [admitting, configured, connected, draft, ref, reset, setLocalError, settingsError]);
   // Commands run here, never reaching the agent; a failed one keeps its draft, so sending it again retries.
   const reloadPlugins = useCallback(() => {
     setAdmitting(true);
     setCommandResult(undefined);
-    void ref.reloadPlugins().then((text) => {
+    void ref.reloadPlugins(BACKGROUND_CONTEXT).then((text) => {
       setCommandResult({ text, failed: false });
       reset();
     }, (cause: unknown) => {
@@ -151,7 +158,7 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
     if (stopping) return;
     setStopping(true);
     setLocalError(undefined);
-    void ref.stop().catch((cause: unknown) => {
+    void ref.stop(BACKGROUND_CONTEXT).catch((cause: unknown) => {
       setLocalError(errorText(cause, 'Something went wrong. Please try again.'));
     }).finally(() => setStopping(false));
   }, [ref, setLocalError, stopping]);
@@ -159,7 +166,7 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
   // A run that ended without an answer continues on the context as it is (pi-durable's continue submission).
   const resume = () => {
     setLocalError(undefined);
-    void ref.continue().catch((cause: unknown) => {
+    void ref.continue(BACKGROUND_CONTEXT).catch((cause: unknown) => {
       setLocalError(errorText(cause, 'The response could not continue. Try again.'));
     });
   };
@@ -169,14 +176,14 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
   const offers = placementOffers(place);
   const blocked = offers.error;
   const messageError = localError || blocked?.message || controls?.error || snapshot?.report || snapshot?.view.error;
-  const retry = blocked?.retry === 'move' && !localError ? () => { void ref.retryMove(); }
+  const retry = blocked?.retry === 'move' && !localError ? () => { void ref.retryMove(BACKGROUND_CONTEXT); }
     : blocked?.retry === 'link' && (!localError || localError === blocked.message) ? () => {
       setLocalError(undefined);
-      void ref.reconnect();
+      void ref.reconnect(BACKGROUND_CONTEXT);
     } : undefined;
   const dismiss = localError ? () => setLocalError(undefined)
     : blocked || controls?.error ? undefined
-      : snapshot?.report ? () => { void ref.dismissError(); } : undefined;
+      : snapshot?.report ? () => { void ref.dismissError(BACKGROUND_CONTEXT); } : undefined;
   const nameOf = (endpoint: string) => listed?.machines[endpoint]?.name ?? (endpoint === machine?.id ? machineName
     : 'the machine');
   const chosen = chosenMachine(place);
@@ -221,7 +228,7 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
               <DropdownMenuContent align="end">
                 {machines.map(([endpoint, record]) => (
                   <DropdownMenuItem key={endpoint} disabled={place.at === 'moving' || endpoint === chosen}
-                    onClick={() => { void ref.chooseMove({ machineId: endpoint }); }}>
+                    onClick={() => { void ref.chooseMove({ machineId: endpoint }, BACKGROUND_CONTEXT); }}>
                     {endpoint === chosen ? <CheckIcon /> : <span className="size-4" />}
                     {record.name}
                   </DropdownMenuItem>
@@ -230,7 +237,8 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
                 {offers.cancel && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={() => { void ref.cancelMove(); }}>
+                    <DropdownMenuItem variant="destructive"
+                      onClick={() => { void ref.cancelMove(BACKGROUND_CONTEXT); }}>
                       <XIcon />Cancel Move
                     </DropdownMenuItem>
                   </>
@@ -266,11 +274,11 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
         )}
         {moveNotice && !messageError && (
           <Notice tone="neutral" message={moveNotice} action="Dismiss"
-            onAction={() => { void ref.dismissMoveNotice(); }} />
+            onAction={() => { void ref.dismissMoveNotice(BACKGROUND_CONTEXT); }} />
         )}
         {connection?.notice && !moveNotice && !messageError && (
           <Notice tone="neutral" message={connection.notice} action="Dismiss"
-            onAction={() => { void ref.dismissNotice(); }} />
+            onAction={() => { void ref.dismissNotice(BACKGROUND_CONTEXT); }} />
         )}
         {commandResult && (
           <Notice tone={commandResult.failed ? 'error' : 'neutral'} message={commandResult.text} action="Dismiss"
@@ -288,7 +296,7 @@ function InfiniChat({ host }: { host: Host<MacPrincipal> }) {
         <ProvidersSheet key={providersSheet.session} open={providersSheet.open} onClose={providersSheet.hide}
           focus={focusProvider} />
         <ScheduledSheet key={scheduledSheet.session} open={scheduledSheet.open} onClose={scheduledSheet.hide} />
-        <McpSheet key={mcpSheet.session} host={host} open={mcpSheet.open} onClose={mcpSheet.hide} />
+        <McpSheet key={mcpSheet.session} open={mcpSheet.open} onClose={mcpSheet.hide} />
       </div>
     </ChatAgentContext>
   );

@@ -1,10 +1,12 @@
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { useWatch } from '@earendil-works/chord/react';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { ScheduledInput } from '@pi-agent/infinichat/pi/infinichat/schedule';
 import { ClockIcon } from 'lucide-react';
 import { useState } from 'react';
 
 import { useInfiniChatRef } from '../../hooks/use-infinichat';
-import { errorText, useMember } from '../../hooks/use-ref';
+import { errorText } from '../../lib/error-text';
 import { Notice } from '../chat/notices';
 import { Button } from '../ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../ui/empty';
@@ -36,7 +38,7 @@ const runTime = (until: number) =>
  */
 export function ScheduledSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const ref = useInfiniChatRef();
-  const tasks = useMember(ref.scheduled);
+  const tasks = useWatch(ref.scheduled);
   const [editing, setEditing] = useState<Editing>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -50,7 +52,7 @@ export function ScheduledSheet({ open, onClose }: { open: boolean; onClose: () =
     setBusy(true);
     setError(undefined);
     const change = replacement === undefined ? { id: task.id } : { id: task.id, replacement };
-    void ref.cancelScheduled(change).then((done) => {
+    void ref.cancelScheduled(change, BACKGROUND_CONTEXT).then((done) => {
       if (done) setEditing(undefined);
       else setError(replacement === undefined ? 'That task reached InfiniChat before it was deleted.'
         : 'This task already reached InfiniChat.');

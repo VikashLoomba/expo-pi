@@ -7,12 +7,15 @@ export const ChatImageProperties = { data: str(), mimeType: str() };
 export const ChatImageSchema = obj(ChatImageProperties, { open: true });
 export type ChatImage = Static<typeof ChatImageSchema>;
 
-/** pi-ai's `UserMessage` content, as a caller on another host sends it: text, or text and image parts. */
+/**
+ * pi-ai's `UserMessage` content, as a caller on another host sends it: text, or text and image parts. Its objects are
+ * closed, as Chord requires of every object in a method's arguments (chord `docs/design.md` §5, "Arguments").
+ */
 export const UserInputSchema = union([
   str(),
   arr(union([
-    obj({ type: stringLiteral('text'), text: str() }, { open: true }),
-    obj({ type: stringLiteral('image'), ...ChatImageProperties }, { open: true }),
+    obj({ type: stringLiteral('text'), text: str() }),
+    obj({ type: stringLiteral('image'), ...ChatImageProperties }),
   ])),
 ]);
 

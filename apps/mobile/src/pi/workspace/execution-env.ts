@@ -1,4 +1,4 @@
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import { uuidv7 } from '@earendil-works/pi-ai';
 import {
   ExecutionError, FileError, LineScanner, StreamDecoder, err, ok, toError,

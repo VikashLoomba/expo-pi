@@ -1,8 +1,9 @@
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { useState, type FormEvent } from 'react';
 
 import type { ChatSummaryRecord } from '../../../contract';
 import type { ChatsRef } from '../../hooks/use-chats';
-import { errorText } from '../../hooks/use-ref';
+import { errorText } from '../../lib/error-text';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
@@ -25,7 +26,7 @@ function RenameDialog({ chats, chat, onClose }: { chats: ChatsRef; chat: ChatSum
     if (saving || !title.trim()) return;
     setSaving(true);
     setError(undefined);
-    void chats.rename({ id: String(chat.id), title }).then(onClose, (cause: unknown) => {
+    void chats.rename({ id: String(chat.id), title }, BACKGROUND_CONTEXT).then(onClose, (cause: unknown) => {
       setError(errorText(cause, 'Could not rename this chat.'));
     }).finally(() => setSaving(false));
   };
@@ -56,7 +57,7 @@ function DeleteDialog({ chats, chat, onClose }: { chats: ChatsRef; chat: ChatSum
   const remove = () => {
     setDeleting(true);
     setError(undefined);
-    void chats.delete({ id: String(chat.id) }).then(onClose, (cause: unknown) => {
+    void chats.delete({ id: String(chat.id) }, BACKGROUND_CONTEXT).then(onClose, (cause: unknown) => {
       setError(errorText(cause, 'Could not delete this chat.'));
     }).finally(() => setDeleting(false));
   };

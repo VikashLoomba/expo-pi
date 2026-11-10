@@ -1,10 +1,12 @@
+import type { Held } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { useWatch } from '@earendil-works/chord/react';
 import type { Machine } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { ServerIcon } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 
-import type { CheckStage } from '../../../contract';
-import type { MachinesRef } from '../../hooks/use-machines';
-import { errorText, useMember } from '../../hooks/use-ref';
+import type { CheckStage, MacMachines } from '../../../contract';
+import { errorText } from '../../lib/error-text';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -20,6 +22,8 @@ import {
 } from '../ui/item';
 import { Spinner } from '../ui/spinner';
 
+type MachinesRef = Held<typeof MacMachines>;
+
 const STAGES: Record<CheckStage, string> = {
   connecting: 'Connecting…', approving: 'Approve the SSH sign-in in your browser…',
   checking: 'Checking the machine…', exchanging: 'Exchanging InfiniChat keys…',
@@ -31,9 +35,9 @@ const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
  * reaches it, what the holder's server found of it, and this Mac's own check; adding and editing in a form below.
  */
 export function MachinesPane({ machines: api }: { machines: MachinesRef }) {
-  const listed = useMember(api.machines);
-  const self = useMember(api.self);
-  const holder = useMember(api.holder) ?? null;
+  const listed = useWatch(api.machines);
+  const self = useWatch(api.self);
+  const holder = useWatch(api.holder) ?? null;
   const [editing, setEditing] = useState<{ endpoint?: string }>();
   const [notice, setNotice] = useState<string>();
   const rows = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
@@ -78,17 +82,17 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
   onEdit: () => void;
   act: (work: Promise<unknown>, fallback: string) => void;
 }) {
-  const checks = useMember(api.checks);
-  const identities = useMember(api.identities);
-  const reaches = useMember(api.reach);
-  const pending = useMember(api.pendingHostKeys);
+  const checks = useWatch(api.checks);
+  const identities = useWatch(api.identities);
+  const reaches = useWatch(api.reach);
+  const pending = useWatch(api.pendingHostKeys);
   const check = checks?.[endpoint];
   const identity = identities?.[endpoint];
   const reach = reaches?.[endpoint];
   const waiting = pending?.[endpoint];
   const running = check?.state === 'checking';
-  const chooseIdentity = () => act(api.pickIdentityFile().then((path) => {
-    if (path !== null) return api.setIdentity({ endpoint, path });
+  const chooseIdentity = () => act(api.pickIdentityFile(BACKGROUND_CONTEXT).then((path) => {
+    if (path !== null) return api.setIdentity({ endpoint, path }, BACKGROUND_CONTEXT);
   }), 'The identity file could not be chosen.');
   return (
     <Item variant="outline" className="machine-item">
@@ -103,11 +107,14 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
       </ItemContent>
       <ItemActions className="row-actions">
         {running
-          ? <Button type="button" variant="outline" size="sm" onClick={() => act(api.cancelCheck({ endpoint }), '')}>
+          ? <Button type="button" variant="outline" size="sm"
+            onClick={() => act(api.cancelCheck({ endpoint }, BACKGROUND_CONTEXT), '')}>
             Cancel
           </Button>
           : <Button type="button" variant="outline" size="sm"
-            onClick={() => act(api.check({ endpoint }), 'The check could not start.')}>Check Connection</Button>}
+            onClick={() => act(api.check({ endpoint }, BACKGROUND_CONTEXT), 'The check could not start.')}>
+            Check Connection
+          </Button>}
         <Button type="button" variant="outline" size="sm" disabled={running} onClick={onEdit}>Edit…</Button>
         <AlertDialog>
           <AlertDialogTrigger render={<Button type="button" variant="outline" size="sm" className="button-danger"
@@ -124,7 +131,8 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction variant="destructive"
-                onClick={() => act(api.remove({ endpoint }), 'The machine could not be removed.')}>
+                onClick={() => act(api.remove({ endpoint }, BACKGROUND_CONTEXT),
+                  'The machine could not be removed.')}>
                 Remove
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -138,7 +146,8 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
           {identity === undefined ? 'Your SSH setup' : basename(identity)}
           <button type="button" className="link-button" onClick={chooseIdentity}>Choose identity file…</button>
           {identity !== undefined && <button type="button" className="link-button"
-            onClick={() => act(api.setIdentity({ endpoint, path: null }), 'The identity file could not be forgotten.')}>
+            onClick={() => act(api.setIdentity({ endpoint, path: null }, BACKGROUND_CONTEXT),
+              'The identity file could not be forgotten.')}>
             Use your SSH setup
           </button>}
         </dd>
@@ -157,7 +166,8 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
                     <code key={key.fingerprint}>{`${key.algorithm} ${key.fingerprint}`}</code>
                   ))}
                   <Button type="button" variant="link" size="xs" onClick={() => act(
-                    api.acceptHostKey({ endpoint, fingerprints: waiting.keys.map((key) => key.fingerprint) }),
+                    api.acceptHostKey({ endpoint, fingerprints: waiting.keys.map((key) => key.fingerprint) },
+                      BACKGROUND_CONTEXT),
                     'The host key could not be accepted.')}>
                     {waiting.changed ? 'Accept verified replacement key' : 'Accept verified key'}
                   </Button>
@@ -176,7 +186,8 @@ function MachineRow({ api, endpoint, machine, isSelf, isHolder, onEdit, act }: {
               {check.state === 'failed' && check.error}
               {check.state === 'failed' && check.pendingKey !== undefined && (
                 <Button type="button" variant="link" size="xs"
-                  onClick={() => act(api.trustNewKey({ endpoint }), 'The new key could not be trusted.')}>
+                  onClick={() => act(api.trustNewKey({ endpoint }, BACKGROUND_CONTEXT),
+                    'The new key could not be trusted.')}>
                   Trust new key
                 </Button>
               )}
@@ -208,9 +219,9 @@ function MachineForm({ api, initial, endpoint, onDone }: {
     setSaving(true);
     setError(undefined);
     const form = { hostname, port: Number(port), username, ...(endpoint === undefined ? {} : { previous: endpoint }) };
-    void api.save(form).then(() => {
+    void api.save(form, BACKGROUND_CONTEXT).then(() => {
       const saved = `${username.trim()}@${hostname.trim().toLowerCase()}:${Number(port)}`;
-      void api.check({ endpoint: saved }).catch(() => {});
+      void api.check({ endpoint: saved }, BACKGROUND_CONTEXT).catch(() => {});
       onDone();
     }, (cause: unknown) => {
       setError(errorText(cause, 'The machine could not be saved.'));

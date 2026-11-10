@@ -1,6 +1,7 @@
-import { hostNamed, method, remote } from '@earendil-works/chord';
+import { method, remote } from '@earendil-works/chord';
 import { arr, bool, nul, num, obj, oneOf, opt, str, union, type Static } from '@earendil-works/pi-schema';
 
+import { ServerHost } from './contract';
 import { signInAttemptFields } from './sign-in-attempt';
 
 /**
@@ -32,6 +33,25 @@ export type McpServerStatus = Static<typeof McpServerStatusSchema>;
 export const McpSignInAttemptSchema = union([nul(), obj({ ...signInAttemptFields, server: str() }, { open: true })]);
 export type McpSignInAttempt = Static<typeof McpSignInAttemptSchema>;
 
+/** `/mcp`'s members, declared once for the tools plugin's store object and the type clients hold (`contract.ts`). */
+export const InfiniChatMcpMembers = {
+  state: {
+    servers: arr(McpServerStatusSchema),
+    problems: arr(str()),
+    signInAttempt: McpSignInAttemptSchema,
+  },
+  methods: {
+    // Starts a sign-in to `server`, ending one under way, and returns its number.
+    signIn: method(obj({ server: str() }), num()),
+    answer: method(obj({ promptId: num(), value: str() })),
+    cancelSignIn: method(),
+    // Deletes the server's stored credentials and disconnects it.
+    signOut: method(obj({ server: str() })),
+    // Connects the server again, with the credentials stored now.
+    reconnect: method(obj({ server: str() })),
+  },
+};
+
 /**
  * The machine's MCP servers as clients show them, the object of the server's tools plugin (`tools-facet.ts`), which
  * holds their connections: the servers, what its configuration skipped and why, and its sign-in under way. A client
@@ -40,25 +60,7 @@ export type McpSignInAttempt = Static<typeof McpSignInAttemptSchema>;
  */
 export const InfiniChatMcp = remote('infinichat.mcp', {
   version: 1,
-  input: obj({}, { open: true }),
-  host: hostNamed('infinichat-server'),
-  variants: {
-    owner: {
-      state: {
-        servers: arr(McpServerStatusSchema),
-        problems: arr(str()),
-        signInAttempt: McpSignInAttemptSchema,
-      },
-      methods: {
-        // Starts a sign-in to `server`, ending one under way, and returns its number.
-        signIn: method(obj({ server: str() }, { open: true }), num()),
-        answer: method(obj({ promptId: num(), value: str() }, { open: true })),
-        cancelSignIn: method(),
-        // Deletes the server's stored credentials and disconnects it.
-        signOut: method(obj({ server: str() }, { open: true })),
-        // Connects the server again, with the credentials stored now.
-        reconnect: method(obj({ server: str() }, { open: true })),
-      },
-    },
-  },
+  params: {},
+  hostAddress: () => ServerHost(),
+  variants: { owner: InfiniChatMcpMembers },
 });

@@ -1,5 +1,5 @@
-import type { JsonValue } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import type { JsonValue } from '@earendil-works/chord/json';
 import { num, obj, type Static } from '@earendil-works/pi-schema';
 import type { Harness, TaskGraphWatch } from '@earendil-works/pi-durable';
 

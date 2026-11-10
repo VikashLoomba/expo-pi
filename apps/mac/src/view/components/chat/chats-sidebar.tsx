@@ -1,9 +1,10 @@
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { useWatch } from '@earendil-works/chord/react';
 import { KeyRoundIcon, MessageSquareIcon, PlusIcon } from 'lucide-react';
 import { useState } from 'react';
 
 import type { ChatSummaryRecord } from '../../../contract';
 import type { ChatsRef } from '../../hooks/use-chats';
-import { useMember } from '../../hooks/use-ref';
 import { providersPane, useOpenSettings } from '../../lib/app-context';
 import { Alert, AlertAction, AlertDescription } from '../ui/alert';
 import { Button } from '../ui/button';
@@ -50,8 +51,8 @@ export function ChatsGroup({ chats: api, selected, connected, notice, onDismissN
   onSelect: (id: string) => void; onCreate: () => void; onAction: (action: ChatAction) => void;
   onSettings: (id: string) => void;
 }) {
-  const chats = useMember(api.chats);
-  const error = useMember(api.report);
+  const chats = useWatch(api.chats);
+  const error = useWatch(api.report);
   const [search, setSearch] = useState('');
   const query = search.trim().toLocaleLowerCase();
   const visible = (chats ?? []).filter((chat) =>
@@ -74,7 +75,9 @@ export function ChatsGroup({ chats: api, selected, connected, notice, onDismissN
             <AlertDescription>{notice ?? error}</AlertDescription>
             <AlertAction>
               <Button type="button" variant="link" size="xs"
-                onClick={notice ? onDismissNotice : () => { void api.dismissError(); }}>Dismiss</Button>
+                onClick={notice ? onDismissNotice : () => { void api.dismissError(BACKGROUND_CONTEXT); }}>
+                Dismiss
+              </Button>
             </AlertAction>
           </Alert>
         )}

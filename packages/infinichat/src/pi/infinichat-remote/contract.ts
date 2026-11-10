@@ -1,4 +1,4 @@
-import { hostNamed, method, remote } from '@earendil-works/chord';
+import { hostKind, method, remote } from '@earendil-works/chord';
 import { stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
 import {
   arr, bool, nul, num, obj, opt, str, union, type Schema, type Static,
@@ -26,8 +26,14 @@ const readonlyArr = <T>(items: Schema<T>): Schema<readonly T[]> => arr(items);
 export type InfiniChatPrincipal = { kind: 'owner' } | { kind: 'host' };
 
 /**
+ * The machine's server, the one addressable host of its links (chord `docs/design.md` §3 "Host kinds and addresses"):
+ * every type clients hold lives there. A client has no address.
+ */
+export const ServerHost = hostKind('infinichat-server');
+
+/**
  * The view's snapshot and the Harness's latest report, until it is dismissed. Named `snapshot`: a reference itself
- * has `status`, which Chord reserves.
+ * has `state`, which Chord reserves (chord `docs/design.md` §5, "Reserved member names").
  */
 export const SnapshotSchema = obj({ view: ChatViewSnapshotSchema, report: opt(str()) }, { open: true });
 export const ControlsSchema = union([InfiniChatControlsSchema, nul()]);
@@ -44,15 +50,15 @@ export const ScheduledSchema = union([readonlyArr(ScheduledTaskSchema), nul()]);
 export const ServerSchema = obj({ version: str() }, { open: true });
 export type InfiniChatServer = Static<typeof ServerSchema>;
 
-const FileSchema = obj({ sha256: str(), size: num() }, { open: true });
+const FileSchema = obj({ sha256: str(), size: num() });
 /** The conversation's database file, its WAL folded into it, by SHA-256 and size. */
-export const ConversationFilesSchema = obj({ db: FileSchema }, { open: true });
+export const ConversationFilesSchema = obj({ db: FileSchema });
 export type ConversationFiles = Static<typeof ConversationFilesSchema>;
 /**
  * Who can hold the conversation: a phone, by the client ID it keeps and the name it gives itself, or a machine another
  * machine hands it to directly, by its endpoint (`machineEndpoint`) and its name.
  */
-export const ClientSchema = obj({ id: str(), name: str() }, { open: true });
+export const ClientSchema = obj({ id: str(), name: str() });
 export type InfiniChatClient = Static<typeof ClientSchema>;
 /**
  * Whether this machine holds the conversation open, and the files it adopted then. Only the side that holds it opens
@@ -65,7 +71,7 @@ export const ConversationSchema = obj({ active: bool(),
 export type ConversationState = Static<typeof ConversationSchema>;
 
 /** An SSH host key as Remote machines shows it: its algorithm and OpenSSH's `SHA256:` fingerprint. */
-const HostKeySchema = obj({ algorithm: str(), fingerprint: str() }, { open: true });
+const HostKeySchema = obj({ algorithm: str(), fingerprint: str() });
 /**
  * A machine of the conversation, which a server's tools reach with its own SSH (pi-env): the name the machine gives
  * itself, its endpoint, the host key a client accepted for it (trust on first use, decided once), its own InfiniChat
@@ -76,7 +82,7 @@ export const MachineSchema = obj({
   name: str(), hostname: str(), port: num(), username: str(),
   hostKey: opt(HostKeySchema), publicKey: opt(str()),
   authorizedKeys: opt(arr(str())),
-}, { open: true });
+});
 export type Machine = Static<typeof MachineSchema>;
 /** The conversation's machines document (`machines.ts`), by endpoint; null while the machine doesn't hold it. */
 export const MachinesSchema = union([
@@ -85,7 +91,7 @@ export const MachinesSchema = union([
 /** What a check or an accepted host key changes on a record. */
 export const MachinePatchSchema = obj({
   name: opt(str()), publicKey: opt(str()), authorizedKeys: opt(arr(str())), hostKey: opt(HostKeySchema),
-}, { open: true });
+});
 /** What the server knows a machine by, whichever client lists it: `username@hostname:port`. */
 export const machineEndpoint = ({ username, hostname, port }: { username: string; hostname: string; port: number }) =>
   `${username}@${hostname}:${port}`;
@@ -135,76 +141,80 @@ export const SignInAttemptSchema = union([nul(), obj({
 export type SignInAttempt = Static<typeof SignInAttemptSchema>;
 
 /**
+ * What the machine's InfiniChat offers, declared once: the server's store object holds these members for the host's
+ * life, and the type clients hold re-exposes them (chord `docs/design.md` §6, "shared store, per-principal views").
+ */
+export const InfiniChatMembers = {
+  state: {
+    snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
+    server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
+    // Not `signIn`, the method that starts one: a member name is state or a method, never both (design §5).
+    signInAttempt: SignInAttemptSchema,
+    machines: MachinesSchema, reach: ReachSchema, pendingHostKeys: PendingHostKeysSchema,
+  },
+  methods: {
+    accept: method(obj({ content: UserInputSchema, requestId: str() })),
+    stop: method(),
+    // Continues the run that ended without an answer (`controls.runFailure`): pi-durable's continue submission.
+    continue: method(),
+    // Loads the entries of the transcript's rows for what isn't loaded (`ChatMessage.history`) into `messages`,
+    // which every client reads.
+    loadEarlier: method(),
+    fillGap: method(obj({ after: num(), upTo: num() })),
+    updateSettings: method(obj({
+      main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema, instructions: str(),
+      name: str(), subagents: opt(union([ChatModelSettingsSchema, nul()])),
+    })),
+    cancelScheduled: method(obj({ id: num(), replacement: opt(ScheduledInputSchema) }),
+      bool()),
+    dismissError: method(),
+    // The phone's IANA zone, sent on every connect, so the times the agent reads match the phone's clock.
+    setTimeZone: method(obj({ zone: str() })),
+    // The user's `/reload-plugins`: reloads the tools plugin (code mode and MCP) and the user's plugins with
+    // Chord's hot reload, without restarting the server or conversation, and says what it did.
+    reloadPlugins: method(undefined, str()),
+    // The account screen's operations on the machine's credential store. `signIn` starts an attempt and returns
+    // its number; the attempt runs on the server, and its prompts are answered by separate calls.
+    signIn: method(obj({ providerId: str() }), num()),
+    answer: method(obj({ promptId: num(), value: str() })),
+    cancelSignIn: method(),
+    setApiKey: method(obj({ providerId: str(), key: str() })),
+    signOut: method(obj({ providerId: str() })),
+    // Fetches pi.dev's newer models for the machine's providers into `catalog` (`chat-providers.ts`); it rejects
+    // when a provider's fetch failed, and that provider keeps the models it had.
+    refreshCatalog: method(),
+    // Moving the conversation, as upstream's session sync hands a session over: one side closes its Harness, the
+    // files are copied, the other side opens them. `adopt` opens the files in `data/` when they match, and is
+    // refused while active; it clears `heldBy`. `relinquish` (Chord reserves `release`) records the phone it
+    // hands the conversation `to` as `heldBy`, stops input, closes the Harness and its storage, and names the files
+    // it left; called again with the same phone, it names them again, and with another it is refused, so one
+    // handover runs at a time. `archive` keeps the released database as the machine's copy, which nothing opens,
+    // and `heldBy` with it; it is refused while active.
+    adopt: method(ConversationFilesSchema),
+    relinquish: method(obj({ to: ClientSchema }), ConversationFilesSchema),
+    archive: method(),
+    // `pull` brings the database another machine (`from`, as the conversation there lists it, since this one has
+    // no conversation open to read it from) released into `data/`, read over this machine's own SSH, once it
+    // matches `files`; refused while active, as a phone's upload is. A move between two machines is relinquish
+    // there, pull and adopt here, then archive there, with a client orchestrating.
+    pull: method(obj({ from: MachineSchema, files: ConversationFilesSchema })),
+    // The conversation's machines document, edited through the side that holds it: a record whole, part of one
+    // (what a check found, an accepted host key), or its removal. `acceptHostKey` trusts the pending keys with
+    // these fingerprints here and records the key on the machine, so the next holder trusts it too.
+    putMachine: method(MachineSchema),
+    patchMachine: method(obj({ endpoint: str(), patch: MachinePatchSchema })),
+    removeMachine: method(obj({ endpoint: str() })),
+    acceptHostKey: method(obj({ endpoint: str(), fingerprints: arr(str()) })),
+  },
+};
+
+/**
  * InfiniChat as the machine that runs its Harness serves it: the same view, controls and transcript the phone shows,
  * and the operations of its screens.
  */
 export const InfiniChatRemote = remote('infinichat.remote', {
-  version: 6,
-  input: obj({}, { open: true }),
-  host: hostNamed('infinichat-server'),
-  variants: {
-    owner: {
-      state: {
-        snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
-        server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
-        // Not `signIn`, the method that starts one: Chord refuses a member that is both (`src/contract.ts:232`).
-        signInAttempt: SignInAttemptSchema,
-        machines: MachinesSchema, reach: ReachSchema, pendingHostKeys: PendingHostKeysSchema,
-      },
-      methods: {
-        accept: method(obj({ content: UserInputSchema, requestId: str() }, { open: true })),
-        stop: method(),
-        // Continues the run that ended without an answer (`controls.runFailure`): pi-durable's continue submission.
-        continue: method(),
-        // Loads the entries of the transcript's rows for what isn't loaded (`ChatMessage.history`) into `messages`,
-        // which every client reads.
-        loadEarlier: method(),
-        fillGap: method(obj({ after: num(), upTo: num() }, { open: true })),
-        updateSettings: method(obj({
-          main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema, instructions: str(),
-          name: str(), subagents: opt(union([ChatModelSettingsSchema, nul()])),
-        }, { open: true })),
-        cancelScheduled: method(obj({ id: num(), replacement: opt(ScheduledInputSchema) }, { open: true }),
-          bool()),
-        dismissError: method(),
-        // The phone's IANA zone, sent on every connect, so the times the agent reads match the phone's clock.
-        setTimeZone: method(obj({ zone: str() }, { open: true })),
-        // The user's `/reload-plugins`: reloads the tools plugin (code mode and MCP) and the user's plugins with
-        // Chord's hot reload, without restarting the server or conversation, and says what it did.
-        reloadPlugins: method(undefined, str()),
-        // The account screen's operations on the machine's credential store. `signIn` starts an attempt and returns
-        // its number; the attempt runs on the server, and its prompts are answered by separate calls.
-        signIn: method(obj({ providerId: str() }, { open: true }), num()),
-        answer: method(obj({ promptId: num(), value: str() }, { open: true })),
-        cancelSignIn: method(),
-        setApiKey: method(obj({ providerId: str(), key: str() }, { open: true })),
-        signOut: method(obj({ providerId: str() }, { open: true })),
-        // Fetches pi.dev's newer models for the machine's providers into `catalog` (`chat-providers.ts`); it rejects
-        // when a provider's fetch failed, and that provider keeps the models it had.
-        refreshCatalog: method(),
-        // Moving the conversation, as upstream's session sync hands a session over: one side closes its Harness, the
-        // files are copied, the other side opens them. `adopt` opens the files in `data/` when they match, and is
-        // refused while active; it clears `heldBy`. `relinquish` (Chord reserves `release`) records the phone it
-        // hands the conversation `to` as `heldBy`, stops input, closes the Harness and its storage, and names the files
-        // it left; called again with the same phone, it names them again, and with another it is refused, so one
-        // handover runs at a time. `archive` keeps the released database as the machine's copy, which nothing opens,
-        // and `heldBy` with it; it is refused while active.
-        adopt: method(ConversationFilesSchema),
-        relinquish: method(obj({ to: ClientSchema }, { open: true }), ConversationFilesSchema),
-        archive: method(),
-        // `pull` brings the database another machine (`from`, as the conversation there lists it, since this one has
-        // no conversation open to read it from) released into `data/`, read over this machine's own SSH, once it
-        // matches `files`; refused while active, as a phone's upload is. A move between two machines is relinquish
-        // there, pull and adopt here, then archive there, with a client orchestrating.
-        pull: method(obj({ from: MachineSchema, files: ConversationFilesSchema }, { open: true })),
-        // The conversation's machines document, edited through the side that holds it: a record whole, part of one
-        // (what a check found, an accepted host key), or its removal. `acceptHostKey` trusts the pending keys with
-        // these fingerprints here and records the key on the machine, so the next holder trusts it too.
-        putMachine: method(MachineSchema),
-        patchMachine: method(obj({ endpoint: str(), patch: MachinePatchSchema }, { open: true })),
-        removeMachine: method(obj({ endpoint: str() }, { open: true })),
-        acceptHostKey: method(obj({ endpoint: str(), fingerprints: arr(str()) }, { open: true })),
-      },
-    },
-  },
+  version: 7,
+  params: {},
+  hostAddress: () => ServerHost(),
+  variants: { owner: InfiniChatMembers },
 });

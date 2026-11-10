@@ -17,6 +17,7 @@
   "dependencies": {
     "@earendil-works/chord": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
+    "@earendil-works/pi-claude-code": "github:earendil-works/pi-claude-code#d5b5e04c314d3452d357174d16d10dda34daa2d2",
     "@earendil-works/pi-codemode": "catalog:",
     "@earendil-works/pi-durable": "catalog:",
     "@earendil-works/pi-env": "catalog:",

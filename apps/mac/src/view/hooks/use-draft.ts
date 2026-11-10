@@ -1,8 +1,9 @@
+import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
 import { uuidv7 } from '@earendil-works/pi-ai';
 import { useCallback, useRef, useState } from 'react';
 
 import type { Attachment } from '../../contract';
-import { errorText } from './use-ref';
+import { errorText } from '../lib/error-text';
 
 /** A draft keeps one request ID for every attempt to send it, so a resend after a failure is admitted once. */
 export type Draft = { text: string; images: readonly Attachment[]; requestId: string };
@@ -10,8 +11,8 @@ const emptyDraft = (): Draft => ({ text: '', images: [], requestId: uuidv7() });
 
 /** What fits photos to the shown model in the main process: `MacInfiniChat` and `MacChat` both do. */
 export interface PhotoSource {
-  pickPhotos(): Promise<Attachment[]>;
-  attach(input: { name: string; mimeType: string; data: string }): Promise<Attachment>;
+  pickPhotos(context: Context): Promise<Attachment[]>;
+  attach(input: { name: string; mimeType: string; data: string }, context: Context): Promise<Attachment>;
 }
 
 /** A file's bytes as base64, for the main process to fit. */
@@ -62,12 +63,15 @@ export function useDraft(photos: PhotoSource) {
       setAttaching(false);
     }
   }, []);
-  const attach = useCallback(() => { void attachWith(() => photos.pickPhotos()); }, [attachWith, photos]);
+  const attach = useCallback(() => {
+    void attachWith(() => photos.pickPhotos(BACKGROUND_CONTEXT));
+  }, [attachWith, photos]);
   const attachFiles = useCallback((files: readonly File[]) => {
     void attachWith(async () => {
       const fitted: Attachment[] = [];
       for (const file of files) {
-        fitted.push(await photos.attach({ name: file.name, mimeType: file.type, data: await base64Of(file) }));
+        const data = await base64Of(file);
+        fitted.push(await photos.attach({ name: file.name, mimeType: file.type, data }, BACKGROUND_CONTEXT));
       }
       return fitted;
     });
