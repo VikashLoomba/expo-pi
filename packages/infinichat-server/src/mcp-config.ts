@@ -247,6 +247,7 @@ export interface McpStdioEntry {
   readonly command: string;
   readonly args?: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
+  readonly toolExposure?: Readonly<Record<string, ConfiguredExposure>>;
 }
 
 /**

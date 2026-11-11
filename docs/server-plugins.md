@@ -163,8 +163,12 @@ when the account has no `~/.local/bin/cua-driver` and, on Linux, a desktop sessi
   `"enabled": false` stays so. A failed install is in the service's log, or in the reload's reply, and the next start or
   reload tries again.
 - The entry runs `~/.local/bin/cua-driver mcp`, the link Cua's updates keep (`cua-driver mcp-config` prints the folder
-  of one version). Its default exposure fits: the driver has 66 tools, which scripts find with `searchTools()`, and its
-  own instructions and `get_guide` tool tell the model how to use them.
+  of one version). The driver has 66 tools, which keep the default exposure and which scripts find with
+  `searchTools()`, except its guide: `"toolExposure": { "get_guide": "direct" }`. Code mode's prompt section leaves
+  out the tools of the default exposure, and a server with no tool declared there gets no heading, so without this
+  the model learns of a server only by searching. With it the section names `mcp__cua-driver` with Cua's own one-line
+  description and declares `get_guide`, about 240 tokens, and the guide tells of the rest. The section's 3,000-token
+  budget is shared with InfiniChat's own tools, which the driver's larger tools would crowd out.
 - On Linux the entry has `"env": { "DISPLAY": ":0" }`, with the display the desktop session gave the account's service
   manager (`systemctl --user show-environment`). The service starts with that manager, before a desktop session, so its
   own environment often has none, and the driver finds the display's key and the session bus itself but not the display

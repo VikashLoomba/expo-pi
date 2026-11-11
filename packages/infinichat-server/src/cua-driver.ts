@@ -28,6 +28,15 @@ const SWITCHES = {
   CUA_DRIVER_RS_TELEMETRY_ENABLED: 'false',
 };
 
+/**
+ * The one tool of the driver's 66 that code mode's prompt section declares. The section leaves out the tools of the
+ * default exposure, and a server none of whose tools it declares gets no heading there (durable
+ * `src/codemode/codemode.ts`, `describe.ts`), so the model would learn of the driver only by searching. With its
+ * guide declared, the section names the server with Cua's own one-line description, and the guide tells of the rest.
+ * The section's budget is shared with InfiniChat's own tools, which the driver's larger tools would crowd out.
+ */
+const LISTED = { get_guide: 'direct' } as const;
+
 /** The end of what a failed command wrote, where the installer says why. */
 function reason(error: unknown): string {
   const output = error instanceof Error && 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
@@ -93,7 +102,7 @@ export class CuaDriver {
     // The MCP client adds an entry's `env` to the server's own (pi-mcp `StdioTransport`), and the driver finds the
     // display's key and the session bus itself once it has the display (Cua `platform-linux/src/xauth.rs`).
     addMcpServer(this.config, NAME, { command: `~/${LINK}`, args: ['mcp'],
-      ...(display === undefined ? {} : { env: { DISPLAY: display } }) });
+      ...(display === undefined ? {} : { env: { DISPLAY: display } }), toolExposure: LISTED });
     return 'Cua Driver installed.';
   }
 }
