@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -223,29 +223,60 @@ export function toolExposure(config: McpServerConfig, tool: string): McpExposure
   return config.exposure;
 }
 
+/** `file` as written, undefined when there is none; one that can't be read or isn't a configuration throws why. */
+function readConfigFile(file: string) {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
+    throw new Error(`${MCP_CONFIG} could not be read: ${message(error)}.`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${MCP_CONFIG} is not valid JSON: ${message(error)}.`);
+  }
+  if (!isConfigFile(parsed)) throw new Error(`${MCP_CONFIG} needs an mcpServers object.`);
+  return parsed;
+}
+
+/** A stdio server as an entry of the configuration. */
+export interface McpStdioEntry {
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Adds `entry` to `file` as the server `name`, unless it has one of that name, which stays as its user wrote it; a
+ * missing file is made. Synchronous, and written aside and renamed into place, readable by this account alone as the
+ * server's other files are, so a crash never leaves half of it (`state.ts`). A file that isn't a configuration throws
+ * why and stays as it is.
+ */
+export function addMcpServer(file: string, name: string, entry: McpStdioEntry): void {
+  const config = readConfigFile(file) ?? {};
+  if (config.mcpServers !== undefined && name in config.mcpServers) return;
+  const temporary = `${file}.${process.pid}`;
+  writeFileSync(temporary, `${JSON.stringify({ ...config, mcpServers: { ...config.mcpServers, [name]: entry } },
+    null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, file);
+}
+
 /**
  * `file`, read synchronously, as the tools plugin's object applies it (`McpServers.apply`). A file that is
  * missing configures no server; one that can't be read or parsed configures none either, and says why, as does each
  * entry that is left out.
  */
 export function mcpConfiguration(file: string): McpConfiguration {
-  const none = (problem: string) => ({ servers: [], disabled: [], problems: [`${problem} No MCP server is connected.`] });
-  let text: string;
+  let parsed: ReturnType<typeof readConfigFile>;
   try {
-    text = readFileSync(file, 'utf8');
+    parsed = readConfigFile(file);
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return { servers: [], disabled: [], problems: [] };
-    }
-    return none(`${MCP_CONFIG} could not be read: ${message(error)}.`);
+    return { servers: [], disabled: [], problems: [`${message(error)} No MCP server is connected.`] };
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    return none(`${MCP_CONFIG} is not valid JSON: ${message(error)}.`);
-  }
-  if (!isConfigFile(parsed)) return none(`${MCP_CONFIG} needs an mcpServers object.`);
+  if (parsed === undefined) return { servers: [], disabled: [], problems: [] };
   const servers: McpServerConfig[] = [];
   const disabled: McpDisabledServer[] = [];
   const problems: string[] = [];

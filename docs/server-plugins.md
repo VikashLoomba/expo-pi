@@ -147,6 +147,37 @@ reload. A malformed or unreadable `mcp.json` is
 reported and configures no server, so every server closes and code mode stays; fix it and reload. Calls already
 running finish on their old connection, which closes once they settle.
 
+## Computer use: Cua Driver
+
+The agents see and operate a machine's desktop apps through Cua Driver (github.com/trycua/cua, read at commit
+`066c9d1`, driver 0.47.6), which Cua ships as one program that serves MCP over stdio (`cua-driver mcp`). The tools
+plugin's object has it installed (`src/cua-driver.ts`) at its start and before each `/reload-plugins` reads `mcp.json`,
+when the account has no `~/.local/bin/cua-driver` and, on Linux, a desktop session:
+
+- It runs Cua's install line (README "Cua Driver") with the installer's own switches `CUA_DRIVER_NO_CONNECT`,
+  `CUA_DRIVER_NO_TEST` and `CUA_DRIVER_NO_MODIFY_PATH`, so the account's Claude Code, Codex and Cursor, its shell
+  profile and its screen stay as they are, then turns Cua's telemetry off for good (`cua-driver telemetry disable`;
+  the installer sends no install event either).
+- After a successful install it adds the server `cua-driver` to `mcp.json`, unless the file has one of that name, and
+  applies the file. The entry is the user's from then on: the driver is installed, so an entry removed or set
+  `"enabled": false` stays so. A failed install is in the service's log, or in the reload's reply, and the next start or
+  reload tries again.
+- The entry runs `~/.local/bin/cua-driver mcp`, the link Cua's updates keep (`cua-driver mcp-config` prints the folder
+  of one version). Its default exposure fits: the driver has 66 tools, which scripts find with `searchTools()`, and its
+  own instructions and `get_guide` tool tell the model how to use them.
+- On Linux the entry has `"env": { "DISPLAY": ":0" }`, with the display the desktop session gave the account's service
+  manager (`systemctl --user show-environment`). The service starts with that manager, before a desktop session, so its
+  own environment often has none, and the driver finds the display's key and the session bus itself but not the display
+  (Cua `platform-linux/src/xauth.rs`, `session_bus.rs`). A machine without a session has nothing to drive and gets no
+  driver; one that logs in later gets it at the next start or reload. A display that changes is the user's to edit.
+- On macOS the driver's process hands over to Cua's app (`/Applications/CuaDriver.app`), which the system's
+  Accessibility and Screen Recording permissions belong to. The server does nothing about them: Cua asks.
+
+Cua's installer, updater (`cua-driver update --apply`) and uninstaller own the driver's files; the server never updates
+or removes it. The object's native ends an install under way when the host closes, and Cua's installer swaps a version
+into place atomically, so the next start installs again. The driver's process is the MCP connection's, as any stdio
+server's.
+
 ## Extensions
 
 `src/registry.ts` defines the Chord registry `infinichat.extensions`, whose composed value is Durable's registry

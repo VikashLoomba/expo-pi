@@ -41,7 +41,8 @@ export const InfiniChatTools = local('infinichat.tools', {
     ...InfiniChatMcpMembers.methods,
     /**
      * Reads the configuration again: connects the servers added, reconnects those whose connection changed, closes
-     * those removed, and connects each that is left but isn't connected. Says what it did.
+     * those removed, and connects each that is left but isn't connected. A machine without Cua Driver gets it first,
+     * with its entry (`cua-driver.ts`). Says what it did.
      */
     mcp: method(undefined, str()),
   },

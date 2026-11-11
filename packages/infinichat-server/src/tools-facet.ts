@@ -12,6 +12,7 @@ import {
 } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { MACHINE_WORK } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
+import { CuaDriver } from './cua-driver';
 import { mcpConfiguration } from './mcp-config';
 import { McpLog } from './mcp-log';
 import { McpServers } from './mcp-servers';
@@ -33,7 +34,8 @@ const ROOTS = [{ uri: pathToFileURL(WORK).href, name: 'work' }];
 interface McpView { servers: McpServerStatus[]; problems: string[]; signInAttempt: McpSignInAttempt }
 const NO_SERVERS: McpView = { servers: [], problems: [], signInAttempt: null };
 
-const report = (error: unknown) => console.error('InfiniChat:', error instanceof Error ? error.message : error);
+const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+const report = (error: unknown) => console.error('InfiniChat:', message(error));
 
 /**
  * Code mode and the MCP servers of `~/.infinichat/mcp.json`: the tools plugin the runtime ships, which the host loads
@@ -42,11 +44,13 @@ const report = (error: unknown) => console.error('InfiniChat:', error instanceof
  * configuration at the start and whenever `mcp` is called, as `/reload-plugins` does: this plugin's code changes only
  * with a release, and Chord's reload restarts only the objects of changed plugins (§21). Durable's phases borrow the
  * connections through the tools of their snapshots. A server's tools arrive after it connects and change when it says
- * so, so the object contributes a list it sets again at each change (§17, "contributions may be readables"). The type
- * clients hold, `/mcp`'s, re-exposes the object's members (§6, "shared store, per-principal views"). At shutdown the
- * host closes these natives before or with InfiniChat's, whose Harness then aborts what still runs: a script finds its
- * sandbox closed and waits for that abort (durable `src/codemode/codemode.ts`), and a server closes once its requests
- * settle (`McpServer.retire`). `version` is the release the servers are told is connecting, InfiniChat's plugin's.
+ * so, so the object contributes a list it sets again at each change (§17, "contributions may be readables"). At the
+ * start and before each later application, a machine without Cua Driver gets it, with its entry in the configuration
+ * (`CuaDriver`). The type clients hold, `/mcp`'s, re-exposes the object's members (§6, "shared store, per-principal
+ * views"). At shutdown the host closes these natives before or with InfiniChat's, whose Harness then aborts what still
+ * runs: a script finds its sandbox closed and waits for that abort (durable `src/codemode/codemode.ts`), and a server
+ * closes once its requests settle (`McpServer.retire`). `version` is the release the servers are told is connecting,
+ * InfiniChat's plugin's.
  */
 export default (version: string) => defineFacet<InfiniChatPrincipal>((host) => {
   host.serve(InfiniChatTools, (_params, self) => {
@@ -54,6 +58,7 @@ export default (version: string) => defineFacet<InfiniChatPrincipal>((host) => {
     // One backend for the file, so its writes run one at a time (`node/credentials.ts`).
     const servers = self.open(async () => new McpServers(fileCredentialBackend(join(HOME, 'mcp-auth.json')),
       new McpLog(join(HOME, 'mcp.log')), ROOTS, version), (opened) => opened.close());
+    const cua = self.open(async () => new CuaDriver(CONFIG), (opened) => opened.close());
     const extensions = self.writable<readonly Extension[]>([]);
     self.contribute(Extensions, extensions);
     const shown = self.writable(NO_SERVERS);
@@ -70,6 +75,12 @@ export default (version: string) => defineFacet<InfiniChatPrincipal>((host) => {
       // Each server connects as it is made; the summary matters to a reload only.
       void servers.value.apply(configuration).catch(report);
       publish();
+      // In the background, as the servers connect: an install takes a minute, and its entry connects after it.
+      void cua.value.ensure().then((installed) => {
+        if (installed === undefined) return undefined;
+        console.error('InfiniChat:', installed);
+        return servers.value.apply(mcpConfiguration(CONFIG));
+      }).catch(report);
       try {
         await untilAborted(ctx);
       } finally {
@@ -85,7 +96,12 @@ export default (version: string) => defineFacet<InfiniChatPrincipal>((host) => {
       cancelSignIn: async () => done(servers.value.cancelSignIn()),
       signOut: async ({ server }) => done(servers.value.signOut(server)),
       reconnect: async ({ server }) => done(servers.value.reconnect(server)),
-      mcp: async () => servers.value.apply(mcpConfiguration(CONFIG)),
+      mcp: async () => {
+        // First, so the configuration read below has the driver's entry; a failed install is part of the reply.
+        const driver = await cua.value.ensure().catch(message);
+        const applied = await servers.value.apply(mcpConfiguration(CONFIG));
+        return driver === undefined ? applied : `${driver}\n${applied}`;
+      },
     };
   });
 
