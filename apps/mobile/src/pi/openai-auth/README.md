@@ -45,7 +45,7 @@ The native receiver uses an Apple-only local Expo module with `@ExpoModule` and 
 ## A machine's sign-in
 
 While InfiniChat runs on a connected machine, that machine signs in with pi-ai's own Node ChatGPT flow and keeps the
-grant (`server/sign-in.ts`, `docs/server-harness-toggle/04-credentials-and-sign-in.md`). Its authorization URL uses
+grant (`packages/infinichat/src/pi/sign-in.ts`). Its authorization URL uses
 the same `http://127.0.0.1:1455/auth/callback` redirect, so the browser returns to this phone.
 
 - `openOpenAIBrowserFor(url, signal)` gives `openOpenAIBrowser` an Expo `AuthRequest` with that URL's `state`.

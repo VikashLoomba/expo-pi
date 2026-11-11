@@ -1,13 +1,22 @@
-# Pi Chat on Expo / iOS
+# InfiniChat
 
-An on-device chat app for iOS built with Pi's **durable `Harness`**, Expo SQLite, and Pi's provider registry. Connect OpenAI with ChatGPT or an API key, or use Anthropic, Google, OpenRouter, or xAI with an API key. Continue independent conversations across app restarts, each with its own provider, model, reasoning effort, and execution environment (a private on-device workspace, or a remote machine over SSH). A new chat continues with the most recently active chat's model and effort while that provider is connected; otherwise it uses the first connected provider's default entry in `src/pi/models.ts`.
+InfiniChat is an AI agent with one chat that never ends: Victor Taelin's
+[UniiChat](https://github.com/VictorTaelin/UniiChat) design (a memory tree of one-line summaries the agent zooms
+into) built on pi's durable `Harness`. One device holds the conversation, the iPhone itself or a machine running the
+server, and every app shows it live. Both apps also keep ordinary chats of their own, each with its own provider,
+model, reasoning effort and execution environment.
 
-The app uses published `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@earendil-works/pi-telemetry` and
-`@earendil-works/chord` **1.2.0**, reviewed against pi's
-[`v1.2.0`](https://github.com/earendil-works/pi/tree/v1.2.0) tag (`06a4669`). The temporary vendored tarballs and
-`pnpm.overrides` have been removed. The remote daemon ships from npm `@earendil-works/pi-env` **1.2.0**, with
-artifact integrity and binary hashes pinned by `scripts/sync-pi-daemon-assets.mjs`.
-[`babel-plugins/pi-compat.js`](apps/mobile/babel-plugins/pi-compat.js) makes Pi's published modules bundle and run on
+| Part | Where | What it is |
+| --- | --- | --- |
+| iPhone app | `apps/mobile` | Expo and React Native, iOS only. Holds InfiniChat itself or follows a machine. |
+| Mac app | `apps/mac` | Electrobun: a Bun main process and React DOM screens. A client of the Mac's own server. |
+| Shared code | `packages/infinichat` | The agent core, both apps' services and views, the clients of a server. |
+| Server | `packages/infinichat-server` | What a machine runs to hold InfiniChat; a Chord host with plugins and MCP. |
+| SSH library | `packages/react-native-ssh` | The phone's SSH engine (Rust, C FFI, Nitro module). |
+
+pi's packages (`pi-durable`, `pi-ai`, `chord`, `pi-env` and the rest) take one version from the `catalog` in
+`pnpm-workspace.yaml`. [`AGENTS.md`](AGENTS.md) holds the rules for working in this repository.
+[`babel-plugins/pi-compat.js`](apps/mobile/babel-plugins/pi-compat.js) makes pi's published modules bundle and run on
 Hermes, and `src/pi/random-values.ts` installs `crypto.getRandomValues` from expo-crypto at startup.
 
 ## Run
@@ -30,6 +39,16 @@ Use a development build for the app's OAuth integration. Rebuild an existing dev
 5. Rename or delete conversations from their chat options. Delete stops the chat's work, marks it deleted, and removes its workspace directories.
 
 Existing chats remain readable without a provider connection. Starting a chat, sending, or resuming model work requires credentials for a provider. Pi's `openai` OAuth provider has no device-code route in the installed `pi-ai`.
+
+### The Mac app and the server
+
+Run the Mac app from `apps/mac` with `hutch run dev` (Hutch drives Electrobun); [`docs/mac-app`](docs/mac-app/README.md)
+has its design and release steps. The apps set the server up on a machine that has none, and it updates itself from
+its `server/v<version>` GitHub releases; `pnpm release` in `packages/infinichat-server` cuts one. See
+[server plugins, MCP and release](docs/server-plugins.md).
+
+The sections below describe the iPhone app's ordinary chats; their paths are relative to `apps/mobile`.
+
 
 ## Per-chat model settings
 
@@ -114,26 +133,22 @@ npx expo export --platform ios --source-maps --clear
 
 ## Main files
 
-- `src/app/index.tsx`: saved chat list, search, creation, and chat actions.
-- `src/app/chat/[id].tsx`: conversation transcript, composer, photo attachments, follow-up queueing, tool output, and cancellation.
-- `src/chat/photo-attachments.ts`: photos from the camera or library, fitted to the model's image limits; `src/pi/user-input.ts` builds and reads pi-ai user content; `src/pi/images.ts` is the image processor `read` runs with, on `expo-image-manipulator`; `src/components/chat/message-images.tsx` renders saved images.
-- `src/app/chat-settings/[id].tsx`: staged per-chat provider, model, reasoning, and execution settings.
-- `src/app/remote-hosts.tsx`: remote machine settings, connection tests, and host-key verification.
-- `src/app/account.tsx`: provider API keys, ChatGPT sign-in, browser actions, connection retry, and disconnecting accounts.
-- `src/chat/chat-provider.tsx`: shared Models instance, account state, the service lifecycle (open, reopen after a storage failure), and the hooks that subscribe a screen to a chat.
-- `src/components/chat/transcript.tsx` and `src/hooks/use-transcript-scroll.ts`: transcript-only subscriptions and UI-thread following that yields to the reader.
-- `src/components/chat/markdown/`: incremental Markdown parsing (`parse-markdown.ts`), streaming suffix repair (`streaming-source.ts`, `streaming-parser.ts`), and stable rendered blocks.
-- `src/components/chat/web-search.tsx` and `web-search-presentation.ts`: search activity and the ordered source list.
-- `src/pi/chat-service.ts`: durable Harness, the chat list from `app.chat` documents (`chat-metadata.ts`), sending and settings.
-- `src/pi/chat-view.ts`: `ChatView`, one chat's conversation view and document subscriptions while it is shown.
-- `src/pi/chat-projection.ts`: pure mapping from a chat's committed state to rows, controls and list summaries.
-- `src/pi/native-web-search/`: the provider decorator, stream-event decoders, the generation-signal binding and durable bridge, the observation entry, the presentation document, and the presentation projection.
-- `src/pi/model-catalog.ts`: SDK-derived provider/model choices, effort capabilities, and selection validation.
-- `src/pi/models.ts`, `provider-credentials.ts` and `secure-storage.ts`: mobile provider registration and provider-scoped SecureStore persistence.
-- `src/pi/storage/`: custom Expo `SqliteDatabase` adapter and portable `SqliteStorage` factory.
-- `src/pi/workspace/`: each chat's workspace directory (`device-storage.ts`), the execution environment over it (`execution-env.ts`), and the shell's view of it (`files.ts`).
-- `src/pi/execution/remote/`: the pi-env daemon client over react-native-ssh — connection, provisioning, the remote execution environment, host settings and admission.
-- `src/pi/openai-auth/`: modern OpenAI `OAuthAuth` adapter, installation identity, issued-client token exchange, callback/browser coordination, and same-attempt manual fallback.
-- `modules/pi-oauth-callback/`: Swift-only Expo Modules 2.0 loopback receiver using Apple Network; local module autolinking keeps native code outside generated projects.
-- `babel-plugins/pi-compat.js`: the two Babel edits Pi needs on Hermes — variable-specifier `import()` calls become rejected promises, and chord's indexed descriptor lookup uses a string key.
-- `src/pi/random-values.ts`: installs `crypto.getRandomValues` from expo-crypto at startup, which Hermes lacks and Pi's id generation needs.
+- `packages/infinichat/src/pi/infinichat/`: the agent core. The memory tree and its views (`memory.ts`), the summary
+  builds (`summary.ts`), the turn coordinator (`app.ts`), subagents (`agents.ts`), scheduled tasks (`schedule.ts`),
+  the memory and device tools (`tools.ts`, `device-tools.ts`) and the prompt (`prompt.ts`).
+- `packages/infinichat/src/pi/infinichat-service.ts` and `infinichat-view.ts`: what a screen sends to and reads from
+  the conversation. `pi/infinichat-remote/`: the client of a machine's server, its install, and moving the
+  conversation between devices.
+- `packages/infinichat/src/pi/chat-service.ts`, `chat-view.ts` and `chat-projection.ts`: ordinary chats.
+  `pi/native-web-search/`: OpenAI's hosted web search as a provider decorator. `node/`: the Node side for the server
+  and the Mac app.
+- `packages/infinichat-server/src/`: `main.ts` and `conversation.ts` (holding the conversation), `facet.ts` (what
+  clients call), `plugins.ts` and `mcp-*.ts` (plugins, code mode and MCP), `update.ts` (self-update).
+- `apps/mobile/src/app/`: the routes. `(tabs)/(infinichat)/` is the InfiniChat tab, `(tabs)/chats/` the ordinary
+  chats, with `infinichat-settings/`, `infinichat-schedule/`, `remote-hosts/` and `account.tsx` beside them.
+- `apps/mobile/src/chat/chat-provider.tsx`: the shared Models instance, account state and the services' lifecycle.
+- `apps/mobile/src/pi/`: `storage/` (the Expo `SqliteDatabase` adapter), `workspace/` (the on-device execution
+  environment), `execution/remote/` (the pi-env daemon client over SSH), `openai-auth/` (the OpenAI sign-in adapter).
+- `apps/mobile/src/keep-alive/`: keeps on-device work running while the phone is locked.
+- `apps/mobile/modules/pi-oauth-callback/`: the Swift loopback receiver for sign-in callbacks.
+- `apps/mac/src/main/`: the Mac's main process. `src/view/`: its screens. `src/contract.ts`: what the two exchange.
