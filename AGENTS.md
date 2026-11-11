@@ -18,9 +18,8 @@ Install with `pnpm install` from the root; run Expo, EAS and `@expo/agent-cli` c
 `@expo/agent-cli` writes its AGENTS.md block and skill links relative to the Expo project, but agents read this
 AGENTS.md at the root, so keep it the only one and its block up to date here.
 
-InfiniChat, the OptChat-on-pi-durable tab, has its implementation guide at `docs/infinichat/README.md`. The guide's
-TypeScript, tests and examples are reference material with their own `package.json`. It is outside the workspace's
-apps and packages, so Metro, the typecheck and lint never reach it.
+The tests of InfiniChat's agent core (`packages/infinichat/src/pi/infinichat`) are in `packages/infinichat/test`. Run
+them with `bun test test` from `packages/infinichat`.
 
 ## Expo has changed — do not trust your training data
 

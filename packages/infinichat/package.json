@@ -5,7 +5,8 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "bun test test"
   },
   "peerDependencies": {
     "@earendil-works/chord": "catalog:",

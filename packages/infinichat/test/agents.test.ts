@@ -23,27 +23,27 @@ import {
   section,
   type Extension,
 } from '@earendil-works/pi-durable';
-import { memoryTools } from '../src/tools.mjs';
+
 import {
   AGENT_TASK,
   AgentAnchor,
   AgentCallDoc,
   AgentDirectoryDoc,
-  AgentReportDoc,
   PrivateAgentDoc,
   agentTask,
   agentTools,
   agentWork,
   takeAgentReports,
-} from '../src/agents.mjs';
-import { MemoryDoc, appendMessage } from '../src/memory.mjs';
-import { BuildNode, ConfigDoc, pumpBuilds } from '../src/summary.mjs';
-import { subagentPrompt } from '../src/prompt.mjs';
+} from '../src/pi/infinichat/agents';
+import { MemoryDoc, appendMessage } from '../src/pi/infinichat/memory';
+import { subagentPrompt } from '../src/pi/infinichat/prompt';
+import { BuildNode, ConfigDoc, pumpBuilds } from '../src/pi/infinichat/summary';
+import { memoryTools } from '../src/pi/infinichat/tools';
 
 /** The agent task as the app sets it up: its conversation goes without the master and starts with the devices open. */
 const AgentTask = agentTask({
   master: () => master,
-  prompt: subagentPrompt('OptChat', true),
+  prompt: async () => subagentPrompt('OptChat', true),
   turnState: async () => 'Devices open now:\n- mac',
 });
 /** The master's prompt and the agent tools as their own extension, which a subagent's conversation goes without. */
@@ -146,13 +146,9 @@ async function agentHarness(route: FauxResponseStep, work: () => Promise<void> =
       () => harness.commit((tx) => agentWork(tx, root.id), context),
       (work) => work.length === 0,
     );
-  const pendingReports = async () => {
-    const keys = (await harness.snapshot(AgentDirectoryDoc, root.id, context))?.pendingReports ?? [];
-    const found = [];
-    for (const key of keys) found.push(await harness.snapshot(AgentReportDoc, root.id, key, context));
-    return found;
-  };
-  return { faux, storage, harness, root, reports, say, names, agent, calls, settled, pendingReports };
+  /** The reports waiting for admission, taken as OptChat's coordinator takes them: each is returned once. */
+  const takeReports = () => harness.commit((tx) => takeAgentReports(tx, root.id), context);
+  return { faux, storage, harness, root, reports, say, names, agent, calls, settled, takeReports };
 }
 
 test('spawn names agents, which start from the view, the devices and their log, and report in full', async () => {
@@ -221,16 +217,14 @@ test('spawn names agents, which start from the view, the devices and their log, 
     const native = await (await f.harness.conversation(agent.conversationId, context))?.context(context);
     assert.ok(JSON.stringify(native).includes('retained-signature'));
     // Each report is the whole reply, trimmed, under the agent's name and the zoom that opens its chat.
-    const reports = await f.pendingReports();
+    const reports = await f.takeReports();
     assert.equal(reports.length, 2);
-    const full = reports.find((report) => report?.text.startsWith(`[${investigator}]`));
+    const full = reports.find((report) => report.text.startsWith(`[${investigator}]`));
     assert.equal(full?.text, `[${investigator}]\n${fullText.trim()}\n\nFull chat: zoom("${investigator}")`);
     assert.equal(full?.stopped, false);
     assert.ok(!full?.text.includes('private reasoning'));
-    assert.ok(reports.some((report) => report?.text === `[${counter}]\nMany.\n\nFull chat: zoom("${counter}")`));
-    const taken = await f.harness.commit((tx) => takeAgentReports(tx, f.root.id), context);
-    assert.equal(taken.length, 2);
-    assert.deepEqual(await f.harness.commit((tx) => takeAgentReports(tx, f.root.id), context), []);
+    assert.ok(reports.some((report) => report.text === `[${counter}]\nMany.\n\nFull chat: zoom("${counter}")`));
+    assert.deepEqual(await f.takeReports(), []);
     assert.deepEqual(f.reports, []);
   } finally {
     await f.harness.close(context);
@@ -300,9 +294,9 @@ test('tell steers an agent at work through its call, whose one report answers bo
     assert.deepEqual(roles, ['user', 'assistant', 'toolResult', 'user']);
     assert.deepEqual(lastUserTexts(last), ['STEER: check B too']);
     // One call, as UniiChat's agent runs one: both messages end in its one answer, reported once.
-    const reports = await f.pendingReports();
+    const reports = await f.takeReports();
     assert.deepEqual(
-      reports.map((report) => report?.text),
+      reports.map((report) => report.text),
       [`[${name}]\nFINAL ANSWER\n\nFull chat: zoom("${name}")`],
     );
     assert.equal((await f.calls()).length, 1);
@@ -322,7 +316,7 @@ test('tell steers an agent at work through its call, whose one report answers bo
         'tool: work {}',
         'echo: worked',
         'user: STEER: check B too',
-        'unii: FINAL ANSWER',
+        'infinichat: FINAL ANSWER',
       ]
         .map((line, i) => `${i}|${line}`)
         .join('\n\n')}`,
@@ -367,11 +361,11 @@ test('tell sends an idle agent its log anew, in a context started over with the 
     assert.deepEqual(lastUserTexts(second), [
       '<chat>\n</chat>',
       '\nDevices open now:\n- mac\n\n',
-      '0|note: subagent\n\n1|user: First task\n\n2|unii: FIRST REPORT\n\n3|user: Second task',
+      '0|note: subagent\n\n1|user: First task\n\n2|infinichat: FIRST REPORT\n\n3|user: Second task',
     ]);
-    const reports = await f.pendingReports();
+    const reports = await f.takeReports();
     assert.deepEqual(
-      reports.map((report) => report?.text),
+      reports.map((report) => report.text),
       [
         `[${name}]\nFIRST REPORT\n\nFull chat: zoom("${name}")`,
         `[${name}]\nSECOND REPORT\n\nFull chat: zoom("${name}")`,
@@ -389,7 +383,8 @@ test('tell sends an idle agent its log anew, in a context started over with the 
   }
 });
 
-test('a call that ended without clearing its place leaves the agent idle: a tell calls it, with what it was told', async () => {
+test('a call that ended without clearing its place leaves the agent idle: a tell calls it, with what it was '
+  + 'told', async () => {
   let name = '';
   const requests: ModelContext[] = [];
   const route: FauxResponseStep = (request) => {
@@ -422,7 +417,7 @@ test('a call that ended without clearing its place leaves the agent idle: a tell
     assert.ok(second);
     assert.equal(
       lastUserTexts(second).at(-1),
-      '0|note: subagent\n\n1|user: First task\n\n2|unii: FIRST\n\n3|user: Lost before\n\n4|user: Second task',
+      '0|note: subagent\n\n1|user: First task\n\n2|infinichat: FIRST\n\n3|user: Lost before\n\n4|user: Second task',
     );
     const after = await f.agent(name);
     assert.equal(after.calling, null);
@@ -487,7 +482,7 @@ test('a message told before the call reaches the agent joins its log, in the one
     assert.ok(!entries.items.some((entry) => entry.kind === 'pi.reset'));
     assert.equal((await f.calls()).length, 1);
     assert.deepEqual(
-      (await f.pendingReports()).map((report) => report?.text),
+      (await f.takeReports()).map((report) => report.text),
       [`[${name}]\nBOTH DONE\n\nFull chat: zoom("${name}")`],
     );
     assert.deepEqual(f.reports, []);
@@ -536,7 +531,7 @@ test('a call whose run fails reports the failure, and what it was told meanwhile
     release();
     await f.settled();
     assert.deepEqual(
-      (await f.pendingReports()).map((report) => report?.text),
+      (await f.takeReports()).map((report) => report.text),
       [`[${name}]\nfailed: 400 bad request\n\nFull chat: zoom("${name}")`],
     );
     assert.equal(subagentCalls.length, 1);
@@ -652,12 +647,6 @@ test('earlier agent tasks and documents migrate as pi-durable reads them', () =>
     effort: null,
     calling: 4,
     waiting: [],
-  });
-  assert.deepEqual(AgentReportDoc.definition.migrate?.({ text: '[Old] done', requestId: 'r', consumed: true }, 1), {
-    text: '[Old] done',
-    requestId: 'r',
-    consumed: true,
-    stopped: false,
   });
   assert.deepEqual(AgentCallDoc.definition.migrate?.({ taskId: 4, name: 'Old' }, 1), {
     result: 'Started Old. Its report will arrive automatically.',
