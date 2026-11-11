@@ -24,6 +24,8 @@ export type PhoneInfiniChat = { service: InfiniChatService; close(): Promise<voi
 export async function openPhoneInfiniChat(options: {
   storage: Storage; models: Models; workspaces: Workspaces; remote: RemoteExecution;
   authError?: (providerId: string) => string | undefined;
+  /** Follows the credential store, so a conversation without models chooses them once a provider is connected. */
+  accountChanges?: (listener: () => void) => () => void;
   onClosed?: (end: SessionEnd) => void;
   /** Counts InfiniChat's live work while it is open; its owner closes it. */
   keepAlive?: KeepAliveController;
@@ -46,6 +48,7 @@ export async function openPhoneInfiniChat(options: {
     parts,
     registry,
     authError: options.authError,
+    accountChanges: options.accountChanges,
     env: deviceTools.env,
     onClosed: options.onClosed,
   });

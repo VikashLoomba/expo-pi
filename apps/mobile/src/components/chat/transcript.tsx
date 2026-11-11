@@ -119,8 +119,8 @@ export const ChatTranscript = memo(function ChatTranscript({
   const renderTurn = ({ item }: { item: Turn }) =>
     <TurnItem turn={item} open={opened.open.includes(item.id)} onToggle={() => toggle(item.id)} stopping={stopping}
       onSteerQueued={onSteerQueued} onLoadHistory={loadHistory} />;
-  const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
-    : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
+  const working = stopping ? 'Stopping…' : controls?.waiting ?? (controls?.compacting
+    ? 'Summarizing earlier messages…' : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`);
   const { listRef, onEndVisible, scrollToLatest, showScrollDown } = useTranscriptScroll();
   const composerHeight = useSharedValue(0);
   const { bottom } = useSafeAreaInsets();

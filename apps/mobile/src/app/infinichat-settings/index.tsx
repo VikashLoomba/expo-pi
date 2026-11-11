@@ -1,7 +1,11 @@
 import {
-  Button, Form, Host, HStack, RNHostView, Section, Text, TextField, Toggle, useNativeState,
+  Button, Form, Host, HStack, RNHostView, Section, Spacer, Text, TextField, Toggle, useNativeState, VStack,
 } from '@expo/ui/swift-ui';
-import { disabled as disable, lineLimit } from '@expo/ui/swift-ui/modifiers';
+import { disabled as disable, font, foregroundStyle, lineLimit } from '@expo/ui/swift-ui/modifiers';
+import {
+  USAGE_NOTE, usageCost, usageDetail, usageTitle, usageTotal,
+} from '@pi-agent/infinichat/chat/usage-presentation';
+import type { InfiniChatUsage } from '@pi-agent/infinichat/pi/infinichat/usage';
 import { getModelSettingsError, type ChatModelSettings } from '@pi-agent/infinichat/pi/model-catalog';
 import { router, Stack } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -29,6 +33,7 @@ const roleCaptions: Record<InfiniChatRole, string> = {
 /** How UniiChat's prompt.txt describes the user's own instructions, which follow the prompt. */
 const INSTRUCTIONS_PLACEHOLDER = 'Who you are, how your files are organized and how you want work done.';
 const DEFAULT_NAME = 'InfiniChat';
+const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 
 const sameSettings = (left: ChatModelSettings, right: ChatModelSettings) => left.model.provider === right.model.provider
   && left.model.modelId === right.model.modelId && left.thinkingLevel === right.thinkingLevel;
@@ -59,6 +64,15 @@ export default function InfiniChatSettingsScreen() {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+  // What the conversation has spent, read once as the settings open; a read that fails shows no section.
+  const [usage, setUsage] = useState<InfiniChatUsage>();
+  useEffect(() => {
+    let shown = true;
+    service.usage().then((rows) => {
+      if (shown) setUsage(rows);
+    }, () => {});
+    return () => { shown = false; };
+  }, [service]);
   const blocked = !conversation;
   const disabled = blocked || saving || refreshing;
   const settingsChanged = !sameSettings(draft.main, initial.main) || !sameSettings(draft.summary, initial.summary)
@@ -209,6 +223,21 @@ export default function InfiniChatSettingsScreen() {
             onTextChange={(text) => setDraft((current) => ({ ...current, instructions: text }))}
             modifiers={[lineLimit({ min: 4, max: 12 }), disable(disabled)]} />
         </Section>
+        {usage !== undefined && usage.length > 0 && <Section title="Usage" footer={<Text>{USAGE_NOTE}</Text>}>
+          {usage.map((row) => <HStack key={`${row.memory}-${row.model}`} spacing={12}>
+            <VStack alignment="leading" spacing={2}>
+              <Text>{usageTitle(row)}</Text>
+              <Text modifiers={[font({ textStyle: 'footnote' }), secondary]}>{usageDetail(row)}</Text>
+            </VStack>
+            <Spacer />
+            <Text modifiers={[secondary]}>{usageCost(row.cost)}</Text>
+          </HStack>)}
+          <HStack>
+            <Text>Total</Text>
+            <Spacer />
+            <Text>{usageCost(usageTotal(usage))}</Text>
+          </HStack>
+        </Section>}
         <Section footer={<Text>Changing models keeps InfiniChat’s memory and history.</Text>}>
           <Button label={refreshing ? 'Refreshing models…' : 'Refresh models'} systemImage="arrow.clockwise"
             modifiers={[disable(blocked || saving || refreshing)]} onPress={() => { void refresh(); }} />

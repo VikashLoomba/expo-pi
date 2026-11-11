@@ -9,6 +9,7 @@ import { ChatViewSnapshotSchema } from '../chat-view';
 import { ScheduledTaskSchema } from '../infinichat-scheduled';
 import { InfiniChatControlsSchema } from '../infinichat-view';
 import { ScheduledInputSchema } from '../infinichat/schedule';
+import { InfiniChatUsageSchema } from '../infinichat/usage';
 import { ChatModelSettingsSchema, ModelCatalogSchema } from '../model-catalog';
 import { ProviderAccessSchema } from '../provider-credentials';
 import { UserInputSchema } from '../user-input';
@@ -168,6 +169,8 @@ export const InfiniChatMembers = {
     cancelScheduled: method(obj({ id: num(), replacement: opt(ScheduledInputSchema) }),
       bool()),
     dismissError: method(),
+    // What the conversation has spent, by model, and what writing its memory has; read when a screen asks.
+    usage: method(undefined, InfiniChatUsageSchema),
     // The phone's IANA zone, sent on every connect, so the times the agent reads match the phone's clock.
     setTimeZone: method(obj({ zone: str() })),
     // The user's `/reload-plugins`: reloads the tools plugin (code mode and MCP) and the user's plugins with
@@ -191,6 +194,9 @@ export const InfiniChatMembers = {
     // handover runs at a time. `archive` keeps the released database as the machine's copy, which nothing opens,
     // and `heldBy` with it; it is refused while active.
     adopt: method(ConversationFilesSchema),
+    // Starts a conversation of this machine's own, for a person whose InfiniChat is on no device yet; refused while
+    // this machine holds one, has handed one to a phone, or keeps a database a move left.
+    create: method(),
     relinquish: method(obj({ to: ClientSchema }), ConversationFilesSchema),
     archive: method(),
     // `pull` brings the database another machine (`from`, as the conversation there lists it, since this one has
@@ -213,7 +219,7 @@ export const InfiniChatMembers = {
  * and the operations of its screens.
  */
 export const InfiniChatRemote = remote('infinichat.remote', {
-  version: 7,
+  version: 8,
   params: {},
   hostAddress: () => ServerHost(),
   variants: { owner: InfiniChatMembers },

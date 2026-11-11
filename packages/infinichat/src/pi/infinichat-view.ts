@@ -13,6 +13,7 @@ import { projectControls, projectMessages, queuedRow, readConversationView, type
 import { WatchedView } from './chat-view';
 import { AGENT_TASK } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, turnOpen, type Admission, type AppState } from './infinichat/app';
+import { MemoryDoc, type MemoryState } from './infinichat/memory';
 import { ConfigDoc, type OptChatConfig } from './infinichat/summary';
 import { ChatModelSettingsSchema } from './model-catalog';
 import { SearchPresentationsDoc, type SearchPresentationsState } from './native-web-search/durable';
@@ -81,9 +82,22 @@ function shownInbox(inbox: InboxState | undefined, originals: ReadonlyMap<string
   }) };
 }
 
+/**
+ * What a message waits for while no run has it: its turn starts once every earlier message has its line in memory
+ * (`memoryReady`), which the summary model writes or, while it fails, doesn't.
+ */
+function waitingOnMemory(memory: MemoryState | undefined): string | undefined {
+  if (memory === undefined || memory.frontier >= memory.nextMessage) return undefined;
+  if (memory.stalled !== null) return `Memory can’t be written: ${memory.stalled.slice(0, 200)}`;
+  const left = memory.pendingLeaves.length;
+  return `Writing memory · ${left} ${left === 1 ? 'line' : 'lines'} left`;
+}
+
 type InfiniChatWatches = {
   metadata: DocumentWatch<ChatMetadata> | undefined;
   app: DocumentWatch<AppState> | undefined;
+  /** OptChat's memory, for what an accepted input waits on. */
+  memory: DocumentWatch<MemoryState> | undefined;
   config: DocumentWatch<OptChatConfig> | undefined;
   /** OpenAI's hosted searches by response, as `ChatView` reads them. */
   search: DocumentWatch<SearchPresentationsState> | undefined;
@@ -107,18 +121,19 @@ export class InfiniChatView extends WatchedView<InfiniChatControls, InfiniChatWa
   }
 
   protected async attach(): Promise<InfiniChatWatches> {
-    const [metadata, app, config, search, tasks] = await Promise.all([
+    const [metadata, app, memory, config, search, tasks] = await Promise.all([
       this.harness.watchDoc(ChatMetadataDoc, this.id, context),
       this.harness.watchDoc(AppDoc, this.id, context),
+      this.harness.watchDoc(MemoryDoc, this.id, context),
       this.harness.watchDoc(ConfigDoc, this.id, context),
       this.harness.watchDoc(SearchPresentationsDoc, this.id, context),
       this.harness.watchTaskGraph(context),
     ]);
-    return { metadata, app, config, search, tasks };
+    return { metadata, app, memory, config, search, tasks };
   }
 
-  protected handles({ metadata, app, config, search, tasks }: InfiniChatWatches) {
-    return [metadata, app, config, search, tasks];
+  protected handles({ metadata, app, memory, config, search, tasks }: InfiniChatWatches) {
+    return [metadata, app, memory, config, search, tasks];
   }
 
   protected present({ metadata }: InfiniChatWatches) {
@@ -172,8 +187,11 @@ export class InfiniChatView extends WatchedView<InfiniChatControls, InfiniChatWa
     const config = watches.config?.value;
     const summary = config?.summary ?? null;
     const app = watches.app?.value;
+    const unsent = pending.some((requestId) => !delivered.has(requestId));
+    const waiting = !controls.busy && unsent ? waitingOnMemory(watches.memory?.value) : undefined;
     this.controls = {
       ...controls,
+      ...(waiting === undefined ? {} : { waiting }),
       // An accepted input waits for its turn's summaries or the coordinator before pi-durable runs it, the coordinator
       // closes a turn after its run (logging what it left), and agents work in the background; a stop cancels them,
       // so the conversation is working, and a run that ended is continued only once its turn is closed.

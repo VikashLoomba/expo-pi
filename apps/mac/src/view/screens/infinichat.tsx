@@ -102,6 +102,7 @@ function InfiniChat() {
   const [stopping, setStopping] = useState(false);
   /** What the last command the composer ran said, until dismissed. */
   const [commandResult, setCommandResult] = useState<{ text: string; failed: boolean }>();
+  const [starting, setStarting] = useState(false);
   const name = controls?.name || TITLE;
   const agent = useMemo(() => ({ name, avatar }), [name, avatar]);
   const busy = !!controls?.busy;
@@ -113,6 +114,8 @@ function InfiniChat() {
   const settingsError = controls && configured && catalog ? getModelSettingsError(catalog, controls.settings)
     : undefined;
   const connected = !configured || access.connected;
+  // InfiniChat chooses its models itself once a provider is connected, so without models there is usually none.
+  const anyConnected = Object.values(accesses ?? {}).some((each) => each.connected);
   const providerLabel = catalog?.find((entry) => entry.id === providerId)?.name || providerId || 'your provider';
   const showProviders = providersSheet.show;
   const openProviders = useCallback((provider?: string) => {
@@ -196,7 +199,16 @@ function InfiniChat() {
   // The server holds the conversation open only while it is here; its cell says where it went otherwise.
   const away = place.at !== 'elsewhere' ? undefined
     : place.holder ? `InfiniChat is on ${place.holder.name}.`
-      : `InfiniChat isn’t on ${machineName} yet. Move it here from your iPhone.`;
+      : `InfiniChat isn’t on ${machineName} yet. Start it here, or move it here from your iPhone.`;
+  // A machine that holds no conversation and knows of none elsewhere can start one of its own.
+  const startable = place.at === 'elsewhere' && !place.holder && connection?.status === 'connected';
+  const start = () => {
+    setStarting(true);
+    setLocalError(undefined);
+    void ref.start(BACKGROUND_CONTEXT).catch((cause: unknown) => {
+      setLocalError(errorText(cause, 'InfiniChat could not be started here. Try again.'));
+    }).finally(() => setStarting(false));
+  };
   const machines = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
   const failure = !busy && offers.available ? controls?.runFailure : undefined;
   return (
@@ -250,11 +262,22 @@ function InfiniChat() {
             </DropdownMenu>
           </div>
         </header>
-        {away ? <Placeholder>{away}</Placeholder> : <Transcript stopping={stopping} onChoose={choosePrompt} />}
+        {!away ? <Transcript stopping={stopping} onChoose={choosePrompt} />
+          : !startable ? <Placeholder>{away}</Placeholder> : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3">
+              <p className="m-0 text-[15px] text-muted-foreground">{away}</p>
+              <Button type="button" variant="outline" disabled={starting} onClick={start}>
+                Start InfiniChat Here
+              </Button>
+            </div>
+          )}
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-6 pb-6">
-        {controls && !configured && (
-          <Notice tone="neutral" message={MODELS_REQUIRED} action="Settings" onAction={settingsSheet.show} />
-        )}
+        {controls && !configured && (anyConnected
+          ? <Notice tone="neutral" message={MODELS_REQUIRED} action="Settings" onAction={settingsSheet.show} />
+          : (
+            <Notice tone="neutral" message={`Sign in to a provider on ${machineName} to start InfiniChat.`}
+              action="Providers" onAction={() => openProviders()} />
+          ))}
         {settingsError !== undefined && (
           <Notice message={settingsError} action="Settings" onAction={settingsSheet.show} />
         )}

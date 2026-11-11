@@ -8,6 +8,7 @@ import type { ScheduledTask } from '../infinichat-scheduled';
 import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
 import type { InfiniChatControls } from '../infinichat-view';
 import type { ScheduledInput } from '../infinichat/schedule';
+import type { InfiniChatUsage } from '../infinichat/usage';
 import type { ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
 import {
@@ -301,6 +302,15 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean> {
     return this.call((ref, ctx) => ref.cancelScheduled(replacement === undefined ? { id } : { id, replacement }, ctx));
+  }
+
+  usage(): Promise<InfiniChatUsage> {
+    return this.call((ref, ctx) => ref.usage(ctx));
+  }
+
+  /** Starts a conversation on this machine, which holds none (`ServerConversation.create`). */
+  create(): Promise<void> {
+    return this.act((ref, ctx) => ref.create(ctx));
   }
 
   reloadPlugins(): Promise<string> {

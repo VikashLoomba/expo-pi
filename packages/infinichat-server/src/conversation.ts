@@ -113,6 +113,28 @@ export class ServerConversation {
   }
 
   /**
+   * Starts a conversation of this machine's own, for a person whose InfiniChat is on no device yet: its database is
+   * created in `data/` and held from then on. Refused while this machine holds one, while the one it held has gone to
+   * a phone (`heldBy`), and while `data/` holds a database, which a move left: two conversations never merge, so a
+   * second one is never started beside the first.
+   */
+  create(): Promise<void> {
+    return this.run(async () => {
+      if (this.state.active) throw new Error('InfiniChat is already open on this machine.');
+      if (this.state.heldBy !== undefined) throw new Error(`InfiniChat is on ${this.state.heldBy.name}.`);
+      if (await this.files()) throw new Error('This machine already keeps an InfiniChat conversation.');
+      await mkdir(this.data, { recursive: true, mode: 0o700 });
+      this.setState({ active: true });
+      try {
+        await this.open();
+      } catch (error) {
+        this.setState({ active: false });
+        throw error;
+      }
+    });
+  }
+
+  /**
    * Hands the conversation to phone `to`: keeps it as `heldBy`, stops input at once, closes the core (its Harness waits
    * for running task code and writes the tasks it stopped back as pending) and its storage, folds its WAL, and names
    * the database it left in `data/`. Called again for the same phone, it names it again; for another, it is refused,

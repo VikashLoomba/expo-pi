@@ -105,6 +105,11 @@ export class MacInfiniChat {
     return this.connected().signIn(providerId);
   }
 
+  /** Starts a conversation on the machine shown, which holds none and knows of none elsewhere. */
+  start(): Promise<void> {
+    return this.connected().create();
+  }
+
   answer(promptId: number, value: string): Promise<void> {
     return this.connected().answer(promptId, value);
   }

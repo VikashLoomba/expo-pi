@@ -9,6 +9,7 @@ import {
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { McpServerStatusSchema, McpSignInAttemptSchema } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { ScheduledInputSchema } from '@pi-agent/infinichat/pi/infinichat/schedule';
+import { InfiniChatUsageSchema } from '@pi-agent/infinichat/pi/infinichat/usage';
 import { ChatModelSettingsSchema, ModelCatalogSchema } from '@pi-agent/infinichat/pi/model-catalog';
 import { ChatImageProperties, UserInputSchema } from '@pi-agent/infinichat/pi/user-input';
 
@@ -128,6 +129,10 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
           subagents: union([ChatModelSettingsSchema, nul()]) })),
         cancelScheduled: method(obj({ id: num(), replacement: opt(ScheduledInputSchema) }),
           bool()),
+        // What the conversation has spent, for the settings sheet, read when it opens.
+        usage: method(undefined, InfiniChatUsageSchema),
+        // Starts a conversation on the machine shown when no device holds one (`ServerConversation.create`).
+        start: method(),
         setAvatar: method(undefined, union([nul(), str()])),
         clearAvatar: method(),
         // The providers sheet's operations on the holder machine's credential store, forwarded to its object.

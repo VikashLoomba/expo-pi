@@ -9,8 +9,9 @@ import {
 
 import {
   MemoryDoc, bytes, end, first, flat, key, publishNode, readMessage, readNode, renderCompaction, retagged, shownMessage,
-  type NodeRef,
+  stallBuilds, type NodeRef,
 } from './memory';
+import { recordMemoryUsage } from './usage';
 
 /** A model and effort the host selected. */
 export type ModelSelection = { model: ModelRef; thinkingLevel: ModelThinkingLevel };
@@ -287,9 +288,14 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
       const until = r.now() + retryDelayMs(retry, retries + 1);
       await r.commit(async (tx) => {
         const d = await tx.doc(BuildScratchDoc, task.id);
+        // Every attempt's spend, a failed one's too, as pi-durable's compaction counts its own.
+        if (answer !== undefined) {
+          await recordMemoryUsage(tx, r.conversationId, `${answer.provider}/${answer.model}`, answer.usage);
+        }
         const text = answer ? replyText(answer) : '';
         if (answer !== undefined && !isRetryableAssistantError(answer) && unanswerable(answer, text)) {
           // The model's own failure, as a refusal: the best line a try wrote, else the source cut to the limit.
+          await stallBuilds(tx, r.conversationId, null);
           d.shortest ??= prefixUtf8(flat(d.source), 512);
           return { status: 'running', checkpoint: { phase: 'publish' } };
         }
@@ -297,13 +303,15 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
           // Any other failure only delays a summary, as UniiChat's patient calls ask again till one is answered: an
           // outage or a missing credential, past pi-durable's bounded policy, at pi-ai's backoff, which caps at a
           // minute. With the Harness's retries off, it is tried again at the next message.
+          const message = failure ?? answer?.errorMessage ?? 'Summary model returned no reply';
+          await stallBuilds(tx, r.conversationId, message);
           if (retry.enabled) {
             return { status: 'sleeping', checkpoint: { phase: 'retry', attempt, retries: retries + 1, until }, until };
           }
           await release(tx, r.conversationId, task.input.ref, task.id);
-          const message = failure ?? answer?.errorMessage ?? 'Summary model returned no reply';
           return { status: 'terminal', outcome: { status: 'failed', error: { message } } };
         }
+        await stallBuilds(tx, r.conversationId, null);
         if (d.shortest === null || bytes(text) < bytes(d.shortest)) d.shortest = text;
         const done = bytes(text) <= 512 || attempt + 1 >= 5;
         if (!done) d.last = text;

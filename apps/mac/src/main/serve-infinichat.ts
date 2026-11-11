@@ -91,6 +91,8 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         attach: async ({ mimeType, data }) => infinichat.attach(Buffer.from(data, 'base64'), mimeType),
         updateSettings: async (settings) => done(shown.updateSettings(settings)),
         cancelScheduled: async ({ id, replacement }) => shown.cancelScheduled(id, replacement),
+        usage: async () => [...await shown.usage()],
+        start: async () => done(infinichat.start()),
         setAvatar: async () => avatar.choose(),
         clearAvatar: async () => done(avatar.clear()),
         signIn: async ({ providerId }) => infinichat.signIn(providerId),

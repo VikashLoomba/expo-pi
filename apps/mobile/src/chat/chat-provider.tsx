@@ -125,6 +125,7 @@ function useChatRuntime() {
       if (state.phone || unmounted) return;
       const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
         storage, models, workspaces, remote, keepAlive, notifications, authError,
+        accountChanges: credentials.subscribe,
         onClosed: (end) => {
           if (end.kind !== 'failed') return;
           serialize(async () => {

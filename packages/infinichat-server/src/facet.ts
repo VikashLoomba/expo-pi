@@ -136,6 +136,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       const registry = registryReader(extensions, context);
       const held = new ServerConversation(home, (storage) => InfiniChatService.open({
         storage, models: account.value.models, parts, registry, machine: device, env: devices.env,
+        accountChanges: account.value.credentials.subscribe,
         onClosed: (end) => {
           if (end.kind === 'failed') proc.fail(end.error);
         },
@@ -187,6 +188,9 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
     const readClaudeCode = async () => {
       claudeCode = await claudeCodeAccess(account.value.models);
       publishAccount();
+      // Its login is no change of the credential store, so the conversation hears of it here.
+      const open = conversation.value.current;
+      if (claudeCode.connected) void open?.chooseDefaults().catch((error: unknown) => open.report(error));
     };
     self.onLive(async (ctx) => {
       const publishView = () => view.set(viewNow());
@@ -230,6 +234,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       cancelScheduled: async ({ id, replacement }, ctx) =>
         core().cancelScheduled(id, replacement, callContext(ctx)),
       dismissError: async () => done(core().dismissError()),
+      // Chord's JSON arrays are mutable types.
+      usage: async () => [...await core().usage()],
       setTimeZone: async ({ zone }) => done(setTimeZone(home, zone)),
       reloadPlugins: () => proc.reloadPlugins(),
       signIn: async ({ providerId }) => signIn.value.signIn(providerId),
@@ -253,6 +259,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       },
       // The move goes on when the caller goes away: a dropped link never leaves it half done.
       adopt: async (files) => done(conversation.value.adopt(files)),
+      create: async () => done(conversation.value.create()),
       relinquish: ({ to }) => conversation.value.relinquish(to),
       archive: async () => done(conversation.value.archive()),
       pull: async ({ from, files }, ctx) =>
@@ -288,6 +295,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
         signInAttempt: machine.signInAttempt, reach: machine.reach, pendingHostKeys: machine.pendingHostKeys,
         accept: machine.accept, stop: machine.stop, continue: machine.continue, loadEarlier: machine.loadEarlier,
         fillGap: machine.fillGap, updateSettings: machine.updateSettings, cancelScheduled: machine.cancelScheduled,
+        usage: machine.usage, create: machine.create,
         dismissError: machine.dismissError, setTimeZone: machine.setTimeZone, reloadPlugins: machine.reloadPlugins,
         signIn: machine.signIn, answer: machine.answer, cancelSignIn: machine.cancelSignIn,
         setApiKey: machine.setApiKey, signOut: machine.signOut, refreshCatalog: machine.refreshCatalog,

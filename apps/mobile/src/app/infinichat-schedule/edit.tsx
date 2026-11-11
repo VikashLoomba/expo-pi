@@ -1,7 +1,11 @@
-import { Button, DatePicker, Form, Host, Section, Text, TextField, useNativeState } from '@expo/ui/swift-ui';
-import { disabled as disable, lineLimit } from '@expo/ui/swift-ui/modifiers';
+import {
+  Button, DatePicker, Form, Host, Picker, Section, Text, TextField, useNativeState,
+} from '@expo/ui/swift-ui';
+import { disabled as disable, lineLimit, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
-import type { ScheduledInput } from '@pi-agent/infinichat/pi/infinichat/schedule';
+import {
+  ONCE, REPEAT_CHOICES, repeatKey, repeatLabel, type ScheduledInput,
+} from '@pi-agent/infinichat/pi/infinichat/schedule';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
@@ -31,10 +35,15 @@ function TaskForm({ task }: { task: ScheduledTask }) {
   const colors = useChatColors();
   const { infiniChat } = useChatApp();
   const text = useNativeState(task.task);
-  const [draft, setDraft] = useState<ScheduledInput>({ task: task.task, until: task.until });
+  const [draft, setDraft] = useState<ScheduledInput>({ task: task.task, until: task.until,
+    ...(task.repeat === undefined ? {} : { repeat: task.repeat }) });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const changed = draft.task.trim() !== task.task || draft.until !== task.until;
+  // The repeats offered, and the task's own when InfiniChat set another.
+  const repeats = task.repeat === undefined || REPEAT_CHOICES.some((each) => repeatKey(each) === repeatKey(task.repeat))
+    ? REPEAT_CHOICES : [...REPEAT_CHOICES, task.repeat];
+  const changed = draft.task.trim() !== task.task || draft.until !== task.until
+    || repeatKey(draft.repeat) !== repeatKey(task.repeat);
   const canSave = !busy && changed && !!draft.task.trim();
   /** Deletes the task, or replaces it with `replacement`; either fails once the task has reached InfiniChat. */
   const finish = async (replacement?: ScheduledInput) => {
@@ -59,7 +68,7 @@ function TaskForm({ task }: { task: ScheduledTask }) {
       {busy ? <Stack.Toolbar.View><ActivityIndicator /></Stack.Toolbar.View>
         : <Stack.Toolbar.Button icon="checkmark" variant="prominent" tintColor={colors.accent}
           accessibilityLabel="Save task" disabled={!canSave}
-          onPress={() => { void finish({ task: draft.task.trim(), until: draft.until }); }} />}
+          onPress={() => { void finish({ ...draft, task: draft.task.trim() }); }} />}
     </Stack.Toolbar>
     <Host style={styles.fill} seedColor={colors.accent} testID="scheduled-task-form">
       <Form>
@@ -73,6 +82,16 @@ function TaskForm({ task }: { task: ScheduledTask }) {
           <DatePicker title="Runs at" selection={new Date(draft.until)} range={{ start: new Date() }}
             displayedComponents={['date', 'hourAndMinute']} modifiers={[disable(busy)]}
             onDateChange={(date) => setDraft((current) => ({ ...current, until: date.getTime() }))} />
+          <Picker<string> label="Repeat" selection={repeatKey(draft.repeat)}
+            modifiers={[pickerStyle('menu'), disable(busy)]}
+            onSelectionChange={(chosen) => setDraft(({ repeat: _before, ...current }) => {
+              const repeat = repeats.find((each) => repeatKey(each) === chosen);
+              return repeat === undefined ? current : { ...current, repeat };
+            })}>
+            <Text modifiers={[tag(ONCE)]}>Never</Text>
+            {repeats.map((each) =>
+              <Text key={repeatKey(each)} modifiers={[tag(repeatKey(each))]}>{repeatLabel(each)}</Text>)}
+          </Picker>
         </Section>
         <Section>
           <Button label="Delete task" systemImage="trash" role="destructive" modifiers={[disable(busy)]}

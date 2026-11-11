@@ -811,6 +811,9 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       steeringMode: 'all',
       followUpMode: 'all',
       compaction: { enabled: false },
+      // The view changes only at its end between turns, so its cache entries are kept for the longest a provider
+      // offers: pi-ai maps this to an hour on Anthropic and a day on OpenAI.
+      stream: { cacheRetention: 'long' },
       // An input queued behind a failed run starts a fresh turn, as UniiChat's next call takes it, never the failed
       // turn's context.
       afterFailedRun: 'withdraw',

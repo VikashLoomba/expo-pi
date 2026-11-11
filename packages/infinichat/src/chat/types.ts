@@ -76,6 +76,8 @@ export const ChatControlsProperties = {
   compacting: bool(),
   /** A request failed and is waiting to be tried again. */
   retrying: bool(),
+  /** What an accepted message waits for before its turn starts, when that is not the model; the screens say it. */
+  waiting: opt(str()),
   error: opt(str()),
   /**
    * Why the last run ended without an answer, pi-durable's `pi.live.runFailure`, until a later run starts: its reason

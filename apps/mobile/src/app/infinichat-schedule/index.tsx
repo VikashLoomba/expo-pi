@@ -3,6 +3,7 @@ import {
 } from '@expo/ui/swift-ui';
 import { font, foregroundStyle, lineLimit, listStyle } from '@expo/ui/swift-ui/modifiers';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
+import { repeatLabel } from '@pi-agent/infinichat/pi/infinichat/schedule';
 import { router, Stack } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { PlatformColor, StyleSheet } from 'react-native';
@@ -47,7 +48,9 @@ export default function ScheduledTasksScreen() {
     onPress={() => router.push({ pathname: '/infinichat-schedule/edit', params: { id: String(item.id) } })}>
     <HStack spacing={12}>
       <VStack alignment="leading" spacing={2}>
-        <Text modifiers={[buttonLabel]}>{runTime(item.until)}</Text>
+        <Text modifiers={[buttonLabel]}>
+          {item.repeat ? `${runTime(item.until)} · ${repeatLabel(item.repeat)}` : runTime(item.until)}
+        </Text>
         <Text modifiers={[font({ textStyle: 'footnote' }), buttonDetail, lineLimit(2)]}>{item.task}</Text>
       </VStack>
       <Spacer />

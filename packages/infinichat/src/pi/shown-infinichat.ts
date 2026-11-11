@@ -9,6 +9,7 @@ import type { Machine } from './infinichat-remote/contract';
 import type { MachinePatch, MachinesState } from './infinichat-remote/machines';
 import type { InfiniChatControls } from './infinichat-view';
 import type { ScheduledInput } from './infinichat/schedule';
+import type { InfiniChatUsage } from './infinichat/usage';
 
 const noop = () => {};
 const LOADING: ChatViewSnapshot = { status: 'loading' };
@@ -105,6 +106,10 @@ export class ShownInfiniChat implements InfiniChatHost {
 
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean> {
     return this.current().cancelScheduled(id, replacement);
+  }
+
+  usage(): Promise<InfiniChatUsage> {
+    return this.current().usage();
   }
 
   reloadPlugins(): Promise<string> {

@@ -244,8 +244,10 @@ export default function InfiniChatScreen() {
   const accountStatus = !access.ready ? 'Restoring your connection…'
     : access.error ? `Reconnect ${provider?.name || providerId}${remote ? onMachine : ' in Account'}`
       : `Connect ${provider?.name || providerId || 'your provider'}${onMachine} to send a message`;
-  // With no model chosen there is no provider to connect; the models notice says what to do instead.
+  // With no model chosen there is no provider to connect; the notice below says what to do instead.
   const connected = !configured || access.connected;
+  // InfiniChat chooses its models itself once a provider is connected, so without models there is usually none.
+  const anyConnected = catalog.some((entry) => providerAccess(entry.id).connected);
   return <View testID="infinichat-screen" style={[styles.screen, { backgroundColor: colors.background }]}>
     <Stack.Screen options={{ title: agentName,
       headerTitle: () => <Pressable testID="open-infinichat-settings" accessibilityRole="button"
@@ -301,8 +303,12 @@ export default function InfiniChatScreen() {
     <ChatAgentContext value={agent}><ChatTranscript view={view} ready stopping={stopping} onChoose={choosePrompt}
       composer={<>
       {conversation && !configured && <View style={styles.banner}>
-        <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
-          action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
+        {anyConnected
+          ? <InlineNotice testID="infinichat-models-required" tone="neutral" message={MODELS_REQUIRED}
+            action={settingsDisabled ? undefined : 'Settings'} onAction={openSettings} />
+          : <InlineNotice testID="infinichat-provider-required" tone="neutral"
+            message={`Connect a provider${onMachine} to start InfiniChat.`}
+            action={accountAction} onAction={openAccount} />}
       </View>}
       {settingsError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-settings-error" message={settingsError}

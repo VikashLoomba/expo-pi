@@ -1,8 +1,11 @@
+import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { InfiniChatHost } from '@pi-agent/infinichat/pi/infinichat-service';
 import * as Notifications from 'expo-notifications';
 
 const IDENTIFIER_PREFIX = 'infinichat-task-';
-const identifierOf = (id: number) => `${IDENTIFIER_PREFIX}${id}`;
+/** One identifier for each time a task comes: a repeating task's next time is a notification of its own. */
+const identifierOf = ({ id, until, repeat }: ScheduledTask) =>
+  repeat === undefined ? `${IDENTIFIER_PREFIX}${id}` : `${IDENTIFIER_PREFIX}${id}-${until}`;
 
 const OPEN = { identifier: 'open', buttonTitle: 'Open', options: { opensAppToForeground: true } };
 /**
@@ -75,11 +78,11 @@ export class ScheduledTaskNotifications {
     try {
       const held = (await Notifications.getAllScheduledNotificationsAsync())
         .filter((request) => request.identifier.startsWith(IDENTIFIER_PREFIX));
-      const wanted = new Set(pending.map((item) => identifierOf(item.id)));
+      const wanted = new Set(pending.map((item) => identifierOf(item)));
       for (const request of held) {
         if (!wanted.has(request.identifier)) await Notifications.cancelScheduledNotificationAsync(request.identifier);
       }
-      const missing = pending.filter((item) => !held.some((request) => request.identifier === identifierOf(item.id)
+      const missing = pending.filter((item) => !held.some((request) => request.identifier === identifierOf(item)
         && request.content.categoryIdentifier === category.identifier));
       if (missing.length === 0 || !(await this.permitted())) return;
       await (this.categories[source.runsOn] ??= Notifications.setNotificationCategoryAsync(category.identifier,
@@ -91,7 +94,7 @@ export class ScheduledTaskNotifications {
       for (const item of missing) {
         try {
           await Notifications.scheduleNotificationAsync({
-            identifier: identifierOf(item.id),
+            identifier: identifierOf(item),
             content: { title: 'InfiniChat', body: item.task, categoryIdentifier: category.identifier },
             trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: item.until },
           });

@@ -72,7 +72,7 @@ export const NodeDoc = defineDocFamily<{ value: BuiltNode | null }, BuiltNode | 
   initial: (value) => ({ value }),
 });
 type View = { refs: NodeRef[]; reducing: boolean };
-type MemoryState = {
+export type MemoryState = {
   nextMessage: number;
   frontier: number;
   viewThrough: number;
@@ -84,18 +84,22 @@ type MemoryState = {
   failed: Record<string, { ref: NodeRef; at: number }>;
   main: View;
   compact: View;
+  /** Why no summary is being written, the summary model's last failure, until it answers again. */
+  stalled: string | null;
 };
+type MemoryStateV2 = Omit<MemoryState, 'stalled'>;
 export const MemoryDoc = defineDoc<MemoryState>({
   kind: 'optchat.memory',
-  version: 2,
+  version: 3,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   checkpointWhen: () => true,
-  // Version 1 took leaves and parents in turn; builds now start in the order the messages came.
+  // Version 1 took leaves and parents in turn; builds now start in the order the messages came. Versions 1 and 2
+  // kept no reason for a summary that waits.
   migrate: (value) => {
-    const { nextQueue: _turn, ...memory } = value as MemoryState & { nextQueue: 'leaf' | 'parent' };
-    return memory;
+    const { nextQueue: _turn, ...memory } = value as MemoryStateV2 & { nextQueue?: 'leaf' | 'parent' };
+    return { ...memory, stalled: null };
   },
   initial: () => ({
     nextMessage: 0,
@@ -109,6 +113,7 @@ export const MemoryDoc = defineDoc<MemoryState>({
     failed: {},
     main: { refs: [], reducing: false },
     compact: { refs: [], reducing: false },
+    stalled: null,
   }),
 });
 
@@ -137,6 +142,17 @@ export function clipToolText(text: string): string {
 export async function advanceMessageProgress(tx: Tx, root: ConversationId): Promise<void> {
   const s = await tx.doc(MemoryDoc, root);
   s.messageProgress++;
+  s.revision++;
+}
+
+/**
+ * The summary model failed (`why`) or answered again (`null`). A turn starts only once the earlier messages have their
+ * lines, as UniiChat's `settle` waits, and tells why they won't be written rather than leave a message waiting.
+ */
+export async function stallBuilds(tx: Tx, root: ConversationId, why: string | null): Promise<void> {
+  const s = await tx.doc(MemoryDoc, root);
+  if (s.stalled === why) return;
+  s.stalled = why;
   s.revision++;
 }
 

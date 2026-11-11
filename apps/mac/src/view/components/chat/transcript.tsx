@@ -150,8 +150,8 @@ export const Transcript = memo(function Transcript({ stopping, onChoose }: {
   const controls = useWatch(ref.controls);
   const status = snapshot?.status ?? 'loading';
   const busy = !!controls?.busy;
-  const working = stopping ? 'Stopping…' : controls?.compacting ? 'Summarizing earlier messages…'
-    : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`;
+  const working = stopping ? 'Stopping…' : controls?.waiting ?? (controls?.compacting
+    ? 'Summarizing earlier messages…' : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`);
   const showWorking = !!controls?.compacting
     || (busy && !messages.some((message) => message.streaming || message.tool?.status === 'running'));
   const turns = useMemo(() => turnsOf(messages), [messages]);

@@ -1,7 +1,9 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { useWatch } from '@earendil-works/chord/react';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
-import type { ScheduledInput } from '@pi-agent/infinichat/pi/infinichat/schedule';
+import {
+  ONCE, REPEAT_CHOICES, repeatKey, repeatLabel, type ScheduledInput,
+} from '@pi-agent/infinichat/pi/infinichat/schedule';
 import { ClockIcon } from 'lucide-react';
 import { useState } from 'react';
 
@@ -13,12 +15,13 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '..
 import { Field, FieldGroup, FieldLabel } from '../ui/field';
 import { Input } from '../ui/input';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '../ui/item';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { FormSheet } from './form-sheet';
 
 /**
- * The task as the list showed it, its unsaved text and time, and when editing began, the earliest time the input
- * offers: saving replaces the task with one of another ID.
+ * The task as the list showed it, its unsaved text, time and repeat, and when editing began, the earliest time the
+ * input offers: saving replaces the task with one of another ID.
  */
 type Editing = { task: ScheduledTask; draft: ScheduledInput; since: number };
 
@@ -31,6 +34,13 @@ function localInput(time: number): string {
 }
 const runTime = (until: number) =>
   new Date(until).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+/** The task as a draft starts from it. */
+const draftOf = ({ task, until, repeat }: ScheduledTask): ScheduledInput =>
+  repeat === undefined ? { task, until } : { task, until, repeat };
+/** The repeats offered for `task`, with its own when InfiniChat set another. */
+const repeatsOf = ({ repeat }: ScheduledTask) =>
+  repeat === undefined || REPEAT_CHOICES.some((each) => repeatKey(each) === repeatKey(repeat))
+    ? REPEAT_CHOICES : [...REPEAT_CHOICES, repeat];
 
 /**
  * The tasks InfiniChat scheduled for later, soonest first, as the phone's `infinichat-schedule` sheet: Edit opens a
@@ -61,7 +71,8 @@ export function ScheduledSheet({ open, onClose }: { open: boolean; onClose: () =
     }).finally(() => setBusy(false));
   };
   const dirty = editing !== undefined
-    && (editing.draft.task.trim() !== editing.task.task || editing.draft.until !== editing.task.until);
+    && (editing.draft.task.trim() !== editing.task.task || editing.draft.until !== editing.task.until
+      || repeatKey(editing.draft.repeat) !== repeatKey(editing.task.repeat));
   const canSave = editing !== undefined && dirty && !!editing.draft.task.trim();
   return (
     <FormSheet open={open} onClose={editing ? () => setEditing(undefined) : onClose} dirty={dirty}
@@ -70,7 +81,7 @@ export function ScheduledSheet({ open, onClose }: { open: boolean; onClose: () =
         : 'Each task reaches InfiniChat as a message at its time. A notification shows then while InfiniChat is '
           + 'open on this Mac.'}
       save={editing ? { label: 'Save', disabled: !canSave, busy, onSave: () => {
-        finish(editing.task, { task: editing.draft.task.trim(), until: editing.draft.until });
+        finish(editing.task, { ...editing.draft, task: editing.draft.task.trim() });
       } } : undefined}
       leading={editing ? (
         <Button type="button" variant="outline" className="text-destructive" disabled={busy}
@@ -95,6 +106,25 @@ export function ScheduledSheet({ open, onClose }: { open: boolean; onClose: () =
                 if (!Number.isNaN(until)) setEditing({ ...editing, draft: { ...editing.draft, until } });
               }} />
           </Field>
+          <Field orientation="horizontal">
+            <FieldLabel>Repeat</FieldLabel>
+            <Select value={repeatKey(editing.draft.repeat)} disabled={busy}
+              items={[{ value: ONCE, label: 'Never' },
+                ...repeatsOf(editing.task).map((each) => ({ value: repeatKey(each), label: repeatLabel(each) }))]}
+              onValueChange={(chosen) => {
+                const { repeat: _before, ...draft } = editing.draft;
+                const repeat = repeatsOf(editing.task).find((each) => repeatKey(each) === chosen);
+                setEditing({ ...editing, draft: repeat === undefined ? draft : { ...draft, repeat } });
+              }}>
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ONCE}>Never</SelectItem>
+                {repeatsOf(editing.task).map((each) => (
+                  <SelectItem key={repeatKey(each)} value={repeatKey(each)}>{repeatLabel(each)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
         </FieldGroup>
       ) : tasks === undefined || tasks === null ? (
         <p className="text-muted-foreground">
@@ -113,13 +143,14 @@ export function ScheduledSheet({ open, onClose }: { open: boolean; onClose: () =
           {tasks.map((task) => (
             <Item key={task.id} variant="outline" size="sm">
               <ItemContent>
-                <ItemTitle>{runTime(task.until)}</ItemTitle>
+                <ItemTitle>
+                  {task.repeat ? `${runTime(task.until)} · ${repeatLabel(task.repeat)}` : runTime(task.until)}
+                </ItemTitle>
                 <ItemDescription className="line-clamp-2">{task.task}</ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Button type="button" variant="outline" size="sm" disabled={busy}
-                  onClick={() => setEditing({ task, draft: { task: task.task, until: task.until },
-                    since: Date.now() })}>
+                  onClick={() => setEditing({ task, draft: draftOf(task), since: Date.now() })}>
                   Edit…
                 </Button>
                 <Button type="button" variant="outline" size="sm" className="text-destructive" disabled={busy}

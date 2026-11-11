@@ -1,10 +1,14 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { useWatch } from '@earendil-works/chord/react';
+import {
+  USAGE_NOTE, usageCost, usageDetail, usageTitle, usageTotal,
+} from '@pi-agent/infinichat/chat/usage-presentation';
 import type { MachineAccess } from '@pi-agent/infinichat/pi/infinichat-remote/client';
+import type { InfiniChatUsage } from '@pi-agent/infinichat/pi/infinichat/usage';
 import {
   getModelSettingsError, type ChatModelSettings, type ModelCatalog,
 } from '@pi-agent/infinichat/pi/model-catalog';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useInfiniChatRef } from '../../hooks/use-infinichat';
 import { errorText } from '../../lib/error-text';
@@ -14,6 +18,7 @@ import { Notice } from '../chat/notices';
 import { Button } from '../ui/button';
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '../ui/field';
 import { Input } from '../ui/input';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '../ui/item';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { FormSheet } from './form-sheet';
@@ -87,6 +92,16 @@ function SettingsForm({ open, onClose, onOpenProviders, initial: opened, catalog
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  // What the conversation has spent, read each time the sheet opens; a read that fails shows no section.
+  const [usage, setUsage] = useState<InfiniChatUsage>();
+  useEffect(() => {
+    if (!open) return undefined;
+    let shown = true;
+    ref.usage(BACKGROUND_CONTEXT).then((rows) => {
+      if (shown) setUsage(rows);
+    }, () => {});
+    return () => { shown = false; };
+  }, [open, ref]);
   const changed = !sameSettings(draft.main, initial.main) || !sameSettings(draft.summary, initial.summary)
     || !sameChoice(draft.subagents, initial.subagents)
     || draft.instructions !== initial.instructions || draft.name !== initial.name;
@@ -202,6 +217,23 @@ function SettingsForm({ open, onClose, onOpenProviders, initial: opened, catalog
             </FieldDescription>
           </FieldGroup>
         </FieldSet>
+        {usage !== undefined && usage.length > 0 && (
+          <FieldSet>
+            <FieldLegend>Usage</FieldLegend>
+            <ItemGroup>
+              {usage.map((row) => (
+                <Item key={`${row.memory}-${row.model}`} variant="outline" size="sm">
+                  <ItemContent>
+                    <ItemTitle>{usageTitle(row)}</ItemTitle>
+                    <ItemDescription>{usageDetail(row)}</ItemDescription>
+                  </ItemContent>
+                  <ItemActions>{usageCost(row.cost)}</ItemActions>
+                </Item>
+              ))}
+            </ItemGroup>
+            <FieldDescription>Total {usageCost(usageTotal(usage))}. {USAGE_NOTE}</FieldDescription>
+          </FieldSet>
+        )}
       </div>
     </FormSheet>
   );

@@ -18,8 +18,10 @@ import { AGENT_TASK } from './infinichat/agents';
 import { openOptChat, optChatParts, type OptChat, type OptChatParts } from './infinichat/app';
 import type { InfiniChatDevices } from './infinichat/device-tools';
 import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
+import { MemoryUsageDoc, usageRows, type InfiniChatUsage } from './infinichat/usage';
 import { BuildNode, ConfigDoc } from './infinichat/summary';
 import { requireModelAuth } from './model-auth';
+import { infiniChatDefaults, NEW_CHAT_DEFAULTS } from './new-chat';
 import { assertModelSettings, buildModelCatalog, type ChatModelSettings } from './model-catalog';
 import { createNativeWebSearchBridge, SearchPresentationsDoc } from './native-web-search/durable';
 import { imagesOf, textOf } from './user-input';
@@ -63,6 +65,8 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   stop(): Promise<void>;
   updateSettings(settings: InfiniChatSettings): Promise<void>;
   cancelScheduled(id: number, replacement?: ScheduledInput): Promise<boolean>;
+  /** What the conversation has spent, by model, and what writing its memory has; read when a screen asks. */
+  usage(): Promise<InfiniChatUsage>;
   /** The user's `/reload-plugins` (`chat/commands.ts`): what reloading the machine's plugins did. */
   reloadPlugins(): Promise<string>;
   dismissError(): void;
@@ -112,6 +116,7 @@ export class InfiniChatService implements InfiniChatHost {
   private closed = false;
   private closePromise?: Promise<void>;
   private shownView?: InfiniChatView;
+  private unfollowAccount = () => {};
 
   private constructor(
     private readonly chat: OptChat,
@@ -131,6 +136,8 @@ export class InfiniChatService implements InfiniChatHost {
     storage: Storage; models: Models; parts: OptChatParts; registry: RegistryReader;
     /** Why a provider has no usable credential, for example a locked keychain or `SESSION_EXPIRED`. */
     authError?: (providerId: string) => string | undefined;
+    /** The host's credential store, followed so a conversation without models chooses them (`chooseDefaults`). */
+    accountChanges?: (listener: () => void) => () => void;
     /** The machine this runs on, named where a message sends the user to sign in; none on the phone. */
     machine?: string;
     /** The conversation's environment for pi-durable's own tools (`HarnessOptions.env`); device tools bring theirs. */
@@ -167,6 +174,12 @@ export class InfiniChatService implements InfiniChatHost {
     service = new InfiniChatService(chat, scheduled, machines, options.models, options.authError, options.machine);
     void scheduled.start().catch((error: unknown) => service?.report(error));
     void machines.start().catch((error: unknown) => service?.report(error));
+    // A new conversation is ready as soon as a provider is connected, now or at a later sign-in.
+    const choose = () => {
+      void service.chooseDefaults().catch((error: unknown) => service.report(error));
+    };
+    service.unfollowAccount = options.accountChanges?.(choose) ?? service.unfollowAccount;
+    choose();
     // A storage error ends the Harness: report it once and let the owner reopen (pi-durable README "Errors").
     void chat.harness.closed.then((end) => {
       if (end.kind === 'failed') service.report(end.error);
@@ -220,10 +233,17 @@ export class InfiniChatService implements InfiniChatHost {
     if (!textOf(content).trim() && !imagesOf(content).length) throw new Error('Enter a message or attach a photo.');
     this.assertOpen();
     const root = this.chat.root;
+    // A sign-in the host has not told of yet still counts.
+    await this.chooseDefaults(context);
     const agent = await this.chat.harness.snapshot(AgentDoc, root.id, context);
-    // OptChat has no default model; nothing is sent until the settings choose one.
-    if (!agent?.model) throw new Error('Choose InfiniChat’s models in its settings to send a message.');
+    if (!agent?.model) {
+      const where = this.machine === undefined ? 'in Account' : `on ${this.machine}`;
+      throw new Error(`Sign in or connect a provider ${where} to send a message.`);
+    }
     await requireModelAuth(this.models, settingsOf(agent), this.authError, this.machine);
+    // The turn starts only once the summary model has written the earlier messages' lines, so it must answer too.
+    const summary = (await this.chat.harness.snapshot(ConfigDoc, root.id, context))?.summary;
+    if (summary) await requireModelAuth(this.models, summary, this.authError, this.machine);
     this.assertOpen();
     await this.chat.accept({ requestId, content });
   }
@@ -281,6 +301,52 @@ export class InfiniChatService implements InfiniChatHost {
   }
 
   /**
+   * Chooses the models of a conversation that has none, once a provider is connected: that provider's defaults
+   * (`infiniChatDefaults`), the preferred provider first, as a new chat's are chosen. Only what is still unchosen is
+   * saved, so a conversation with both models is left as it is. It runs as the service opens, whenever the host's
+   * credentials change, and before a send.
+   */
+  async chooseDefaults(context = BACKGROUND_CONTEXT): Promise<void> {
+    if (this.closed) return;
+    const root = this.chat.root;
+    const agent = await this.chat.harness.snapshot(AgentDoc, root.id, context);
+    const config = await this.chat.harness.snapshot(ConfigDoc, root.id, context);
+    if (agent?.model && config?.summary) return;
+    const chosen = agent?.model?.provider;
+    const { preferredProvider } = NEW_CHAT_DEFAULTS;
+    // Sorting is stable: the preferred provider moves first and the rest keep catalog order. A main model already
+    // chosen keeps its provider for the summaries.
+    const providers = buildModelCatalog(this.models)
+      .filter((provider) => chosen === undefined || provider.id === chosen)
+      .sort((left, right) => Number(right.id === preferredProvider) - Number(left.id === preferredProvider));
+    for (const provider of providers) {
+      // Saved credentials that cannot be read do not make a provider usable.
+      if (!await this.models.checkAuth(provider.id).then(Boolean, () => false)) continue;
+      // What the account offers, as a send checks; when it can't be asked now, the catalog's models stand.
+      const offered = await this.models.getAvailable(provider.id).catch(() => provider.models);
+      const defaults = infiniChatDefaults(provider, new Set(offered.map((model) => model.id)));
+      if (!defaults || this.closed) continue;
+      await root.commit(async (tx) => {
+        if ((await tx.doc(AgentDoc, root.id)).model === undefined) await configure(tx, root.id, defaults.main);
+        const saved = await tx.doc(ConfigDoc, root.id);
+        saved.summary ??= defaults.summary;
+      }, context);
+      return;
+    }
+  }
+
+  /**
+   * pi-durable's ledger of the whole session (README "Usage and Cost"), which counts the main agent and every
+   * subagent, and OptChat's own of the summaries it wrote (`MemoryUsageDoc`).
+   */
+  async usage(context = BACKGROUND_CONTEXT): Promise<InfiniChatUsage> {
+    this.assertOpen();
+    const { models } = await this.chat.harness.usage(context);
+    const memory = await this.chat.harness.snapshot(MemoryUsageDoc, this.chat.root.id, context);
+    return [...usageRows(models, false), ...usageRows(memory?.models ?? {}, true)];
+  }
+
+  /**
    * Deletes a scheduled task still waiting, or edits it; false when it was sent first. The caller names it by number,
    * so its ID comes from pi-durable's own record of the waiting task.
    */
@@ -304,6 +370,7 @@ export class InfiniChatService implements InfiniChatHost {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
     this.listeners.clear();
+    this.unfollowAccount();
     this.closePromise = (async () => {
       try {
         await this.chat.close();
