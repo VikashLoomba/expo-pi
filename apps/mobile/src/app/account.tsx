@@ -14,7 +14,10 @@ const PRIVACY = 'Your chat history is saved on this device, including when you s
   + 'device’s secure credential storage and restored after restarting the app; signing out removes it. Your messages '
   + 'are processed by the provider selected for that chat. API keys use the same secure storage as your sign-in.';
 
-/** The keep-alive opt-in, with the location use explained where it is switched on (App Review 2.5.4). */
+/**
+ * The opt-in to share the phone's city with InfiniChat's agent and keep its work running while the phone is locked:
+ * one location access for both, explained where it is switched on (App Review 5.1.5 and 2.5.4).
+ */
 function BackgroundWorkSection() {
   const { keepAliveSettings } = useChatApp();
   const enabled = useSyncExternalStore(keepAliveSettings.subscribe, keepAliveSettings.getSnapshot,
@@ -29,9 +32,9 @@ function BackgroundWorkSection() {
     try {
       const permission = await Location.requestBackgroundPermissionsAsync();
       if (permission.status !== 'granted') {
-        Alert.alert('Allow location access to keep work running',
-          'InfiniChat holds a background location stream to keep agent work running while your phone is locked. '
-          + 'Your location is never read, stored, or sent anywhere. Allow “Always” location access to use this.',
+        Alert.alert('Allow location access',
+          'InfiniChat tells its agent which city you’re in, and uses the same access to keep agent work running '
+          + 'while your phone is locked. Allow “Always” location access to use this.',
           [{ text: 'Not now', style: 'cancel' },
             { text: 'Open Settings', onPress: () => { void Linking.openSettings(); } }]);
         return;
@@ -41,11 +44,12 @@ function BackgroundWorkSection() {
       setAsking(false);
     }
   };
-  return <Section title="Background work" footer={<Text>
-    Keep agent work running while your phone is locked. InfiniChat holds a background location stream to stay alive —
-    your location is never read, stored, or sent anywhere — and shows progress in a Live Activity. Off by default.
+  return <Section title="Location and background work" footer={<Text>
+    While InfiniChat runs on this iPhone, its agent is told which city you’re in, and the same location access keeps
+    its work running when your phone is locked, with progress in a Live Activity. Only the city is shared, with the
+    model that answers. Off by default.
   </Text>}>
-    <Toggle label="Keep work running when locked" isOn={enabled} modifiers={[disable(asking)]}
+    <Toggle label="Share my city and keep work running" isOn={enabled} modifiers={[disable(asking)]}
       onIsOnChange={(value) => { void change(value); }} />
   </Section>;
 }

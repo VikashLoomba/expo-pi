@@ -48,8 +48,8 @@
         "expo-location",
         {
           "isIosBackgroundLocationEnabled": true,
-          "locationAlwaysAndWhenInUsePermission": "Allow InfiniChat to keep agent work running in the background. Location updates are only used to keep the app alive while work runs.",
-          "locationWhenInUsePermission": "Allow InfiniChat to keep agent work running in the background. Location updates are only used to keep the app alive while work runs."
+          "locationAlwaysAndWhenInUsePermission": "InfiniChat tells its agent which city you’re in, and uses the same access to keep its work running while your iPhone is locked.",
+          "locationWhenInUsePermission": "InfiniChat tells its agent which city you’re in while it runs on this iPhone."
         }
       ],
       [

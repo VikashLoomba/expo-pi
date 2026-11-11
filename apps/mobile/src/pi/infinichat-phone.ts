@@ -27,6 +27,8 @@ export async function openPhoneInfiniChat(options: {
   /** Follows the credential store, so a conversation without models chooses them once a provider is connected. */
   accountChanges?: (listener: () => void) => () => void;
   onClosed?: (end: SessionEnd) => void;
+  /** The city this phone is in, while its user shares it (`keep-alive/place.ts`); the phone's device says it. */
+  city: () => Promise<string | undefined>;
   /** Counts InfiniChat's live work while it is open; its owner closes it. */
   keepAlive?: KeepAliveController;
   /** Follows its scheduled tasks from the open on, until the side that opens next replaces it; its owner closes it. */
@@ -34,7 +36,8 @@ export async function openPhoneInfiniChat(options: {
 }): Promise<PhoneInfiniChat> {
   // The machines are the service's own document; the list reads it once the service is open.
   let service: InfiniChatService | undefined;
-  const devices = createDevices(options.workspaces, options.remote, () => service?.machines.getSnapshot());
+  const devices = createDevices(options.workspaces, options.remote, () => service?.machines.getSnapshot(),
+    options.city);
   // The phone, holding the chat, is also the conversation's environment.
   const deviceTools = infiniChatDevices(devices, createExpoImages());
   const parts = infiniChatExtensions(deviceTools, () => service?.harness,

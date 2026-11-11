@@ -17,12 +17,15 @@ const PHONE_WORK = '/workspace';
  * the environments the chats use, over this phone's credentials for each.
  */
 export function createDevices(workspaces: Workspaces, remote: RemoteExecution,
-  machines: () => MachinesState | undefined) {
+  machines: () => MachinesState | undefined, city: () => Promise<string | undefined>) {
   return async (): Promise<Device[]> => {
+    // Where the phone is, while its user shares it; a place that can't be read is left out.
+    const place = await city().catch(() => undefined);
     return [
       {
         name: PHONE_DEVICE,
-        description: `this phone, a sandboxed workspace at /workspace, work dir ${PHONE_WORK}`,
+        description: `this phone${place ? `, in ${place}` : ''}, a sandboxed workspace at /workspace, `
+          + `work dir ${PHONE_WORK}`,
         async environment(who, read, context) {
           // Agents run in their own conversations, but the phone's workspace belongs to the root conversation.
           const workspace = await read.snapshot(WorkspaceDoc, ROOT_CONVERSATION_ID, context);

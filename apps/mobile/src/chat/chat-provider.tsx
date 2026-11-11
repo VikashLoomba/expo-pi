@@ -21,6 +21,7 @@ import React, {
 import { AppState } from 'react-native';
 
 import { KeepAliveController } from '../keep-alive/controller';
+import { currentCity } from '../keep-alive/place';
 import { createKeepAliveSettings } from '../keep-alive/settings';
 import { createRemoteHostRepository } from '../pi/execution/remote/host-storage';
 import { createRemoteExecution } from '../pi/execution/remote/owner';
@@ -126,6 +127,8 @@ function useChatRuntime() {
       const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
         storage, models, workspaces, remote, keepAlive, notifications, authError,
         accountChanges: credentials.subscribe,
+        // One opt-in: the city is shared only while the user keeps background work on.
+        city: () => keepAliveSettings.getSnapshot() ? currentCity() : Promise.resolve(undefined),
         onClosed: (end) => {
           if (end.kind !== 'failed') return;
           serialize(async () => {

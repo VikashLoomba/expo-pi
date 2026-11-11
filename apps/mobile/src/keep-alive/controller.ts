@@ -23,8 +23,8 @@ type Source = {
 
 /**
  * Keeps agent work running while the phone is locked, as Termius does: while any observed Harness has live work,
- * the app holds a background location stream (which keeps the process running; the locations are unused) and a
- * Live Activity showing progress. Both end when the work does. Everything is inert unless the user opted in;
+ * the app holds a background location stream and a Live Activity showing progress. The stream keeps the process
+ * running and the phone's position current, from which InfiniChat's agent is told the city (`place.ts`). Both end when the work does. Everything is inert unless the user opted in;
  * the setting applies at the next work change. One controller observes every Harness, so there is one stream and
  * one Live Activity.
  */
@@ -129,7 +129,7 @@ export class KeepAliveController {
     // The Account screen asks for this when the setting is switched on; a revoked permission just stays inert.
     if (permission.status !== 'granted') return;
     await Location.startLocationUpdatesAsync(KEEP_ALIVE_LOCATION_TASK, {
-      // Only keeping the process alive: the lowest power source, a wide interval, and the system indicator on.
+      // A city is all that is read from it: the lowest power source, a wide interval, and the system indicator on.
       accuracy: Location.Accuracy.Lowest,
       distanceInterval: 3000,
       pausesUpdatesAutomatically: false,
