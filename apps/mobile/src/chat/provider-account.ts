@@ -8,7 +8,8 @@ import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credential
 export interface ProviderAccount {
   providerAccess(providerId: string): ProviderAccess;
   providerOAuth(providerId: string): { name: string; loginLabel?: string; isSubscription?: boolean } | undefined;
-  saveProviderKey(providerId: string, key: string): Promise<void>;
+  /** Saves an API key in place of what the provider had. `workspaceId` is Anthropic's, saved with its key. */
+  saveProviderKey(providerId: string, key: string, workspaceId?: string): Promise<void>;
   disconnectProvider(providerId: string): Promise<void>;
   /** Reads a saved credential again after a storage error; absent where there is nothing to read again from. */
   retryAuth?(providerId: string): Promise<void>;

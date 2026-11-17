@@ -417,8 +417,8 @@ function useChatController() {
     setAuthNotice(undefined);
     await credentials.restoreProvider(providerId);
   };
-  const saveProviderKey = async (providerId: string, key: string) => {
-    await signIns.setApiKey(providerId, key);
+  const saveProviderKey = async (providerId: string, key: string, workspaceId?: string) => {
+    await signIns.setApiKey(providerId, key, workspaceId);
     await refreshCatalog();
   };
   /** Removes the saved credential. A failed removal stays pending so the account screen can retry it. */
@@ -621,9 +621,9 @@ export function useInfiniChatAccount(): ProviderAccount & {
     },
     // What this phone can present: ChatGPT through its receiver, and API keys.
     providerOAuth,
-    saveProviderKey: async (providerId, key) => {
+    saveProviderKey: async (providerId, key, workspaceId) => {
       if (!remote) throw new Error('InfiniChat is not connected yet.');
-      await remote.setApiKey(providerId, key);
+      await remote.setApiKey(providerId, key, workspaceId);
     },
     disconnectProvider,
     signOutPending,

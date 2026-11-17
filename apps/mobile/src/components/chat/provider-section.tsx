@@ -1,7 +1,10 @@
 import {
-  Button, HStack, Image, Label, LabeledContent, SecureField, Section, Text, useNativeState,
+  Button, HStack, Image, Label, LabeledContent, SecureField, Section, Text, TextField, useNativeState,
 } from '@expo/ui/swift-ui';
-import { disabled as disable, foregroundStyle } from '@expo/ui/swift-ui/modifiers';
+import {
+  autocorrectionDisabled, disabled as disable, foregroundStyle, textInputAutocapitalization,
+} from '@expo/ui/swift-ui/modifiers';
+import { ANTHROPIC_PROVIDER_ID } from '@pi-agent/infinichat/pi/anthropic-workspace';
 import { CLAUDE_CODE_PROVIDER_ID } from '@pi-agent/infinichat/pi/claude-code';
 import type { ModelCatalog, ProviderOption } from '@pi-agent/infinichat/pi/model-catalog';
 import { OPENAI_PROVIDER_ID } from '@pi-agent/infinichat/pi/openai-auth/core';
@@ -29,22 +32,30 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
   // The key field's latest text; `hasKey` only decides whether the save button is enabled.
   const key = useRef('');
   const [hasKey, setHasKey] = useState(false);
+  // An Anthropic key that isn't scoped to one workspace is refused unless its requests name one, so its entry takes
+  // the workspace's ID too. It is saved with the key and, like the key, not shown again.
+  const takesWorkspace = provider.id === ANTHROPIC_PROVIDER_ID;
+  const workspaceText = useNativeState('');
+  // The workspace field's latest text, read when saving.
+  const workspace = useRef('');
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string>();
   const notice = error || access.error;
-  const clearKey = () => {
+  const clearEntry = () => {
     key.current = '';
     keyText.set('');
     setHasKey(false);
+    workspace.current = '';
+    workspaceText.set('');
   };
   const save = async () => {
     setSaving(true);
     setError(undefined);
     try {
-      await saveProviderKey(provider.id, key.current);
-      clearKey();
+      await saveProviderKey(provider.id, key.current, workspace.current.trim() || undefined);
+      clearEntry();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save this provider key.');
     } finally {
@@ -56,7 +67,7 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
     setError(undefined);
     try {
       await disconnectProvider(provider.id);
-      clearKey();
+      clearEntry();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not remove this provider key.');
     } finally {
@@ -86,8 +97,12 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
         + 'Each chat keeps its selected provider and model.'
       : `API key requests use your ${provider.name} API account and its billing. `
         + 'The provider checks your key when you send a message.',
+    takesWorkspace && (!oauth || showKey)
+      ? 'A key that isn’t scoped to a workspace also needs a workspace ID, from Workspaces in the Claude Console. '
+        + 'It is saved with the key, so enter both to change it.' : undefined,
   ].filter(Boolean).join(' ');
   const busy = signingIn || saving || removing || signOutPending;
+  const entryModifiers = [disable(saving || removing || signingIn)];
   return <Section title={provider.name} footer={<Text>{footer}</Text>}>
     <LabeledContent label="Status">
       <HStack spacing={6}>
@@ -100,7 +115,7 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
       label={access.connected && access.type === 'oauth' ? `Switch ${accountName} account`
         : oauth.loginLabel ?? `Continue with ${accountName}`}
       onPress={() => {
-        clearKey();
+        clearEntry();
         setShowKey(false);
         setError(undefined);
         void signIn(provider.id);
@@ -110,7 +125,7 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
     {oauth && authenticating && <Button label="Cancel sign-in" onPress={cancelSignIn} />}
     {oauth && !authenticating && <Button label={showKey ? 'Hide API key entry' : 'Use API key'}
       modifiers={[disable(busy)]} onPress={() => {
-        clearKey();
+        clearEntry();
         setShowKey((show) => !show);
       }} />}
     {(!oauth || showKey) && <>
@@ -118,7 +133,10 @@ function ProviderSection({ provider, account }: { provider: ProviderOption; acco
         onTextChange={(value) => {
           key.current = value;
           setHasKey(!!value.trim());
-        }} modifiers={[disable(saving || removing || signingIn)]} />
+        }} modifiers={entryModifiers} />
+      {takesWorkspace && <TextField text={workspaceText} placeholder="Workspace ID (optional)"
+        onTextChange={(value) => { workspace.current = value; }}
+        modifiers={[autocorrectionDisabled(), textInputAutocapitalization('never'), ...entryModifiers]} />}
       <Button modifiers={[disable(!hasKey || !access.ready || busy)]}
         label={saving ? 'Saving…' : access.type === 'oauth' ? 'Use this API key'
           : access.connected ? 'Replace API key' : 'Save API key'}
