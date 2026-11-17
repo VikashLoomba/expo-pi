@@ -528,12 +528,15 @@ export function useShownMachine(): RemoteInfiniChat | undefined {
  * The connection to the machine InfiniChat lives on or moves to or from, and its actions; undefined while it has no
  * machine.
  */
-export function useInfiniChatConnection(): (RemoteConnection & { retry(): void; dismissNotice(): void }) | undefined {
+export function useInfiniChatConnection(): (RemoteConnection & {
+  retry(): void; dismissNotice(): void; requestUpdate(): Promise<void>;
+}) | undefined {
   const { infiniChatClient: remote } = useChatApp();
   const getConnection = () => remote?.getConnection();
   const connection = useSyncExternalStore(remote?.subscribe ?? subscribeNothing, getConnection, getConnection);
   return remote && connection && {
     ...connection, retry: () => remote.reconnect(), dismissNotice: () => remote.dismissNotice(),
+    requestUpdate: () => remote.requestUpdate(),
   };
 }
 

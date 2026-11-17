@@ -214,6 +214,15 @@ export default function InfiniChatScreen() {
       setLocalError(cause instanceof Error ? cause.message : 'The response could not continue. Try again.');
     }
   };
+  // The server restarts into its update, so the connection closes and comes back by itself.
+  const updateServer = async () => {
+    setLocalError(undefined);
+    try {
+      await connection?.requestUpdate();
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'The update could not be started. Try again.');
+    }
+  };
   const failure = !busy && offers.available ? conversation?.runFailure : undefined;
   // A move that failed, and a machine that can't be reached, are tried again when the user asks and when the app
   // becomes active; a send that failed with the same error offers the same. A removed machine has nothing to try again.
@@ -336,6 +345,13 @@ export default function InfiniChatScreen() {
       {connection?.notice && !moveNotice && !messageError && <View style={styles.banner}>
         <InlineNotice testID="infinichat-machine-notice" tone="neutral" message={connection.notice}
           action="Dismiss" onAction={connection.dismissNotice} />
+      </View>}
+      {connection?.update && machine !== undefined && !movingNow && !messageError && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-server-update" tone="neutral"
+          message={connection.update === 'requested' ? `InfiniChat on ${machine} is updating and will reconnect.`
+            : `An update is available for InfiniChat on ${machine}.`}
+          action={connection.update === 'available' ? 'Update' : undefined}
+          onAction={() => { void updateServer(); }} />
       </View>}
       <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
         onStop={() => { void stop(); }}

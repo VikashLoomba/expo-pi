@@ -26,8 +26,12 @@ type ConnectionStatus =
   | { status: 'connecting'; stage?: InstallStage }
   | { status: 'connected' }
   | { status: 'failed'; error: string };
-/** This app's connection to a machine's InfiniChat; `notice` is what the latest install said, until dismissed. */
-export type RemoteConnection = ConnectionStatus & { notice?: string };
+/**
+ * This app's connection to a machine's InfiniChat; `notice` is what the latest install said, until dismissed.
+ * `update` is there while the server answering is older than the release this app was built with: `available`, and
+ * `requested` once the server was asked to update itself, until its link closes as it restarts into the release.
+ */
+export type RemoteConnection = ConnectionStatus & { notice?: string; update?: 'available' | 'requested' };
 
 type InfiniChatRef = Held<typeof InfiniChatRemote>;
 /** The sign-ins of the machine's own credential store, by provider. */
@@ -89,6 +93,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   /** Aborted at `close`: the reference's hold and its members' watches end with it. */
   private readonly released = new AbortController();
   private notice?: string;
+  /** The session whose server was asked to update itself. */
+  private updating?: Session;
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
     scheduled: readonly ScheduledTask[] | undefined; catalog: ModelCatalog; access: MachineAccess;
@@ -174,9 +180,23 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.session?.live ? this.ref?.server.value.version : undefined;
   }
 
-  /** Asks the machine's server to update itself now, through the connection's machine. */
+  /**
+   * Asks the machine's server to update itself now, through the connection's machine. It updates by restarting into
+   * the newest release (server `update.ts`), so this session's link closes and the next connection finds the server
+   * there; until then the connection says the update is `requested`. A server that could not be asked rejects.
+   */
   async requestUpdate(): Promise<void> {
-    await this.session?.server?.requestUpdate();
+    const session = this.session;
+    if (session?.server === undefined) return;
+    this.updating = session;
+    this.publishConnection();
+    try {
+      await session.server.requestUpdate();
+    } catch (error) {
+      if (this.updating === session) this.updating = undefined;
+      this.publishConnection();
+      throw error;
+    }
   }
 
   /**
@@ -554,6 +574,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
       ref.conversation, ref.machines, ref.reach, ref.pendingHostKeys]) {
       follow(member, this.refresh, context);
     }
+    // The connection says whether the server answering is behind this app (`update`).
+    follow(ref.server, () => this.publishConnection(), context);
     return ref;
   }
 
@@ -593,7 +615,14 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   private publishConnection(status?: ConnectionStatus) {
     if (status) this.status = status;
-    this.connection = this.notice === undefined ? this.status : { ...this.status, notice: this.notice };
+    const server = this.serverVersion();
+    // Offered only while the server is behind this app's release, not for every newer one: this app refuses a move
+    // back from a server ahead of it (`move.ts`), so it does not point at releases newer than itself. A server that
+    // is asked still takes the newest release (`update.ts`).
+    const update = server === undefined || compareVersions(server, this.version) >= 0 ? undefined
+      : this.session === this.updating ? 'requested' : 'available';
+    this.connection = { ...this.status, ...(this.notice === undefined ? {} : { notice: this.notice }),
+      ...(update === undefined ? {} : { update }) };
     this.notify();
   }
 

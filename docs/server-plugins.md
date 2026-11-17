@@ -273,7 +273,10 @@ server.
 
 Release 4.0.0 is the first on Chord v2, whose link protocol an app built for an earlier release cannot speak, and
 the reverse: an app asks a server behind it to update (`RemoteInfiniChat`), and says to update the app when the server
-is ahead. Release the server before the apps that need it.
+is ahead. Release the server before the apps that need it. A server that fits the app but is older than the release
+the app was built with is offered its update: the connection says so (`RemoteConnection.update`), and the iPhone's
+chat screen shows a notice with Update above the input, which asks the server to update itself (`requestUpdate`,
+SIGHUP). The server then takes the newest release, restarts, and the app connects again.
 
 A server installed from a release checks at startup, daily, and on SIGHUP. It verifies downloaded artifacts, closes
 its Harness and exits 75 for the service manager to restart it. Old runtime folders are cleaned on startup.
