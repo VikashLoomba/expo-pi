@@ -1,0 +1,6 @@
+# The SSH library's build outputs, which are not in git: they differ from machine to machine, so they would give
+# each machine its own fingerprint, and the Rust build folder alone is over a gigabyte to hash. Its sources still
+# count, so a Rust change asks for a new build.
+**/react-native-ssh/rust/target/**/*
+**/react-native-ssh/ios/*.xcframework/**/*
+**/react-native-ssh/lib/**/*

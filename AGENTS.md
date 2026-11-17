@@ -12,7 +12,8 @@ restarts the service. On a machine, Claude goes through its Claude Code login (p
 dependency of the server) instead of an Anthropic API key. The phone's SSH library,
 `@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
 `packages/react-native-ssh` (Rust engine, C FFI, Nitro module); `pnpm install` builds its `lib/`, and its iOS
-archives are built there by `bash scripts/build-rust-ios.sh` before an iOS build, neither committed. App paths
+archives are built there by `bash scripts/build-rust-ios.sh` before an iOS build, neither committed; an EAS build
+runs that itself (`scripts/eas-build-pre-install.sh`, the app's `eas-build-pre-install` hook). App paths
 in this file (`src/app/`, `app.json`, `package.json`, `ios/`) are relative to `apps/mobile`.
 Install with `pnpm install` from the root; run Expo, EAS and `@expo/agent-cli` commands from `apps/mobile`.
 `@expo/agent-cli` writes its AGENTS.md block and skill links relative to the Expo project, but agents read this
@@ -87,6 +88,21 @@ Run lint and typecheck before declaring any task done.
 
 Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
 Docs: https://docs.expo.dev/eas/index.md
+
+This project (`eas.json`, EAS project `pi-agent`): `production` is the App Store build, sent to TestFlight by
+`npx eas-cli@latest build -p ios --profile production --auto-submit --non-interactive` (the signing credentials and
+the App Store Connect key are on EAS, so any signed-in machine can run it); `development-simulator` is the unsigned
+development build for Expo Simulators. The profiles pin pnpm to the version that wrote the lockfile: the build
+image's pnpm 11 fails the install on this workspace's build-script settings (`ERR_PNPM_IGNORED_BUILDS`), so move the
+pin with the workspace. EAS's Mac images have no Rust; the pre-install hook installs it and builds the SSH archive.
+
+Without the Mac (a Linux machine such as the owner's server machine), follow Expo's "Use an iOS Simulator on Linux
+or Windows" (https://docs.expo.dev/eas/simulators/how-to/work-without-a-mac.md): build `development-simulator` when
+native code changed (`npx @expo/agent-cli status` says), start Metro with `npx expo start --tunnel`, then
+`npx eas-cli@latest simulator:start --platform ios --type agent-device --build-id <id> --open-url
+"piagent://expo-development-client/?url=<encoded Metro URL>" --name "<purpose>" --non-interactive`, and stop the
+session and Metro when done. The remote simulator is not on the owner's network, so it reaches no machine over SSH:
+connecting to a machine is still checked on the iPhone, from TestFlight.
 
 ## Rules
 

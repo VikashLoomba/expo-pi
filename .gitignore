@@ -31,6 +31,8 @@ yarn-error.*
 
 # local env files
 .env*.local
+# EAS CLI's simulator session file: it holds the session's token
+.env.eas-simulator
 
 # typescript
 *.tsbuildinfo

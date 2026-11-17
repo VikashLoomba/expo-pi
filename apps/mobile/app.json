@@ -12,7 +12,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "deploymentTarget": "26",
-      "bundleIdentifier": "com.vikashloomba.piagent"
+      "bundleIdentifier": "com.vikashloomba.piagent",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "plugins": [
       "expo-router",
@@ -62,6 +65,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ba2fc416-c742-4a0a-a3c6-dd86dda00771"
+      }
     }
   }
 }

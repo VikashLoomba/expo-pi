@@ -69,7 +69,8 @@
   "scripts": {
     "start": "expo start",
     "ios": "expo run:ios",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "eas-build-pre-install": "bash scripts/eas-build-pre-install.sh"
   },
   "private": true
 }
