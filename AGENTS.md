@@ -127,16 +127,28 @@ recommends the remote source, but expo-widgets gives its extension the number th
 `Info.plist` files, after prebuild. With the remote source the extension stayed at 1, and each archive warned that
 it did not match the app's.
 
-Without the Mac (a Linux machine such as the owner's server machine), follow Expo's "Use an iOS Simulator on Linux
-or Windows" (https://docs.expo.dev/eas/simulators/how-to/work-without-a-mac.md): build `development-simulator` when
-native code changed (`npx @expo/agent-cli status` says), start Metro with `npx expo start --tunnel`, then
-`npx eas-cli@latest simulator:start --platform ios --type agent-device --build-id <id> --open-url
-"piagent://expo-development-client/?url=<encoded Metro URL>" --name "<purpose>" --non-interactive`, and stop the
-session (`simulator:stop --id <id>`) and Metro when done. Metro prints its public address as
-`exp+pi-agent://<host>`; the URL to encode is `https://<host>`. `@expo/agent-cli`'s `runtime:*` commands reach the
-app there through Metro: leave out `--ios`, which looks for a device on this machine. The remote simulator is not
-on the owner's network, so it reaches no machine over SSH: connecting to a machine is still checked on the iPhone,
-from TestFlight.
+Without the Mac (a Linux machine such as the owner's server machine), the app runs on an EAS Simulator session, which
+`@expo/agent-cli` plans, starts, drives and ends (`npx @expo/agent-cli dev --help`). It automates Expo's "Use an iOS
+Simulator on Linux or Windows" (https://docs.expo.dev/eas/simulators/how-to/work-without-a-mac.md), so run it instead
+of that page's `expo start` and `eas simulator:start`:
+
+1. `npx @expo/agent-cli dev --ios --eas --plan` says what would run, and runs nothing. While EAS has a
+   `development-simulator` build for the project's fingerprint it is one step, the dev server over a tunnel. An
+   `eas build` step uses build minutes: expect one only after a native change (`npx @expo/agent-cli status` says).
+2. `npx @expo/agent-cli dev --ios --eas --detach --wait-ready --no-agent-skills` runs the plan: the dev server, and a
+   session with that build installed and opened on it, whose ID it prints. The session bills until it is stopped.
+3. `npx @expo/agent-cli navigate <route> --eas` opens a screen there. `runtime:tree`, `runtime:tap`, `runtime:type`,
+   `runtime:eval` and `runtime:errors` reach the app through the dev server: leave out `--ios`, which looks for a
+   device on this machine. The CLI takes no screenshot, and taps and types only by testID, so for a screenshot and
+   for an element without one use the session's own controls: `npx eas-cli@latest simulator:control
+   screenshot.capture --output <file>`, `tap <x> <y>` (each from 0 to 1) and `type <text>`, with `--id <session>`.
+4. `npx @expo/agent-cli dev:stop --eas` ends the session and the dev server. Then delete `apps/mobile/.gitignore`,
+   which `expo start` writes on every run for what the root's `.gitignore` already lists. Any `.gitignore` there
+   changes the project's fingerprint, so while it stays the next plan starts with an `eas build` nobody needs.
+   `--no-agent-skills` keeps the run from also linking the packages' skills into `apps/mobile`.
+
+The remote simulator is not on the owner's network, so it reaches no machine over SSH: connecting to a machine is
+still checked on the iPhone, from TestFlight.
 
 ## Rules
 
