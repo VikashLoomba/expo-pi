@@ -228,6 +228,10 @@ exec xvfb-run -a -s '-screen 0 1280x800x24 -dpi 96 +extension RANDR +extension G
   folder: a browser may hand a new window to the copy already running there.
 - To have the agents work on the real session instead, the entry is the user's to change, to
   `"command": "~/.local/bin/cua-driver", "args": ["mcp"], "env": { "DISPLAY": ":0" }`.
+- Checked on Linux Mint (X11) with driver 0.47.7: in scratch runs through pi-mcp's `McpClient` and `StdioTransport`
+  (launch, the accessibility tree, an element click, typing and a pixel click on a GTK dialog; a close that leaves
+  nothing), and on a live server, where a `/reload-plugins` moved the connection to the desktop and an agent's turn
+  captured it. Not run: the newest driver (0.52.9 when this was written), a browser, drags and scrolling.
 
 ## Extensions
 

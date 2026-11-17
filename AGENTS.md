@@ -78,6 +78,16 @@ Run lint and typecheck before declaring any task done.
 - Review the final implementation against those contracts and update affected guidance. Report source assessment,
   device checks and unverified behavior separately.
 
+## On a machine that runs the owner's server
+
+- The owner's live conversation is in `~/.infinichat/data/infinichat.db`. Read it only with
+  `sqlite3 "file:...?mode=ro"`; never write it, and never send a message into it.
+- `/reload-plugins` is the user's command, and restarting or signalling `infinichat.service` is the owner's call. Its
+  log is `journalctl --user-unit infinichat.service`.
+- Try things in a scratch `HOME` or with a scratch configuration, never on the owner's apps or the real display, and
+  leave nothing behind. For Cua Driver set `DO_NOT_TRACK=1` and `CUA_DRIVER_RS_UPDATE_CHECK=false`, and do not run its
+  installer or uninstaller, which end the live server's driver (`docs/server-plugins.md`).
+
 ## Navigation & Routing
 
 - Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
