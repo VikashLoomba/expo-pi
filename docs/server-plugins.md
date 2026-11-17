@@ -149,10 +149,10 @@ running finish on their old connection, which closes once they settle.
 
 ## Computer use: Cua Driver
 
-The agents see and operate a machine's desktop apps through Cua Driver (github.com/trycua/cua, read at commit
-`066c9d1`, driver 0.47.6), which Cua ships as one program that serves MCP over stdio (`cua-driver mcp`). The tools
-plugin's object has it installed (`src/cua-driver.ts`) at its start and before each `/reload-plugins` reads `mcp.json`,
-when the account has no `~/.local/bin/cua-driver` and, on Linux, a desktop session:
+The agents see and operate desktop apps on a machine through Cua Driver (github.com/trycua/cua, read at commit
+`066c9d1`, driver 0.47.6, and for Linux without a screen at `bff492d`), which Cua ships as one program that serves MCP
+over stdio (`cua-driver mcp`). The tools plugin's object has it installed (`src/cua-driver.ts`) at its start and
+before each `/reload-plugins` reads `mcp.json`, when the account has no `~/.local/bin/cua-driver`:
 
 - It runs Cua's install line (README "Cua Driver") with the installer's own switches `CUA_DRIVER_NO_CONNECT`,
   `CUA_DRIVER_NO_TEST` and `CUA_DRIVER_NO_MODIFY_PATH`, so the account's Claude Code, Codex and Cursor, its shell
@@ -163,24 +163,71 @@ when the account has no `~/.local/bin/cua-driver` and, on Linux, a desktop sessi
   `"enabled": false` stays so. A failed install is in the service's log, or in the reload's reply, and the next start or
   reload tries again.
 - The entry runs `~/.local/bin/cua-driver mcp`, the link Cua's updates keep (`cua-driver mcp-config` prints the folder
-  of one version). The driver has 66 tools, which keep the default exposure and which scripts find with
-  `searchTools()`, except its guide: `"toolExposure": { "get_guide": "direct" }`. Code mode's prompt section leaves
+  of one version), on Linux inside a desktop of its own (below). The driver has 66 tools, which keep the default
+  exposure and which scripts find with `searchTools()`, except its guide:
+  `"toolExposure": { "get_guide": "direct" }`. Code mode's prompt section leaves
   out the tools of the default exposure, and a server with no tool declared there gets no heading, so without this
   the model learns of a server only by searching. With it the section names `mcp__cua-driver` with Cua's own one-line
   description and declares `get_guide`, about 240 tokens, and the guide tells of the rest. The section's 3,000-token
   budget is shared with InfiniChat's own tools, which the driver's larger tools would crowd out.
-- On Linux the entry has `"env": { "DISPLAY": ":0" }`, with the display the desktop session gave the account's service
-  manager (`systemctl --user show-environment`). The service starts with that manager, before a desktop session, so its
-  own environment often has none, and the driver finds the display's key and the session bus itself but not the display
-  (Cua `platform-linux/src/xauth.rs`, `session_bus.rs`). A machine without a session has nothing to drive and gets no
-  driver; one that logs in later gets it at the next start or reload. A display that changes is the user's to edit.
 - On macOS the driver's process hands over to Cua's app (`/Applications/CuaDriver.app`), which the system's
   Accessibility and Screen Recording permissions belong to. The server does nothing about them: Cua asks.
 
 Cua's installer, updater (`cua-driver update --apply`) and uninstaller own the driver's files; the server never updates
 or removes it. The object's native ends an install under way when the host closes, and Cua's installer swaps a version
 into place atomically, so the next start installs again. The driver's process is the MCP connection's, as any stdio
-server's.
+server's. Cua's installer and uninstaller end every `cua-driver` of the account (`pkill -x cua-driver`), a running
+server's too, so neither is run by hand, even into a scratch home, on a machine whose server should keep its driver.
+
+### Linux: a desktop of its own
+
+On Linux the driver works in a virtual desktop, always: a machine needs no monitor and no login, and the agents never
+take a real session's pointer or see its windows. A real X session is no substitute on a machine used without a
+screen: with every output disconnected its compositor stops drawing, and each capture returns the last frame. The
+entry's command is `sh -c` with this script (`DESKTOP` in `src/cua-driver.ts`):
+
+```sh
+exec 3>&1 >&2
+unset WAYLAND_DISPLAY SESSION_MANAGER NO_AT_BRIDGE
+export XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR/infinichat-desktop"
+mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+export GTK_MODULES=gail:atk-bridge GNOME_ACCESSIBILITY=1 QT_ACCESSIBILITY=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
+export MOZ_ENABLE_ACCESSIBILITY=1 ACCESSIBILITY_ENABLED=1
+exec xvfb-run -a -s '-screen 0 1280x800x24 -dpi 96 +extension RANDR +extension GLX -noreset' \
+  dbus-run-session -- sh -c 'xfwm4 3>&- & exec "$HOME/.local/bin/cua-driver" mcp >&3 3>&-'
+```
+
+- It is how Cua runs the driver headless: "wrap this command in xvfb-run and dbus-run-session"
+  (`scripts/ci/linux/run-rust-e2e.sh`). The display's size and options and the accessibility variables are those of
+  Cua's desktop image (`libs/images/common/desktop/start-desktop.sh`), and `xfwm4` is the window manager of XFCE, the
+  desktop Cua validates on (`Skills/cua-driver/LINUX.md`).
+- Only the driver may write to the MCP stream. xvfb-run joins its command's stderr to stdout, and the session's
+  services inherit stdout (the accessibility registry prints a line there), so stdout is kept as descriptor 3 for the
+  driver and everything else writes to stderr, whose tail `/mcp` shows.
+- The service can have a real session's environment: the account's service manager takes it in at a login, and this
+  machine's service has `DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS` and `SESSION_MANAGER` from its Cinnamon
+  session. xvfb-run and dbus-run-session replace the first three. `SESSION_MANAGER` and `NO_AT_BRIDGE` are unset as
+  Cua's image unsets them: with the first, the desktop's apps would sign on to the real session's manager, which
+  ends its clients at a logout. `WAYLAND_DISPLAY` is unset so that an app does not open in a Wayland session; that
+  is reasoned, not checked on a Wayland machine.
+- The session has a runtime folder of its own, as Cua's image has: it mounts gvfs and starts dconf and an accessibility
+  bus there, which would otherwise be the real session's.
+- The MCP connection owns the desktop. pi-mcp starts the command in its own process group and ends the group when
+  the connection closes (`StdioTransport`), and the apps the driver starts are its children in that group. Nothing in
+  the desktop could outlive the driver, so the display is the driver's too, and no part of it is the server's to
+  start, watch or stop. The desktop lasts until the server stops or restarts, the entry changes or is turned off, or
+  the user reconnects the server in `/mcp`, which gives a fresh one; a reload with the entry unchanged leaves it. A
+  closed connection leaves no process, socket, lock or mount; a group ended without that close leaves xvfb-run's
+  folder with one small file in `/tmp`.
+- A machine without `xvfb-run`, `dbus-run-session` or `xfwm4` gets no driver: the install fails with what is missing
+  (Debian and Ubuntu: `xvfb`, `dbus-daemon`, `xfwm4`; the apps' accessibility is `at-spi2-core`), in the log and in
+  the reload's reply, and the next start or reload tries again. The server installs nothing with root.
+- Under a virtual display the driver has no background pointer for a surface without accessibility, a browser's page
+  for one, and Cua's guide has the model ask for `delivery_mode: "foreground"` there, which in this desktop disturbs
+  nobody (`Skills/cua-driver/LINUX.md`). A second copy of an app that also runs in the real session shares its home
+  folder: a browser may hand a new window to the copy already running there.
+- To have the agents work on the real session instead, the entry is the user's to change, to
+  `"command": "~/.local/bin/cua-driver", "args": ["mcp"], "env": { "DISPLAY": ":0" }`.
 
 ## Extensions
 

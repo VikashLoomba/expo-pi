@@ -37,31 +37,58 @@ const SWITCHES = {
  */
 const LISTED = { get_guide: 'direct' } as const;
 
+/** What the Linux entry's desktop is made of: the virtual display, its session bus and its window manager. */
+const DESKTOP_PROGRAMS = ['xvfb-run', 'dbus-run-session', 'xfwm4'];
+/**
+ * What the Linux entry runs: the driver in a virtual desktop of its own, so a machine needs no monitor and no login,
+ * and the agents never take a real session's pointer. Cua runs the driver headless this way ("wrap this command in
+ * xvfb-run and dbus-run-session", `scripts/ci/linux/run-rust-e2e.sh`, read at `bff492d`). The display's size and
+ * options, the accessibility variables and a runtime folder of its own are those of Cua's desktop image
+ * (`libs/images/common/desktop/start-desktop.sh`), and the window manager that of XFCE, which Cua validates on.
+ */
+const DESKTOP = [
+  // Only the driver may write to the MCP stream. xvfb-run joins its command's stderr to stdout, and the session's
+  // services inherit stdout, so stdout is kept as descriptor 3 for the driver and everything else writes to stderr.
+  'exec 3>&1 >&2',
+  // The service may have a real session's environment (the account's service manager takes it in at a login). With
+  // these, an app would open in the Wayland session, or sign on to that session's manager, which ends its clients
+  // at a logout. The display, its key and the session bus are replaced below. The last two are what Cua's image
+  // unsets.
+  'unset WAYLAND_DISPLAY SESSION_MANAGER NO_AT_BRIDGE',
+  // The session mounts gvfs and starts dconf and an accessibility bus in its runtime folder, which would otherwise be
+  // the real session's.
+  'export XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR/infinichat-desktop"',
+  'mkdir -p -m 700 "$XDG_RUNTIME_DIR"',
+  'export GTK_MODULES=gail:atk-bridge GNOME_ACCESSIBILITY=1 QT_ACCESSIBILITY=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1',
+  'export MOZ_ENABLE_ACCESSIBILITY=1 ACCESSIBILITY_ENABLED=1',
+  `exec xvfb-run -a -s '-screen 0 1280x800x24 -dpi 96 +extension RANDR +extension GLX -noreset' `
+    + `dbus-run-session -- sh -c 'xfwm4 3>&- & exec "$HOME/${LINK}" mcp >&3 3>&-'`,
+].join('\n');
+
 /** The end of what a failed command wrote, where the installer says why. */
 function reason(error: unknown): string {
   const output = error instanceof Error && 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
   return output.trim().split('\n').slice(-3).join('\n') || (error instanceof Error ? error.message : String(error));
 }
 
-/**
- * The X display of the account's desktop session on Linux. The service starts with the account's service manager,
- * before a desktop session, so its own environment often lacks `DISPLAY`; the session hands it to the manager once
- * it is up. Undefined when the machine has no session to drive.
- */
-async function sessionDisplay(signal: AbortSignal): Promise<string | undefined> {
-  if (process.env.DISPLAY) return process.env.DISPLAY;
-  const shown = await run('systemctl', ['--user', 'show-environment'], { signal }).catch(() => undefined);
-  return /^DISPLAY=(\S+)$/m.exec(shown?.stdout ?? '')?.[1];
+/** Which of the desktop's programs this machine lacks, on the path the entry's command gets. */
+async function missingPrograms(signal: AbortSignal): Promise<string[]> {
+  const lacking = await run('/bin/sh', ['-c', 'for name; do command -v "$name" >/dev/null || echo "$name"; done', 'sh',
+    ...DESKTOP_PROGRAMS], { signal });
+  return lacking.stdout.split('\n').filter(Boolean);
 }
 
 /**
- * Cua Driver (github.com/trycua/cua, read at 0.47.6), which lets the agents see and operate this machine's desktop
- * apps as an MCP server: installed by its own installer when the account has none, and added to the MCP configuration
- * once, after that install. The entry is the user's from then on: removed or turned off, it stays so, since the driver
- * is installed. A native of the tools plugin's object (`tools-facet.ts`), which closes it with the host; that ends an
- * install under way, whose swap into place is atomic, so the next start tries again. Cua's installer, updater and
- * uninstaller own the driver's files, and the MCP connection its process, as any stdio server's (`McpServer`). On
- * macOS that process hands over to Cua's own app, which the system's permissions belong to and which asks for them.
+ * Cua Driver (github.com/trycua/cua, read at 0.47.6), which lets the agents see and operate desktop apps on this
+ * machine as an MCP server: installed by its own installer when the account has none, and added to the MCP
+ * configuration once, after that install. The entry is the user's from then on: removed or turned off, it stays so,
+ * since the driver is installed. A native of the tools plugin's object (`tools-facet.ts`), which closes it with the
+ * host; that ends an install under way, whose swap into place is atomic, so the next start tries again. Cua's
+ * installer, updater and uninstaller own the driver's files, and the MCP connection its process, as any stdio
+ * server's (`McpServer`). On macOS that process hands over to Cua's own app, which the system's permissions belong
+ * to and which asks for them. On Linux the connection's process is the driver's whole desktop (`DESKTOP`), in one
+ * process group that pi-mcp ends when the connection closes (`StdioTransport`): the apps the driver starts are its
+ * children and end with it, so nothing in the desktop could outlive it and the display goes too.
  */
 export class CuaDriver {
   private readonly controller = new AbortController();
@@ -71,9 +98,9 @@ export class CuaDriver {
   constructor(private readonly config: string) {}
 
   /**
-   * Installs the driver when the account has none and the machine a desktop to drive; one install at a time. Says
-   * that it did, for the caller to apply the configuration again, or resolves undefined when there was nothing to do;
-   * a failed install rejects with the installer's reason, and the next call tries again.
+   * Installs the driver when the account has none; one install at a time. Says that it did, for the caller to apply
+   * the configuration again, or resolves undefined when there was nothing to do. A failed install rejects with the
+   * installer's reason, as does a Linux machine that lacks a program of the desktop, and the next call tries again.
    */
   ensure(): Promise<string | undefined> {
     this.running ??= this.install().finally(() => {
@@ -89,20 +116,19 @@ export class CuaDriver {
   private async install(): Promise<string | undefined> {
     const { signal } = this.controller;
     if (existsSync(join(homedir(), LINK))) return undefined;
+    // A desktop of its own on Linux only: on macOS the driver hands over to Cua's app, which works on the real screen.
     const linux = platform() === 'linux';
-    // Linux only: on macOS the driver's app finds the screen itself.
-    const display = linux ? await sessionDisplay(signal) : undefined;
-    if (linux && display === undefined) return undefined;
     try {
+      // First, so a machine that could not give the driver its desktop gets no driver.
+      const missing = linux ? await missingPrograms(signal) : [];
+      if (missing.length > 0) throw new Error(`its desktop needs ${missing.join(', ')}, which this machine lacks`);
       await run('/bin/bash', ['-c', INSTALL], { signal, env: { ...process.env, ...SWITCHES } });
     } catch (error) {
       if (signal.aborted) return undefined;
       throw new Error(`Cua Driver could not be installed: ${reason(error)}`);
     }
-    // The MCP client adds an entry's `env` to the server's own (pi-mcp `StdioTransport`), and the driver finds the
-    // display's key and the session bus itself once it has the display (Cua `platform-linux/src/xauth.rs`).
-    addMcpServer(this.config, NAME, { command: `~/${LINK}`, args: ['mcp'],
-      ...(display === undefined ? {} : { env: { DISPLAY: display } }), toolExposure: LISTED });
+    addMcpServer(this.config, NAME, { ...(linux ? { command: 'sh', args: ['-c', DESKTOP] }
+      : { command: `~/${LINK}`, args: ['mcp'] }), toolExposure: LISTED });
     return 'Cua Driver installed.';
   }
 }

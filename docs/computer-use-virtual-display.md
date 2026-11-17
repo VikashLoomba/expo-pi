@@ -1,8 +1,9 @@
 # Handoff: computer use on a Linux machine with no display
 
-Written 2026-11-16 for the agent that picks this up on the owner's Linux machine. Nothing here is built yet. It
-records what the owner asked for, what was measured, what Cua does, and what still has to be decided. Delete this
-file when the work ships; `docs/server-plugins.md` is where the result is documented.
+Written 2026-11-16 for the agent that picks this up on the owner's Linux machine. The design is decided and the
+server change is written (see "What was decided" and "What remains" below); it is not released, and this machine's
+entry is not moved yet. Delete this file when the work ships; `docs/server-plugins.md`, "Linux: a desktop of its
+own", is where the result is documented.
 
 ## What the owner asked for
 
@@ -17,13 +18,14 @@ file when the work ships; `docs/server-plugins.md` is where the result is docume
 
 ## Where things stand (server 4.2.1)
 
-- `packages/infinichat-server/src/cua-driver.ts` installs Cua Driver when the account has none and, on Linux, a
-  desktop session, then adds the `cua-driver` server to `~/.infinichat/mcp.json` with `env.DISPLAY` and
-  `toolExposure: { get_guide: 'direct' }`. `tools-facet.ts` owns it; `mcp-config.ts` has `addMcpServer`.
-  `docs/server-plugins.md`, "Computer use: Cua Driver", describes all of it.
+- The released server, 4.2.1, installs Cua Driver when the account has none and, on Linux, a desktop session, then
+  adds the `cua-driver` server to `~/.infinichat/mcp.json` with `env.DISPLAY` and
+  `toolExposure: { get_guide: 'direct' }`. `tools-facet.ts` owns it; `mcp-config.ts` has `addMcpServer`. The change
+  in this checkout replaces the display with a desktop of the driver's own (`docs/server-plugins.md`).
 - This machine's live server (`infinichat.service`, a user unit, running from `~/.infinichat`, not from this
-  checkout) has the driver, 0.47.7 at `~/.local/bin/cua-driver`, and this entry:
-  `{"command":"~/.local/bin/cua-driver","args":["mcp"],"env":{"DISPLAY":":0"},"toolExposure":{"get_guide":"direct"}}`.
+  checkout) has the driver, 0.47.7 at `~/.local/bin/cua-driver`. Its entry was
+  `{"command":"~/.local/bin/cua-driver","args":["mcp"],"env":{"DISPLAY":":0"},"toolExposure":{"get_guide":"direct"}}`
+  until "What remains" below.
 - A real turn worked end to end on 2026-11-10: the prompt named `mcp__cua-driver`, the model called
   `get_desktop_state`, passed the PNG to `image()`, and Claude described it.
 
@@ -92,24 +94,39 @@ Speaking MCP over that command's stdin and stdout:
 Not tested: clicks, drags and scrolling; a real browser in the virtual display; the server's own MCP client against
 such a command; what a second copy of an app does while the real session runs the first.
 
-## What has to be decided, with the owner, before code
+## What was decided (2026-11-16, with the owner)
 
-AGENTS.md asks for a design and the owner's approval first. The questions the design has to answer:
+1. **Who owns the display: the entry's command.** The owner asked for the right design whatever its size. The other
+   shape, a display the tools object starts, would keep nothing: an app the driver launches is its child in its
+   process group (measured: same PGID), which pi-mcp ends with the connection, so a display that outlived the
+   driver would be empty. One owner also means no fixed display number, no start order and nothing to supervise.
+2. **When: always on Linux.** `sessionDisplay` is gone. The real session is the user's own edit of the entry.
+3. **What runs in it:** Xvfb through xvfb-run, `xfwm4`, 1280x800x24. No VNC.
+4. **Machines missing the programs** get no driver, and the install's failure names what is missing.
+5. **The entry that exists** on this machine moves by a hand edit after the code, which the owner approved; the owner
+   then runs `/reload-plugins` and tries a turn.
 
-1. **Who owns the display.** Two shapes, both from Cua:
-   - The entry's command starts it (Cua's CI and removed guide): the display lives exactly as long as the MCP
-     connection, which the server already owns, and the server gains almost no code. Its apps end when the
-     connection is replaced. See "How a reload treats servers" in `docs/server-plugins.md` for when that happens.
-   - The tools object starts it (Cua's images): the display outlives reconnects and ends with the host, at the
-     cost of a native that owns three processes.
-2. **When a machine gets a virtual display.** Always on Linux, or only when the session has no connected output.
-   Today a machine with no desktop session gets no driver at all (`sessionDisplay` in `cua-driver.ts`); with a
-   virtual display it could.
-3. **What runs in it.** Xvfb or Xvnc (which the owner could watch), which window manager, what size.
-4. **Machines missing the programs.** The server installs nothing with root. Say what happens there.
-5. **The entry that exists.** Once added, the entry is the user's and the server never rewrites it. This machine's
-   has `DISPLAY=:0`; moving it is a hand edit the owner approves, as for 4.2.1. The app is unreleased: no migration
-   code.
+## What remains
+
+- Commit the change (`src/cua-driver.ts`, `src/mcp-config.ts`, `docs/server-plugins.md`); the owner has not asked for
+  the commit yet.
+- This machine's `cua-driver` entry in `~/.infinichat/mcp.json` is replaced (2026-11-16 18:03) with the one the code
+  writes, taken from the code's own output. The running server still has the old connection, on `:0`, until the
+  owner's `/reload-plugins`; then a real turn. To go back: `"command": "~/.local/bin/cua-driver", "args": ["mcp"],
+  "env": { "DISPLAY": ":0" }` with the same `toolExposure`.
+- Release (4.2.2), on the owner's word.
+- Not verified: the newest driver (0.52.9 was downloaded and checked against its release's sums, but running it was
+  not permitted in that session; every run here used the installed 0.47.7); a real browser, where page clicks need
+  `delivery_mode: "foreground"`, and what its request for the keyring does (the service's environment names the real
+  session's `GNOME_KEYRING_CONTROL`); drags and scrolling; a second copy of an app that the real session also runs;
+  a Wayland machine; the live server with the entry.
+
+Verified in scratch runs with the installed driver, through pi-mcp's own `McpClient` and `StdioTransport`: the code's
+install path with a stand-in for Cua's installer writes the entry and `mcpConfiguration` reads it without a problem;
+that entry connects in about 125 ms with 66 tools and a 1280x800 screen and no transport error; on a GTK dialog,
+`launch_app`, `get_window_state`, an element click, `type_text` and a pixel click (background, through AT-SPI)
+worked; a close took 17 ms and left no process, socket, lock, mount or folder; a machine without the programs gets
+the message and no install.
 
 ## Rules that are not all in AGENTS.md
 
@@ -123,5 +140,8 @@ AGENTS.md asks for a design and the owner's approval first. The questions the de
   updates or removes the driver.
 - Cua's uninstaller finds daemons with `pgrep -f`, which also matches a shell whose command line names
   `cua-driver`; run it from a downloaded file.
+- Cua's installer ends every `cua-driver` of the account (`pkill -x cua-driver` in `_install-common.sh`), the live
+  server's too. Do not run it on this machine, not even into a scratch home; to try the install path, put a stand-in
+  `curl` first on a path that has no real one.
 - A release is the server package's lint, typecheck, build and `check`, the docs, a commit and push, then
   `pnpm release` there ("Release" in `docs/server-plugins.md`). Releasing from this machine has not been tried.
