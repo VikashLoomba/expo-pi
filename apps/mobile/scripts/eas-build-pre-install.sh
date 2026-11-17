@@ -9,4 +9,8 @@ if ! command -v cargo >/dev/null; then
   # shellcheck source=/dev/null
   . "$HOME/.cargo/env"
 fi
-bash "$(dirname "$0")/../../../packages/react-native-ssh/scripts/build-rust-ios.sh"
+library="$(cd "$(dirname "$0")/../../../packages/react-native-ssh" && pwd)"
+# EAS builds a simulator app for Intel Macs too (its destination is the generic simulator), and CocoaPods links no
+# slice that lacks one of the build's architectures. The library's script adds that slice when the target is there.
+(cd "$library/rust" && rustup target add x86_64-apple-ios)
+bash "$library/scripts/build-rust-ios.sh"
