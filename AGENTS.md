@@ -135,17 +135,19 @@ of that page's `expo start` and `eas simulator:start`:
 1. `npx @expo/agent-cli dev --ios --eas --plan` says what would run, and runs nothing. While EAS has a
    `development-simulator` build for the project's fingerprint it is one step, the dev server over a tunnel. An
    `eas build` step uses build minutes: expect one only after a native change (`npx @expo/agent-cli status` says).
-2. `npx @expo/agent-cli dev --ios --eas --detach --wait-ready --no-agent-skills` runs the plan: the dev server, and a
-   session with that build installed and opened on it, whose ID it prints. The session bills until it is stopped.
+2. `npx @expo/agent-cli dev --ios --eas --detach --wait-ready` runs the plan: the dev server, and a session with
+   that build installed and opened on it, whose ID it prints. The session bills until it is stopped.
 3. `npx @expo/agent-cli navigate <route> --eas` opens a screen there. `runtime:tree`, `runtime:tap`, `runtime:type`,
    `runtime:eval` and `runtime:errors` reach the app through the dev server: leave out `--ios`, which looks for a
    device on this machine. The CLI takes no screenshot, and taps and types only by testID, so for a screenshot and
    for an element without one use the session's own controls: `npx eas-cli@latest simulator:control
    screenshot.capture --output <file>`, `tap <x> <y>` (each from 0 to 1) and `type <text>`, with `--id <session>`.
-4. `npx @expo/agent-cli dev:stop --eas` ends the session and the dev server. Then delete `apps/mobile/.gitignore`,
-   which `expo start` writes on every run for what the root's `.gitignore` already lists. Any `.gitignore` there
-   changes the project's fingerprint, so while it stays the next plan starts with an `eas build` nobody needs.
-   `--no-agent-skills` keeps the run from also linking the packages' skills into `apps/mobile`.
+4. `npx @expo/agent-cli dev:stop --eas` ends the session and the dev server.
+
+`apps/mobile/.gitignore` holds only the blocks `expo start` and the CLI's skills sync generate, committed as they
+write them. Expo's fingerprint hashes that file (`bareGitIgnore`), so without it every run left a new one behind and
+the next plan began with an `eas build` nobody needed. A run leaves `git status` clean; a change to the file changes
+the fingerprint, and so needs a new `development-simulator` build.
 
 The remote simulator is not on the owner's network, so it reaches no machine over SSH: connecting to a machine is
 still checked on the iPhone, from TestFlight.
