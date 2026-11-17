@@ -251,17 +251,21 @@ sandbox closed and waits for the Harness's abort, so it resumes at the next star
 
 ## Claude through Claude Code
 
-On a machine, Claude goes through its Claude Code login instead of an Anthropic API key
-(`src/claude-code.ts`): pi-claude-code's provider (github.com/earendil-works/pi-claude-code, pinned to a commit in
-`package.json`; it is not on npm), registered as its own extension entry registers it, in place of pi-ai's Anthropic
-provider. The phone and the Mac app's own chats keep the API-key provider: the provider drives the `claude` program,
-which only a machine has. Claude Code keeps the login (`claude auth login` in the machine's terminal), so the
-credential store has nothing for it: the Providers screens show what pi-ai's availability check finds
-(`claude auth status`), read at the server's start and at each refresh of models. `claude` must be on the PATH of the
-account's login shell, which starts the server. The provider starts a `claude` process for a conversation's requests
-and keeps at most two warm for five minutes; the server ends them as it closes. The build copies the script the
-provider runs as its tool inventory, `inert-mcp.mjs`, beside InfiniChat's plugin, and a release ships it in the
-runtime.
+A machine offers Claude twice: through its Claude Code login (`src/claude-code.ts`), and with an Anthropic API key,
+pi-ai's Anthropic provider as every device registers it (`chat-providers.ts`). The Providers screens list each as its
+own section. A conversation that has no models yet takes those of the first connected provider, OpenAI before the
+others and then in the catalog's order, so with both connected and no OpenAI it starts on the API key.
+
+The first is pi-claude-code's provider (github.com/earendil-works/pi-claude-code, pinned to a commit in
+`package.json`; it is not on npm), registered as its own extension entry registers it; it names itself "Claude Code
+Subscription (Experimental)". The phone and the Mac app's own chats have only the API-key provider: Claude Code's
+drives the `claude` program, which only a machine has. Claude Code keeps the login (`claude auth login` in the
+machine's terminal), so the credential store has nothing for it: the Providers screens show what pi-ai's availability
+check finds (`claude auth status`), read at the server's start and at each refresh of models. `claude` must be on the
+PATH of the account's login shell, which starts the server. The provider starts a `claude` process for a
+conversation's requests and keeps at most two warm for five minutes; the server ends them as it closes. The build
+copies the script the provider runs as its tool inventory, `inert-mcp.mjs`, beside InfiniChat's plugin, and a release
+ships it in the runtime.
 
 ## Contract versions
 
@@ -303,12 +307,13 @@ it in place. `release.json` keeps its schema (`version`,
 push, then run `pnpm release` there. `--latest=false` is intentional: GitHub Latest belongs to the Mac app, not the
 server.
 
-Release 4.0.0 is the first on Chord v2, whose link protocol an app built for an earlier release cannot speak, and
-the reverse: an app asks a server behind it to update (`RemoteInfiniChat`), and says to update the app when a server
-ahead of it no longer serves its version of the contract (above). Release the server before the apps that need it. A server that fits the app but is older than the release
-the app was built with is offered its update: the connection says so (`RemoteConnection.update`), and the iPhone's
-chat screen shows a notice with Update above the input, which asks the server to update itself (`requestUpdate`,
-SIGHUP). The server then takes the newest release, restarts, and the app connects again.
+Release 4.0.0 is the first on Chord v2, whose link protocol an app built for an earlier release cannot speak, and the
+reverse: an app asks a server behind it to update (`RemoteInfiniChat`), and says to update the app when a server ahead
+of it no longer serves its version of the contract (above). Release the server before the apps that need it. A server
+that fits the app but is older than the release the app was built with is offered its update: the connection says so
+(`RemoteConnection.update`), and the iPhone's chat screen shows a notice with Update above the input, which asks the
+server to update itself (`requestUpdate`, SIGHUP). The server then takes the newest release, restarts, and the app
+connects again.
 
 A server installed from a release checks at startup, daily, and on SIGHUP. It verifies downloaded artifacts, closes
 its Harness and exits 75 for the service manager to restart it. Old runtime folders are cleaned on startup.

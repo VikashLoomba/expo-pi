@@ -8,8 +8,8 @@ updates itself; the apps only set one up on a machine that has none. For server 
 `docs/server-plugins.md`: the server, both apps and the shared client are on Chord v2 (the package since chord 1.5.1,
 its design in chord's `docs/design.md`); `/reload-plugins` rebuilds and reloads the user's plugins and applies
 `mcp.json` again; InfiniChat's own plugin and the tools plugin (code mode and MCP) change only by a release, which
-restarts the service. On a machine, Claude goes through its Claude Code login (pi-claude-code, a pinned git
-dependency of the server) instead of an Anthropic API key. The phone's SSH library,
+restarts the service. On a machine, Claude is offered through its Claude Code login (pi-claude-code, a pinned git
+dependency of the server) beside pi-ai's Anthropic provider, which takes an API key. The phone's SSH library,
 `@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
 `packages/react-native-ssh` (Rust engine, C FFI, Nitro module); `pnpm install` builds its `lib/`, and its iOS
 archives are built there by `bash scripts/build-rust-ios.sh` before an iOS build, neither committed; an EAS build

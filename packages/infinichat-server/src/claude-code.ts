@@ -3,21 +3,18 @@ import { createClaudeCodeProvider, PROVIDER_ID } from '@earendil-works/pi-claude
 import { CLAUDE_CODE_PROVIDER_ID } from '@pi-agent/infinichat/pi/claude-code';
 import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
 
-/** pi-ai's Anthropic provider, which takes an API key (`chat-providers.ts`). */
-const ANTHROPIC_PROVIDER_ID = 'anthropic';
 // The apps name the provider without loading it; this fails the typecheck when upstream renames it.
 PROVIDER_ID satisfies typeof CLAUDE_CODE_PROVIDER_ID;
 
 /**
- * Claude on a machine goes through its Claude Code login instead of an Anthropic API key (owner, 2026-11-10):
- * pi-claude-code's provider, registered as its own extension entry registers it (`src/index.ts`,
- * `pi.registerProvider(createClaudeCodeProvider())`), in place of pi-ai's Anthropic one. It drives the `claude`
- * program on the server's PATH, which keeps the login; the provider stores no credential, starts a `claude` process
- * per conversation's requests and keeps at most two warm for five minutes (its `ARCHITECTURE.md`, "Process reuse").
+ * Claude on a machine through its Claude Code login (owner, 2026-11-10): pi-claude-code's provider, registered as its
+ * own extension entry registers it (`src/index.ts`, `pi.registerProvider(createClaudeCodeProvider())`), beside pi-ai's
+ * Anthropic one, which takes an API key (owner, 2026-11-17: it had replaced that one). It drives the `claude` program
+ * on the server's PATH, which keeps the login; the provider stores no credential, starts a `claude` process per
+ * conversation's requests and keeps at most two warm for five minutes (its `ARCHITECTURE.md`, "Process reuse").
  * pi.dev lists no models for it, so it comes without `withPiCatalog`: it asks Claude Code for the account's.
  */
 export function registerClaudeCode(models: MutableModels): void {
-  models.deleteProvider(ANTHROPIC_PROVIDER_ID);
   models.setProvider(createClaudeCodeProvider());
 }
 
