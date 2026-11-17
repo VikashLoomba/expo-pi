@@ -207,8 +207,11 @@ test('independent strict main and compact high-water byte thresholds', async () 
         await appendMessage(tx, root.id, input('threshold plus one'));
         await publishNode(tx, root.id, { ref: [0, count], text: 'x', bytes: 1, builder });
         assert.ok(s[field].refs.length < count);
-        // Each view batches on its own size: the chat's batch only appends to the compactions' view.
-        if (field === 'main') assert.deepEqual(s.compact.refs, [...compactBefore, [0, count]]);
+        // Each view batches on its own size: the chat's batch only appends to the compactions' view. A copy is
+        // compared, as above: Bun's strict deepEqual does not take pi-durable's document proxy for an equal array,
+        // and composing that failure's message from the proxy never ends.
+        const compactAfter = s.compact.refs.map((ref): NodeRef => [ref[0], ref[1]]);
+        if (field === 'main') assert.deepEqual(compactAfter, [...compactBefore, [0, count]]);
       }, context);
     } finally {
       await h.close(context);
