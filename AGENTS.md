@@ -65,6 +65,9 @@ Run lint and typecheck before declaring any task done.
   and pi-durable at exact versions, and they on pi-schema); `pnpm why -r @earendil-works/pi-durable` then finds one
   version. The server's `runtime/package.json` pins the same versions (`scripts/build.mjs --check`), and
   `scripts/sync-daemons.mjs` pins pi-env's daemon to the same release.
+- An app and a server bind by `infinichat.remote` and `infinichat.mcp`. Change one with Chord's `evolve`, and map the
+  version before it where the server serves the type (`accepts`), so released apps keep working with newer servers;
+  never edit a released version or a schema it names (`docs/server-plugins.md`, "Contract versions").
 - Keep lines under about 120 characters, no multi-statement one-liners, and comments that explain why, not what.
 - Design before code: for non-trivial work, propose which upstream example you start from, any deviations, and the rough size compared with upstream's equivalent, and get approval before implementing. Size is a signal: a feature several times larger than upstream's equivalent means the design is wrong.
 

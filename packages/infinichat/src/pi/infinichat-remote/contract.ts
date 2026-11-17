@@ -1,4 +1,4 @@
-import { hostKind, method, remote } from '@earendil-works/chord';
+import { evolve, hostKind, method, remote } from '@earendil-works/chord';
 import { stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
 import {
   arr, bool, nul, num, obj, opt, str, union, type Schema, type Static,
@@ -142,10 +142,12 @@ export const SignInAttemptSchema = union([nul(), obj({
 export type SignInAttempt = Static<typeof SignInAttemptSchema>;
 
 /**
- * What the machine's InfiniChat offers, declared once: the server's store object holds these members for the host's
- * life, and the type clients hold re-exposes them (chord `docs/design.md` §6, "shared store, per-principal views").
+ * What the machine's InfiniChat offered at version 8 of its contract, which server 4.1.0 released: the base of the
+ * contract's history (chord `docs/design.md` §27), written in full and left as it is. An app built with a version
+ * binds by that version's fingerprint, which Chord computes from these schemas, so a change here, or to a schema
+ * this names, locks out every app on it. A change is an edit of the next version instead (`InfiniChatRemote`).
  */
-export const InfiniChatMembers = {
+const InfiniChatMembersV8 = {
   state: {
     snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
     server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
@@ -215,12 +217,38 @@ export const InfiniChatMembers = {
 };
 
 /**
- * InfiniChat as the machine that runs its Harness serves it: the same view, controls and transcript the phone shows,
- * and the operations of its screens.
+ * `setApiKey`'s arguments since version 9. `workspaceId` is Anthropic's: the workspace a key that isn't scoped to
+ * one acts in, saved with the key (`sign-in.ts`). It is a field of its own because a method's arguments are closed
+ * (design §5, "Arguments"), which the map a credential keeps it in is not.
  */
-export const InfiniChatRemote = remote('infinichat.remote', {
+const ApiKeySchema = obj({ providerId: str(), key: str(), workspaceId: opt(str()) });
+
+/**
+ * What the machine's InfiniChat offers now, declared once: the server's store object holds these members for the
+ * host's life, and the type clients hold re-exposes them (chord `docs/design.md` §6, "shared store, per-principal
+ * views"). Version 8's, with each later version's edits.
+ */
+export const InfiniChatMembers = {
+  state: InfiniChatMembersV8.state,
+  methods: { ...InfiniChatMembersV8.methods, setApiKey: method(ApiKeySchema) },
+};
+
+const InfiniChatRemoteV8 = remote('infinichat.remote', {
   version: 8,
   params: {},
   hostAddress: () => ServerHost(),
-  variants: { owner: InfiniChatMembers },
+  variants: { owner: InfiniChatMembersV8 },
 });
+
+/**
+ * InfiniChat as the machine that runs its Harness serves it: the same view, controls and transcript the phone shows,
+ * and the operations of its screens.
+ *
+ * Each version is Chord's `evolve` of the one before (design §27, "Contract evolution in code"), and the server maps
+ * the versions it still serves to the newest where it serves the type (`accepts`, `infinichat-server/src/facet.ts`),
+ * so an app keeps working with every server released after it. An app newer than the server is the one case Chord
+ * leaves waiting: it asks that server to update itself (`client.ts`).
+ *
+ * - 9: `setApiKey` takes a workspace ID.
+ */
+export const InfiniChatRemote = evolve(InfiniChatRemoteV8, (edit) => edit.args('setApiKey', ApiKeySchema));

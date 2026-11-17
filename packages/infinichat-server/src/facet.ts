@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { constant, defineFacet, local, untilAborted, type Ctx } from '@earendil-works/chord';
+import { constant, defineFacet, local, untilAborted, type AcceptsTable, type Ctx } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
 import { registryReader } from '@earendil-works/pi-durable';
@@ -59,10 +59,11 @@ const NO_REACH: ReachView = { reach: {}, pendingHostKeys: {} };
  * changes this plugin, and a release restarts the process (`update.ts`). The Harness reads its extensions from
  * `Extensions`: InfiniChat's own, contributed by this facet, the tools plugin's and installed plugins'. It opens the
  * database only while this machine holds the conversation (`ServerConversation`), so the object holds the holder
- * rather than the Harness itself.
+ * rather than the Harness itself. Its version follows its members, as Chord has every contract change bump it; this
+ * plugin is its only consumer, so it accepts no older one.
  */
 export const InfiniChatMachine = local('infinichat.machine', {
-  version: 1,
+  version: 2,
   params: {},
   members: { ...InfiniChatMembers.state, ...InfiniChatMembers.methods },
 });
@@ -73,6 +74,17 @@ const callContext = (ctx: Ctx<InfiniChatPrincipal>) =>
 
 /** This plugin's release, which the runtime it runs on reads here, holding none of its own (`main.ts`). */
 export const version = INFINICHAT_SERVER_VERSION;
+
+/**
+ * The versions of `infinichat.remote` this server still serves besides the newest, each with what its later edits
+ * need mapped (chord `docs/design.md` §27, "Mappings live with the provider"), so the apps released with them keep
+ * working with this server. A version is dropped only once no app on it is in use.
+ *
+ * - 8: its `setApiKey` arguments are the newest's without a workspace ID.
+ */
+const ACCEPTED: AcceptsTable<typeof InfiniChatRemote> = {
+  8: { methods: { setApiKey: { args: (old) => old } } },
+};
 
 /**
  * InfiniChat's server plugin: the facet a server host loads from its runtime (`main.ts`), given the process as start
@@ -241,7 +253,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       signIn: async ({ providerId }) => signIn.value.signIn(providerId),
       answer: async ({ promptId, value }) => done(signIn.value.answer(promptId, value)),
       cancelSignIn: async () => done(signIn.value.cancel()),
-      setApiKey: async ({ providerId, key }) => done(signIn.value.setApiKey(providerId, key)),
+      setApiKey: async ({ providerId, key, workspaceId }) =>
+        done(signIn.value.setApiKey(providerId, key, workspaceId)),
       signOut: async ({ providerId }) => done(signIn.value.signOut(providerId)),
       refreshCatalog: async () => {
         const models = account.value.models;
@@ -304,5 +317,5 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
         acceptHostKey: machine.acceptHostKey,
       },
     };
-  });
+  }, { accepts: ACCEPTED });
 });

@@ -263,6 +263,34 @@ and keeps at most two warm for five minutes; the server ends them as it closes. 
 provider runs as its tool inventory, `inert-mcp.mjs`, beside InfiniChat's plugin, and a release ships it in the
 runtime.
 
+## Contract versions
+
+`infinichat.remote` and `infinichat.mcp` (`packages/infinichat/src/pi/infinichat-remote/contract.ts` and
+`mcp-contract.ts`) are what an app and a server bind by: a hold carries the app's version of the contract and its
+fingerprint, and binds only to a server that serves that version (design §5, "Compatibility"). They change as Chord's
+design has a contract change (§27, "Contract evolution in code"; `docs/layer-1.md`, "Evolution"):
+
+- The oldest version still served is the history's base, a `remote()` written in full. It stays as it was released,
+  and so do the schemas it names: Chord computes a version's fingerprint from them, so an edit to one changes the
+  fingerprint of every version that has it and locks out the apps built with those. A schema that has to change gets
+  a new definition, which the next version takes. The schemas pi's packages supply count too
+  (`ModelThinkingLevelSchema` in a chat's model settings): a pi upgrade that changes one is a contract change.
+- Each later version is `evolve(previous, edits)`, one version per release that changes the contract, an added
+  member included.
+- The server serves the older versions with `accepts` on `host.serve` (`ACCEPTED` in `src/facet.ts`): for each
+  member a later edit changed or removed, a mapping of the old arguments to the new, or of the new state or result
+  to the old; an added member needs none. TypeScript requires exactly those mappings, and Chord checks the table
+  against the history when the plugin loads.
+- So an app works with every server released after it. The other direction has no mapping: an app newer than the
+  server waits with `contract_mismatch`, and asks that server to update itself (`RemoteInfiniChat`). The server is
+  still released before the apps that need it.
+- Dropping a version from `ACCEPTED`, or a new base (a change of params or of the variant set is one), refuses the
+  apps on the versions left out, which are told to update. That is the owner's decision.
+
+`infinichat.remote` is at version 9 over the base 8, which server 4.1.0 released. `infinichat.mcp` is at its base,
+version 1. The Mac app's own contracts (`apps/mac/src/contract.ts`) are between its main process and its window, one
+build, so they have no older version to serve.
+
 ## Release
 
 The tools plugin is part of the runtime's `main.js`. The runtime tarball also holds
@@ -276,8 +304,8 @@ push, then run `pnpm release` there. `--latest=false` is intentional: GitHub Lat
 server.
 
 Release 4.0.0 is the first on Chord v2, whose link protocol an app built for an earlier release cannot speak, and
-the reverse: an app asks a server behind it to update (`RemoteInfiniChat`), and says to update the app when the server
-is ahead. Release the server before the apps that need it. A server that fits the app but is older than the release
+the reverse: an app asks a server behind it to update (`RemoteInfiniChat`), and says to update the app when a server
+ahead of it no longer serves its version of the contract (above). Release the server before the apps that need it. A server that fits the app but is older than the release
 the app was built with is offered its update: the connection says so (`RemoteConnection.update`), and the iPhone's
 chat screen shows a notice with Update above the input, which asks the server to update itself (`requestUpdate`,
 SIGHUP). The server then takes the newest release, restarts, and the app connects again.

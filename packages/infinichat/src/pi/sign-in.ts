@@ -1,5 +1,6 @@
 import type { AuthPrompt, LoginOptions, Models, ProviderAuthInteraction } from '@earendil-works/pi-ai';
 import { AuthPromptController } from '../chat/auth-prompt-controller';
+import { ANTHROPIC_PROVIDER_ID, ANTHROPIC_WORKSPACE_ID_ENV } from './anthropic-workspace';
 import type { SignInAttempt } from './infinichat-remote/contract';
 import type { ShownAttempt, ShownAuthPrompt } from './infinichat-remote/sign-in-attempt';
 import { OPENAI_PROVIDER_ID } from './openai-auth/core';
@@ -164,15 +165,25 @@ export class ProviderSignIn {
     this.attempts.cancel();
   }
 
-  async setApiKey(providerId: string, input: string): Promise<void> {
+  /**
+   * Saves `input` as the provider's API key, in place of what it had. `workspaceId` is Anthropic's: the workspace a
+   * key that isn't scoped to one acts in, saved with the key as pi-ai's own logins save the settings that go with
+   * one (`providers/cloudflare-auth.ts`), and sent with each request (`anthropic-workspace.ts`).
+   */
+  async setApiKey(providerId: string, input: string, workspaceId?: string): Promise<void> {
     if (this.attempts.busy) throw new Error('Finish or cancel sign-in before changing provider credentials.');
     const key = input.trim();
     if (!key) throw new Error('Enter an API key.');
     if (!this.models.getProvider(providerId)?.auth.apiKey?.login) {
       throw new Error('This provider does not support API key sign-in.');
     }
+    const workspace = workspaceId?.trim();
+    if (workspace && providerId !== ANTHROPIC_PROVIDER_ID) {
+      throw new Error('Only an Anthropic API key takes a workspace ID.');
+    }
     // Pi's store contract has one write path, the same `modify` that `models.login` ends in.
-    await this.credentials.modify(providerId, async () => ({ type: 'api_key', key }));
+    await this.credentials.modify(providerId, async () => ({ type: 'api_key', key,
+      ...(workspace ? { env: { [ANTHROPIC_WORKSPACE_ID_ENV]: workspace } } : {}) }));
   }
 
   async signOut(providerId: string): Promise<void> {

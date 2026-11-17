@@ -44,8 +44,10 @@ const NO_MESSAGES: readonly ChatMessage[] = [];
 const NO_REPORT: InfiniChatSnapshot = {};
 /**
  * The server and this app do not fit: its handshake failed, which the host reports as `protocol_error` (chord
- * `docs/design.md` §3, `onError`), or it serves another version of the contract, which leaves the hold waiting with
- * `contract_mismatch` (§5, "Compatibility"). One of the two has to load new code.
+ * `docs/design.md` §3, `onError`), or it serves no version of the contract this app can bind, which leaves the hold
+ * waiting with `contract_mismatch` (§5, "Compatibility"). A server serves the versions released before its own
+ * (`accepts`, `contract.ts`), so that is a server older than this app, or one that has dropped this app's version.
+ * One of the two has to load new code.
  */
 class Mismatch extends Error {}
 
@@ -264,8 +266,10 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.act((ref, ctx) => ref.cancelSignIn(ctx));
   }
 
-  setApiKey(providerId: string, key: string): Promise<void> {
-    return this.act((ref, ctx) => ref.setApiKey({ providerId, key }, ctx));
+  /** Saves the machine's API key for a provider; `workspaceId` is Anthropic's (`ProviderSignIn.setApiKey`). */
+  setApiKey(providerId: string, key: string, workspaceId?: string): Promise<void> {
+    return this.act((ref, ctx) =>
+      ref.setApiKey({ providerId, key, ...(workspaceId === undefined ? {} : { workspaceId }) }, ctx));
   }
 
   signOut(providerId: string): Promise<void> {
@@ -468,8 +472,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
    * One attempt: dials the machine's server, which sets it up only when needed, then connects the client host over its
    * link and holds the reference. When the server refuses the socket, this app's key is written again and the server
    * started, unless this attempt already did. A server that doesn't fit this app (`Mismatch`) is either behind it, and
-   * asked to update itself, or ahead of it. A server behind this app that closes the link before the reference is live
-   * counts as one too: a release from before Chord v2 answers this app's handshake with its own protocol's close.
+   * asked to update itself, or ahead of it and no longer serving its version. A server behind this app that closes the
+   * link before the reference is live counts as one too: a release from before Chord v2 answers this app's handshake
+   * with its own protocol's close.
    */
   private async connect(signal: AbortSignal): Promise<void> {
     const session: Session = { live: false };
