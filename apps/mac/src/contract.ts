@@ -84,7 +84,7 @@ export type MoveStatus = Static<typeof MoveStatusSchema>;
  * `ShownInfiniChat` carries them across moves, the connection to that machine, and the operations of its screen.
  */
 export const MacInfiniChat = remote('infinichat.mac.conversation', {
-  version: 1,
+  version: 2,
   params: {},
   hostAddress: () => MacMain(),
   variants: {
@@ -139,7 +139,8 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         signIn: method(obj({ providerId: str() }), num()),
         answer: method(obj({ promptId: num(), value: str() })),
         cancelSignIn: method(),
-        setApiKey: method(obj({ providerId: str(), key: str() })),
+        // `workspaceId` is Anthropic's, saved with its key (`ProviderSignIn.setApiKey`).
+        setApiKey: method(obj({ providerId: str(), key: str(), workspaceId: opt(str()) })),
         signOut: method(obj({ providerId: str() })),
       },
     },
@@ -319,7 +320,7 @@ export const MacChat = remote('infinichat.mac.chat', {
  * Providers pane and the providers sheet share their list.
  */
 export const MacAccount = remote('infinichat.mac.account', {
-  version: 1,
+  version: 2,
   params: {},
   hostAddress: () => MacMain(),
   variants: {
@@ -330,7 +331,8 @@ export const MacAccount = remote('infinichat.mac.account', {
         signIn: method(obj({ providerId: str() }), num()),
         answer: method(obj({ promptId: num(), value: str() })),
         cancelSignIn: method(),
-        setApiKey: method(obj({ providerId: str(), key: str() })),
+        // `workspaceId` is Anthropic's, saved with its key (`ProviderSignIn.setApiKey`).
+        setApiKey: method(obj({ providerId: str(), key: str(), workspaceId: opt(str()) })),
         signOut: method(obj({ providerId: str() })),
       },
     },

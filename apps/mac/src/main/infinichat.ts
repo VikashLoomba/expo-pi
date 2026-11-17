@@ -118,8 +118,8 @@ export class MacInfiniChat {
     return this.connected().cancelSignIn();
   }
 
-  setApiKey(providerId: string, key: string): Promise<void> {
-    return this.connected().setApiKey(providerId, key);
+  setApiKey(providerId: string, key: string, workspaceId?: string): Promise<void> {
+    return this.connected().setApiKey(providerId, key, workspaceId);
   }
 
   signOut(providerId: string): Promise<void> {

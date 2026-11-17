@@ -98,7 +98,8 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         signIn: async ({ providerId }) => infinichat.signIn(providerId),
         answer: async ({ promptId, value }) => done(infinichat.answer(promptId, value)),
         cancelSignIn: async () => done(infinichat.cancelSignIn()),
-        setApiKey: async ({ providerId, key }) => done(infinichat.setApiKey(providerId, key)),
+        setApiKey: async ({ providerId, key, workspaceId }) =>
+          done(infinichat.setApiKey(providerId, key, workspaceId)),
         signOut: async ({ providerId }) => done(infinichat.signOut(providerId)),
       },
     };

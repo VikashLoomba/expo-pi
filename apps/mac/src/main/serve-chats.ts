@@ -132,7 +132,8 @@ export function serveChats(host: FacetHost<MacPrincipal>, chats: Chats, account:
         signIn: async ({ providerId }) => account.signIn.signIn(providerId),
         answer: async ({ promptId, value }) => done(account.signIn.answer(promptId, value)),
         cancelSignIn: async () => done(account.signIn.cancel()),
-        setApiKey: async ({ providerId, key }) => done(account.signIn.setApiKey(providerId, key)),
+        setApiKey: async ({ providerId, key, workspaceId }) =>
+          done(account.signIn.setApiKey(providerId, key, workspaceId)),
         signOut: async ({ providerId }) => done(account.signIn.signOut(providerId)),
       },
     };
