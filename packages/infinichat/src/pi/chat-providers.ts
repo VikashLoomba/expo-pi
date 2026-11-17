@@ -6,18 +6,19 @@ import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
 
+import { withAnthropicWorkspace } from './anthropic-workspace';
 import { withNativeWebSearch } from './native-web-search/provider';
 import { withPiCatalog } from './pi-catalog';
 
 /**
  * The providers chats offer on every device, in catalog order, with pi-ai's own auth and pi.dev's newer models. OpenAI
- * carries the native web search decorator, which acts only on requests a Harness's search bridge binds. A host replaces
- * what its sign-ins need with `setProvider`, which keeps a provider's place. Individual imports preserve Metro's lazy,
- * mobile-safe SDK boundaries.
+ * carries the native web search decorator, which acts only on requests a Harness's search bridge binds, and Anthropic
+ * the one that sends the workspace saved with its key. A host replaces what its sign-ins need with `setProvider`, which
+ * keeps a provider's place. Individual imports preserve Metro's lazy, mobile-safe SDK boundaries.
  */
 export function registerChatProviders(models: MutableModels) {
-  for (const provider of [withNativeWebSearch(openaiProvider()), anthropicProvider(), deepseekProvider(),
-    googleProvider(), openrouterProvider(), xaiProvider()]) {
+  for (const provider of [withNativeWebSearch(openaiProvider()), withAnthropicWorkspace(anthropicProvider()),
+    deepseekProvider(), googleProvider(), openrouterProvider(), xaiProvider()]) {
     models.setProvider(withPiCatalog(provider));
   }
 }
