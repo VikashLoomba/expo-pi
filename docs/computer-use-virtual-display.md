@@ -108,13 +108,13 @@ such a command; what a second copy of an app does while the real session runs th
 
 ## What remains
 
-- Commit the change (`src/cua-driver.ts`, `src/mcp-config.ts`, `docs/server-plugins.md`); the owner has not asked for
-  the commit yet.
+- The change is committed (`7d469bc`) and released as 4.2.2 (2026-11-16, from this machine: `pnpm release` works
+  here). A machine's server takes a release at its start, daily, or on SIGHUP, and restarts into it.
 - This machine's `cua-driver` entry in `~/.infinichat/mcp.json` is replaced (2026-11-16 18:03) with the one the code
-  writes, taken from the code's own output. The running server still has the old connection, on `:0`, until the
-  owner's `/reload-plugins`; then a real turn. To go back: `"command": "~/.local/bin/cua-driver", "args": ["mcp"],
-  "env": { "DISPLAY": ":0" }` with the same `toolExposure`.
-- Release (4.2.2), on the owner's word.
+  writes, taken from the code's own output. The running server has the old connection, on `:0`, until the owner's
+  `/reload-plugins` or the server's own restart into 4.2.2; then a real turn, which is what is left before this file
+  goes. To go back: `"command": "~/.local/bin/cua-driver", "args": ["mcp"], "env": { "DISPLAY": ":0" }` with the
+  same `toolExposure`.
 - Not verified: the newest driver (0.52.9 was downloaded and checked against its release's sums, but running it was
   not permitted in that session; every run here used the installed 0.47.7); a real browser, where page clicks need
   `delivery_mode: "foreground"`, and what its request for the keyring does (the service's environment names the real
@@ -144,4 +144,4 @@ the message and no install.
   server's too. Do not run it on this machine, not even into a scratch home; to try the install path, put a stand-in
   `curl` first on a path that has no real one.
 - A release is the server package's lint, typecheck, build and `check`, the docs, a commit and push, then
-  `pnpm release` there ("Release" in `docs/server-plugins.md`). Releasing from this machine has not been tried.
+  `pnpm release` there ("Release" in `docs/server-plugins.md`). It works from this machine (4.2.2).
