@@ -5,7 +5,7 @@ import { FlashList } from '@shopify/flash-list';
 import { GlassView } from 'expo-glass-effect';
 import { router } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { memo, useCallback, useMemo, useState, type ReactNode, type Ref } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import {
   ActivityIndicator, PlatformColor, Pressable, StyleSheet, Text, View, type ScrollViewProps,
 } from 'react-native';
@@ -19,7 +19,7 @@ import { useChatControls, useChatError, useChatMessages, useChatStatus } from '@
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { useTranscriptScroll } from '@/hooks/use-transcript-scroll';
 import { ChatIcon, type ChatIconName } from './icon';
-import { TurnItem, type OnLoadHistory } from './turn-item';
+import { TurnItem, type OnLoadHistory, type RunFrame } from './turn-item';
 import { AgentMark, useChatAgentName } from './agent';
 import { ActionButton } from './primitives';
 
@@ -50,7 +50,10 @@ function EmptyConversation({ onChoose }: { onChoose: (text: string) => void }) {
 }
 
 const keyExtractor = (turn: Turn) => turn.id;
-const NO_TURNS: readonly string[] = [];
+const NO_RUNS: readonly string[] = [];
+
+/** A turn that has begun: its input is placed. One still waiting shows under other IDs until then. */
+const begun = (turn: Turn): boolean => turn.opener !== undefined && turn.opener.queued === undefined;
 
 /**
  * FlashList's chat setting, as its docs give it: the list opens on the newest message; near it, new and streaming
@@ -82,9 +85,9 @@ function ChatScrollView({ composerHeight, onEndVisible, ...props }: ScrollViewPr
  * Only this subtree subscribes to text deltas. `memo` stays because the chat screen that renders it is not compiled
  * by React Compiler (it contains `try … finally`). The composer floats over the transcript and moves with the
  * keyboard. The thread is folded by turn (owner, 2026-10-29): the person's messages and the agent's replies as they
- * are, the steps between them folded in every turn, the newest too, a tap on a run's summary opening its turn's
- * steps, and a new turn folding the rest again. It holds the newest turns; a row above them loads earlier ones as the
- * reader scrolls up, and FlashList keeps the reader's place as they arrive.
+ * are, the steps between them folded in every turn, the newest too, a tap on a run's summary opening that run, and a
+ * new turn folding the rest again. It holds the newest turns; a row above them loads earlier ones as the reader
+ * scrolls up, and FlashList keeps the reader's place as they arrive.
  */
 export const ChatTranscript = memo(function ChatTranscript({
   view, ready, stopping, onChoose, onSteerQueued, composer,
@@ -101,29 +104,68 @@ export const ChatTranscript = memo(function ChatTranscript({
   const status = useChatStatus(view);
   const error = useChatError(view);
   const turns = useMemo(() => turnsOf(messages), [messages]);
-  // The turns open: the ones the reader opened since the newest turn began; a new turn closes them all again.
-  const newest = turns.at(-1)?.id;
+  // The runs open: the ones the reader opened since the newest turn began; a new turn closes them all again. A
+  // queued message is not a turn yet, so the run the reader watches stays open until that message's turn starts.
+  const newest = turns.filter(begun).at(-1)?.id;
   const [opened, setOpened] = useState<{ newest: string | undefined; open: readonly string[] }>(
-    () => ({ newest, open: NO_TURNS }));
-  if (opened.newest !== newest) setOpened({ newest, open: NO_TURNS });
-  const toggle = (id: string) => setOpened((current) => ({
-    ...current,
-    open: current.open.includes(id) ? current.open.filter((other) => other !== id) : [...current.open, id],
-  }));
+    () => ({ newest, open: NO_RUNS }));
+  if (opened.newest !== newest) setOpened({ newest, open: NO_RUNS });
+  const { listRef, onEndVisible, scrollToLatest, showScrollDown } = useTranscriptScroll();
+  const composerHeight = useSharedValue(0);
+  const { bottom } = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
+  // A run the reader just opened, until FlashList has laid it out: its turn's row and that row's height before, and
+  // where the run was in it.
+  const opening = useRef<({ index: number; row: number } & RunFrame) | undefined>(undefined);
+  const toggle = (index: number, run: string, frame: RunFrame) => {
+    const row = listRef.current?.getLayout(index);
+    const closing = opened.open.includes(run);
+    opening.current = closing || !row ? undefined : { index, row: row.height, ...frame };
+    setOpened((current) => ({
+      ...current, open: closing ? current.open.filter((other) => other !== run) : [...current.open, run],
+    }));
+  };
+  /**
+   * An opened run unfolds under its summary, which stays where the reader tapped it. The list moves only as far as
+   * showing the steps takes: not at all while they end above the composer; to the thread's end when the run is its
+   * last thing, the work under way, where FlashList goes on following it; and otherwise until the steps' end is in
+   * view or the summary is under the header, whichever comes first. FlashList's `scrollToIndex` puts the summary
+   * there, but it stops at FlashList's own last offset, which leaves out the footer and the composer's inset, so the
+   * shorter moves are plain scrolls. This runs once the row is laid out (`onCommitLayoutEffect`), and scrolls a
+   * frame later, outside FlashList's own layout pass.
+   */
+  const settle = () => {
+    const run = opening.current;
+    const list = listRef.current;
+    const row = run && list?.getLayout(run.index);
+    if (!run || !list || !row) return;
+    opening.current = undefined;
+    const first = list.getFirstItemOffset();
+    const top = first + row.y + run.top;
+    const end = top + run.height + row.height - run.row;
+    // The offsets that put the summary under the header, and the steps' end above the composer.
+    const summary = top - headerHeight;
+    const shown = end - list.getWindowSize().height + bottom + composerHeight.get();
+    if (shown <= list.getAbsoluteLastScrollOffset()) return;
+    const last = end >= first + list.getChildContainerDimensions().height - 1;
+    requestAnimationFrame(() => {
+      if (last) scrollToLatest();
+      else if (summary <= shown) {
+        void list.scrollToIndex({ index: run.index, viewOffset: run.top - headerHeight, animated: true });
+      } else list.scrollToOffset({ offset: shown, animated: true });
+    });
+  };
   // The history rows load through the view, which pages its transcript (pi-durable's `ConversationTranscript`).
   const loadHistory = useCallback<OnLoadHistory>(async (history) => {
     if (!view) return;
     if (history.kind === 'earlier') await view.loadEarlier();
     else await view.fillGap(history);
   }, [view]);
-  const renderTurn = ({ item }: { item: Turn }) =>
-    <TurnItem turn={item} open={opened.open.includes(item.id)} onToggle={() => toggle(item.id)} stopping={stopping}
+  const renderTurn = ({ item, index }: { item: Turn; index: number }) =>
+    <TurnItem turn={item} open={opened.open} onToggle={(run, frame) => toggle(index, run, frame)} stopping={stopping}
       onSteerQueued={onSteerQueued} onLoadHistory={loadHistory} />;
   const working = stopping ? 'Stopping…' : controls?.waiting ?? (controls?.compacting
     ? 'Summarizing earlier messages…' : controls?.retrying ? 'Retrying…' : `${agentName} is thinking…`);
-  const { listRef, onEndVisible, scrollToLatest, showScrollDown } = useTranscriptScroll();
-  const composerHeight = useSharedValue(0);
-  const { bottom } = useSafeAreaInsets();
   // FlashList renders this as a component, so it needs one identity for the life of the list.
   const renderScrollComponent = useCallback((props: ScrollViewProps) =>
     <ChatScrollView {...props} composerHeight={composerHeight} onEndVisible={onEndVisible} />,
@@ -144,7 +186,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   return <View style={styles.transcript}>
     {placeholder ?? <FlashList ref={listRef} testID="message-list" data={turns} keyExtractor={keyExtractor}
       renderItem={renderTurn} extraData={opened.open} renderScrollComponent={renderScrollComponent}
-      maintainVisibleContentPosition={chatPosition}
+      maintainVisibleContentPosition={chatPosition} onCommitLayoutEffect={settle}
       keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" scrollEventThrottle={16}
       contentContainerStyle={[styles.messages, !messages.length && styles.grow]}
       ListEmptyComponent={<EmptyConversation onChoose={onChoose} />}

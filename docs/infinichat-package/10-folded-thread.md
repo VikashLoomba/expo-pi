@@ -29,11 +29,41 @@ A turn is the input that opened it (OptChat's fresh turn: the person's message, 
 own) and everything until the next, steers included. The person's messages and the agent's replies show as they
 are, in every turn. The steps between a message and a reply (thinking, searches, tool calls, reports, notices) are a
 run under a summary line, "Worked in 7 steps", that opens as the Chain of Thought pattern opens an agent's steps.
-Every run is closed, the newest turn's too, until a click or tap on its summary opens its turn's runs; the summary
-line says when a run is working; a new turn closes the rest again. Nothing changes in the prompt. (First built with
-the newest turn's runs open; the owner asked the same day that nothing open on its own, so on the Mac the thinking
-row no longer opens while it streams, a failed tool no longer opens on its error, and an agent's report is closed
-too.)
+Every run is closed, the newest turn's too, until a click or tap on its summary: on the Mac it opens its turn's runs,
+on the phone that run alone (below). The summary line says when a run is working; a new turn closes the rest again.
+Nothing changes in the prompt. (First built with the newest turn's runs open; the owner asked the same day that
+nothing open on its own, so on the Mac the thinking row no longer opens while it streams, a failed tool no longer
+opens on its error, and an agent's report is closed too.)
+
+## The phone's runs (owner, 2026-11-17)
+
+Asked to find what was wrong with opening a run on the phone, then: "All of 1, 2 and 3 need to be fixed. The key
+thing is that I want a good user experience."
+
+1. **A run shows steps, not messages.** It rendered each row with the whole `MessageRow`, so a reply that has
+   thinking or searches (which `blocksOf` puts in the run and after it) showed its text, sources and copy action
+   twice, and every thinking step carried the avatar, the agent's name and an empty copy row. `StepRow`
+   (`step-row.tsx`) is the Mac's `StepRows` for the phone, and `MessageRow` no longer shows steps at all.
+2. **A tap opens that run.** A turn has a run for every stretch of work between two replies, all in one FlashList
+   row; opening them together pushed the tapped line down by the height of the runs above it. The open set holds
+   runs, `<turn ID>/<block ID>`, and a block's ID is its place in the turn, because a run's first row changes when a
+   response that began with nothing to show turns out to be tool calls.
+3. **The list moves only as far as showing the run takes.** FlashList follows the end
+   (`maintainVisibleContentPosition.autoscrollToBottomThreshold`, `useBoundDetection.ts` in 2.3.2) on the next
+   change of its data while the list is still near the end, not the moment a row grows: on the simulator a run
+   opened at the end of a finished thread stayed where it was. So a small run opened near the end is carried up by
+   the next streamed row, and the last run of a thread, whose summary is the line above the composer, opens under
+   the composer. Once FlashList has laid the opened run out (`onCommitLayoutEffect`), `settle` in `transcript.tsx`
+   leaves the list alone while the steps end above the composer; goes to the thread's end when the run is its last
+   thing, where FlashList goes on following the work; and otherwise scrolls until the steps' end is in view or the
+   summary is under the header, whichever comes first. FlashList's `scrollToIndex` ends at FlashList's own last
+   offset, which leaves out the footer, the list's bottom padding and keyboard-controller's inset for the composer
+   (about 200 points here), so only the move that puts the summary under the header uses it; the others are
+   `scrollToEnd` and `scrollToOffset`.
+
+With them: the summary keeps its chevron while its run works, so it shows whether it is open; and a new turn is one
+whose input is placed, so a message that waits in the queue (three row IDs from sent to placed) no longer closes
+the run the reader watches, once when sent and again when its turn starts.
 
 ## As built
 
@@ -49,10 +79,11 @@ too.)
   `ReportRow`, a notice `Marker`, or a reply's `ReasoningRow` and `SearchRows`. The working line is the newest
   turn's last row. The open set is empty whenever a new turn begins, plus the turns the reader opened since; the
   thread opens on the newest turn's start and settles a new one there.
-- **The phone** (`turn-item.tsx`, `message-row.tsx`, `transcript.tsx`): the same as a FlashList of turns; a run's
-  summary is a pressable line with a spinner while it works, its steps the existing `MessageRow`s under a hairline
-  rule; a reply shown by itself hides its thinking and searches (`hideSteps`), which are in the run. The regular chat
-  screen shares the component, so its threads fold by turn too.
+- **The phone** (`turn-item.tsx`, `message-row.tsx`, `step-row.tsx`, `transcript.tsx`): the same as a FlashList of
+  turns; a run's summary is a pressable line with a spinner while it works and a chevron for whether it is open,
+  its steps `StepRow`s under a hairline rule: the tool card, a notice, and closed lines for a report and for a
+  reply's thinking, with its searches. The regular chat screen shares the component, so its threads fold by turn
+  too.
 
 ## Size
 
@@ -64,3 +95,12 @@ Verified on this Mac: the typechecks and lints; the server bundle rebuilt, which
 on the next connect. To verify by the owner on the Mac and the iPhone: every turn's steps folded under their
 summaries, the newest included, a click or tap opening a turn's steps, a send folding the rest, a steer staying in
 the open turn.
+
+The phone's runs (2026-11-17): typecheck, lint and the package's tests, and on an EAS iOS simulator
+(`development-simulator` build, Metro through the tunnel) with a scratch screen that gave `ChatTranscript` canned
+rows, since the simulator reaches no model: a run shows tool cards and a closed "Thought" line and the reply once,
+after it; a tap opens that run and leaves the turn's other run closed; at the end of a finished thread a two-step
+run opens under its summary, which does not move, a 25-step run comes to rest with its summary under the header
+(recorded: it opens in place, then glides, with no jump to the end), and closing it brings the thread back; the
+last run of a thread still working opens onto its newest step and stays there as steps arrive. Not checked: a real
+conversation on the iPhone, a queued message's turn starting while a run is open, VoiceOver.

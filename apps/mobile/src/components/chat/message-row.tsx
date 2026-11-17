@@ -3,26 +3,26 @@ import type { ChatMessage } from '@pi-agent/infinichat/chat/types';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useChatColors } from '@/hooks/use-chat-colors';
 import { AgentMark, useChatAgentName } from './agent';
 import { ChatIcon } from './icon';
 import { MessageContent } from './message-content';
 import { MessageImages } from './message-images';
-import { ToolCard } from './tool-card';
-import { WebSearchActivity, WebSearchSources } from './web-search';
+import { WebSearchSources } from './web-search';
 import { collectSearchSources } from '@pi-agent/infinichat/chat/web-search-presentation';
 
-export function MessageRow({ message, stopping = false, onSteerQueued, hideSteps = false }: {
+/**
+ * A message the folded thread shows: the person's text in a bubble, or the agent's reply with its sources and copy
+ * action. The steps around a reply, its own thinking and searches included, are a run of their own (`StepRow`).
+ */
+export function MessageRow({ message, stopping = false, onSteerQueued }: {
   message: ChatMessage; stopping?: boolean;
   onSteerQueued?: (submissionId: number, content: UserMessage['content']) => void;
-  /** A reply shown by itself: its thinking and searches are in the steps run before it. */
-  hideSteps?: boolean;
 }) {
   const colors = useChatColors();
   const agentName = useChatAgentName();
-  const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [steering, setSteering] = useState(false);
   const sources = message.webSearch ? collectSearchSources(message.webSearch) : [];
@@ -46,8 +46,6 @@ export function MessageRow({ message, stopping = false, onSteerQueued, hideSteps
     {message.images?.length ? <MessageImages images={message.images} messageId={message.id} /> : null}
     {message.text ? <Text testID={`message-${message.id}`} selectable style={[styles.userText, { color: colors.text }]}>{message.text}</Text> : null}
   </View>;
-  if (message.role === 'tool' && message.tool) return <View style={styles.toolWrapper}><ToolCard message={message} /></View>;
-  if (message.role === 'notice') return <Text selectable testID={`message-${message.id}`} style={[styles.notice, { color: colors.secondary }]}>{message.text}</Text>;
   if (message.role === 'user' && message.queued) return <View style={styles.userQueuedRow}>
     {userBubble}
     <View style={styles.queuedMeta}>
@@ -63,34 +61,15 @@ export function MessageRow({ message, stopping = false, onSteerQueued, hideSteps
     </View>
   </View>;
   if (message.role === 'user') return <View style={styles.userRow}>{userBubble}</View>;
-  // An agent's report is UniiChat's work message, "[Name]" and its text: the name heads the row and the text is its
-  // body, without the zoom pointer for the model, as UniiChat's `report_read` shows one.
-  const report = message.role === 'work'
-    ? /^\[([^\]\r\n]+)\]\s*([\s\S]*?)(?:\s*Full chat: zoom\("[^"\r\n]*"\))?\s*$/.exec(message.text)
-    : null;
-  const author = report?.[1] ?? agentName;
-  const body = report?.[2] ?? message.text;
   return <View testID={`message-${message.id}`} style={styles.assistant}>
     <View style={styles.assistantIdentity}>
       <AgentMark size={25} />
-      <Text style={[styles.assistantName, { color: colors.secondary }]}>{author}</Text>
+      <Text style={[styles.assistantName, { color: colors.secondary }]}>{agentName}</Text>
       <Text numberOfLines={1} style={[styles.streamingLabel, { color: colors.muted }]}>
         {message.streaming ? stopping ? 'Stopping…' : 'Responding' : message.interrupted ? 'Interrupted' : ' '}
       </Text>
     </View>
-    {!hideSteps && message.webSearch
-      ? <WebSearchActivity calls={message.webSearch.calls} messageId={message.id} /> : null}
-    {!hideSteps && message.thinking ? <View>
-      <Pressable testID={`thinking-${message.id}`} accessibilityRole="button" accessibilityState={{ expanded: thinkingExpanded }} onPress={() => setThinkingExpanded(!thinkingExpanded)} style={styles.thinkingHeader}>
-        <ChatIcon name="spark" color={colors.muted} size={14} />
-        <Text style={[styles.thinkingLabel, { color: colors.secondary }]}>Thinking</Text>
-        <ChatIcon name={thinkingExpanded ? 'down' : 'chevron'} color={colors.muted} size={11} />
-      </Pressable>
-      {thinkingExpanded && <Text selectable style={[styles.thinkingText, { color: colors.secondary, borderLeftColor: colors.border }]}>{message.thinking}</Text>}
-    </View> : null}
-    {body ? <MessageContent text={body} streaming={message.streaming} />
-      : message.streaming && !message.webSearch?.calls.some((call) => call.status === 'running')
-        ? <View style={styles.waiting}><ActivityIndicator size="small" color={colors.accent} /></View> : null}
+    {message.text ? <MessageContent text={message.text} streaming={message.streaming} /> : null}
     <WebSearchSources sources={sources} messageId={message.id} />
     {message.error ? <Text selectable style={[styles.messageError, { color: colors.danger }]}>{message.error}</Text> : null}
     <Pressable testID={`copy-${message.id}`} accessibilityRole="button" accessibilityLabel={copied ? 'Message copied' : 'Copy message'}
@@ -115,13 +94,7 @@ const styles = StyleSheet.create({
   assistantIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   assistantName: { fontSize: 13, fontWeight: '600' },
   streamingLabel: { flex: 1, fontSize: 12 },
-  waiting: { height: 25, alignItems: 'flex-start', justifyContent: 'center' },
   copyButton: { minHeight: 36, minWidth: 82, flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6 },
   copiedLabel: { fontSize: 12 },
-  thinkingHeader: { flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 32, alignSelf: 'flex-start' },
-  thinkingLabel: { fontSize: 13 },
-  thinkingText: { fontSize: 14, lineHeight: 21, borderLeftWidth: 2, paddingLeft: 12, marginVertical: 8 },
   messageError: { fontSize: 14, lineHeight: 21 },
-  notice: { fontSize: 13, lineHeight: 20, textAlign: 'center', paddingHorizontal: 14, paddingVertical: 18 },
-  toolWrapper: { paddingBottom: 16 },
 });

@@ -33,7 +33,9 @@ export function turnsOf(messages: readonly ChatMessage[]): Turn[] {
  * A turn as the thread shows it folded (owner, 2026-10-29: "just collapse the transcript turns and show agent
  * responses and user messages"): the person's messages and the agent's replies are shown, and the steps between
  * them, the thinking, searches, tool calls and reports, are a run that opens as the Chain of Thought pattern opens
- * an agent's steps. A reply's own thinking and searches belong to the run before it, so its row is in both.
+ * an agent's steps. A reply's own thinking and searches belong to the run before it, so its row is in both. A run's
+ * ID is its place among the turn's blocks, which holds while its rows change: its first row is replaced when a
+ * response that began with nothing to show turns out to be tool calls.
  */
 export type Block = { kind: 'message'; row: ChatMessage } | { kind: 'steps'; id: string; rows: ChatMessage[] };
 
@@ -48,7 +50,7 @@ export function blocksOf(rows: readonly ChatMessage[]): Block[] {
     if (steps(row)) {
       const last = blocks.at(-1);
       if (last?.kind === 'steps') last.rows.push(row);
-      else blocks.push({ kind: 'steps', id: `steps-${row.id}`, rows: [row] });
+      else blocks.push({ kind: 'steps', id: `steps-${blocks.length}`, rows: [row] });
     }
     if (row.role === 'user' || replies(row)) blocks.push({ kind: 'message', row });
   }
