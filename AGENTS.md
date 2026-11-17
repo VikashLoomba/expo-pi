@@ -105,9 +105,14 @@ and build once: `npx eas-cli@latest build:list --limit 5`, then `build:view <id>
 `artifacts.xcodeBuildLogsUrl` is the full Xcode log and whose `logFiles` are JSON lines with each line's phase
 (brotli-compressed, which `fetch` undoes and `curl` does not). After a store build, `submit:view <id>` says how far
 the submission got: `finished` is the upload to App Store Connect, and Apple's processing after it shows only there
-and in TestFlight. Each archive warns that the widget extension's build number is 1: expo-widgets sets it at
-prebuild, before EAS applies the remote number to the `Info.plist` files. The export and the upload go through
-with it.
+and in TestFlight.
+
+The build number is `ios.buildNumber` in `app.json` (`appVersionSource: "local"` in `eas.json`), which
+`autoIncrement` raises by one in that file as a store build starts: commit the change with the build. Expo
+recommends the remote source, but expo-widgets gives its extension the number the app config has at prebuild
+(`withTargetXcodeProject` in its plugin; expo/expo issue 43740), and EAS writes a remote number only into the
+`Info.plist` files, after prebuild. With the remote source the extension stayed at 1, and each archive warned that
+it did not match the app's.
 
 Without the Mac (a Linux machine such as the owner's server machine), follow Expo's "Use an iOS Simulator on Linux
 or Windows" (https://docs.expo.dev/eas/simulators/how-to/work-without-a-mac.md): build `development-simulator` when

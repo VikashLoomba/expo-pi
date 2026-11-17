@@ -13,6 +13,7 @@
     "ios": {
       "deploymentTarget": "26",
       "bundleIdentifier": "com.vikashloomba.piagent",
+      "buildNumber": "4",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
