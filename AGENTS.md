@@ -100,6 +100,15 @@ fails with `No signing certificate "Mac App Distribution" found`. So the phone b
 (`packages/infinichat-server/assets/pi-env-gz`, which `scripts/sync-daemons.mjs` writes beside the plain ones the Mac
 app ships) and inflates the one a machine needs (`daemon-assets.ts`).
 
+A build uses the owner's build minutes and a store build takes a new build number, so find a failure's cause first
+and build once: `npx eas-cli@latest build:list --limit 5`, then `build:view <id> --json`, whose
+`artifacts.xcodeBuildLogsUrl` is the full Xcode log and whose `logFiles` are JSON lines with each line's phase
+(brotli-compressed, which `fetch` undoes and `curl` does not). After a store build, `submit:view <id>` says how far
+the submission got: `finished` is the upload to App Store Connect, and Apple's processing after it shows only there
+and in TestFlight. Each archive warns that the widget extension's build number is 1: expo-widgets sets it at
+prebuild, before EAS applies the remote number to the `Info.plist` files. The export and the upload go through
+with it.
+
 Without the Mac (a Linux machine such as the owner's server machine), follow Expo's "Use an iOS Simulator on Linux
 or Windows" (https://docs.expo.dev/eas/simulators/how-to/work-without-a-mac.md): build `development-simulator` when
 native code changed (`npx @expo/agent-cli status` says), start Metro with `npx expo start --tunnel`, then
