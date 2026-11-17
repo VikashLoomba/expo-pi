@@ -1,3 +1,4 @@
+import { inflateAsync } from '@strawberrytech/react-native-nitro-zlib';
 import { Asset } from 'expo-asset';
 import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
 import { File } from 'expo-file-system';
@@ -9,14 +10,16 @@ export interface DaemonBinary { bytes: Uint8Array; sha256: string }
 type Target = keyof typeof PI_DAEMON_MANIFEST;
 
 // Literal asset references let Metro embed every supported remote target in the
-// standalone application. Nothing is downloaded from a registry on the phone.
+// standalone application. Nothing is downloaded from a registry on the phone. The copies are gzipped
+// (`sync-daemons.mjs`): Xcode's export finds a macOS program among an iOS app's files and fails for want of a Mac
+// certificate to sign it.
 /* eslint-disable @typescript-eslint/no-require-imports */
 function bundledModule(target: Target): number {
   switch (target) {
-    case 'darwin-arm64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-darwin-arm64.bin');
-    case 'darwin-x64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-darwin-x64.bin');
-    case 'linux-arm64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-linux-arm64.bin');
-    case 'linux-x64': return require('@pi-agent/infinichat-server/assets/pi-env/pi-env-linux-x64.bin');
+    case 'darwin-arm64': return require('@pi-agent/infinichat-server/assets/pi-env-gz/pi-env-darwin-arm64.bin.gz');
+    case 'darwin-x64': return require('@pi-agent/infinichat-server/assets/pi-env-gz/pi-env-darwin-x64.bin.gz');
+    case 'linux-arm64': return require('@pi-agent/infinichat-server/assets/pi-env-gz/pi-env-linux-arm64.bin.gz');
+    case 'linux-x64': return require('@pi-agent/infinichat-server/assets/pi-env-gz/pi-env-linux-x64.bin.gz');
   }
 }
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -24,7 +27,9 @@ function bundledModule(target: Target): number {
 async function readBundled(target: Target): Promise<DaemonBinary> {
   const asset = await Asset.fromModule(bundledModule(target)).downloadAsync();
   if (!asset.localUri) throw new Error('The bundled Pi daemon asset is unavailable. Reinstall the app.');
-  const bytes = await new File(asset.localUri).bytes();
+  const packed = await new File(asset.localUri).bytes();
+  // nitro-zlib takes a whole ArrayBuffer, so the view is copied into one of its own.
+  const bytes = new Uint8Array(await inflateAsync(packed.slice().buffer, 'gzip'));
   const expected = PI_DAEMON_MANIFEST[target];
   if (bytes.byteLength !== expected.size) throw new Error('The bundled Pi daemon asset is incomplete. Reinstall the app.');
   const hash = await digest(CryptoDigestAlgorithm.SHA256, bytes);

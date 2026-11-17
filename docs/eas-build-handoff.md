@@ -26,18 +26,23 @@ vikash-system when this mac is offline, using eas simulators support."
 
 ## What failed, and where each stands
 
-1. **Simulator build `60721c7e`: link error, fix pushed, not yet proven.** `ld: library 'rnssh_ffi' not found`,
-   after `[CP] RnsshFFI.xcframework: Unable to find matching slice in 'ios-arm64 ios-arm64-simulator'`. EAS builds
-   the simulator app for the generic simulator, which includes Intel, and the archive had no x86_64 simulator
-   slice. The hook now adds the `x86_64-apple-ios` target, which makes the library's script build that slice. A new
-   simulator build was started with the fix; see "Builds started last" below, or `eas build:list`.
-2. **Store build `6bb26858` (build number 2): archive fine, export failed. Not diagnosed.**
-   `error: exportArchive No signing certificate "Mac App Distribution" found` /
-   `No "Mac App Distribution" signing certificate matching team ID ... with a private key was found`, exit status
-   70. The provisioning profile mapping listed both bundle ids. Something makes the export treat a product as a Mac
-   app; the widget extension target (`expo-widgets`, target `ExpoWidgetsTarget`) and Mac Catalyst or
-   "Designed for iPad" settings are where to look first. Read Expo's docs and the Xcode log before changing
-   anything (`artifacts.xcodeBuildLogsUrl` in `eas build:view <id> --json`).
+1. **Simulator build `60721c7e`: link error, fixed.** `ld: library 'rnssh_ffi' not found`, after
+   `[CP] RnsshFFI.xcframework: Unable to find matching slice in 'ios-arm64 ios-arm64-simulator'`. EAS builds the
+   simulator app for the generic simulator, which includes Intel, and the archive had no x86_64 simulator slice. The
+   hook now adds the `x86_64-apple-ios` target, which makes the library's script build that slice. Build `d432c9e5`
+   finished with it, and ran on a remote simulator from this machine through Metro's tunnel (2026-11-16).
+2. **Store build `6bb26858` (build number 2): archive fine, export failed. Diagnosed, fix in place, no store build
+   since.** `error: exportArchive No signing certificate "Mac App Distribution" found`, exit status 70. Every target
+   in the Xcode log was built for `iphoneos`, so no target or Catalyst setting is at fault. The app bundled the
+   pi-env daemons as Metro assets, and the two for macOS are Mach-O programs: the export re-signs what it finds in
+   the app and asks for a Mac certificate for them (the same error as firebase-ios-sdk issue 5403). EAS does not
+   upload Xcode's distribution log, so the next store build is the first direct proof. The phone now bundles the
+   daemons gzipped (AGENTS.md, "Building with EAS"); a release bundle made here holds no Mach-O file, and on the
+   simulator all four inflate to their manifest's size and SHA-256.
+3. **A warning in the same log, open.** `The CFBundleVersion of an app extension ('1') must match that of its
+   containing parent app ('2')`: expo-widgets gives its target `CURRENT_PROJECT_VERSION` from the app config and
+   `GENERATE_INFOPLIST_FILE`, and EAS's remote version reaches only the `Info.plist` files. The archive succeeded
+   with it; see what App Store Connect says at the first upload before doing anything about it.
 
 ## Working with builds from here
 
@@ -54,6 +59,6 @@ vikash-system when this mac is offline, using eas simulators support."
 
 ## Builds started last
 
-Filled in when this was handed over:
-
-- Simulator build with the x86_64 fix: see the first `development-simulator` entry of `eas build:list`.
+- Simulator build with the x86_64 fix: `d432c9e5-0b90-4b41-a361-1ecf6e568f61`, finished. It serves until native code
+  changes (`npx @expo/agent-cli status`).
+- No store build has been started since `6bb26858`.

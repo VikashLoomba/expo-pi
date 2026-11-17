@@ -21,7 +21,7 @@ export default {
       // A single-file bundle cannot resolve Photon's package, so the main process reads its own copy
       // (pi-durable `images/node`).
       'node_modules/@silvia-odwyer/photon/photon_rs_bg.wasm': 'photon/photon_rs_bg.wasm',
-      // The pi-env daemons this Mac's own connections deploy (`machines.ts`), the same files the phone ships.
+      // The pi-env daemons this Mac's own connections deploy (`machines.ts`); the phone ships them gzipped.
       'node_modules/@pi-agent/infinichat-server/assets/pi-env': 'server/pi-env',
     },
     watch: ['../../packages/infinichat/src'],

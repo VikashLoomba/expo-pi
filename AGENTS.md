@@ -95,14 +95,21 @@ the App Store Connect key are on EAS, so any signed-in machine can run it); `dev
 development build for Expo Simulators. The profiles pin pnpm to the version that wrote the lockfile: the build
 image's pnpm 11 fails the install on this workspace's build-script settings (`ERR_PNPM_IGNORED_BUILDS`), so move the
 pin with the workspace. EAS's Mac images have no Rust; the pre-install hook installs it and builds the SSH archive.
+An iOS app holds no program of another system: Xcode's export finds a macOS Mach-O file among the app's files and
+fails with `No signing certificate "Mac App Distribution" found`. So the phone bundles the pi-env daemons gzipped
+(`packages/infinichat-server/assets/pi-env-gz`, which `scripts/sync-daemons.mjs` writes beside the plain ones the Mac
+app ships) and inflates the one a machine needs (`daemon-assets.ts`).
 
 Without the Mac (a Linux machine such as the owner's server machine), follow Expo's "Use an iOS Simulator on Linux
 or Windows" (https://docs.expo.dev/eas/simulators/how-to/work-without-a-mac.md): build `development-simulator` when
 native code changed (`npx @expo/agent-cli status` says), start Metro with `npx expo start --tunnel`, then
 `npx eas-cli@latest simulator:start --platform ios --type agent-device --build-id <id> --open-url
 "piagent://expo-development-client/?url=<encoded Metro URL>" --name "<purpose>" --non-interactive`, and stop the
-session and Metro when done. The remote simulator is not on the owner's network, so it reaches no machine over SSH:
-connecting to a machine is still checked on the iPhone, from TestFlight.
+session (`simulator:stop --id <id>`) and Metro when done. Metro prints its public address as
+`exp+pi-agent://<host>`; the URL to encode is `https://<host>`. `@expo/agent-cli`'s `runtime:*` commands reach the
+app there through Metro: leave out `--ios`, which looks for a device on this machine. The remote simulator is not
+on the owner's network, so it reaches no machine over SSH: connecting to a machine is still checked on the iPhone,
+from TestFlight.
 
 ## Rules
 

@@ -21,7 +21,7 @@ LaunchAgent server, which it installs and updates itself, with the package's cli
 - **Serving a shown host:** `apps/mobile/server/serve.ts:40-112`: cells with `{ init }`, `self.on(name, store, …)`
   mirrors with `replace(ctx, value, { diff: true })`, the snapshot last.
 - **Assets:** `ServerAssets` (`install.ts:27-34`) and the phone's loaders (`server-assets.ts:34`,
-  `daemon-assets.ts:37`) verify bytes against the generated manifests. On the Mac the files sit in the bundle's
+  `daemon-assets.ts:42`) verify bytes against the generated manifests. On the Mac the files sit in the bundle's
   `Resources`, found with `PATHS.RESOURCES_FOLDER`; `build.copy` places them (deviation 3 decides where they come from).
 
 ## Builds

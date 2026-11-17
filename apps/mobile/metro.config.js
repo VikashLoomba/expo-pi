@@ -3,7 +3,8 @@ const { getDefaultConfig } = require('expo/metro-config');
 const JUST_BASH_BROWSER = /[/\\]just-bash[/\\]dist[/\\]bundle[/\\]browser\.js$/;
 
 const config = getDefaultConfig(__dirname);
-if (!config.resolver.assetExts.includes('bin')) config.resolver.assetExts.push('bin');
+// The pi-env daemons the app uploads to a machine, gzipped (`daemon-assets.ts`).
+if (!config.resolver.assetExts.includes('gz')) config.resolver.assetExts.push('gz');
 const resolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   // just-bash's browser bundle imports node:zlib only for its gzip-family commands, which this shell
