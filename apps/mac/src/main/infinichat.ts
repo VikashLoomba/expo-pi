@@ -9,7 +9,6 @@ import { InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move'
 import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move-status';
 import type { CredentialBackend } from '@pi-agent/infinichat/pi/provider-credentials';
 import { ShownInfiniChat } from '@pi-agent/infinichat/pi/shown-infinichat';
-import { INFINICHAT_SERVER_MANIFEST } from '@pi-agent/infinichat-server/manifest';
 import { homedir } from 'node:os';
 
 import { Attachments } from './attachments';
@@ -45,7 +44,7 @@ export class MacInfiniChat {
     private readonly client: InfiniChatClient, private readonly secrets: CredentialBackend, images: ImageProcessor) {
     this.attachments = new Attachments(images);
     this.moves = new InfiniChatMoves(home, (id) => macDirectory(this.manager(), id),
-      (id) => this.environment(id), undefined, 'this Mac', INFINICHAT_SERVER_MANIFEST.version, {
+      (id) => this.environment(id), undefined, 'this Mac', {
         hold: () => this.shown.hold(),
         // This Mac never holds the conversation; a move to or from "this device" is never offered.
         closeLocal: () => Promise.reject(new Error('This Mac keeps no InfiniChat of its own.')),
@@ -232,7 +231,7 @@ export class MacInfiniChat {
       const directory = macDirectory(machines, id);
       const dialer = machines.isSelf(id) ? macDialer(this.mac, this.client, this.secrets)
         : remoteDialer(id, directory.machine, machines, this.client, this.secrets);
-      remote = new RemoteInfiniChat(dialer, directory, this.client, INFINICHAT_SERVER_MANIFEST.version);
+      remote = new RemoteInfiniChat(dialer, directory, this.client);
       this.remotes.set(id, remote);
       // Every client's changes reach the screens: a move's target reports its connection before it is shown.
       remote.subscribe(() => this.notify());

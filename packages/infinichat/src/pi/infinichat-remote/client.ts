@@ -19,7 +19,7 @@ import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from 
 import { follow, heard } from './follow';
 import type { MachinePatch, MachinesState } from './machines';
 import { RemoteMcp } from './mcp-client';
-import { compareVersions } from './release';
+import { behindNewest } from './release';
 import { attemptStep } from './sign-in-attempt';
 
 type ConnectionStatus =
@@ -28,16 +28,20 @@ type ConnectionStatus =
   | { status: 'failed'; error: string };
 /**
  * This app's connection to a machine's InfiniChat; `notice` is what the latest install said, until dismissed.
- * `update` is there while the server answering is older than the release this app was built with: `available`, and
- * `requested` once the server was asked to update itself, until its link closes as it restarts into the release.
+ * `update` is there while the server answering is behind the newest published release: `available`, and `requested`
+ * once the server was asked to update itself, until its link closes as it restarts into the release.
  */
 export type RemoteConnection = ConnectionStatus & { notice?: string; update?: 'available' | 'requested' };
 
 type InfiniChatRef = Held<typeof InfiniChatRemote>;
 /** The sign-ins of the machine's own credential store, by provider. */
 export type MachineAccess = Readonly<Record<string, ProviderAccess>>;
-/** One connection attempt's dialed server; `live` once its server's reference is. */
-interface Session { server?: DialedServer; live: boolean }
+/**
+ * One connection attempt's dialed server; `live` once its server's reference is. `behind` is then whether that server
+ * is behind the newest published release (`behindNewest`), false when the releases could not be read, and `outdated`
+ * is set once it is.
+ */
+interface Session { server?: DialedServer; live: boolean; behind?: Promise<boolean>; outdated?: boolean }
 
 const LOADING: ChatViewSnapshot = { status: 'loading' };
 const NO_MESSAGES: readonly ChatMessage[] = [];
@@ -47,7 +51,7 @@ const NO_REPORT: InfiniChatSnapshot = {};
  * `docs/design.md` §3, `onError`), or it serves no version of the contract this app can bind, which leaves the hold
  * waiting with `contract_mismatch` (§5, "Compatibility"). A server serves the versions released before its own
  * (`accepts`, `contract.ts`), so that is a server older than this app, or one that has dropped this app's version.
- * One of the two has to load new code.
+ * One of the two has to load new code: the server when a newer release of it is published, and else this app.
  */
 class Mismatch extends Error {}
 
@@ -67,8 +71,8 @@ function plain(error: unknown): Error {
  * screens keep the last values meanwhile (§7). It closes each dialed server's link and transport
  * through the dialer, and borrows the machine directory. The machine's own tools reach the conversation's other
  * machines with its own SSH, from the machines document it serves. `client` is this app as the server's client: its
- * ID and the name a move back records. `version` is the server release this app was built with, which tells which
- * side is behind when the server's contract doesn't cover this app's.
+ * ID and the name a move back records. It carries no server release of its own: a server is out of date when it is
+ * behind the newest published one (`behindNewest`).
  */
 export class RemoteInfiniChat implements InfiniChatHost {
   private readonly host = createHost<InfiniChatPrincipal>({
@@ -97,6 +101,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private notice?: string;
   /** The session whose server was asked to update itself. */
   private updating?: Session;
+  /** The server release that last didn't fit this app, and whether a newer one was published then. */
+  private unfit?: { version: string; behind: boolean };
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
     scheduled: readonly ScheduledTask[] | undefined; catalog: ModelCatalog; access: MachineAccess;
@@ -114,7 +120,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   readonly mcp: RemoteMcp;
 
   constructor(private readonly dialer: ServerDialer, private readonly directory: MachineDirectory,
-    private readonly client: InfiniChatClient, private readonly version: string) {
+    private readonly client: InfiniChatClient) {
     this.mcp = new RemoteMcp(this.host, () => this.name, (run) => this.root(run));
   }
 
@@ -177,9 +183,12 @@ export class RemoteInfiniChat implements InfiniChatHost {
   readonly getReach = () => this.values?.reach;
   readonly getPendingHostKeys = () => this.values?.pendingHostKeys;
 
-  /** The release of the server answering now, once connected. */
-  serverVersion(): string | undefined {
-    return this.session?.live ? this.ref?.server.value.version : undefined;
+  /**
+   * Whether the server answering now is behind the newest published release, once connected; false when the releases
+   * could not be read.
+   */
+  async outdated(): Promise<boolean> {
+    return await this.session?.behind ?? false;
   }
 
   /**
@@ -471,10 +480,10 @@ export class RemoteInfiniChat implements InfiniChatHost {
   /**
    * One attempt: dials the machine's server, which sets it up only when needed, then connects the client host over its
    * link and holds the reference. When the server refuses the socket, this app's key is written again and the server
-   * started, unless this attempt already did. A server that doesn't fit this app (`Mismatch`) is either behind it, and
-   * asked to update itself, or ahead of it and no longer serving its version. A server behind this app that closes the
-   * link before the reference is live counts as one too: a release from before Chord v2 answers this app's handshake
-   * with its own protocol's close.
+   * started, unless this attempt already did. A server that doesn't fit this app (`Mismatch`) is asked to update itself
+   * when it is behind the newest published release; one that is on it no longer serves this app's version of the
+   * contract, so the app is the side to update. Once live, the session learns whether its server is behind that
+   * release, which the connection then offers as an update.
    */
   private async connect(signal: AbortSignal): Promise<void> {
     const session: Session = { live: false };
@@ -494,15 +503,19 @@ export class RemoteInfiniChat implements InfiniChatHost {
       session.server = server;
       let { link } = server;
       for (;;) {
-        const behind = compareVersions(server.version, this.version) < 0;
         let opened: boolean;
         try {
           opened = await this.open(session, link, signal);
-          if (!opened && behind) throw new Mismatch('The server closed the link.');
         } catch (error) {
           if (!(error instanceof Mismatch)) throw error;
-          if (!behind) {
-            throw new Error(`InfiniChat on ${server.name} is newer than this app. Update this app to use it.`);
+          // Read once for a server's release: the attempts that follow a mismatch come every half minute, and GitHub
+          // answers an address 60 times an hour.
+          if (this.unfit?.version !== server.version) {
+            this.unfit = { version: server.version, behind: await behindNewest(server.version, signal) };
+          }
+          if (!this.unfit.behind) {
+            throw new Error(`InfiniChat on ${server.name} is up to date and doesn’t work with this app. Update this `
+              + 'app to use it.');
           }
           await server.requestUpdate();
           throw new Error(`InfiniChat on ${server.name} is updating to work with this app. Try again in a moment.`);
@@ -512,6 +525,12 @@ export class RemoteInfiniChat implements InfiniChatHost {
         link = await server.install();
       }
       session.live = true;
+      // Releases that can't be read offer no update; the server still finds its own (server `update.ts`).
+      session.behind = behindNewest(server.version, this.released.signal).catch(() => false);
+      void session.behind.then((behind) => {
+        session.outdated = behind;
+        if (behind && this.session === session) this.publishConnection();
+      });
       this.refresh();
       // The next connect sends it again, so one lost with its link changes nothing.
       this.ref?.setTimeZone({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone }, BACKGROUND_CONTEXT)
@@ -579,8 +598,6 @@ export class RemoteInfiniChat implements InfiniChatHost {
       ref.conversation, ref.machines, ref.reach, ref.pendingHostKeys]) {
       follow(member, this.refresh, context);
     }
-    // The connection says whether the server answering is behind this app (`update`).
-    follow(ref.server, () => this.publishConnection(), context);
     return ref;
   }
 
@@ -620,12 +637,11 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   private publishConnection(status?: ConnectionStatus) {
     if (status) this.status = status;
-    const server = this.serverVersion();
-    // Offered only while the server is behind this app's release, not for every newer one: this app refuses a move
-    // back from a server ahead of it (`move.ts`), so it does not point at releases newer than itself. A server that
-    // is asked still takes the newest release (`update.ts`).
-    const update = server === undefined || compareVersions(server, this.version) >= 0 ? undefined
-      : this.session === this.updating ? 'requested' : 'available';
+    const session = this.session;
+    // Offered while the live session's server is behind the newest published release, which it takes when asked
+    // (server `update.ts`).
+    const update = !session?.live || !session.outdated ? undefined
+      : session === this.updating ? 'requested' : 'available';
     this.connection = { ...this.status, ...(this.notice === undefined ? {} : { notice: this.notice }),
       ...(update === undefined ? {} : { update }) };
     this.notify();

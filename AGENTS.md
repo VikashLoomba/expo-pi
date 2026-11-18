@@ -2,7 +2,7 @@ This is an Expo/React Native app for iOS. Prioritize iOS-native patterns and the
 
 The repository is a pnpm workspace in Expo's monorepo layout: the iOS app is in `apps/mobile`, the Mac app in
 `apps/mac`, the shared InfiniChat code in `packages/infinichat`, and the server machines run, with its build and
-release scripts, generated manifests and the pi-env daemons both apps ship, in `packages/infinichat-server`. The
+release scripts, generated daemon manifest and the pi-env daemons both apps ship, in `packages/infinichat-server`. The
 server is published as `server/v<version>` GitHub releases (`pnpm release` there, before the apps that need it) and
 updates itself; the apps only set one up on a machine that has none. For server plugin and MCP work, read
 `docs/server-plugins.md`: the server, both apps and the shared client are on Chord v2 (the package since chord 1.5.1,
@@ -71,6 +71,9 @@ Run lint and typecheck before declaring any task done.
 - An app and a server bind by `infinichat.remote` and `infinichat.mcp`. Change one with Chord's `evolve`, and map the
   version before it where the server serves the type (`accepts`), so released apps keep working with newer servers;
   never edit a released version or a schema it names (`docs/server-plugins.md`, "Contract versions").
+- An app holds no server release and never compares one of its own with a server's. Whether the two fit is Chord's
+  contract versions, and whether a side can read a conversation is pi-durable's own versions. A server is out of date
+  when it is behind the newest release published (`infinichat-remote/release.ts`, `behindNewest`).
 - Keep lines under about 120 characters, no multi-statement one-liners, and comments that explain why, not what.
 - Design before code: for non-trivial work, propose which upstream example you start from, any deviations, and the rough size compared with upstream's equivalent, and get approval before implementing. Size is a signal: a feature several times larger than upstream's equivalent means the design is wrong.
 

@@ -292,8 +292,8 @@ design has a contract change (§27, "Contract evolution in code"; `docs/layer-1.
   to the old; an added member needs none. TypeScript requires exactly those mappings, and Chord checks the table
   against the history when the plugin loads.
 - So an app works with every server released after it. The other direction has no mapping: an app newer than the
-  server waits with `contract_mismatch`, and asks that server to update itself (`RemoteInfiniChat`). The server is
-  still released before the apps that need it.
+  server waits with `contract_mismatch`, and asks that server to update itself when a newer release of it is
+  published (`RemoteInfiniChat`). The server is still released before the apps that need it.
 - Dropping a version from `ACCEPTED`, or a new base (a change of params or of the variant set is one), refuses the
   apps on the versions left out, which are told to update. That is the owner's decision.
 
@@ -314,13 +314,23 @@ it in place. `release.json` keeps its schema (`version`,
 push, then run `pnpm release` there. `--latest=false` is intentional: GitHub Latest belongs to the Mac app, not the
 server.
 
-Release 4.0.0 is the first on Chord v2, whose link protocol an app built for an earlier release cannot speak, and the
-reverse: an app asks a server behind it to update (`RemoteInfiniChat`), and says to update the app when a server ahead
-of it no longer serves its version of the contract (above). Release the server before the apps that need it. A server
-that fits the app but is older than the release the app was built with is offered its update: the connection says so
-(`RemoteConnection.update`), and the iPhone's chat screen shows a notice with Update above the input, which asks the
-server to update itself (`requestUpdate`, SIGHUP). The server then takes the newest release, restarts, and the app
-connects again.
+An app holds no server release, and nothing compares an app's with a server's. Chord binds an app and a server by
+their contracts' versions, and pi-durable versions what a conversation stores (above, and Durable `docs/spec.md`
+§3.6); a release number says neither. What an app does compare is a server's release with the newest one published
+(`behindNewest`, `infinichat-remote/release.ts`), which it reads from this repository's releases as an install does:
+
+- A connected server behind the newest release is offered its update: the connection says so
+  (`RemoteConnection.update`), and the iPhone's chat screen shows a notice with Update above the input, which asks
+  the server to update itself (`requestUpdate`, SIGHUP). The server takes the newest release, restarts, and the app
+  connects again. So a release that changes only the server shows in the apps already installed.
+- A server whose contract does not fit the app is asked to update itself when it is behind the newest release. One
+  that is on it no longer serves the app's version, and the app says to update the app.
+- A machine about to take the conversation in a move is asked to update first when it is behind the newest release
+  (`move.ts`, `receives`). A move back to a device checks nothing: pi-durable refuses what an older app cannot read
+  when the app opens it, which the app reports as its failure to open, with the files there and unopened.
+
+Releases that cannot be read offer no update, and the server still finds its own. Release the server before the apps
+that need it.
 
 A server installed from a release checks at startup, daily, and on SIGHUP. It verifies downloaded artifacts, closes
 its Harness and exits 75 for the service manager to restart it. Old runtime folders are cleaned on startup.

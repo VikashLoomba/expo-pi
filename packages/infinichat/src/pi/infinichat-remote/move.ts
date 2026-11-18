@@ -9,7 +9,6 @@ import { keyExchangeLines } from './keys';
 import { HASH, PRINT_MARKER, runScript } from './machine';
 import { cancellable, moveError, type MoveBase, type MoveStatus, type MoveStep } from './move-status';
 import type { PagePlatform } from './pages';
-import { compareVersions } from './release';
 import {
   copyFrom, copyTo, DATA, FOLDER, INFINICHAT_DATABASE, receivePatch, sendPatch, type Copied, type Copy,
 } from './transfer';
@@ -180,15 +179,14 @@ export class InfiniChatMoves {
 
   /**
    * `directory` gives a machine as the app knows it, `environment` its files and commands, and `device` names this
-   * device in messages, such as "this iPhone". `version` is the server release this app was built with, its own
-   * InfiniChat's. `files` is this device's own InfiniChat; a device that never holds the conversation, as the Mac app,
-   * has none, and moves it between machines only.
+   * device in messages, such as "this iPhone". `files` is this device's own InfiniChat; a device that never holds the
+   * conversation, as the Mac app, has none, and moves it between machines only.
    */
   constructor(private readonly home: InfiniChatHomeStore,
     private readonly directory: (machineId: string) => MachineDirectory,
     private readonly environment: (machineId: string) => Promise<ExecutionEnv>,
     private readonly files: DatabaseFiles | undefined, private readonly device: string,
-    private readonly version: string, private readonly sides: MoveSides) {}
+    private readonly sides: MoveSides) {}
 
   /** This device's files, on the paths that move the conversation to or from this device. */
   private get ownFiles(): DatabaseFiles {
@@ -372,7 +370,7 @@ export class InfiniChatMoves {
   }
 
   /**
-   * This device → machine. The machine runs this app's release or a newer one before this device closes anything
+   * This device → machine. The machine is on the newest server release before this device closes anything
    * (`receives`). Until the machine has adopted them, this device's files are the conversation; a machine that already
    * holds them open finished the move.
    */
@@ -380,7 +378,7 @@ export class InfiniChatMoves {
     const remote = this.sides.machine(machineId);
     const name = this.name(machineId);
     await remote.connected(signal);
-    await this.receives(remote, this.version, name);
+    await this.receives(remote, name);
     if (this.home.getSnapshot().home === 'phone') {
       this.step('closing');
       this.home.set({ version: 1, home: 'machine', machineId, phase: 'moving-there' });
@@ -404,7 +402,7 @@ export class InfiniChatMoves {
   }
 
   /**
-   * Machine → machine, this device orchestrating: the target runs the source's release or a newer one, the source
+   * Machine → machine, this device orchestrating: the target is on the newest server release (`receives`), the source
    * closes the conversation and names its files, the target pulls them over its own SSH and opens them, and the source
    * keeps its released copy. This device's own copy stays set aside, as it was under the source.
    */
@@ -419,7 +417,7 @@ export class InfiniChatMoves {
     this.step('closing');
     // A source that can't be reached can't hand the conversation on; it stays there, shown as it was.
     await source.connected(signal);
-    await this.receives(target, source.serverVersion(), this.name(toId));
+    await this.receives(target, this.name(toId));
     const home = this.home.getSnapshot();
     if (home.home === 'machine' && home.phase === 'there') {
       this.home.set({ version: 1, home: 'machine', machineId: toId, phase: 'moving-there', from: fromId });
@@ -484,18 +482,16 @@ export class InfiniChatMoves {
 
   /**
    * Machine → this device. The machine closes the conversation and names its files, which stay unchanged there until
-   * `archive`, so a relaunch downloads them again and Cancel has the machine open them again.
+   * `archive`, so a relaunch downloads them again and Cancel has the machine open them again. Nothing here compares
+   * this app with the machine's server: whether this device can read the conversation is pi-durable's to say when it
+   * opens it (its spec §3.6, §11.2). An app too old for it reports that as its failure to open (`openLocal`); the
+   * files are then this device's, unopened, and a move to a machine sends them as any other.
    */
   private async back(machineId: string, signal: AbortSignal) {
     const remote = this.sides.machine(machineId);
     this.step('closing');
     // A machine that can't be reached can't hand the conversation back; it stays there, shown as it was.
     await remote.connected(signal);
-    const there = remote.serverVersion();
-    if (there !== undefined && compareVersions(this.version, there) < 0) {
-      throw new Error(`InfiniChat on ${this.name(machineId)} is newer than this app. Update this app before moving `
-        + `InfiniChat to ${this.device}.`);
-    }
     const home = this.home.getSnapshot();
     if (home.home === 'machine' && home.phase === 'there') {
       this.home.set({ version: 1, home: 'machine', machineId, phase: 'moving-back' });
@@ -590,14 +586,15 @@ export class InfiniChatMoves {
   }
 
   /**
-   * A conversation moves only to a side of its release or a newer one, since pi-durable's migrations are one-way: a
-   * machine behind `version` is asked to update itself first.
+   * A machine takes the conversation on the newest server release: one behind it is asked to update itself first.
+   * pi-durable's migrations are one-way, and the newest release is the newest code a released app or another machine
+   * can have written the conversation with. It compares the machine's server with its own releases only, never with
+   * this app.
    */
-  private async receives(remote: RemoteInfiniChat, version: string | undefined, name: string): Promise<void> {
-    const target = remote.serverVersion();
-    if (target === undefined || version === undefined || compareVersions(target, version) >= 0) return;
+  private async receives(remote: RemoteInfiniChat, name: string): Promise<void> {
+    if (!await remote.outdated()) return;
     await remote.requestUpdate();
-    throw new Error(`InfiniChat on ${name} is updating to a newer version first. Try the move again in a moment.`);
+    throw new Error(`InfiniChat on ${name} is updating to its newest version first. Try the move again in a moment.`);
   }
 
   private name(machineId: string): string {

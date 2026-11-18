@@ -75,3 +75,13 @@ export async function latestServerRelease(signal: AbortSignal): Promise<ServerRe
   }
   return release;
 }
+
+/**
+ * Whether a server on release `version` is behind the newest one published: the one way an app tells that a server is
+ * out of date. An app holds no server release of its own to compare with: whether it and a server fit is Chord's
+ * contract versions, and whether a side can read a conversation is pi-durable's own.
+ */
+export async function behindNewest(version: string, signal: AbortSignal): Promise<boolean> {
+  const newest = await latestServerRelease(signal);
+  return newest !== undefined && compareVersions(version, newest.version) < 0;
+}

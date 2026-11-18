@@ -118,8 +118,7 @@ is a client without an address that loads nothing and connects the dialed link a
 drop. `follow` watches a member or the reference's state, and `heard` wraps a link so the client hears its close:
 a link has one close listener, which the host takes (`infinichat-remote/follow.ts`). A server that does not fit
 this app shows as a handshake the host reports as `protocol_error`, or as a hold left waiting with
-`contract_mismatch`; a server behind this app that closes the link before the reference is live counts too
-(`client.ts`). Contracts declare `params` and `hostAddress: () => ServerHost()`, every object in a method's arguments
+`contract_mismatch` (`client.ts`). Contracts declare `params` and `hostAddress: () => ServerHost()`, every object in a method's arguments
 is closed, and a method without a result answers `null` (§5). `infinichat.remote` is version 7, the server 4.0.0.
 
 ## References

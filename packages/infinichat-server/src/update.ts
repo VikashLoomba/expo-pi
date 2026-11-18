@@ -65,7 +65,7 @@ export class ServerUpdates {
   constructor(private readonly folder: string, private readonly runtime: string,
     private readonly installed: ServerRelease, private readonly restart: () => void) {}
 
-  /** Removes the folders no service starts any more, other runtimes and earlier layouts, then checks. */
+  /** Removes the folders no service starts any more, the other runtimes, then checks. */
   async start(): Promise<void> {
     for (const name of await readdir(this.folder)) {
       if (name !== this.installed.runtime.key && name !== 'current') {

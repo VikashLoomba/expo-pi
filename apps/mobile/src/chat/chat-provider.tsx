@@ -14,7 +14,6 @@ import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/mo
 import { NEW_CHAT_DEFAULTS } from '@pi-agent/infinichat/pi/new-chat';
 import type { ProviderAccess, ProviderCredentialStore } from '@pi-agent/infinichat/pi/provider-credentials';
 import { ProviderSignIn } from '@pi-agent/infinichat/pi/sign-in';
-import { INFINICHAT_SERVER_MANIFEST } from '@pi-agent/infinichat-server/manifest';
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
 } from 'react';
@@ -49,8 +48,6 @@ const closedService: ChatServiceSnapshot = { chats: [] };
 const getClosedService = () => closedService;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const INFINICHAT_MOVING = 'InfiniChat is moving. Send again once the move is done.';
-/** The server release this app was built with, which a machine's server and a move are compared with. */
-const SERVER_VERSION = INFINICHAT_SERVER_MANIFEST.version;
 
 /**
  * App-lifetime objects. Chats open at launch and stay open in the background until the provider unmounts.
@@ -150,7 +147,7 @@ function useChatRuntime() {
       let client = state.remotes.get(machineId);
       if (!client) {
         client = new RemoteInfiniChat(phoneDialer(remoteHosts, remote, machineId),
-          phoneMachines(machines, machineId), phoneClient(), SERVER_VERSION);
+          phoneMachines(machines, machineId), phoneClient());
         state.remotes.set(machineId, client);
       }
       setInfiniChatClient(client);
@@ -196,7 +193,7 @@ function useChatRuntime() {
     };
     // A move borrows the remote owner's connection to the machine, as the chats' tools do, and never closes it.
     const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(machines, machineId),
-      (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', SERVER_VERSION, {
+      (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', {
       hold: () => infiniChat.hold(),
       closeLocal: () => queued(async () => {
         const closing = state.phone;
