@@ -35,7 +35,8 @@ const listed = (what: string, names: readonly string[]) => names.length ? [`${wh
  * `.tsx`, `.js`, `.mjs`) whose default export is a facet, or a single file `<name>.server.ts` there. Chord's plugins
  * component finds them, builds each facet with esbuild, loads them beside the runtime's own facets, watches their
  * files and rolls a rebuilt one out (`src/node/plugins/README.md`, "For apps"); a plugin that fails to build or load
- * is left out, or keeps its old code at a reload. Reloads stay explicit: the user's `/reload-plugins`.
+ * is left out, or keeps its old code at a reload. Reloads stay explicit: the user's `/reload-plugins`, or an agent's
+ * `reload_plugins` after it changed a plugin or the MCP configuration (`extending.ts`).
  */
 export class ServerPlugins {
   private readonly plugins: Plugins;
@@ -62,12 +63,13 @@ export class ServerPlugins {
   }
 
   /**
-   * The user's `/reload-plugins`: builds the plugins whose files changed and those added since, rolls them out on
-   * this host, where Chord restarts each object of a changed plugin and leaves the others (design §21), and has the
-   * tools plugin read the MCP configuration again. Says what it did, for the app to show.
+   * The user's `/reload-plugins` and the agents' `reload_plugins`: builds the plugins whose files changed and those
+   * added since, rolls them out on this host, where Chord restarts each object of a changed plugin and leaves the
+   * others (design §21), and has the tools plugin read the MCP configuration again. Says what it did, for the app to
+   * show or the agent to read.
    */
   reload(): Promise<string> {
-    // Two clients share the operation.
+    // Two callers share the operation.
     this.reloading ??= this.run().finally(() => {
       this.reloading = undefined;
     });

@@ -38,26 +38,19 @@ tools and plugins' tools. A conversation held by the phone, which has no code mo
 
 A plugin is a folder of `~/.infinichat/plugins` with a `package.json`, whose `name` is the plugin's (an npm package
 name), and a `server.ts` (or `.tsx`, `.js`, `.mjs`) whose default export is a facet; or a single file
-`<name>.server.ts` there. A folder without a `package.json` is reported and not loaded. Chord's plugins component
+`<name>.server.ts` there. The guide a release ships, `packages/infinichat-server/docs/extending.md`, is the
+reference for writing one, with an example. A folder without a `package.json` is reported and not loaded. Chord's
+plugins component
 (`createPlugins`, `src/plugins.ts`) finds them, builds each facet into one script with esbuild (the plugin's own
 files and the packages of its `dependencies` inlined), evaluates it and loads it beside the runtime's facets. A
 plugin that fails to build or load is left out, and the others load.
 
 A plugin imports the server's own instances of these packages, and nothing else from the runtime:
 `@earendil-works/chord`, `@earendil-works/chord/context`, `@earendil-works/chord/json`, `@earendil-works/pi-ai`,
-`@earendil-works/pi-durable` and `@earendil-works/pi-schema`. A facet only declares (design §16):
-
-```ts
-import { defineFacet, defineRegistry } from '@earendil-works/chord';
-import { defineExtension, type Extension, type RegistrySnapshot } from '@earendil-works/pi-durable';
-
-// A token of this name and version is the server's registry.
-const Extensions = defineRegistry<readonly Extension[], RegistrySnapshot>('infinichat.extensions', { version: 1 });
-
-export default defineFacet((_host, self) => {
-  self.contribute(Extensions, [defineExtension({ name: 'hello', tools: [] })]);
-});
-```
+`@earendil-works/pi-durable` and `@earendil-works/pi-schema` (`MODULES` in `src/plugins.ts`). The server defines no
+API package of its own, so Chord takes an import of Chord itself (its `docs/plugin-authoring.md` refuses one only
+under an app's API). A facet only declares (design §16), and contributes its Durable extensions to the registry by a
+token of the registry's name and version, `infinichat.extensions` at 1, as the guide's example does.
 
 The runtime ships esbuild as `esbuild-wasm` under the name `esbuild` (`runtime/package.json`): a release has one
 runtime for every machine, and esbuild's native build is one package per platform.
@@ -74,27 +67,40 @@ The reply says which plugins were added, reloaded or removed, which failed and w
 what happened to the MCP servers: connected, reconnected, closed, failed or unchanged, and which entries were skipped
 and why.
 
+## The agents extend the server
+
+On a machine, an agent writes a plugin or adds an MCP server when the user asks, as pi's coding agent extends pi: its
+prompt names pi's documentation on disk, which the model reads when asked (`promptSections.docs` in the coding
+agent's `src/core/system-prompt.ts`). InfiniChat's plugin contributes one extension for it, `infinichat.extending`
+(`src/extending.ts`), which every agent on the machine has, a subagent too, and a conversation the phone holds has
+not:
+
+- A prompt section, `extending`: the plugins folder, the MCP configuration, the guide's path and the tool below, to
+  use when the user asks for a tool or a server. Its text changes only with the runtime's folder, so it is sent once
+  and stays cached (durable `test/examples/14-system-prompt.ts`).
+- The guide, `packages/infinichat-server/docs/extending.md`, which the build copies to `dist/docs` and a release
+  ships in the runtime, `<runtime>/docs/extending.md`. It is the reference for the plugin layout and for `mcp.json`,
+  for people too, and points to what the runtime's `node_modules` already holds for the rest: Chord's
+  `docs/plugin-authoring.md` and pi-durable's README.
+- A tool, `reload_plugins`, the agents' `/reload-plugins`: the process's one reload, whose reply the agent reads and
+  acts on. pi's own tools cannot reload (coding-agent `docs/extensions.md`, "ctx.reload()"); that the agent applies
+  its own change is the owner's decision. It is deferred, so code mode's section leaves it out and the `extending`
+  section names it. An aborted call stops waiting, and the reload goes on. A script has the tools that existed when
+  it started (durable `src/codemode/codemode.ts`, `execute`), so the tools a reload adds are callable from the next
+  script.
+
+A plugin runs inside the server's process: one that blocks while it loads stops the server, and the user removes it
+over SSH, as with an extension of pi. The guide has the agent keep a facet to declarations.
+
+Checked by lint, typecheck (the guide's example too) and build. Not run: an agent has not yet extended a server
+with it.
+
 ## MCP configuration
 
-`~/.infinichat/mcp.json` uses an `mcpServers` object:
-
-```json
-{
-  "mcpServers": {
-    "example": {
-      "command": "node",
-      "args": ["/path/to/server.mjs"],
-      "exposure": "codemode"
-    }
-  }
-}
-```
-
-A server can instead have a streamable HTTP `url` and optional `headers`. Stdio supports `args`, `env`, and `cwd`.
-`${NAME}` in `env`, `headers` and `oauth.clientSecret` values expands from the server process's environment; a name it
-lacks skips that server, and the reply names the variable. A leading `~/` in command, arguments, or working directory
-expands to the account's home. Common fields are `enabled`, `description`, `timeout` (seconds per MCP request; default
-60, renewed by the server's progress notifications), `exposure`, and `toolExposure`. Legacy SSE is not implemented.
+`~/.infinichat/mcp.json` has an `mcpServers` object in the format of pi's coding agent. The guide describes it, with
+an example: a stdio and a streamable HTTP server's fields, `${NAME}` from the server process's environment, exposure
+and OAuth (`packages/infinichat-server/docs/extending.md`, "An MCP server"). `src/mcp-config.ts` reads it. A
+request's `timeout` is renewed by the server's progress notifications. Legacy SSE is not implemented.
 
 Exposure: scripts call every registered tool. `direct` tools are declared in code mode's prompt section;
 `codemode` (default, including its `codemode-deferred` alias) and `deferred` tools are left out of it, and scripts find
@@ -298,8 +304,9 @@ build, so they have no older version to serve.
 ## Release
 
 The tools plugin is part of the runtime's `main.js`. The runtime tarball also holds
-`plugins/infinichat/inert-mcp.mjs`, and the runtime key hashes `package-lock.json`, `main.js` and that script, so a
-server whose runtime differs downloads the new one and restarts into it. `main.js` holds no version: the runtime
+`plugins/infinichat/inert-mcp.mjs` and the agents' guide, `docs/extending.md`, and the runtime key hashes
+`package-lock.json`, `main.js` and those two, so a server whose runtime differs downloads the new one and restarts
+into it. `main.js` holds no version: the runtime
 reads its release's from InfiniChat's plugin, which exports it (`version` in `src/facet.ts`), so a release that
 changes only the plugin keeps the runtime key, and a server on that runtime downloads the plugin alone and replaces
 it in place. `release.json` keeps its schema (`version`,

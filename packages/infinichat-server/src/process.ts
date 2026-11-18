@@ -10,6 +10,8 @@ import { InfiniChatMcpMembers } from '@pi-agent/infinichat/pi/infinichat-remote/
 export interface ServerProcess {
   /** `~/.infinichat`. */
   readonly home: string;
+  /** The folder this host runs from: a release's runtime, with the guide the agents read (`extending.ts`). */
+  readonly runtime: string;
   readonly device: string;
   readonly description: string;
   /**
@@ -19,7 +21,10 @@ export interface ServerProcess {
   readonly loaded: Promise<void>;
   /** Ends the process as failed, so its service manager starts it again: reopening is how pi-durable recovers. */
   fail(error: unknown): void;
-  /** Reloads the user's plugins and reads the MCP configuration again (`plugins.ts`); says what happened. */
+  /**
+   * Reloads the user's plugins and reads the MCP configuration again (`plugins.ts`); says what happened. The user's
+   * `/reload-plugins` and the agents' `reload_plugins` (`extending.ts`) share it.
+   */
   reloadPlugins(): Promise<string>;
 }
 

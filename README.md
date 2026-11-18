@@ -80,7 +80,9 @@ Each chat can run its tools on a remote machine over SSH instead of the on-devic
 
 When InfiniChat runs on a server, `/reload-plugins` reloads the tools plugin (code mode and the MCP servers of
 `~/.infinichat/mcp.json`) and the user's plugins with Chord's hot reload, without restarting the conversation: added
-servers connect, changed ones reconnect, removed ones close, and the others stay connected. See
+servers connect, changed ones reconnect, removed ones close, and the others stay connected. The agent can do both
+itself: ask it for a tool or an MCP server, and it writes the plugin or the entry, following
+[the guide a release ships](packages/infinichat-server/docs/extending.md), and reloads with its own tool. See
 [server plugins, MCP and release](docs/server-plugins.md) for configuration, failure handling and the upstream
 patterns.
 
@@ -143,7 +145,8 @@ npx expo export --platform ios --source-maps --clear
   `pi/native-web-search/`: OpenAI's hosted web search as a provider decorator. `node/`: the Node side for the server
   and the Mac app.
 - `packages/infinichat-server/src/`: `main.ts` and `conversation.ts` (holding the conversation), `facet.ts` (what
-  clients call), `plugins.ts` and `mcp-*.ts` (plugins, code mode and MCP), `update.ts` (self-update).
+  clients call), `plugins.ts` and `mcp-*.ts` (plugins, code mode and MCP), `extending.ts` (how the agents extend the
+  server), `update.ts` (self-update).
 - `apps/mobile/src/app/`: the routes. `(tabs)/(infinichat)/` is the InfiniChat tab, `(tabs)/chats/` the ordinary
   chats, with `infinichat-settings/`, `infinichat-schedule/`, `remote-hosts/` and `account.tsx` beside them.
 - `apps/mobile/src/chat/chat-provider.tsx`: the shared Models instance, account state and the services' lifecycle.

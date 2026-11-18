@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { copyFile, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,6 +78,10 @@ if (check) {
   // which Claude Code sees pi's tools without running them (its `src/claude-cli.ts`); a bundle cannot carry it.
   await copyFile(require.resolve('@earendil-works/pi-claude-code/src/inert-mcp.mjs'),
     join(root, 'dist/plugins/infinichat/inert-mcp.mjs'));
+  // The guide the agents read before they write a plugin or add an MCP server, which InfiniChat's plugin names by its
+  // path in the runtime (src/extending.ts).
+  await mkdir(join(root, 'dist/docs'));
+  await copyFile(join(root, 'docs/extending.md'), join(root, 'dist/docs/extending.md'));
   await writeFile(manifestPath, manifest);
   console.log(`Built the InfiniChat server ${version} into dist/.`);
 }

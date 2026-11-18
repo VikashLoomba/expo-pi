@@ -100,7 +100,7 @@ async function serve(): Promise<number> {
     closes.push(() => plugins.close());
     const loaded = Promise.withResolvers<void>();
     const proc: ServerProcess = {
-      home, device, description, loaded: loaded.promise,
+      home, runtime, device, description, loaded: loaded.promise,
       fail: (error: unknown) => stopping.resolve({ failed: error }),
       reloadPlugins: () => plugins.reload(),
     };

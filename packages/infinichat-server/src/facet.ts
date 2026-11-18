@@ -25,6 +25,7 @@ import { ProviderSignIn } from '@pi-agent/infinichat/pi/sign-in';
 
 import { claudeCodeAccess, closeClaudeCode, registerClaudeCode } from './claude-code';
 import { ServerConversation } from './conversation';
+import { extending } from './extending';
 import { done, type ServerProcess } from './process';
 import { composeExtensions, Extensions } from './registry';
 import { setTimeZone } from './state';
@@ -57,10 +58,10 @@ const NO_REACH: ReachView = { reach: {}, pendingHostKeys: {} };
  * sign-in, the other machines' connections, the conversation's holder) and the members clients read, which
  * `InfiniChatRemote` re-exposes (chord `docs/design.md` §6, "shared store, per-principal views"). Only a release
  * changes this plugin, and a release restarts the process (`update.ts`). The Harness reads its extensions from
- * `Extensions`: InfiniChat's own, contributed by this facet, the tools plugin's and installed plugins'. It opens the
- * database only while this machine holds the conversation (`ServerConversation`), so the object holds the holder
- * rather than the Harness itself. Its version follows its members, as Chord has every contract change bump it; this
- * plugin is its only consumer, so it accepts no older one.
+ * `Extensions`: InfiniChat's own and `extending`'s, contributed by this facet, the tools plugin's and installed
+ * plugins'. It opens the database only while this machine holds the conversation (`ServerConversation`), so the
+ * object holds the holder rather than the Harness itself. Its version follows its members, as Chord has every
+ * contract change bump it; this plugin is its only consumer, so it accepts no older one.
  */
 export const InfiniChatMachine = local('infinichat.machine', {
   version: 2,
@@ -108,8 +109,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
   });
   const parts = infiniChatExtensions(devices, () => conversationOpen?.current?.harness, report);
   // From the facet, so the table holds them before the Harness opens (a task whose definition is missing stays
-  // blocked, design §24).
-  facet.contribute(Extensions, parts.extensions);
+  // blocked, design §24). With them, what only a machine's agents have: how they extend this server.
+  facet.contribute(Extensions, [...parts.extensions, extending(proc)]);
   host.serve(Extensions, { compose: composeExtensions });
 
   host.serve(InfiniChatMachine, (_params, self) => {
