@@ -2,12 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import {
-  createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Context as ModelContext,
-  type FauxResponseStep,
+  createModels, fauxAssistantMessage, fauxProvider, type Context as ModelContext, type FauxResponseStep,
 } from '@earendil-works/pi-ai';
 import { LiveDoc, MemoryStorage, configure, type ModelRef } from '@earendil-works/pi-durable';
 
-import { AgentDirectoryDoc, PrivateAgentDoc, agentWork } from '../src/pi/infinichat/agents';
 import { AppDoc, InputDoc, type OptChat } from '../src/pi/infinichat/app';
 import { MemoryDoc, MessageDoc } from '../src/pi/infinichat/memory';
 import { ConfigDoc } from '../src/pi/infinichat/summary';
@@ -135,12 +133,12 @@ test('dynamic device state stays after view and outside canonical text and stati
     const text = typeof input.content === 'string'
       ? input.content
       : input.content.filter((x) => x.type === 'text').map((x) => x.text).join('');
-    // The view, the turn state, the agents at work, then the head that tells a turn from a compaction.
+    // The view, the turn state, the agent's place, then the head that tells a turn from a compaction.
     const order = [
       '</chat>',
       '- linux',
-      'Agents at work now: none.',
-      'Turn: the user\'s new message:\n\nsecond',
+      'You are root. Your parent: the user (tell "user"). Your children: none.',
+      'Turn: your new messages:\n\nsecond',
     ].map((part) => text.indexOf(part));
     assert.ok(order.every((at, i) => at >= 0 && (i === 0 || order[i - 1] < at)));
     assert.ok(!text.includes('- mac'));
@@ -329,7 +327,7 @@ test('a stop logs what the turn wrote, cut off, then the stop note', { timeout: 
       (live) => JSON.stringify(live?.generation?.message ?? {}).includes('STREAMED'),
     );
     await chat.abort();
-    const note = 'note: Stopped by the user: OptChat\'s turn.';
+    const note = 'note: Stopped by the user.';
     const lines = await until(() => logged(chat), (all) => all.includes(note));
     assert.equal(lines.length, 3);
     assert.equal(lines[0], 'user: hello');
@@ -382,7 +380,8 @@ test('an input a failed run left queued starts a fresh turn and is answered', { 
     assert.ok(view.includes('|user: one\n'));
     assert.ok(view.includes('|infinichat: PARTIAL ONE [cut off: 400 bad request]\n'));
     assert.ok(view.includes('|note: No reply: 400 bad request. Send a message to try again.\n'));
-    assert.equal(head, '\nAgents at work now: none.\n\nTurn: the user\'s new message:\n\n');
+    assert.equal(head, '\nYou are root. Your parent: the user (tell "user"). Your children: none.\n\n'
+      + 'Turn: your new messages:\n\n');
     assert.equal(words, 'two');
     assert.deepEqual(await until(() => logged(chat), (all) => all.includes('infinichat: ANSWER TWO')), [
       'user: one',
@@ -394,53 +393,6 @@ test('an input a failed run left queued starts a fresh turn and is answered', { 
     assert.deepEqual(reports, []);
   } finally {
     release();
-    await chat.close();
-  }
-});
-
-test('Stop ends the agents at work, whose reports are logged with no turn', { timeout: 15000 }, async () => {
-  const isSubagent = (request: ModelContext) =>
-    JSON.stringify(request.messages).includes('You are a subagent of OptChat');
-  let mainRequests = 0;
-  let working = () => {};
-  const atWork = new Promise<void>((resolve) => {
-    working = resolve;
-  });
-  const { chat, reports } = await chatWith((request) => {
-    if (isSubagent(request)) {
-      working();
-      return fauxAssistantMessage(`SLOW ${'word '.repeat(4000)}`);
-    }
-    mainRequests++;
-    if (request.messages.at(-1)?.role === 'toolResult') return fauxAssistantMessage('Started.');
-    return fauxAssistantMessage([fauxToolCall('spawn', { tasks: ['Slow job'] })], { stopReason: 'toolUse' });
-  }, 200);
-  try {
-    await chat.accept({ requestId: 'go', content: 'Start an agent.' });
-    assert.equal((await waitForAnswer(chat, 'go')).status, 'done');
-    await atWork;
-    const [name] = (await chat.harness.snapshot(AgentDirectoryDoc, chat.root.id, context))?.names ?? [];
-    assert.ok(name);
-    const before = mainRequests;
-    await chat.abort();
-    const note = `note: Stopped by the user: ${name}.`;
-    const report = `work: [${name}]\nfailed: stopped\n\nFull chat: zoom("${name}")`;
-    const lines = await until(() => logged(chat), (all) => all.includes(note) && all.includes(report));
-    assert.equal(lines.filter((line) => line.startsWith('work: ')).length, 1);
-    assert.deepEqual(await chat.harness.commit((tx) => agentWork(tx, chat.root.id), context), []);
-    const agent = await chat.harness.snapshot(PrivateAgentDoc, chat.root.id, name, context);
-    assert.ok(agent?.conversationId);
-    assert.equal((await chat.harness.snapshot(LiveDoc, agent.conversationId, context))?.run, undefined);
-    // Logged, not admitted: no turn answers it.
-    const at = lines.indexOf(report);
-    const record = await chat.harness.snapshot(MessageDoc, chat.root.id, String(at), context);
-    const requestId = record?.source.replace(/^input:/, '') ?? '';
-    assert.match(requestId, /^optchat:agent:\d+:report$/);
-    assert.equal((await chat.harness.snapshot(InputDoc, chat.root.id, requestId, context))?.value ?? null, null);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(mainRequests, before);
-    assert.deepEqual(reports, []);
-  } finally {
     await chat.close();
   }
 });
@@ -477,7 +429,7 @@ test('a stop keeps the note a turn left before it, its own after it', { timeout:
       (live) => JSON.stringify(live?.generation?.message ?? {}).includes('STREAMED'),
     );
     await chat.abort();
-    const note = 'note: No reply: stopped: length. Send a message to try again.\nStopped by the user: OptChat\'s turn.';
+    const note = 'note: No reply: stopped: length. Send a message to try again.\nStopped by the user.';
     const lines = await until(() => logged(chat), (all) => all.includes(note));
     assert.deepEqual(lines.slice(0, 3), ['user: one', 'infinichat: CUT', 'user: two']);
     assert.ok(lines[3].startsWith('infinichat: STREAMED'));
@@ -527,7 +479,8 @@ test('an input prepared for a turn that ended before its submission starts a fre
     const [view, head, words] = lastUserTexts(seen[1]);
     assert.ok(view.includes('|user: one\n'));
     assert.ok(view.includes('|infinichat: answer 1\n'));
-    assert.equal(head, '\nAgents at work now: none.\n\nTurn: the user\'s new message:\n\n');
+    assert.equal(head, '\nYou are root. Your parent: the user (tell "user"). Your children: none.\n\n'
+      + 'Turn: your new messages:\n\n');
     assert.equal(words, 'two');
     assert.deepEqual(reports, []);
   } finally {

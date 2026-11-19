@@ -117,16 +117,16 @@ export const MemoryDoc = defineDoc<MemoryState>({
   }),
 });
 
-export async function readMessage(tx: Tx, root: ConversationId, i: number): Promise<CanonicalMessage> {
-  return await tx.doc(MessageDoc, root, String(i), null);
+export async function readMessage(tx: Tx, chat: ConversationId, i: number): Promise<CanonicalMessage> {
+  return await tx.doc(MessageDoc, chat, String(i), null);
 }
 
 /** A message as a compaction and zoom show it: an image's line tells the model there is one to zoom into. */
 export const shownMessage = (m: CanonicalMessage): string =>
   `${m.kind}: ${m.text}${m.images.map(() => '\n[image]').join('')}`;
 
-export async function readNode(tx: Tx, root: ConversationId, ref: NodeRef): Promise<BuiltNode | null> {
-  return (await tx.doc(NodeDoc, root, key(ref), null)).value;
+export async function readNode(tx: Tx, chat: ConversationId, ref: NodeRef): Promise<BuiltNode | null> {
+  return (await tx.doc(NodeDoc, chat, key(ref), null)).value;
 }
 
 /** UniiChat's clip: half the limit from the head, the tail less 64 for the marker, which counts what it cut. */
@@ -139,8 +139,8 @@ export function clipToolText(text: string): string {
   return chars.slice(0, head).join('') + `\n[... ${cut} characters cut ...]\n` + chars.slice(-tail).join('');
 }
 
-export async function advanceMessageProgress(tx: Tx, root: ConversationId): Promise<void> {
-  const s = await tx.doc(MemoryDoc, root);
+export async function advanceMessageProgress(tx: Tx, chat: ConversationId): Promise<void> {
+  const s = await tx.doc(MemoryDoc, chat);
   s.messageProgress++;
   s.revision++;
 }
@@ -149,22 +149,22 @@ export async function advanceMessageProgress(tx: Tx, root: ConversationId): Prom
  * The summary model failed (`why`) or answered again (`null`). A turn starts only once the earlier messages have their
  * lines, as UniiChat's `settle` waits, and tells why they won't be written rather than leave a message waiting.
  */
-export async function stallBuilds(tx: Tx, root: ConversationId, why: string | null): Promise<void> {
-  const s = await tx.doc(MemoryDoc, root);
+export async function stallBuilds(tx: Tx, chat: ConversationId, why: string | null): Promise<void> {
+  const s = await tx.doc(MemoryDoc, chat);
   if (s.stalled === why) return;
   s.stalled = why;
   s.revision++;
 }
 
-export async function appendMessage(tx: Tx, root: ConversationId, input: MessageInput,
+export async function appendMessage(tx: Tx, chat: ConversationId, input: MessageInput,
   advanceProgress = true): Promise<number[]> {
-  const s = await tx.doc(MemoryDoc, root);
+  const s = await tx.doc(MemoryDoc, chat);
   const chars = Array.from(input.kind === 'echo' ? clipToolText(input.text) : input.text);
   const ids: number[] = [];
   for (let at = 0; at < chars.length || at === 0; at += TEXT_LIMIT) {
     const text = chars.slice(at, at + TEXT_LIMIT).join('');
     const i = s.nextMessage++;
-    await tx.doc(MessageDoc, root, String(i), {
+    await tx.doc(MessageDoc, chat, String(i), {
       ...input,
       i,
       text,
@@ -179,8 +179,8 @@ export async function appendMessage(tx: Tx, root: ConversationId, input: Message
   return ids;
 }
 
-export async function memoryReady(tx: Tx, root: ConversationId, cutoff?: number): Promise<boolean> {
-  const s = await tx.doc(MemoryDoc, root);
+export async function memoryReady(tx: Tx, chat: ConversationId, cutoff?: number): Promise<boolean> {
+  const s = await tx.doc(MemoryDoc, chat);
   return s.frontier >= (cutoff ?? s.nextMessage);
 }
 
@@ -188,10 +188,10 @@ const renderLines = (lines: string[]): string => `<chat>\n${lines.length ? lines
 export const nodeLine = (n: BuiltNode): string => `${first(n.ref)}+${width(n.ref)}|${flat(n.text)}`;
 
 /** A view's size as UniiChat counts it: its lines' text, without their heads, newlines or tags. */
-async function viewBytes(tx: Tx, root: ConversationId, refs: NodeRef[]): Promise<number> {
+async function viewBytes(tx: Tx, chat: ConversationId, refs: NodeRef[]): Promise<number> {
   let total = 0;
   for (const ref of refs) {
-    const n = await readNode(tx, root, ref);
+    const n = await readNode(tx, chat, ref);
     if (!n) throw new Error('View contains an unresolved node');
     total += n.bytes;
   }
@@ -208,15 +208,15 @@ function moreDue(a: NodeRef, b: NodeRef, T: number): boolean {
   return cmp > 0n || (cmp === 0n && first(a) < first(b));
 }
 
-async function reduceView(tx: Tx, root: ConversationId, view: View, T: number, target: number): Promise<boolean> {
+async function reduceView(tx: Tx, chat: ConversationId, view: View, T: number, target: number): Promise<boolean> {
   let changed = false;
-  while ((await viewBytes(tx, root, view.refs)) > target) {
+  while ((await viewBytes(tx, chat, view.refs)) > target) {
     let chosen = -1;
     for (let j = 0; j + 1 < view.refs.length; j++) {
       const a = view.refs[j];
       const b = view.refs[j + 1];
       if (a[0] !== b[0] || a[1] % 2 !== 0 || b[1] !== a[1] + 1) continue;
-      if (!(await readNode(tx, root, [a[0] + 1, a[1] / 2]))) continue;
+      if (!(await readNode(tx, chat, [a[0] + 1, a[1] / 2]))) continue;
       if (chosen < 0 || moreDue(a, view.refs[chosen], T)) chosen = j;
     }
     if (chosen < 0) {
@@ -233,28 +233,28 @@ async function reduceView(tx: Tx, root: ConversationId, view: View, T: number, t
 
 // Each canonical boundary is consumed exactly once when its complete leaf becomes available.
 // A parent completion alone does not start/retry a batch, preserving prompt-cache prefixes.
-export async function settleViews(tx: Tx, root: ConversationId): Promise<void> {
-  const s = await tx.doc(MemoryDoc, root);
+export async function settleViews(tx: Tx, chat: ConversationId): Promise<void> {
+  const s = await tx.doc(MemoryDoc, chat);
   while (s.viewThrough < s.frontier) {
     const i = s.viewThrough++;
     s.main.refs.push([0, i]);
     s.compact.refs.push([0, i]);
     const T = i + 1;
     // Each view batches on its own size only, so a chat batch leaves the compactions' cached view alone.
-    if ((await viewBytes(tx, root, s.main.refs)) > 128000) s.main.reducing = true;
-    if (s.main.reducing) await reduceView(tx, root, s.main, T, 64000);
-    if ((await viewBytes(tx, root, s.compact.refs)) > 32000) s.compact.reducing = true;
-    if (s.compact.reducing) await reduceView(tx, root, s.compact, T, 16000);
+    if ((await viewBytes(tx, chat, s.main.refs)) > 128000) s.main.reducing = true;
+    if (s.main.reducing) await reduceView(tx, chat, s.main, T, 64000);
+    if ((await viewBytes(tx, chat, s.compact.refs)) > 32000) s.compact.reducing = true;
+    if (s.compact.reducing) await reduceView(tx, chat, s.compact, T, 16000);
     s.revision++;
   }
 }
 
-async function cutoffLines(tx: Tx, root: ConversationId, refs: NodeRef[], cutoff: number): Promise<string[]> {
+async function cutoffLines(tx: Tx, chat: ConversationId, refs: NodeRef[], cutoff: number): Promise<string[]> {
   const out: string[] = [];
   let stopped = false;
   async function visit(ref: NodeRef): Promise<void> {
     if (stopped || first(ref) >= cutoff) return;
-    const n = await readNode(tx, root, ref);
+    const n = await readNode(tx, chat, ref);
     if (end(ref) <= cutoff && n) {
       out.push(nodeLine(n));
       return;
@@ -270,37 +270,37 @@ async function cutoffLines(tx: Tx, root: ConversationId, refs: NodeRef[], cutoff
   return out;
 }
 
-export async function renderMain(tx: Tx, root: ConversationId, cutoff?: number): Promise<string> {
-  await settleViews(tx, root);
-  const s = await tx.doc(MemoryDoc, root);
+export async function renderMain(tx: Tx, chat: ConversationId, cutoff?: number): Promise<string> {
+  await settleViews(tx, chat);
+  const s = await tx.doc(MemoryDoc, chat);
   const count = cutoff ?? s.nextMessage;
   if (s.frontier < count) throw new Error('Prior message summaries are not ready');
-  return renderLines(await cutoffLines(tx, root, s.main.refs, count));
+  return renderLines(await cutoffLines(tx, chat, s.main.refs, count));
 }
 
-export async function renderCompaction(tx: Tx, root: ConversationId, cutoffExclusive: number): Promise<string> {
-  await settleViews(tx, root);
-  const s = await tx.doc(MemoryDoc, root);
-  return renderLines(await cutoffLines(tx, root, s.compact.refs, Math.min(cutoffExclusive, s.frontier)));
+export async function renderCompaction(tx: Tx, chat: ConversationId, cutoffExclusive: number): Promise<string> {
+  await settleViews(tx, chat);
+  const s = await tx.doc(MemoryDoc, chat);
+  return renderLines(await cutoffLines(tx, chat, s.compact.refs, Math.min(cutoffExclusive, s.frontier)));
 }
 
-export async function publishNode(tx: Tx, root: ConversationId, node: BuiltNode): Promise<void> {
-  const d = await tx.doc(NodeDoc, root, key(node.ref), null);
+export async function publishNode(tx: Tx, chat: ConversationId, node: BuiltNode): Promise<void> {
+  const d = await tx.doc(NodeDoc, chat, key(node.ref), null);
   if (d.value) throw new Error('Node already published');
   d.value = node;
-  const s = await tx.doc(MemoryDoc, root);
+  const s = await tx.doc(MemoryDoc, chat);
   delete s.active[key(node.ref)];
   delete s.failed[key(node.ref)];
   if (node.ref[0] === 0) {
     const at = s.pendingLeaves.indexOf(node.ref[1]);
     if (at >= 0) s.pendingLeaves.splice(at, 1);
-    while (s.frontier < s.nextMessage && (await readNode(tx, root, [0, s.frontier]))) s.frontier++;
+    while (s.frontier < s.nextMessage && (await readNode(tx, chat, [0, s.frontier]))) s.frontier++;
   }
   const sibling: NodeRef = [node.ref[0], node.ref[1] % 2 === 0 ? node.ref[1] + 1 : node.ref[1] - 1];
-  if (await readNode(tx, root, sibling)) {
+  if (await readNode(tx, chat, sibling)) {
     const parent: NodeRef = [node.ref[0] + 1, Math.floor(node.ref[1] / 2)];
     s.readyParents.push(parent);
   }
   s.revision++;
-  await settleViews(tx, root);
+  await settleViews(tx, chat);
 }

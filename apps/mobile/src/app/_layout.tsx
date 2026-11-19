@@ -31,6 +31,7 @@ export default function RootLayout() {
             <Stack.Screen name="chat-settings/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="infinichat-settings" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="infinichat-schedule" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="infinichat-agent/[name]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="remote-hosts" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
             <Stack.Screen name="infinichat-providers" options={{ title: 'Providers', presentation: 'modal' }} />

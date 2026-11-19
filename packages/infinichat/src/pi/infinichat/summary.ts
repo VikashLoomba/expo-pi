@@ -4,7 +4,8 @@ import type {
 import { isRetryableAssistantError, retryDelayMs } from '@earendil-works/pi-ai/utils/retry';
 import type { Context } from '@earendil-works/chord/context';
 import {
-  defineDoc, defineTask, type Agent, type ConversationId, type DocumentReader, type ModelRef, type TaskId, type Tx,
+  ROOT_CONVERSATION_ID, defineDoc, defineTask,
+  type Agent, type ConversationId, type DocumentReader, type ModelRef, type TaskId, type Tx,
 } from '@earendil-works/pi-durable';
 
 import {
@@ -15,27 +16,27 @@ import { recordMemoryUsage } from './usage';
 
 /** A model and effort the host selected. */
 export type ModelSelection = { model: ModelRef; thinkingLevel: ModelThinkingLevel };
+/** The whole tree's settings, which root's conversation keeps; each agent's model is its own (`pi.agent`). */
 export type OptChatConfig = {
-  /** Builds wait while it is `null`. */
+  /** What writes every agent's summaries, UniiChat's `compactor`. Builds wait while it is `null`. */
   summary: ModelSelection | null;
-  /** The agent's name the user chose, or `null` for the host's. */
+  /** The name the user chose, or `null` for the host's. */
   name: string | null;
-  /** What subagents run on, UniiChat's `agents`: `null` for the main agent's model and effort. */
-  subagents: ModelSelection | null;
 };
 export const ConfigDoc = defineDoc<OptChatConfig>({
   kind: 'optchat.config',
-  version: 3,
+  version: 4,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   checkpointWhen: () => true,
-  // Version 1 had no name, so the conversation went by the host's; versions 1 and 2 ran subagents on the main model.
-  migrate: (value, fromVersion) => {
-    const older = value as Omit<OptChatConfig, 'subagents'>;
-    return { ...older, ...(fromVersion < 2 ? { name: null } : {}), subagents: null };
+  // Version 1 had no name, so the conversation went by the host's. Version 3 kept a model for subagents; each agent
+  // of the tree runs on its own.
+  migrate: (value) => {
+    const { summary, name } = value as { summary: ModelSelection | null; name?: string | null };
+    return { summary, name: name ?? null };
   },
-  initial: () => ({ summary: null, name: null, subagents: null }),
+  initial: () => ({ summary: null, name: null }),
 });
 
 type BuildScratch = {
@@ -101,20 +102,20 @@ const unanswerable = (reply: AssistantMessage, text: string): boolean => reply.s
   || reply.content.some((block) => block.type === 'toolCall')
   || (reply.stopReason !== 'error' && reply.stopReason !== 'aborted' && !text);
 
-async function freeze(tx: Tx, root: ConversationId, ref: NodeRef): Promise<{
+async function freeze(tx: Tx, chat: ConversationId, ref: NodeRef): Promise<{
   source: string; task: string; view: string;
 }> {
   let source: string;
   let task: string;
   const ruler = '-'.repeat(512);
   if (ref[0] === 0) {
-    const m = await readMessage(tx, root, ref[1]);
+    const m = await readMessage(tx, chat, ref[1]);
     source = shownMessage(m);
     task = `Compaction: compress message ${m.i} into one line of at most 512 bytes\n`
       + `(about 70 words), the length of this ruler:\n${ruler}\n<input>\n${source}\n</input>`;
   } else {
-    const a = await readNode(tx, root, [ref[0] - 1, ref[1] * 2]);
-    const b = await readNode(tx, root, [ref[0] - 1, ref[1] * 2 + 1]);
+    const a = await readNode(tx, chat, [ref[0] - 1, ref[1] * 2]);
+    const b = await readNode(tx, chat, [ref[0] - 1, ref[1] * 2 + 1]);
     if (!a || !b) throw new Error('Parent halves must both exist');
     // Each line flattened, as UniiChat's merge input is: a short leaf is its exact, maybe multi-line, source.
     source = `${flat(a.text)}\n${flat(b.text)}`;
@@ -123,7 +124,7 @@ async function freeze(tx: Tx, root: ConversationId, ref: NodeRef): Promise<{
       + `${ruler}\n<chat> may hold their messages, ${first(ref)} to ${end(ref) - 1}, in more detail: take details\n`
       + `of them from there too.\n<input>\n${source}\n</input>`;
   }
-  const view = await renderCompaction(tx, root, ref[0] === 0 ? first(ref) : end(ref));
+  const view = await renderCompaction(tx, chat, ref[0] === 0 ? first(ref) : end(ref));
   return { source, task, view };
 }
 
@@ -137,9 +138,9 @@ const ctx = ([l, i]: NodeRef): number => (l === 0 ? i : (i + 1) * 2 ** l);
  * Queue work only, as UniiChat starts it: the nodes ready up to the JOBS-th unbuilt leaf, in the order the messages
  * came and a merge first at a tie, while fewer than JOBS build. A failed node keeps its place until it builds.
  */
-export async function pumpBuilds(tx: Tx, root: ConversationId): Promise<TaskId<string>[]> {
-  const s = await tx.doc(MemoryDoc, root);
-  const { summary } = await tx.doc(ConfigDoc, root);
+export async function pumpBuilds(tx: Tx, chat: ConversationId): Promise<TaskId<string>[]> {
+  const s = await tx.doc(MemoryDoc, chat);
+  const { summary } = await tx.doc(ConfigDoc, ROOT_CONVERSATION_ID);
   const created: TaskId<string>[] = [];
   // Nothing is built until the host selects a summary model.
   if (!summary) return created;
@@ -147,10 +148,10 @@ export async function pumpBuilds(tx: Tx, root: ConversationId): Promise<TaskId<s
   async function admit(ref: NodeRef): Promise<boolean> {
     const k = key(ref);
     if (s.active[k] || s.failed[k]?.at === s.messageProgress) return false;
-    if (await readNode(tx, root, ref)) return false;
-    const frozen = await freeze(tx, root, ref);
+    if (await readNode(tx, chat, ref)) return false;
+    const frozen = await freeze(tx, chat, ref);
     const id = await tx.createTask(BuildNode, { ref }, {
-      conversationId: root,
+      conversationId: chat,
       ownership: { kind: 'conversation' },
       background: true,
     });
@@ -176,7 +177,7 @@ export async function pumpBuilds(tx: Tx, root: ConversationId): Promise<TaskId<s
   for (const ref of ready) {
     if (Object.keys(s.active).length >= JOBS) break;
     const parent = s.readyParents.findIndex(([l, i]) => l === ref[0] && i === ref[1]);
-    if (parent >= 0 && (await readNode(tx, root, ref))) {
+    if (parent >= 0 && (await readNode(tx, chat, ref))) {
       s.readyParents.splice(parent, 1);
     } else if ((await admit(ref)) && parent >= 0) {
       // Failed parents leave the ready queue while running and are requeued exactly on failure.
@@ -186,8 +187,8 @@ export async function pumpBuilds(tx: Tx, root: ConversationId): Promise<TaskId<s
   return created;
 }
 
-async function release(tx: Tx, root: ConversationId, ref: NodeRef, id: TaskId<string>): Promise<void> {
-  const s = await tx.doc(MemoryDoc, root);
+async function release(tx: Tx, chat: ConversationId, ref: NodeRef, id: TaskId<string>): Promise<void> {
+  const s = await tx.doc(MemoryDoc, chat);
   const k = key(ref);
   if (s.active[k] !== id) return;
   delete s.active[k];
@@ -243,7 +244,7 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
       if (!saved?.selection) throw new Error('Missing native task scratch');
       const { selection } = saved;
       const model = r.models.getModel(selection.model.provider, selection.model.modelId);
-      // The same static system prompt and offered tool schemas as a turn, from the root agent.
+      // The same static system prompt and offered tool schemas as a turn, from the conversation's agent.
       const agent = await r.agent(ctx);
       const request: ModelContext = {
         messages: [
@@ -290,7 +291,8 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
         const d = await tx.doc(BuildScratchDoc, task.id);
         // Every attempt's spend, a failed one's too, as pi-durable's compaction counts its own.
         if (answer !== undefined) {
-          await recordMemoryUsage(tx, r.conversationId, `${answer.provider}/${answer.model}`, answer.usage);
+          // One ledger for the whole tree, in root's conversation.
+          await recordMemoryUsage(tx, ROOT_CONVERSATION_ID, `${answer.provider}/${answer.model}`, answer.usage);
         }
         const text = answer ? replyText(answer) : '';
         if (answer !== undefined && !isRetryableAssistantError(answer) && unanswerable(answer, text)) {

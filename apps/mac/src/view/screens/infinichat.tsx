@@ -10,7 +10,9 @@ import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credential
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { useCallback, useMemo, useState } from 'react';
 
-import { CheckIcon, ChevronDownIcon, ClockIcon, PlusIcon, ServerIcon, SettingsIcon, XIcon } from 'lucide-react';
+import {
+  CheckIcon, ChevronDownIcon, ClockIcon, PlusIcon, ServerIcon, SettingsIcon, UsersIcon, XIcon,
+} from 'lucide-react';
 
 import { MacInfiniChat, type MoveStatus } from '../../contract';
 import { ChatAgentContext } from '../components/chat/agent';
@@ -19,6 +21,7 @@ import { Notice } from '../components/chat/notices';
 import { Placeholder } from '../components/chat/placeholder';
 import { ThreadSourceContext } from '../components/chat/thread-source';
 import { Transcript } from '../components/chat/transcript';
+import { AgentPane } from '../components/infinichat/agent-pane';
 import { useSheet } from '../components/infinichat/form-sheet';
 import { McpSheet } from '../components/infinichat/mcp-sheet';
 import { ProvidersSheet } from '../components/infinichat/providers-sheet';
@@ -89,6 +92,15 @@ function InfiniChat() {
   const avatar = useWatch(ref.avatar) ?? undefined;
   const catalog = useWatch(ref.catalog);
   const accesses = useWatch(ref.access);
+  // The agents root started, and theirs: the header's menu shows one's chat in place of root's, as UniiChat's views
+  // list its tree. One that left the tree, hidden by its parent, gives way to root's again.
+  const children = (useWatch(ref.agents) ?? []).filter((each) => each.parent !== null);
+  const [chosenAgent, setChosenAgent] = useState<string>();
+  const watched = children.some((each) => each.name === chosenAgent) ? chosenAgent : undefined;
+  const depthOf = (parent: string | null): number => {
+    const above = children.find((each) => each.name === parent);
+    return above === undefined ? 0 : 1 + depthOf(above.parent);
+  };
   const openSettings = useOpenSettings();
   const openMachines = () => openSettings({ pane: 'machines' });
   const settingsSheet = useSheet();
@@ -225,6 +237,27 @@ function InfiniChat() {
             </span>
           </Button>
           <div className="col-start-3 flex gap-1 justify-self-end [-webkit-app-region:no-drag] [app-region:no-drag]">
+            {children.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm"
+                  aria-label={`Agents. Showing ${watched ?? name}`} />}>
+                  <UsersIcon />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setChosenAgent(undefined)}>
+                    {watched === undefined ? <CheckIcon /> : <span className="size-4" />}
+                    {name}
+                  </DropdownMenuItem>
+                  {children.map((each) => (
+                    <DropdownMenuItem key={each.name} onClick={() => setChosenAgent(each.name)}>
+                      {each.name === watched ? <CheckIcon /> : <span className="size-4" />}
+                      <span style={{ paddingLeft: `${(depthOf(each.parent) + 1) * 12}px` }}>{each.name}</span>
+                      {each.awake && <span className="text-[11px] text-muted-foreground">working</span>}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <Tooltip>
               <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Scheduled tasks"
                 onClick={scheduledSheet.show} />}>
@@ -262,7 +295,8 @@ function InfiniChat() {
             </DropdownMenu>
           </div>
         </header>
-        {!away ? <Transcript stopping={stopping} onChoose={choosePrompt} />
+        {watched !== undefined && !away ? <AgentPane key={watched} name={watched} rootName={name} />
+          : !away ? <Transcript stopping={stopping} onChoose={choosePrompt} />
           : !startable ? <Placeholder>{away}</Placeholder> : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3">
               <p className="m-0 text-[15px] text-muted-foreground">{away}</p>
@@ -271,6 +305,8 @@ function InfiniChat() {
               </Button>
             </div>
           )}
+        {/* An agent's pane ends in its own strip: the composer, and what stands in its way, are root's. */}
+        {(watched === undefined || away) && (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-6 pb-6">
         {controls && !configured && (anyConnected
           ? <Notice tone="neutral" message={MODELS_REQUIRED} action="Settings" onAction={settingsSheet.show} />
@@ -314,6 +350,7 @@ function InfiniChat() {
           attachments={draft.images} onAttach={attach} onFiles={attachFiles} onRemoveAttachment={removeImage}
           attaching={attaching} imagesSupported={configured} commands={INFINICHAT_COMMANDS} onCommand={runCommand} />
         </div>
+        )}
         <SettingsSheet key={settingsSheet.session} open={settingsSheet.open} onClose={settingsSheet.hide}
           onOpenProviders={openProviders} />
         <ProvidersSheet key={providersSheet.session} open={providersSheet.open} onClose={providersSheet.hide}

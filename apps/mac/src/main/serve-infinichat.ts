@@ -1,7 +1,7 @@
 import type { FacetHost } from '@earendil-works/chord';
 import type { ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 
-import { MacInfiniChat, MacMcp, type Connection, type MacPrincipal } from '../contract';
+import { MacAgent, MacInfiniChat, MacMcp, type Connection, type MacPrincipal } from '../contract';
 import type { MacAvatar } from './avatar';
 import type { MacInfiniChat as Shown } from './infinichat';
 import { done, mirror } from './serve';
@@ -40,6 +40,7 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         controls: view.getControls() ?? null,
         messages: view.getMessages(),
         scheduled: shown.scheduled.getSnapshot() ?? null,
+        agents: shown.agents.getSnapshot() ?? null,
         machines: shown.machines.getSnapshot() ?? null,
       };
     });
@@ -64,6 +65,7 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         // Chord's JSON arrays are mutable types; the copies keep their elements, which the diff compares by identity.
         messages: self.derive([conversation], ([value]) => [...value.messages]),
         scheduled: self.derive([conversation], ([value]) => value.scheduled && [...value.scheduled]),
+        agents: self.derive([conversation], ([value]) => value.agents && [...value.agents]),
         machines: self.derive([conversation], ([value]) => value.machines),
         connection: self.derive([link], ([value]) => value.connection),
         held: self.derive([link], ([value]) => value.held),
@@ -101,6 +103,35 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         setApiKey: async ({ providerId, key, workspaceId }) =>
           done(infinichat.setApiKey(providerId, key, workspaceId)),
         signOut: async ({ providerId }) => done(infinichat.signOut(providerId)),
+      },
+    };
+  });
+}
+
+/**
+ * Serves one agent's chat to the window that shows it, as `serveInfiniChat` serves root's: the members mirror the
+ * shown side's view of that agent, which `ShownInfiniChat` follows across moves while the object lives, and the
+ * operations go to that side.
+ */
+export function serveAgent(host: FacetHost<MacPrincipal>, infinichat: Shown): void {
+  host.serve(MacAgent, ({ name }, _principal, self) => {
+    const chat = infinichat.shown.agent(name);
+    const view = chat.view();
+    const shown = mirror(self, [view], () => ({
+      snapshot: { view: view.getSnapshot() }, controls: view.getControls() ?? null, messages: view.getMessages(),
+    }));
+    return {
+      variant: 'owner',
+      members: {
+        snapshot: self.derive([shown], ([value]) => value.snapshot),
+        controls: self.derive([shown], ([value]) => value.controls),
+        // Chord's JSON arrays are mutable types; the copy keeps its elements, which the diff compares by identity.
+        messages: self.derive([shown], ([value]) => [...value.messages]),
+        loadEarlier: async () => done(view.loadEarlier()),
+        fillGap: async (gap) => done(view.fillGap(gap)),
+        stop: async () => done(chat.stop()),
+        continue: async () => done(chat.continue()),
+        setModel: async (settings) => done(chat.setModel(settings)),
       },
     };
   });

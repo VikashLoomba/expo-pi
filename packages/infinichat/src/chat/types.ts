@@ -21,7 +21,7 @@ export interface ChatSummary {
  */
 export const ChatMessageSchema = obj({
   id: str(),
-  /** `work` is a background agent's report, UniiChat's work message starting "[Name]". */
+  /** `work` is a child's message to its parent, UniiChat's work message starting "[name]", or a scheduled task's. */
   role: oneOf(['user', 'assistant', 'tool', 'notice', 'work']),
   text: str(),
   createdAt: num(),

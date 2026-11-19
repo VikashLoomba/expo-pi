@@ -4,8 +4,9 @@ import type { UserMessage } from '@earendil-works/pi-ai';
 
 import type { ChatMessage } from '../../chat/types';
 import type { ChatViewSnapshot, ChatViewSource } from '../chat-view';
+import type { AgentInfo } from '../infinichat-agents';
 import type { ScheduledTask } from '../infinichat-scheduled';
-import type { InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
+import type { AgentChat, InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
 import type { InfiniChatControls } from '../infinichat-view';
 import type { ScheduledInput } from '../infinichat/schedule';
 import type { InfiniChatUsage } from '../infinichat/usage';
@@ -15,6 +16,7 @@ import {
   InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatClient, type InfiniChatPrincipal,
   type Machine, type PendingHostKeys, type Reach, type SignInAttempt,
 } from './contract';
+import { RemoteAgent } from './agent-client';
 import type { DialedServer, InstallStage, MachineDirectory, ServerDialer } from './dialer';
 import { follow, heard } from './follow';
 import type { MachinePatch, MachinesState } from './machines';
@@ -105,7 +107,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private unfit?: { version: string; behind: boolean };
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
-    scheduled: readonly ScheduledTask[] | undefined; catalog: ModelCatalog; access: MachineAccess;
+    scheduled: readonly ScheduledTask[] | undefined; agents: readonly AgentInfo[] | undefined;
+    catalog: ModelCatalog; access: MachineAccess;
     signIn: SignInAttempt; conversation: ConversationState; machines: MachinesState | undefined; reach: Reach;
     pendingHostKeys: PendingHostKeys;
   };
@@ -115,6 +118,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private closed = false;
   private closing?: Promise<void>;
   private readonly machineListeners = new Set<() => void>();
+  private readonly agentListeners = new Set<() => void>();
+  /** Each agent's chat by its name, which a screen holds while it shows it (`RemoteAgent`). */
+  private readonly chats = new Map<string, RemoteAgent>();
 
   /** The machine's MCP servers, which `/mcp` shows, over this host's link. */
   readonly mcp: RemoteMcp;
@@ -148,6 +154,14 @@ export class RemoteInfiniChat implements InfiniChatHost {
     },
     getSnapshot: () => this.values?.scheduled,
   };
+  /** The tree of agents as the machine serves it; undefined until connected and while it holds no conversation. */
+  readonly agents = {
+    subscribe: (listener: () => void) => {
+      this.agentListeners.add(listener);
+      return () => { this.agentListeners.delete(listener); };
+    },
+    getSnapshot: () => this.values?.agents,
+  };
   /** The conversation's machines document as the machine serves it; undefined until connected and while it is away. */
   readonly machines = {
     subscribe: (listener: () => void) => {
@@ -168,6 +182,15 @@ export class RemoteInfiniChat implements InfiniChatHost {
 
   view(): ChatViewSource<InfiniChatControls> {
     return this.shown;
+  }
+
+  agent(name: string): AgentChat {
+    let chat = this.chats.get(name);
+    if (chat === undefined) {
+      chat = new RemoteAgent(this.host, name, () => this.ref !== undefined && !this.closed, (run) => this.root(run));
+      this.chats.set(name, chat);
+    }
+    return chat;
   }
 
   /** The machine's providers and models, its own sign-ins and its latest sign-in attempt; undefined until shown. */
@@ -422,12 +445,14 @@ export class RemoteInfiniChat implements InfiniChatHost {
       this.listeners.clear();
       this.scheduledListeners.clear();
       this.machineListeners.clear();
+      this.agentListeners.clear();
       await this.running;
       const session = this.session;
       this.session = undefined;
       this.released.abort();
       this.ref?.release();
       this.mcp.release();
+      for (const chat of this.chats.values()) chat.release();
       try {
         await this.host.close(BACKGROUND_CONTEXT);
       } finally {
@@ -577,6 +602,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
       }), { principal: { kind: 'host' } }, BACKGROUND_CONTEXT);
       const ref = this.ref ?? this.hold();
       this.mcp.hold();
+      // A chat a screen began to show before this host had a link.
+      for (const chat of this.chats.values()) chat.linked();
       stopState = follow(ref.state, () => {
         const state = ref.state.value;
         if (state.kind === 'live') settle(() => resolve(true));
@@ -594,8 +621,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const context = withAbortSignal(this.released.signal, BACKGROUND_CONTEXT);
     const ref = this.host.hold(InfiniChatRemote, {}, context);
     this.ref = ref;
-    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.scheduled, ref.access, ref.signInAttempt,
-      ref.conversation, ref.machines, ref.reach, ref.pendingHostKeys]) {
+    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.scheduled, ref.agents, ref.access,
+      ref.signInAttempt, ref.conversation, ref.machines, ref.reach, ref.pendingHostKeys]) {
       follow(member, this.refresh, context);
     }
     return ref;
@@ -612,7 +639,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const rescheduled = scheduled !== this.values?.scheduled;
     const machines = ref.machines.value ?? undefined;
     const relisted = machines !== this.values?.machines;
-    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled,
+    const agents = ref.agents.value ?? undefined;
+    const regrown = agents !== this.values?.agents;
+    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled, agents,
       catalog: ref.catalog.value, access: ref.access.value, signIn: ref.signInAttempt.value,
       conversation: ref.conversation.value, machines, reach: ref.reach.value,
       pendingHostKeys: ref.pendingHostKeys.value };
@@ -620,6 +649,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
     this.notify();
     if (rescheduled) for (const listener of [...this.scheduledListeners]) listener();
     if (relisted) for (const listener of [...this.machineListeners]) listener();
+    if (regrown) for (const listener of [...this.agentListeners]) listener();
   };
 
   /** A live session lost its link or the transport under it: dispose of it and connect again. */

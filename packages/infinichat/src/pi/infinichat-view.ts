@@ -1,17 +1,17 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { JsonValue } from '@earendil-works/chord/json';
 import {
-  ResetEntry,
+  ROOT_CONVERSATION_ID, ResetEntry,
   type ConversationId, type ConversationView, type DocumentWatch, type EntryRecord, type Harness, type InboxItem,
-  type InboxState, type TaskGraphWatch, type TranscriptItem,
+  type InboxState, type TranscriptItem,
 } from '@earendil-works/pi-durable';
-import { bool, nul, obj, str, union, type Static } from '@earendil-works/pi-schema';
+import { bool, compile, nul, obj, str, union, type Static } from '@earendil-works/pi-schema';
 
 import { ChatControlsProperties, type ChatMessage } from '../chat/types';
 import { ChatMetadataDoc, type ChatMetadata } from './chat-metadata';
 import { projectControls, projectMessages, queuedRow, readConversationView, type ChatState } from './chat-projection';
 import { WatchedView } from './chat-view';
-import { AGENT_TASK } from './infinichat/agents';
+import { TreeDoc, USER, agentNamed, type Tree } from './infinichat/agents';
 import { AppDoc, DeliveryEntry, InputDoc, turnOpen, type Admission, type AppState } from './infinichat/app';
 import { MemoryDoc, type MemoryState } from './infinichat/memory';
 import { ConfigDoc, type OptChatConfig } from './infinichat/summary';
@@ -27,11 +27,11 @@ export const InfiniChatControlsSchema = obj({
   summary: union([ChatModelSettingsSchema, nul()]),
   /** The user's own instructions that follow the prompt; empty until written. */
   instructions: str(),
-  /** The name the user gave the agent; empty for InfiniChat. */
+  /** The name the user gave InfiniChat; empty for InfiniChat. */
   name: str(),
-  /** What subagents run on, or `null` for the main model and effort. */
-  subagents: union([ChatModelSettingsSchema, nul()]),
-  /** The main and summary models are both chosen; InfiniChat sends and builds nothing before. */
+  /** Whose chat this is, by the agent's name in the tree: `root`, which alone takes the user's messages, or a child. */
+  agent: str(),
+  /** This agent's model and the summary model are both chosen; InfiniChat sends and builds nothing before. */
   configured: bool(),
 }, { open: true });
 export type InfiniChatControls = Static<typeof InfiniChatControlsSchema>;
@@ -93,23 +93,52 @@ function waitingOnMemory(memory: MemoryState | undefined): string | undefined {
   return `Writing memory · ${left} ${left === 1 ? 'line' : 'lines'} left`;
 }
 
+/** A `tell` call's arguments, as its row shows them (`toolInput`'s JSON), also while they stream. */
+const tellArguments = compile(obj({ name: str(), message: str() }, { open: true }));
+function told(args: string): { name: string; message: string } | undefined {
+  try {
+    const parsed: unknown = JSON.parse(args);
+    return tellArguments.check(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * An agent's rows as UniiChat's terse view shows its chat: what it tells its parent, the user for root, is its message,
+ * and a reply, which it keeps for itself, is a step of its work, shown with its thinking. A reply from before `since`
+ * is from a chat older than the tree, where it answered the user, and stays a message.
+ */
+function spoken(rows: readonly ChatMessage[], parent: string, since: number): ChatMessage[] {
+  return rows.map((row): ChatMessage => {
+    if (row.role === 'tool' && row.tool?.name === 'tell' && row.tool.status !== 'error') {
+      const sent = told(row.tool.args);
+      if (sent?.name !== parent) return row;
+      return { id: row.id, role: 'assistant', text: sent.message, createdAt: row.createdAt,
+        streaming: row.tool.status === 'running' };
+    }
+    if (row.role !== 'assistant' || row.text === '' || row.createdAt < since) return row;
+    return { ...row, text: '', thinking: row.thinking ? `${row.thinking}\n\n${row.text}` : row.text };
+  });
+}
+
 type InfiniChatWatches = {
   metadata: DocumentWatch<ChatMetadata> | undefined;
   app: DocumentWatch<AppState> | undefined;
   /** OptChat's memory, for what an accepted input waits on. */
   memory: DocumentWatch<MemoryState> | undefined;
+  /** The whole tree's settings and its agents, which root's conversation keeps. */
   config: DocumentWatch<OptChatConfig> | undefined;
+  tree: DocumentWatch<Tree> | undefined;
   /** OpenAI's hosted searches by response, as `ChatView` reads them. */
   search: DocumentWatch<SearchPresentationsState> | undefined;
-  /** pi-durable's live tasks, for the agents at work, as the keep-alive counts them. */
-  tasks: TaskGraphWatch;
 };
 
 /**
- * InfiniChat's one conversation while something shows it, as `ChatView` shows a chat (`WatchedView`): pi-durable's
- * conversation view, the chat metadata and web search documents, OptChat's application and summary-model documents
- * and the task graph, with a `ConversationTranscript` kept across attachments. OptChat accepts an input before its
- * coordinator submits it, so accepted inputs from `AppDoc.pending` show as queued rows.
+ * One agent's chat while something shows it, root's or a child's, as `ChatView` shows a chat (`WatchedView`):
+ * pi-durable's conversation view, the chat metadata and web search documents, and OptChat's application, memory,
+ * settings and tree documents, with a `ConversationTranscript` kept across attachments. OptChat accepts an input
+ * before its coordinator submits it, so accepted inputs from `AppDoc.pending` show as queued rows.
  */
 export class InfiniChatView extends WatchedView<InfiniChatControls, InfiniChatWatches> {
   /** Each request's admission, whose input and kind its `InputDoc` keeps unchanged, so a later subscriber reuses it. */
@@ -121,23 +150,24 @@ export class InfiniChatView extends WatchedView<InfiniChatControls, InfiniChatWa
   }
 
   protected async attach(): Promise<InfiniChatWatches> {
-    const [metadata, app, memory, config, search, tasks] = await Promise.all([
+    const [metadata, app, memory, config, tree, search] = await Promise.all([
       this.harness.watchDoc(ChatMetadataDoc, this.id, context),
       this.harness.watchDoc(AppDoc, this.id, context),
       this.harness.watchDoc(MemoryDoc, this.id, context),
-      this.harness.watchDoc(ConfigDoc, this.id, context),
+      this.harness.watchDoc(ConfigDoc, ROOT_CONVERSATION_ID, context),
+      this.harness.watchDoc(TreeDoc, ROOT_CONVERSATION_ID, context),
       this.harness.watchDoc(SearchPresentationsDoc, this.id, context),
-      this.harness.watchTaskGraph(context),
     ]);
-    return { metadata, app, memory, config, search, tasks };
+    return { metadata, app, memory, config, tree, search };
   }
 
-  protected handles({ metadata, app, memory, config, search, tasks }: InfiniChatWatches) {
-    return [metadata, app, memory, config, search, tasks];
+  protected handles({ metadata, app, memory, config, tree, search }: InfiniChatWatches) {
+    return [metadata, app, memory, config, tree, search];
   }
 
-  protected present({ metadata }: InfiniChatWatches) {
-    return metadata?.value !== undefined;
+  /** Every agent's conversation has its application document from the commit that made it; only root has metadata. */
+  protected present({ app, tree }: InfiniChatWatches) {
+    return app?.value !== undefined && tree !== undefined && agentNamed(tree.value.agents, this.id) !== undefined;
   }
 
   /** Inputs read before the first projection show with the transcript rather than after it. */
@@ -181,6 +211,10 @@ export class InfiniChatView extends WatchedView<InfiniChatControls, InfiniChatWa
         if (added) this.schedule();
       }, this.failing());
     }
+    const tree = watches.tree?.value;
+    const agent = tree && agentNamed(tree.agents, this.id);
+    if (tree === undefined || agent === undefined) return 'missing';
+    const { parent } = tree.agents[agent];
     const state: ChatState = { id: this.id, ...docs, inbox: shownInbox(docs.inbox, this.originals),
       metadata: watches.metadata?.value, search: watches.search?.value };
     const controls = projectControls(state, view.entries);
@@ -191,24 +225,26 @@ export class InfiniChatView extends WatchedView<InfiniChatControls, InfiniChatWa
     const waiting = !controls.busy && unsent ? waitingOnMemory(watches.memory?.value) : undefined;
     this.controls = {
       ...controls,
+      // Only root's conversation has a title of its own; a child's chat goes by its name.
+      ...(parent === null ? {} : { title: agent }),
       ...(waiting === undefined ? {} : { waiting }),
-      // An accepted input waits for its turn's summaries or the coordinator before pi-durable runs it, the coordinator
-      // closes a turn after its run (logging what it left), and agents work in the background; a stop cancels them,
-      // so the conversation is working, and a run that ended is continued only once its turn is closed.
-      busy: controls.busy || (app !== undefined && turnOpen(app))
-        || Object.values(watches.tasks.value.tasks).some((task) => task.kind === AGENT_TASK),
+      // An accepted input waits for its turn's summaries or the coordinator before pi-durable runs it, and the
+      // coordinator closes a turn after its run (logging what it left), so the agent is working, and a run that ended
+      // is continued only once its turn is closed.
+      busy: controls.busy || (app !== undefined && turnOpen(app)),
       summary,
       instructions: docs.agent?.instructions ?? '',
       name: config?.name ?? '',
-      subagents: config?.subagents ?? null,
+      agent,
       configured: docs.agent?.model !== undefined && summary !== null,
     };
-    // An agent's report is UniiChat's work message; its delivery row is the agent's, not the user's. Each delivery's
+    // A child's message is UniiChat's work message; its delivery row is the child's, not the parent's. Each delivery's
     // row says whether its input opened a turn of its own, from its admission.
     const items = shownItems(shown.items, this.originals);
     const deliveries = new Map<string, { requestId: string; kind: Admission['kind'] }>(items.flatMap((item) =>
       item.kind === 'entry' && DeliveryEntry.is(item.entry) ? [[`${item.entry.id}-0`, item.entry.data]] : []));
-    const messages = projectMessages(state, items).map((message) => {
+    const rows = spoken(projectMessages(state, items), parent ?? USER, parent === null ? tree.since?.at ?? 0 : 0);
+    const messages = rows.map((message) => {
       const delivery = deliveries.get(message.id);
       if (delivery === undefined) return message;
       const fresh = this.originals.get(delivery.requestId)?.fresh;

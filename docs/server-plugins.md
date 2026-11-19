@@ -29,9 +29,10 @@ that a restart cut off only if its tool is installed when the call is recovered 
 `src/harness/tool.ts`). A conversation moved in later resumes at once. MCP tools appear only once their server has
 connected and listed them, so an MCP call a script makes right after a restart can still fail.
 
-Before it resumes, the server offers the model only code mode, as Durable's README shows it ("Who may call a tool":
-`modelTools: [codemode]`): the main agent and its subagents write scripts, which call InfiniChat's tools, the MCP
-tools and plugins' tools. A conversation held by the phone, which has no code mode, offers every tool again
+Before it resumes, the server offers the model code mode, as Durable's README shows it ("Who may call a tool",
+`modelTools`), and `tell` and `spawn` beside it: every agent of the tree writes scripts, which call InfiniChat's
+tools, the MCP tools and plugins' tools, and says what it has to say, and starts a child, in calls of its own, which
+the screens show as its messages (`callers: ['model']`, so no script makes them). A conversation held by the phone, which has no code mode, offers every tool again
 (`OptChat.offer`). Without a registered `codemode` tool the server offers every tool too.
 
 ## The user's plugins
@@ -72,8 +73,8 @@ and why.
 On a machine, an agent writes a plugin or adds an MCP server when the user asks, as pi's coding agent extends pi: its
 prompt names pi's documentation on disk, which the model reads when asked (`promptSections.docs` in the coding
 agent's `src/core/system-prompt.ts`). InfiniChat's plugin contributes one extension for it, `infinichat.extending`
-(`src/extending.ts`), which every agent on the machine has, a subagent too, and a conversation the phone holds has
-not:
+(`src/extending.ts`), which every agent on the machine has, a child of the tree too, and a conversation the phone
+holds has not:
 
 - A prompt section, `extending`: the plugins folder, the MCP configuration, the guide's path and the tool below, to
   use when the user asks for a tool or a server. Its text changes only with the runtime's folder, so it is sent once
@@ -297,8 +298,9 @@ design has a contract change (§27, "Contract evolution in code"; `docs/layer-1.
 - Dropping a version from `ACCEPTED`, or a new base (a change of params or of the variant set is one), refuses the
   apps on the versions left out, which are told to update. That is the owner's decision.
 
-`infinichat.remote` is at version 9 over the base 8, which server 4.1.0 released. `infinichat.mcp` is at its base,
-version 1. The Mac app's own contracts (`apps/mac/src/contract.ts`) are between its main process and its window, one
+`infinichat.remote` is at version 10 over the base 8, which server 4.1.0 released: 10 is the tree of agents, and
+the versions before it are served root's chat as the one chat, with no tree. `infinichat.agent`, one agent's chat by
+its name, which server 5.0.0 added, and `infinichat.mcp` are at their bases, version 1. The Mac app's own contracts (`apps/mac/src/contract.ts`) are between its main process and its window, one
 build, so they have no older version to serve.
 
 ## Release

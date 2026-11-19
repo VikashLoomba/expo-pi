@@ -2,8 +2,10 @@
 
 InfiniChat is an AI agent with one chat that never ends: Victor Taelin's
 [UniiChat](https://github.com/VictorTaelin/UniiChat) design (a memory tree of one-line summaries the agent zooms
-into) built on pi's durable `Harness`. One device holds the conversation, the iPhone itself or a machine running the
-server, and every app shows it live. Both apps also keep ordinary chats of their own, each with its own provider,
+into) built on pi's durable `Harness`. The agent you talk to is the root of a tree: it starts lasting agents for
+parts of your work, each with a never-ending chat and memory of its own, which talk only to their parent and their
+children; you read any of their chats, and talk to the root. One device holds the conversation, the iPhone itself or
+a machine running the server, and every app shows it live. Both apps also keep ordinary chats of their own, each with its own provider,
 model, reasoning effort and execution environment.
 
 | Part | Where | What it is |
@@ -136,7 +138,8 @@ npx expo export --platform ios --source-maps --clear
 ## Main files
 
 - `packages/infinichat/src/pi/infinichat/`: the agent core. The memory tree and its views (`memory.ts`), the summary
-  builds (`summary.ts`), the turn coordinator (`app.ts`), subagents (`agents.ts`), scheduled tasks (`schedule.ts`),
+  builds (`summary.ts`), the turn coordinator (`app.ts`), each of which an agent's conversation has for itself; the
+  tree of agents and its tools (`agents.ts`), scheduled tasks (`schedule.ts`),
   the memory and device tools (`tools.ts`, `device-tools.ts`) and the prompt (`prompt.ts`).
 - `packages/infinichat/src/pi/infinichat-service.ts` and `infinichat-view.ts`: what a screen sends to and reads from
   the conversation. `pi/infinichat-remote/`: the client of a machine's server, its install, and moving the

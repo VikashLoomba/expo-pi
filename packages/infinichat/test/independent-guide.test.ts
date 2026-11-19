@@ -1,21 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
-import {
-  createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Context as ModelContext,
-} from '@earendil-works/pi-ai';
-import {
-  Harness, MemoryStorage, configure, createRegistry, defineExtension, defineTask,
-} from '@earendil-works/pi-durable';
+import { createModels, fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai';
+import { Harness, MemoryStorage, createRegistry, defineExtension, defineTask } from '@earendil-works/pi-durable';
 
-import { AgentDirectoryDoc } from '../src/pi/infinichat/agents';
-import { AppDoc, InputDoc } from '../src/pi/infinichat/app';
 import {
   MemoryDoc, MessageDoc, NodeDoc, appendMessage, clipToolText, publishNode, renderCompaction, renderMain,
   type NodeRef,
 } from '../src/pi/infinichat/memory';
 import { BuildNode, ConfigDoc, pumpBuilds } from '../src/pi/infinichat/summary';
-import { openHosted, waitForAnswer } from './host';
 
 /**
  * A node records the task that built it. These tests publish nodes themselves, so they name a task that builds
@@ -216,101 +209,5 @@ test('independent strict main and compact high-water byte thresholds', async () 
     } finally {
       await h.close(context);
     }
-  }
-});
-
-test('independent native spawn lets main finish then delivers one complete report as fresh turn', {
-  timeout: 30_000,
-}, async () => {
-  const faux = fauxProvider({ models: [{ id: 'agent-model', contextWindow: 100_000 }] });
-  const models = createModels();
-  models.setProvider(faux.provider);
-  let release = () => {};
-  const privateGate = new Promise<void>((r) => {
-    release = r;
-  });
-  let privateStarted = false;
-  let privateFinished = false;
-  const respond = async (request: ModelContext) => {
-    const last = request.messages.findLast((m) => m.role === 'user');
-    const blocks = !last || last.role !== 'user'
-      ? []
-      : typeof last.content === 'string'
-        ? [{ type: 'text' as const, text: last.content }]
-        : last.content;
-    const latestText = blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
-    const lastBlock = blocks.at(-1);
-    // A subagent's message ends with its log, numbered, its task last.
-    if (lastBlock?.type === 'text' && lastBlock.text.endsWith('|user: PRIVATE_TASK_SENTINEL')) {
-      privateStarted = true;
-      await privateGate;
-      privateFinished = true;
-      return fauxAssistantMessage('PRIVATE_REPLY_COMPLETE');
-    }
-    if (latestText.includes(']\nPRIVATE_REPLY_COMPLETE\n\nFull chat: zoom("')) {
-      return fauxAssistantMessage('RECEIVED_REPORT');
-    }
-    if (request.messages.some((m) => m.role === 'toolResult')) {
-      return fauxAssistantMessage('MAIN_FINISHED_WITHOUT_WAIT');
-    }
-    return fauxAssistantMessage([fauxToolCall('spawn', { tasks: ['PRIVATE_TASK_SENTINEL'] })], {
-      stopReason: 'toolUse',
-    });
-  };
-  faux.setResponses(Array.from({ length: 20 }, () => respond));
-  const reports: unknown[] = [];
-  const model = { provider: 'faux', modelId: 'agent-model' };
-  const chat = await openHosted(new MemoryStorage(), { models, onReport: (e) => reports.push(e) });
-  try {
-    await chat.root.commit(async (tx) => {
-      await configure(tx, chat.root.id, { model });
-      (await tx.doc(ConfigDoc, chat.root.id)).summary = { model, thinkingLevel: 'off' };
-    }, context);
-    await chat.accept({ requestId: 'spawn-request', content: 'Please use a subagent.' });
-    assert.equal((await waitForAnswer(chat, 'spawn-request')).status, 'done');
-    assert.equal(privateFinished, false, 'Foreground must not wait for private report');
-    const [name] = (await chat.harness.snapshot(AgentDirectoryDoc, chat.root.id, context))?.names ?? [];
-    assert.ok(name);
-    const watch = await chat.harness.watchDoc(AppDoc, chat.root.id, context);
-    assert.ok(watch);
-    let admitted = (_id: string) => {};
-    const admittedPromise = new Promise<string>((r) => {
-      admitted = r;
-    });
-    const inspect = (v: typeof watch.value) => {
-      const id = [...(v?.requests ?? []), ...(v?.pending ?? [])].find((x) => /^optchat:agent:\d+:report$/.test(x));
-      if (id) admitted(id);
-    };
-    watch.start(async (call) => {
-      if (call.kind === 'value') inspect(call.value);
-    });
-    inspect(watch.value);
-    release();
-    const reportId = await admittedPromise;
-    await watch.stop();
-    assert.equal((await waitForAnswer(chat, reportId)).status, 'done');
-    assert.equal(privateStarted, true);
-    assert.equal(privateFinished, true);
-    const reportText = `[${name}]\nPRIVATE_REPLY_COMPLETE\n\nFull chat: zoom("${name}")`;
-    const reportInput = (await chat.harness.snapshot(InputDoc, chat.root.id, reportId, context))?.value;
-    assert.equal(reportInput?.fresh, true);
-    assert.equal(reportInput?.content, reportText);
-    const memory = await chat.harness.snapshot(MemoryDoc, chat.root.id, context);
-    const canonical = await Promise.all(
-      Array.from({ length: memory?.nextMessage ?? 0 }, (_, i) =>
-        chat.harness.snapshot(MessageDoc, chat.root.id, String(i), context),
-      ),
-    );
-    assert.equal(canonical.filter((m) => m?.kind === 'work').length, 1);
-    assert.equal(
-      canonical.filter((m) => m?.text === 'PRIVATE_REPLY_COMPLETE').length,
-      0,
-      'Private output never enters main as ordinary assistant record',
-    );
-    assert.equal(canonical.find((m) => m?.kind === 'work')?.text, reportText);
-    assert.deepEqual(reports, []);
-  } finally {
-    release();
-    await chat.close();
   }
 });

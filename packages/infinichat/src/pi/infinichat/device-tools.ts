@@ -11,7 +11,7 @@ import { str, type Schema } from '@earendil-works/pi-schema';
 import type { OptChatExtensionOptions } from './app';
 
 /**
- * UniiChat's work dirs: a device's tools run in <work>/<who>, `main` for the main agent and its name for a subagent.
+ * UniiChat's work dirs: a device's tools run in <work>/<who>, `main` for root and its name for any other agent.
  * A machine's work dir is a folder of its own in the account's home, as UniiChat's `~/.unii/work`.
  */
 export const MACHINE_WORK = '.infinichat/work';
@@ -56,8 +56,8 @@ function withDevice<T>(parameters: Schema<T>): Schema<T & { device?: string }> {
 const kept = ({ name, description, replay, outputLimits, structuredOutputSchema, callers }: ToolRegistration) => ({
   name,
   description: `${description} It runs on the device named, or the one holding this chat when none is, in `
-    + '<work>/<who>, <work> being the work dir the devices list gives for it and <who> main for the main agent, or a '
-    + 'subagent\'s own name.',
+    + '<work>/<who>, <work> being the work dir the devices list gives for it and <who> main for root, or another '
+    + 'agent\'s own name.',
   replay,
   outputLimits,
   structuredOutputSchema,
@@ -88,7 +88,7 @@ export function infiniChatDevices(list: () => Promise<readonly Device[]>, images
       const names = devices.map((candidate) => JSON.stringify(candidate.name)).join(', ');
       throw new Error(`Unknown device ${JSON.stringify(name)}. The devices are ${names}.`);
     }
-    // A subagent's conversation names its folder as its working directory; the main agent's has none.
+    // A child's conversation names its folder as its working directory (`spawn`); root's has none.
     const who = conversationId === ROOT_CONVERSATION_ID
       ? 'main'
       : (await read.snapshot(AgentDoc, conversationId, context))?.cwd ?? 'main';

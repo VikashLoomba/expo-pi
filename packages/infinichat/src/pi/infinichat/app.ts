@@ -11,11 +11,9 @@ import {
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
 import { SearchObservationEntry } from '../native-web-search/entries';
-import {
-  AgentAnchor, AgentDirectoryDoc, PrivateAgentDoc, agentTask, agentTools, agentWork, agentsAtWork, takeAgentReports,
-} from './agents';
+import { AgentAnchor, TreeDoc, agentNamed, agentTools, place } from './agents';
 import { MemoryDoc, advanceMessageProgress, appendMessage, memoryReady, renderMain, settleViews } from './memory';
-import { sharedPrompt, subagentPrompt } from './prompt';
+import { sharedPrompt } from './prompt';
 import { abortScheduled, scheduleTools, scheduledTask, type ScheduledInput } from './schedule';
 import { BuildNode, ConfigDoc, pumpBuilds } from './summary';
 import { memoryTools, toolPolicy, type NativeContracts } from './tools';
@@ -54,10 +52,12 @@ export const InputDoc = defineDocFamily<{ value: Admission | null }, Admission |
 /** The entry a dispatched input is placed as. Its user message carries the envelope; the input is in `InputDoc`. */
 export const DeliveryEntry = defineEntry<{ requestId: string; kind: Admission['kind'] }>('optchat.delivery');
 /**
- * 3: the conversation stores no tool list, so the model is offered the host's tools. 2: the prompt is the extension's
- * section and `instructions` hold only the user's text. 1 composed both and stored the tools it was created with.
+ * 4: the tree of agents, whose replies stay in their own chats: a chat from before answered the user with them
+ * (`TreeDoc.since`). 3: the conversation stores no tool list, so the model is offered the host's tools. 2: the prompt
+ * is the extension's section and `instructions` hold only the user's text. 1 composed both and stored the tools it
+ * was created with.
  */
-const PROMPT_VERSION = 3;
+const PROMPT_VERSION = 4;
 export type AppState = {
   /** The prompt and tool layout the conversation's agent was configured for, `PROMPT_VERSION` once current. */
   promptVersion: number;
@@ -151,8 +151,8 @@ const imagesOf = (input: UserInput): ImageContent[] => typeof input === 'string'
   : input.filter((x): x is ImageContent => x.type === 'image').map((x) => ({ ...x }));
 
 /** The admission a request ID names; absent only when application state is inconsistent. */
-async function storedInput(tx: Tx, root: ConversationId, requestId: string): Promise<Admission> {
-  const stored = (await tx.doc(InputDoc, root, requestId, null)).value;
+async function storedInput(tx: Tx, chat: ConversationId, requestId: string): Promise<Admission> {
+  const stored = (await tx.doc(InputDoc, chat, requestId, null)).value;
   if (!stored) throw new Error(`Unknown OptChat request: ${requestId}`);
   return stored;
 }
@@ -167,14 +167,14 @@ const withdrawn = (receipt: SubmissionRecord): boolean =>
  * where an input's settlement doesn't (durable README "Busy Conversations"). A Continue's turn has no input of its
  * own, so its run is the one that ended it.
  */
-async function closeSettledEpoch(tx: Tx, root: ConversationId): Promise<void> {
-  const app = await tx.doc(AppDoc, root);
-  const live = await tx.doc(LiveDoc, root);
-  const inbox = await tx.doc(InboxDoc, root);
+async function closeSettledEpoch(tx: Tx, chat: ConversationId): Promise<void> {
+  const app = await tx.doc(AppDoc, chat);
+  const live = await tx.doc(LiveDoc, chat);
+  const inbox = await tx.doc(InboxDoc, chat);
   if (!app.open || !app.started || live.run || inbox.items.some((i) => i.mode !== 'write')) return;
   const submissions: SubmissionId[] = [];
   for (const id of app.requests) {
-    const receipt = await tx.submissionByRequest(root, nativeRequest(await storedInput(tx, root, id)));
+    const receipt = await tx.submissionByRequest(chat, nativeRequest(await storedInput(tx, chat, id)));
     // A prepared effect with a lost acknowledgement is not pending if its receipt settled. A withdrawn one is, until
     // it is submitted anew.
     if (!receipt || receipt.status === 'queued' || receipt.status === 'placed' || withdrawn(receipt)) return;
@@ -198,16 +198,16 @@ const nativeRequest = ({ requestId, attempt }: Pick<Admission, 'requestId' | 'at
  * Inputs the last turn didn't take start the next, as UniiChat's next call takes the messages its last one didn't: the
  * old epoch closes, with its note, and the first of them opens a fresh one.
  */
-async function carryOver(tx: Tx, root: ConversationId, moved: string[]): Promise<void> {
-  const app = await tx.doc(AppDoc, root);
+async function carryOver(tx: Tx, chat: ConversationId, moved: string[]): Promise<void> {
+  const app = await tx.doc(AppDoc, chat);
   app.requests = app.requests.filter((id) => !moved.includes(id));
-  await closeSettledEpoch(tx, root);
+  await closeSettledEpoch(tx, chat);
   app.epoch++;
   app.open = true;
   app.started = false;
   app.requests = [...moved];
   for (const id of moved) {
-    const input = await storedInput(tx, root, id);
+    const input = await storedInput(tx, chat, id);
     input.epoch = app.epoch;
     input.fresh = id === moved[0];
     input.phase = 'pending';
@@ -221,12 +221,12 @@ async function carryOver(tx: Tx, root: ConversationId, moved: string[]): Promise
  * context. Each is submitted anew as its next attempt, and with the inputs the turn had not taken yet they start a
  * fresh turn. False when nothing was withdrawn.
  */
-async function requeueWithdrawn(tx: Tx, root: ConversationId): Promise<boolean> {
-  const app = await tx.doc(AppDoc, root);
+async function requeueWithdrawn(tx: Tx, chat: ConversationId): Promise<boolean> {
+  const app = await tx.doc(AppDoc, chat);
   let requeued = false;
   for (const id of app.requests) {
-    const input = await storedInput(tx, root, id);
-    const receipt = await tx.submissionByRequest(root, nativeRequest(input));
+    const input = await storedInput(tx, chat, id);
+    const receipt = await tx.submissionByRequest(chat, nativeRequest(input));
     if (!receipt || !withdrawn(receipt)) continue;
     input.attempt++;
     input.phase = 'pending';
@@ -236,10 +236,10 @@ async function requeueWithdrawn(tx: Tx, root: ConversationId): Promise<boolean> 
   if (!requeued) return false;
   const moved: string[] = [];
   for (const id of app.requests) {
-    if (!(await tx.submissionByRequest(root, nativeRequest(await storedInput(tx, root, id))))) moved.push(id);
+    if (!(await tx.submissionByRequest(chat, nativeRequest(await storedInput(tx, chat, id))))) moved.push(id);
   }
   app.pending = [...moved, ...app.pending.filter((id) => !moved.includes(id))];
-  await carryOver(tx, root, moved);
+  await carryOver(tx, chat, moved);
   return true;
 }
 
@@ -248,11 +248,11 @@ async function requeueWithdrawn(tx: Tx, root: ConversationId): Promise<boolean> 
  * next run's context, so each input still queued is withdrawn here and submitted anew, as a failed run's is. Its
  * attempt is counted before the withdrawal settles the old submission, so a wait for it goes on.
  */
-async function countRequeued(tx: Tx, root: ConversationId): Promise<void> {
-  const app = await tx.doc(AppDoc, root);
+async function countRequeued(tx: Tx, chat: ConversationId): Promise<void> {
+  const app = await tx.doc(AppDoc, chat);
   for (const id of app.requests) {
-    const input = await storedInput(tx, root, id);
-    if ((await tx.submissionByRequest(root, nativeRequest(input)))?.status !== 'queued') continue;
+    const input = await storedInput(tx, chat, id);
+    if ((await tx.submissionByRequest(chat, nativeRequest(input)))?.status !== 'queued') continue;
     input.attempt++;
     input.phase = 'pending';
     input.envelope = null;
@@ -261,25 +261,28 @@ async function countRequeued(tx: Tx, root: ConversationId): Promise<void> {
 }
 
 /** After the coordinator's withdrawal: the inputs with no submission for their attempt start a fresh turn. */
-async function requeueAborted(tx: Tx, root: ConversationId): Promise<void> {
-  const app = await tx.doc(AppDoc, root);
+async function requeueAborted(tx: Tx, chat: ConversationId): Promise<void> {
+  const app = await tx.doc(AppDoc, chat);
   const moved: string[] = [];
   for (const id of app.requests) {
-    if (!(await tx.submissionByRequest(root, nativeRequest(await storedInput(tx, root, id))))) moved.push(id);
+    if (!(await tx.submissionByRequest(chat, nativeRequest(await storedInput(tx, chat, id))))) moved.push(id);
   }
   app.pending = [...moved, ...app.pending.filter((id) => !moved.includes(id))];
-  if (moved.length > 0) await carryOver(tx, root, moved);
-  else await closeSettledEpoch(tx, root);
+  if (moved.length > 0) await carryOver(tx, chat, moved);
+  else await closeSettledEpoch(tx, chat);
 }
 
-/** Called in the acceptance transaction, including when a private report arrives or a scheduled task ends. */
-async function admitInput(tx: Tx, root: ConversationId, input: {
+/**
+ * Called in the acceptance transaction: the user's message to root, an agent's `tell` to its parent or a child, and a
+ * scheduled task's. `chat` is the conversation of the agent it is for.
+ */
+async function admitInput(tx: Tx, chat: ConversationId, input: {
   requestId: string;
   kind: 'user' | 'work' | 'note';
   content: UserInput;
   date: string;
 }): Promise<void> {
-  const stored = await tx.doc(InputDoc, root, input.requestId, null);
+  const stored = await tx.doc(InputDoc, chat, input.requestId, null);
   if (stored.value) {
     const previous = stored.value;
     if (previous.kind !== input.kind || JSON.stringify(previous.content) !== JSON.stringify(input.content)) {
@@ -287,8 +290,8 @@ async function admitInput(tx: Tx, root: ConversationId, input: {
     }
     return;
   }
-  await closeSettledEpoch(tx, root);
-  const app = await tx.doc(AppDoc, root);
+  await closeSettledEpoch(tx, chat);
+  const app = await tx.doc(AppDoc, chat);
   if (input.kind === 'note') {
     stored.value = {
       ...input,
@@ -301,7 +304,7 @@ async function admitInput(tx: Tx, root: ConversationId, input: {
     };
     app.pending.push(input.requestId);
     app.revision++;
-    await advanceMessageProgress(tx, root);
+    await advanceMessageProgress(tx, chat);
     return;
   }
   const fresh = !app.open;
@@ -324,14 +327,14 @@ async function admitInput(tx: Tx, root: ConversationId, input: {
   app.pending.push(input.requestId);
   app.revision++;
   // Accepted external input re-enables failed builds even while the fresh-turn gate waits.
-  await advanceMessageProgress(tx, root);
+  await advanceMessageProgress(tx, chat);
 }
 
 /** Project each immutable native entry once. Reset affects context, never this cursor. */
-async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progressed: boolean; caughtUp: boolean }> {
-  const app = await tx.doc(AppDoc, root);
+async function projectEntries(tx: Tx, chat: ConversationId): Promise<{ progressed: boolean; caughtUp: boolean }> {
+  const app = await tx.doc(AppDoc, chat);
   const entries = await tx.scanEntries({
-    conversationId: root,
+    conversationId: chat,
     order: 'ascending',
     ...(app.cursor ? { minEntryId: app.cursor } : {}),
   }, 128);
@@ -342,8 +345,8 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
     // A placed delivery logs the user's own message, as UniiChat's chat does: the original the admission keeps, not
     // the envelope.
     if (DeliveryEntry.is(entry)) {
-      const input = await storedInput(tx, root, entry.data.requestId);
-      await appendMessage(tx, root, {
+      const input = await storedInput(tx, chat, entry.data.requestId);
+      await appendMessage(tx, chat, {
         kind: input.kind,
         text: textOf(input.content),
         date: input.date,
@@ -383,7 +386,7 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
           for (const { call, ...record } of records) {
             // pi-durable gives every call a result, an aborted one too, so a held call is always logged.
             if (call !== undefined) app.held[call] = { text: record.text, date: record.date, source: record.source };
-            else await appendMessage(tx, root, { ...record, images: [] });
+            else await appendMessage(tx, chat, { ...record, images: [] });
           }
           // UniiChat counts a reply cut at the output limit as none.
           if (message.stopReason === 'length') {
@@ -393,12 +396,12 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
       } else if (message.role === 'toolResult') {
         const call = app.held[message.toolCallId];
         if (call) {
-          await appendMessage(tx, root, { ...call, kind: 'tool', images: [] });
+          await appendMessage(tx, chat, { ...call, kind: 'tool', images: [] });
           delete app.held[message.toolCallId];
         }
         // Text only, an image as UniiChat shows a result's part: the model saw it in its turn.
         const text = message.content.map((x) => (x.type === 'text' ? x.text : '[image]')).join('\n');
-        await appendMessage(tx, root, {
+        await appendMessage(tx, chat, {
           kind: 'echo',
           text: `${message.isError ? 'error: ' : ''}${text || '(no output)'}`,
           date,
@@ -408,9 +411,9 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
       } else if (message.role === 'user' && SearchObservationEntry.is(entry)) {
         // OpenAI's hosted web search, logged as a tool call and its result (owner, 2026-10-30). pi-durable places the
         // findings at the boundary after the reply that searched, so they follow it.
-        await appendMessage(tx, root, { kind: 'tool', text: `web_search ${JSON.stringify(entry.data.action)}`, date,
+        await appendMessage(tx, chat, { kind: 'tool', text: `web_search ${JSON.stringify(entry.data.action)}`, date,
           images: [], source: `${entry.id}:${index++}` });
-        await appendMessage(tx, root, { kind: 'echo', text: textOf(message.content), date, images: [],
+        await appendMessage(tx, chat, { kind: 'echo', text: textOf(message.content), date, images: [],
           source: `${entry.id}:${index++}` });
       }
       // The delivery's user message is the envelope; its original was logged above.
@@ -422,30 +425,33 @@ async function projectEntries(tx: Tx, root: ConversationId): Promise<{ progresse
   return { progressed, caughtUp: entries.next === undefined };
 }
 
-async function consumeReports(tx: Tx, root: ConversationId, date: string): Promise<void> {
-  for (const report of await takeAgentReports(tx, root)) {
-    // A stopped agent's report is logged with no turn, as UniiChat's is.
-    if (report.stopped) {
-      await appendMessage(tx, root, { kind: 'work', text: report.text, date, images: [],
-        source: `input:${report.requestId}` });
-    } else {
-      await admitInput(tx, root, { requestId: report.requestId, kind: 'work', content: report.text, date });
-    }
-  }
-}
-
 /**
- * A fresh turn's message, as UniiChat's: the view, the host's turn state and the agents at work, which change, so
- * they follow the cached view and never enter the prompt; then the head that tells a turn from a compaction.
+ * A fresh turn's message, as UniiChat's: the view, the host's turn state and the agent's place in the tree, which
+ * change, so they follow the cached view and never enter the prompt; then the head that tells a turn from a
+ * compaction.
  */
-function envelope(view: string, content: UserInput, turnState: string, agents: string[]): UserInput {
+function envelope(view: string, content: UserInput, turnState: string, where: string): UserInput {
   const state = turnState ? `${turnState}\n\n` : '';
-  const working = agents.length ? agents.join(', ') : 'none';
   return [
     { type: 'text', text: view },
-    { type: 'text', text: `\n${state}Agents at work now: ${working}.\n\nTurn: the user's new message:\n\n` },
+    { type: 'text', text: `\n${state}${where}\n\nTurn: your new messages:\n\n` },
     ...(typeof content === 'string' ? [{ type: 'text' as const, text: content }] : content),
   ];
+}
+
+/** The agent's place as its turn starts (`place`): a child is awake while its turn runs or waits to. */
+async function placeOf(tx: Tx, chat: ConversationId): Promise<string> {
+  const tree = await tx.doc(TreeDoc, ROOT_CONVERSATION_ID);
+  const name = agentNamed(tree.agents, chat);
+  if (name === undefined) throw new Error('This conversation is no agent of the tree');
+  const awake = new Set<string>();
+  for (const child of tree.agents[name].children) {
+    const { conversationId } = tree.agents[child.name];
+    if ((await tx.doc(LiveDoc, conversationId)).run || turnOpen(await tx.doc(AppDoc, conversationId))) {
+      awake.add(child.name);
+    }
+  }
+  return place(tree, name, awake);
 }
 
 type CoordinatorState = { phase: 'coordinate'; tick: number };
@@ -458,25 +464,23 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
   initial: () => ({ phase: 'coordinate', tick: 0 }),
   phases: {
     async coordinate(task, runtime, context) {
-      const root = runtime.conversationId;
+      // The agent's own conversation: root's, or a child's.
+      const chat = runtime.conversationId;
       const invocation = withAbortSignal(runtime.signal, context);
-      // Read only while an input or a report waits, outside the commit; a host that can't tell (a locked keychain) is
-      // reported, and the turn starts without it rather than never.
-      const pending = (await runtime.snapshot(AppDoc, root, invocation))?.pending.length ?? 0;
-      const reports = (await runtime.snapshot(AgentDirectoryDoc, root, invocation))?.pendingReports.length ?? 0;
-      const read = pending + reports > 0;
+      // Read only while an input waits, outside the commit; a host that can't tell (a locked keychain) is reported,
+      // and the turn starts without it rather than never.
+      const read = ((await runtime.snapshot(AppDoc, chat, invocation))?.pending.length ?? 0) > 0;
       const state = !read ? '' : await turnState().catch((error: unknown) => {
         runtime.report(error);
         return '';
       });
-      const conversation = await runtime.conversation(root, invocation);
-      if (!conversation) throw new Error('OptChat root conversation is missing');
+      const conversation = await runtime.conversation(chat, invocation);
+      if (!conversation) throw new Error('The agent’s conversation is missing');
       const acquired = await Promise.all([
-        runtime.watchDoc(AppDoc, root, invocation),
-        runtime.watchDoc(MemoryDoc, root, invocation),
-        runtime.watchDoc(LiveDoc, root, invocation),
-        runtime.watchDoc(InboxDoc, root, invocation),
-        runtime.watchDoc(AgentDirectoryDoc, root, invocation),
+        runtime.watchDoc(AppDoc, chat, invocation),
+        runtime.watchDoc(MemoryDoc, chat, invocation),
+        runtime.watchDoc(LiveDoc, chat, invocation),
+        runtime.watchDoc(InboxDoc, chat, invocation),
       ]);
       if (acquired.some((watch) => !watch)) {
         await Promise.all(acquired.map((watch) => watch?.stop()));
@@ -498,22 +502,21 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
       try {
         await runtime.commit(async (tx) => {
           // All native table reads happen before reset/task creation table writes.
-          const projection = await projectEntries(tx, root);
+          const projection = await projectEntries(tx, chat);
           progressed = projection.progressed;
           const now = new Date(runtime.now()).toISOString();
-          await consumeReports(tx, root, now);
-          await closeSettledEpoch(tx, root);
-          const app = await tx.doc(AppDoc, root);
-          const running = (await tx.doc(LiveDoc, root)).run !== undefined;
+          await closeSettledEpoch(tx, chat);
+          const app = await tx.doc(AppDoc, chat);
+          const running = (await tx.doc(LiveDoc, chat)).run !== undefined;
           const ended = app.stopped >= app.stop && projection.caughtUp && !running;
           if (ended && (app.cut || app.endNote !== null)) {
             // As UniiChat ends a turn without a reply: what the cut attempt wrote, marked, then why.
             for (const record of app.cut?.records ?? []) {
               const mark = `\n[cut off: ${app.cut?.why.slice(0, 300)}]`;
-              await appendMessage(tx, root, { ...record, text: record.text + mark, images: [] });
+              await appendMessage(tx, chat, { ...record, text: record.text + mark, images: [] });
             }
             if (app.endNote !== null) {
-              await appendMessage(tx, root, { kind: 'note', text: app.endNote, date: now, images: [],
+              await appendMessage(tx, chat, { kind: 'note', text: app.endNote, date: now, images: [],
                 source: `end:${app.epoch}:${app.stop}` });
             }
             app.cut = null;
@@ -522,18 +525,18 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
             progressed = true;
           }
           const next = app.pending[0];
-          if (ended && (await requeueWithdrawn(tx, root))) {
+          if (ended && (await requeueWithdrawn(tx, chat))) {
             progressed = true;
-          } else if (ended && (await tx.doc(InboxDoc, root)).items.some((item) => item.mode !== 'write')) {
+          } else if (ended && (await tx.doc(InboxDoc, chat)).items.some((item) => item.mode !== 'write')) {
             // pi-durable withdrew a failed run's queue above; one still queued is behind a run whose task faulted.
-            await countRequeued(tx, root);
+            await countRequeued(tx, chat);
             withdraw = true;
           } else if (app.stop > app.stopped) {
             if (projection.caughtUp) {
               stop = app.stop;
               // A withdrawn input was never handed to the model, so it never enters memory.
               for (const id of app.stopPending) {
-                const input = await storedInput(tx, root, id);
+                const input = await storedInput(tx, chat, id);
                 input.phase = 'cancelled';
                 input.envelope = null;
               }
@@ -543,9 +546,9 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
               progressed = true;
             }
           } else if (next !== undefined) {
-            const input = await storedInput(tx, root, next);
+            const input = await storedInput(tx, chat, next);
             if (input.kind === 'note' && projection.caughtUp) {
-              await appendMessage(tx, root, {
+              await appendMessage(tx, chat, {
                 kind: 'note',
                 text: textOf(input.content),
                 date: input.date,
@@ -562,7 +565,7 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
                 // this commit, which checks the run, so it never starts a run of its own (pi-durable example 34).
                 // Before this commit's first table write; a known request ID, one submitted before a crash, returns
                 // its submission.
-                await settleViews(tx, root);
+                await settleViews(tx, chat);
                 try {
                   await conversation.submit(tx, {
                     type: 'input',
@@ -580,7 +583,7 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
                 } catch (error) {
                   if (!(error instanceof ConversationIdle)) throw error;
                   // Its turn ended before it reached it, so it starts the next, with the inputs after it.
-                  await carryOver(tx, root, app.requests.filter((id) => app.pending.includes(id)));
+                  await carryOver(tx, chat, app.requests.filter((id) => app.pending.includes(id)));
                 }
                 progressed = true;
               }
@@ -589,19 +592,19 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
             } else if (!read) {
               // Accepted after the turn state was skipped: the next tick reads it.
               progressed = true;
-            } else if (projection.caughtUp && (await memoryReady(tx, root))) {
-              await settleViews(tx, root);
+            } else if (projection.caughtUp && (await memoryReady(tx, chat))) {
+              await settleViews(tx, chat);
               // The view is frozen here; the original enters memory once pi-durable places the delivery.
-              input.envelope = envelope(await renderMain(tx, root), input.content, state, await agentsAtWork(tx, root));
+              input.envelope = envelope(await renderMain(tx, chat), input.content, state, await placeOf(tx, chat));
               input.phase = 'prepared';
               app.started = true;
               app.revision++;
-              await tx.appendEntry(ResetEntry, root, { head: 'self' });
+              await tx.appendEntry(ResetEntry, chat, { head: 'self' });
               dispatchId = input.requestId;
               progressed = true;
             }
           }
-          const launched = await pumpBuilds(tx, root);
+          const launched = await pumpBuilds(tx, chat);
           if (launched.length > 0) progressed = true;
           // A fresh turn is submitted after this commit: an idle admission places its input at once, after the reset
           // this commit appends, and `submit(tx)` must come before a commit's table writes (durable
@@ -617,13 +620,13 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
           // With no run, an abort only withdraws the queued inputs.
           await conversation.abort(context);
           await runtime.commit(async (tx) => {
-            await requeueAborted(tx, root);
+            await requeueAborted(tx, chat);
             return { status: 'running', checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 2 } };
           }, context);
         } else if (stop) {
           await conversation.abort(context);
           await runtime.commit(async (tx) => {
-            const app = await tx.doc(AppDoc, root);
+            const app = await tx.doc(AppDoc, chat);
             app.stopped = stop;
             app.revision++;
             return { status: 'running', checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 2 } };
@@ -631,7 +634,7 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
         } else if (dispatchId !== undefined) {
           const requestId = dispatchId;
           // The prepared admission is read back committed: a draft is not readable after its commit.
-          const prepared = (await runtime.snapshot(InputDoc, root, requestId, context))?.value;
+          const prepared = (await runtime.snapshot(InputDoc, chat, requestId, context))?.value;
           if (!prepared?.envelope) throw new Error(`Prepared input has no envelope: ${requestId}`);
           await conversation.submit({
             type: 'input',
@@ -641,8 +644,8 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
             entry: { kind: DeliveryEntry.kind, data: { requestId, kind: prepared.kind } },
           }, context);
           await runtime.commit(async (tx) => {
-            const app = await tx.doc(AppDoc, root);
-            const saved = await storedInput(tx, root, requestId);
+            const app = await tx.doc(AppDoc, chat);
+            const saved = await storedInput(tx, chat, requestId);
             saved.phase = 'submitted';
             saved.envelope = null;
             const position = app.pending.indexOf(requestId);
@@ -686,18 +689,21 @@ export type OptChatExtensionOptions = {
   nativeContracts?: NativeContracts;
   /** The host's own extensions, such as OpenAI's web search bridge. */
   extensions?: readonly Extension[];
-  /** What changes between turns, such as the devices: read as a turn or a subagent starts, it follows the view. */
+  /** What changes between turns, such as the devices: read as a turn starts, it follows the view. */
   turnState?: () => Promise<string>;
 };
 
 /**
- * OptChat's extensions, which a host installs in the registry its Harness reads, and the definitions the Harness
- * starts their tasks with. A task runs the code its registry holds under the definition's name.
+ * OptChat's extensions, which a host installs in the registry its Harness reads, and what the Harness's opening needs
+ * of them. A task runs the code its registry holds under the definition's name.
  */
 export type OptChatParts = {
   readonly name: string;
   readonly extensions: readonly Extension[];
-  readonly coordinator: ReturnType<typeof coordinatorTask>;
+  /** Gives a conversation its chat: its memory, and its coordinator from the definition the extensions hold. */
+  readonly init: (tx: Tx, conversationId: ConversationId) => Promise<void>;
+  /** `tell` and `spawn`, which the model is offered itself beside a tool `offer` names. */
+  readonly voice: readonly ToolRegistration[];
   readonly scheduled: ReturnType<typeof scheduledTask>;
 };
 
@@ -710,15 +716,19 @@ export type OptChatOptions = {
   onReport?: HarnessOptions['onReport'];
   /** Runs in the root conversation's creating commit after OptChat's own documents, for the host's documents. */
   init?: ConversationInit;
+  /** Runs in every commit that creates a conversation, a child's too, for the documents the host gives each. */
+  conversationCreated?: HarnessOptions['conversationCreated'];
 };
 
 /**
- * All injected values are host capabilities, not omitted OptChat algorithms. The host selects the main model with
+ * All injected values are host capabilities, not omitted OptChat algorithms. The host selects root's model with
  * pi-durable's `configure` and the summary model in `ConfigDoc`, in one commit on `root`, before accepting input.
+ * An operation that takes an agent's conversation is root's without one.
  */
 export type OptChat = {
   harness: Harness;
   root: Conversation;
+  /** The user's message, which only root takes. */
   accept(input: {
     requestId: string;
     content: UserInput;
@@ -727,23 +737,26 @@ export type OptChat = {
   }): Promise<string>;
   /**
    * The user's own instructions, pi-durable's `instructions` section rendered after the prompt, in the host's
-   * settings commit; empty text clears them. The host shows them from the agent document.
+   * settings commit, for every agent of the tree; empty text clears them. The host shows them from root's agent
+   * document.
    */
   setInstructions(tx: Tx, text: string): Promise<void>;
   /**
-   * Offers the main agent and its subagents only the tool `only`, whose scripts call the others, as pi-durable's README
-   * offers code mode (`modelTools: [codemode]`, "Who may call a tool"); every tool without one, or while `only` is not
-   * registered. The host sets it before it resumes the Harness, since the conversation moves between hosts with
-   * different tools. A subagent created later copies it with the rest of the main agent's settings.
+   * Offers every agent the tool `only`, whose scripts call the others, as pi-durable's README offers code mode
+   * (`modelTools`, "Who may call a tool"), and `tell` and `spawn` beside it, which are the model's own calls; every
+   * tool without one, or while `only` is not registered. The host sets it before it resumes the Harness, since the
+   * conversation moves between hosts with different tools. A child spawned later copies it with the rest of its
+   * parent's settings.
    */
   offer(only?: string): Promise<void>;
   /**
-   * Continues the run that ended without an answer (`pi.live.runFailure`) with pi-durable's continue submission, as a
-   * turn of its own: what is sent meanwhile steers it, and the coordinator closes it. Refused while a turn is open or
-   * being closed, or inputs wait for the coordinator.
+   * Continues an agent's run that ended without an answer (`pi.live.runFailure`) with pi-durable's continue
+   * submission, as a turn of its own: what it is sent meanwhile steers it, and its coordinator closes it. Refused
+   * while a turn is open or being closed, or inputs wait for the coordinator.
    */
-  continue(): Promise<void>;
-  abort(): Promise<void>;
+  continue(agent?: ConversationId): Promise<void>;
+  /** The user's stop of one agent's turn, as UniiChat's: the others go on. */
+  abort(agent?: ConversationId): Promise<void>;
   /**
    * Aborts a scheduled task still waiting, as pi-durable's example 23 cancels a task, and schedules `replacement`
    * in its place, since a task's input never changes. False when the task was sent first.
@@ -761,37 +774,44 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
   const hasDeviceTools = options.hasDeviceTools ?? false;
   const turnState = async () => (await options.turnState?.()) ?? '';
   const coordinator = coordinatorTask(turnState);
-  const tools: ToolRegistration[] = [...memoryTools(ROOT_CONVERSATION_ID), ...(options.tools ?? [])];
-  const agents = agentTask({
-    master: () => master,
-    prompt: async (tx, root) => subagentPrompt((await tx.doc(ConfigDoc, root)).name ?? name, hasDeviceTools),
-    turnState,
-  });
+  const init = async (tx: Tx, conversationId: ConversationId) => {
+    await tx.doc(MemoryDoc, conversationId);
+    const app = await tx.doc(AppDoc, conversationId);
+    app.coordinator = await tx.createTask(coordinator, {}, {
+      conversationId,
+      ownership: { kind: 'conversation' },
+      background: true,
+    });
+  };
   const scheduled = scheduledTask((tx, id, input) => admitInput(tx, id, { ...input, kind: 'work' }));
-  const agentCalls = [
-    ...agentTools(ROOT_CONVERSATION_ID, agents), ...scheduleTools(ROOT_CONVERSATION_ID, scheduled, options.harness),
-  ];
-  // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
-  // reaches an existing conversation as pi-durable's system entry instead of staying as created. The master's prompt
-  // and agent tools are an extension of their own, which a subagent's conversation goes without. The section reads the
-  // agent's name from the conversation, so a rename reaches it the same way.
-  const master: Extension = defineExtension({
-    name: 'optchat.master',
-    sections: [section('optchat', async ({ read, conversationId }, sectionContext) => sharedPrompt(
-      (await read.snapshot(ConfigDoc, conversationId, sectionContext))?.name ?? name, hasDeviceTools), { tag: false })],
-    tools: agentCalls,
-  });
-  const policy = toolPolicy([...tools, ...agentCalls], async (call, api, ctx) => {
+  // What only root has, an extension of its own, which a child's conversation goes without: nothing wakes a child
+  // but a message.
+  const schedule = scheduleTools(ROOT_CONVERSATION_ID, scheduled, options.harness);
+  const master: Extension = defineExtension({ name: 'optchat.master', tools: schedule });
+  const tree = agentTools({ master: () => master, init, admit: admitInput });
+  const tools: ToolRegistration[] = [...memoryTools(), ...(options.tools ?? []), ...Object.values(tree)];
+  const policy = toolPolicy([...tools, ...schedule], async (call, api, ctx) => {
     const { conversationId } = api;
     const stored = await api.snapshot(NativeAgentDoc, conversationId, ctx);
     const target: EnvTarget = { conversationId, cwd: stored?.cwd, read: api };
     return options.callEnv ? options.callEnv(call, target, ctx) : options.env?.(target, ctx);
   }, options.nativeContracts);
+  // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
+  // reaches an existing conversation as pi-durable's system entry instead of staying as created. Every agent has the
+  // one prompt, as UniiChat's do, with the name the user gave the whole, which root's conversation keeps, so a rename
+  // reaches it the same way.
   const extensions = [
-    defineExtension({ name: 'optchat', tools, tasks: [coordinator, BuildNode, agents, AgentAnchor, scheduled] }),
+    defineExtension({
+      name: 'optchat',
+      sections: [section('optchat', async ({ read }, sectionContext) => sharedPrompt(
+        (await read.snapshot(ConfigDoc, ROOT_CONVERSATION_ID, sectionContext))?.name ?? name, hasDeviceTools),
+      { tag: false })],
+      tools,
+      tasks: [coordinator, BuildNode, AgentAnchor, scheduled],
+    }),
     master, policy, ...(options.extensions ?? []),
   ];
-  return { name, extensions, coordinator, scheduled };
+  return { name, extensions, init, voice: [tree.tell, tree.spawn], scheduled };
 }
 
 /**
@@ -800,12 +820,13 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
  * and Resume"): a fixed registry right away, a machine's server once its plugins have loaded.
  */
 export async function openOptChat(storage: Storage, options: OptChatOptions, context: Context): Promise<OptChat> {
-  const { name, coordinator, scheduled } = options.parts;
+  const { init, voice, scheduled } = options.parts;
   const opened = await Harness.open(storage, {
     models: options.models,
     registry: options.registry,
     env: options.env,
     onReport: options.onReport,
+    conversationCreated: options.conversationCreated,
     settings: {
       toolExecution: 'sequential',
       steeringMode: 'all',
@@ -817,35 +838,36 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       // An input queued behind a failed run starts a fresh turn, as UniiChat's next call takes it, never the failed
       // turn's context.
       afterFailedRun: 'withdraw',
-      // The coordinator is stored running while idle, so every iOS kill of the app would count toward the restart
+      // A coordinator is stored running while idle, so every iOS kill of the app would count toward the restart
       // limit, which ends a task that reaches it (durable README "Crash loops").
       restartLimit: Infinity,
     },
   }, context);
   const root = await opened.root(context, {
     init: async (tx, id) => {
-      await tx.doc(MemoryDoc, id);
-      await tx.doc(AgentDirectoryDoc, id);
       await tx.doc(ConfigDoc, id);
-      const app = await tx.doc(AppDoc, id);
-      app.coordinator = await tx.createTask(coordinator, {}, {
-        conversationId: id,
-        ownership: { kind: 'conversation' },
-        background: true,
-      });
+      await tx.doc(TreeDoc, id);
+      await init(tx, id);
       await options.init?.(tx, id);
     },
   });
   // A conversation from before version 2 holds the composed prompt as its instructions, and one from version 1 the
-  // tool list it was created with, which hides every tool added since, such as spawn and tell. Clearing them once
-  // leaves the prompt to the section and the tools to the host. pi-durable migrates the document on read, so its
-  // version is what tells.
+  // tool list it was created with, which hides every tool added since. Clearing them once leaves the prompt to the
+  // section and the tools to the host. One from before version 4 is a chat older than the tree: it gets the tree's
+  // document, with root alone, and the message its replies stay in its own chat from, as UniiChat's `since` marks
+  // one. pi-durable migrates the document on read, so its version is what tells.
   await root.commit(async (tx) => {
     const app = await tx.doc(AppDoc, root.id);
     if (app.promptVersion === PROMPT_VERSION) return;
+    const tree = await tx.doc(TreeDoc, root.id);
+    const { nextMessage } = await tx.doc(MemoryDoc, root.id);
+    if (nextMessage > 0) tree.since = { message: nextMessage, at: Date.now() };
     await configure(tx, root.id, { ...(app.promptVersion < 2 ? { instructions: null } : {}), modelTools: null });
     app.promptVersion = PROMPT_VERSION;
   }, context);
+  /** Every agent's conversation, root's first. */
+  const conversations = async (tx: Tx) =>
+    Object.values((await tx.doc(TreeDoc, root.id)).agents).map((agent) => agent.conversationId);
   return {
     harness: opened,
     root,
@@ -856,59 +878,51 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       return input.requestId;
     },
     async setInstructions(tx, text) {
-      await configure(tx, root.id, { instructions: text || null });
+      for (const id of await conversations(tx)) await configure(tx, id, { instructions: text || null });
     },
     async offer(only) {
       const tool = only === undefined ? undefined : (await root.agent(context)).tools.find(({ name }) => name === only);
+      const offered = tool === undefined ? undefined : [tool, ...voice];
+      const names = offered?.map(({ name }) => name).join();
       await root.commit(async (tx) => {
-        const stored = (await tx.doc(NativeAgentDoc, root.id)).modelTools;
-        const current = tool === undefined ? stored === undefined
-          : Array.isArray(stored) && stored.length === 1 && stored[0] === tool.name;
-        if (current) return;
-        const modelTools = tool === undefined ? null : [tool];
-        await configure(tx, root.id, { modelTools });
-        for (const agent of (await tx.doc(AgentDirectoryDoc, root.id)).names) {
-          const { conversationId } = await tx.doc(PrivateAgentDoc, root.id, agent, null);
-          if (conversationId !== null) await configure(tx, conversationId, { modelTools });
+        for (const id of await conversations(tx)) {
+          const stored = (await tx.doc(NativeAgentDoc, id)).modelTools;
+          const current = names === undefined ? stored === undefined : Array.isArray(stored) && stored.join() === names;
+          if (!current) await configure(tx, id, { modelTools: offered ?? null });
         }
       }, context);
     },
-    async continue() {
+    async continue(agent = root.id) {
+      const conversation = await opened.conversation(agent, context);
+      if (!conversation) throw new Error('That agent has no conversation.');
       await opened.commit(async (tx) => {
-        const app = await tx.doc(AppDoc, root.id);
-        if (turnOpen(app)) {
-          throw new Error(`${name} is still finishing its turn. Try again in a moment.`);
-        }
+        const app = await tx.doc(AppDoc, agent);
+        if (turnOpen(app)) throw new Error('The agent is still finishing its turn. Try again in a moment.');
         // Admitted in this commit, before its table writes, with the turn it opens (pi-durable's
         // `34-submit-in-commit.ts`); a run at work refuses it with `ConversationBusy`.
-        await root.submit(tx, { type: 'continue' });
+        await conversation.submit(tx, { type: 'continue' });
         app.open = true;
         app.started = true;
         app.requests = [];
         app.revision++;
       }, context);
     },
-    async abort() {
-      const { requested, work } = await opened.commit(async (tx) => {
-        const app = await tx.doc(AppDoc, root.id);
-        // As UniiChat's stop: the turn and every agent at work, which its note names for later turns.
-        const work = await agentWork(tx, root.id);
-        const turn = (await tx.doc(LiveDoc, root.id)).run ? [`${name}'s turn`] : [];
-        const stopped = [...turn, ...new Set(work.map((each) => each.name))];
-        // A failed turn's note not logged yet stays, the stop's after it.
-        const note = `Stopped by the user: ${stopped.join(', ')}.`;
-        if (stopped.length > 0) app.endNote = app.endNote === null ? note : `${app.endNote}\n${note}`;
+    async abort(agent = root.id) {
+      const requested = await opened.commit(async (tx) => {
+        const app = await tx.doc(AppDoc, agent);
+        // As UniiChat's stop: that agent's turn, which its note tells its later turns. A failed turn's note not
+        // logged yet stays, the stop's after it.
+        const note = 'Stopped by the user.';
+        if ((await tx.doc(LiveDoc, agent)).run) app.endNote = app.endNote === null ? note : `${app.endNote}\n${note}`;
         app.stop++;
         app.stopPending.push(...app.pending);
         app.open = false;
         app.started = false;
         app.requests = [];
         app.revision++;
-        return { requested: app.stop, work };
+        return app.stop;
       }, context);
-      // Each agent's task cuts its run and reports it stopped.
-      for (const { id } of work) await opened.abortTask(id, context);
-      const watch = await opened.watchDoc(AppDoc, root.id, context);
+      const watch = await opened.watchDoc(AppDoc, agent, context);
       if (!watch) throw new Error('OptChat application state is missing');
       const cancellation = new AbortController();
       const waiting = withAbortSignal(cancellation.signal, context);
@@ -924,7 +938,7 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       try {
         await awaitWithContext(Promise.race([
           done,
-          coordinatorFailure(opened, root.id, waiting),
+          coordinatorFailure(opened, agent, waiting),
           watch.closed.then((end) => {
             if (end.kind === 'failed' || end.kind === 'listener_error') throw end.error;
             throw new Error(`Stop watch ended: ${end.kind}`);
@@ -951,8 +965,8 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
   };
 }
 
-async function coordinatorFailure(harness: Harness, root: ConversationId, context: Context): Promise<never> {
-  const app = await harness.snapshot(AppDoc, root, context);
+async function coordinatorFailure(harness: Harness, chat: ConversationId, context: Context): Promise<never> {
+  const app = await harness.snapshot(AppDoc, chat, context);
   if (!app?.coordinator) throw new Error('OptChat has no coordinator task');
   const task = await harness.waitForTask(app.coordinator, context);
   throw new Error(`OptChat coordinator ended: ${JSON.stringify(task.state.outcome)}`);

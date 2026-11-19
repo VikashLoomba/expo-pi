@@ -1,11 +1,12 @@
-import { evolve, hostKind, method, remote } from '@earendil-works/chord';
+import { evolve, hostKind, method, remote, str as paramStr } from '@earendil-works/chord';
 import { stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
 import {
   arr, bool, nul, num, obj, opt, str, union, type Schema, type Static,
 } from '@earendil-works/pi-schema';
 
-import { ChatMessageSchema } from '../../chat/types';
+import { ChatControlsProperties, ChatMessageSchema } from '../../chat/types';
 import { ChatViewSnapshotSchema } from '../chat-view';
+import { AgentInfoSchema } from '../infinichat-agents';
 import { ScheduledTaskSchema } from '../infinichat-scheduled';
 import { InfiniChatControlsSchema } from '../infinichat-view';
 import { ScheduledInputSchema } from '../infinichat/schedule';
@@ -37,8 +38,22 @@ export const ServerHost = hostKind('infinichat-server');
  * has `state`, which Chord reserves (chord `docs/design.md` §5, "Reserved member names").
  */
 export const SnapshotSchema = obj({ view: ChatViewSnapshotSchema, report: opt(str()) }, { open: true });
+/**
+ * The controls of versions 8 and 9, from before the tree of agents, kept as they were released: a model for subagents,
+ * and no name of the agent a chat is.
+ */
+const ControlsSchemaV8 = union([obj({
+  ...ChatControlsProperties,
+  summary: union([ChatModelSettingsSchema, nul()]),
+  instructions: str(),
+  name: str(),
+  subagents: union([ChatModelSettingsSchema, nul()]),
+  configured: bool(),
+}, { open: true }), nul()]);
 export const ControlsSchema = union([InfiniChatControlsSchema, nul()]);
 export const MessagesSchema = readonlyArr(ChatMessageSchema);
+/** The tree of agents, root first (`AgentList`); null while this machine doesn't hold the conversation open. */
+export const AgentsSchema = union([readonlyArr(AgentInfoSchema), nul()]);
 /**
  * The scheduled tasks still waiting, soonest first; null while this machine doesn't hold the conversation open or
  * hasn't read them yet, so the phone never takes an empty list it was not given for its notifications.
@@ -149,7 +164,7 @@ export type SignInAttempt = Static<typeof SignInAttemptSchema>;
  */
 const InfiniChatMembersV8 = {
   state: {
-    snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
+    snapshot: SnapshotSchema, controls: ControlsSchemaV8, messages: MessagesSchema, scheduled: ScheduledSchema,
     server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
     // Not `signIn`, the method that starts one: a member name is state or a method, never both (design §5).
     signInAttempt: SignInAttemptSchema,
@@ -224,13 +239,23 @@ const InfiniChatMembersV8 = {
 const ApiKeySchema = obj({ providerId: str(), key: str(), workspaceId: opt(str()) });
 
 /**
+ * `updateSettings`' arguments since version 10: root's model, and what the whole tree shares. Each other agent's
+ * model is its own (`InfiniChatAgent`).
+ */
+const SettingsSchema = obj({
+  main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema, instructions: str(), name: str(),
+});
+
+/**
  * What the machine's InfiniChat offers now, declared once: the server's store object holds these members for the
  * host's life, and the type clients hold re-exposes them (chord `docs/design.md` §6, "shared store, per-principal
  * views"). Version 8's, with each later version's edits.
  */
 export const InfiniChatMembers = {
-  state: InfiniChatMembersV8.state,
-  methods: { ...InfiniChatMembersV8.methods, setApiKey: method(ApiKeySchema) },
+  state: { ...InfiniChatMembersV8.state, controls: ControlsSchema, agents: AgentsSchema },
+  methods: {
+    ...InfiniChatMembersV8.methods, setApiKey: method(ApiKeySchema), updateSettings: method(SettingsSchema),
+  },
 };
 
 const InfiniChatRemoteV8 = remote('infinichat.remote', {
@@ -250,5 +275,40 @@ const InfiniChatRemoteV8 = remote('infinichat.remote', {
  * leaves waiting: it asks that server to update itself (`client.ts`).
  *
  * - 9: `setApiKey` takes a workspace ID.
+ * - 10: the tree of agents. `agents` lists it; `controls` name the agent a chat is and keep no model for subagents,
+ *   and `updateSettings` takes none. The view, `accept`, `stop` and `continue` are root's, as they were the one
+ *   chat's; every agent's chat is an `InfiniChatAgent`.
  */
-export const InfiniChatRemote = evolve(InfiniChatRemoteV8, (edit) => edit.args('setApiKey', ApiKeySchema));
+const InfiniChatRemoteV9 = evolve(InfiniChatRemoteV8, (edit) => edit.args('setApiKey', ApiKeySchema));
+export const InfiniChatRemote = evolve(InfiniChatRemoteV9, (edit) => edit
+  .state('owner', 'controls', ControlsSchema)
+  .args('updateSettings', SettingsSchema)
+  .addState('owner', 'agents', AgentsSchema));
+
+/** An agent's chat as its object serves it: the view's own snapshot, with no report, which is the conversation's. */
+export const InfiniChatAgentMembers = {
+  state: { snapshot: ChatViewSnapshotSchema, controls: ControlsSchema, messages: MessagesSchema },
+  methods: {
+    loadEarlier: method(),
+    fillGap: method(obj({ after: num(), upTo: num() })),
+    // That agent's turn, and its run that ended without an answer.
+    stop: method(),
+    continue: method(),
+    // The model and effort it runs on from its next request.
+    setModel: method(ChatModelSettingsSchema),
+  },
+};
+
+/**
+ * One agent of the tree as the machine serves it, by its name there, root too: its chat as the phone shows any
+ * chat, which the user reads while its screen is open, and what the user does to it, as UniiChat's views show any
+ * unii and stop it or pick its model. The user's messages go to root alone (`InfiniChatRemote.accept`). An object
+ * lives while a client holds it (chord `docs/design.md` §6, "Lifetime follows from kind and params"), so only the
+ * chats on screen are followed. A name the tree does not have shows as a missing view.
+ */
+export const InfiniChatAgent = remote('infinichat.agent', {
+  version: 1,
+  params: { name: paramStr() },
+  hostAddress: () => ServerHost(),
+  variants: { owner: InfiniChatAgentMembers },
+});

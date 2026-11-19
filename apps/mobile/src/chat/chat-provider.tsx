@@ -7,6 +7,7 @@ import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infin
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { INFINICHAT_DATABASE, InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
+import type { AgentInfo } from '@pi-agent/infinichat/pi/infinichat-agents';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
 import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/machines';
@@ -643,6 +644,19 @@ export function useScheduledTasks(): readonly ScheduledTask[] | undefined {
   const { infiniChat } = useChatApp();
   return useSyncExternalStore(infiniChat.scheduled.subscribe, infiniChat.scheduled.getSnapshot,
     infiniChat.scheduled.getSnapshot);
+}
+
+/** InfiniChat's tree of agents, root first, as the side shown serves it; undefined until read. */
+export function useInfiniChatAgents(): readonly AgentInfo[] | undefined {
+  const { infiniChat } = useChatApp();
+  return useSyncExternalStore(infiniChat.agents.subscribe, infiniChat.agents.getSnapshot,
+    infiniChat.agents.getSnapshot);
+}
+
+/** One agent's chat for the calling screen, the same one across moves, as `useInfiniChatView` is root's. */
+export function useAgentView(name: string): ChatViewSource<InfiniChatControls> {
+  const { infiniChat } = useChatApp();
+  return useMemo(() => infiniChat.agent(name).view(), [infiniChat, name]);
 }
 
 /** InfiniChat's Harness's latest report, until it is dismissed. */

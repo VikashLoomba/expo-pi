@@ -3,9 +3,10 @@ import { stringRecord } from '@earendil-works/pi-ai/providers/schema-builders';
 import { arr, bool, lit, nul, num, obj, oneOf, opt, str, union, type Static } from '@earendil-works/pi-schema';
 import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
 import { ChatExecutionSettingsSchema } from '@pi-agent/infinichat/pi/execution/document';
+import { ChatViewSnapshotSchema } from '@pi-agent/infinichat/pi/chat-view';
 import {
-  AccessSchema, ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema,
-  ReachSchema, ScheduledSchema, SignInAttemptSchema, SnapshotSchema,
+  AccessSchema, AgentsSchema, ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema,
+  PendingHostKeysSchema, ReachSchema, ScheduledSchema, SignInAttemptSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { McpServerStatusSchema, McpSignInAttemptSchema } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { ScheduledInputSchema } from '@pi-agent/infinichat/pi/infinichat/schedule';
@@ -84,13 +85,15 @@ export type MoveStatus = Static<typeof MoveStatusSchema>;
  * `ShownInfiniChat` carries them across moves, the connection to that machine, and the operations of its screen.
  */
 export const MacInfiniChat = remote('infinichat.mac.conversation', {
-  version: 2,
+  version: 3,
   params: {},
   hostAddress: () => MacMain(),
   variants: {
     owner: {
       state: {
         snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
+        // The tree of agents, root first, whose chats are `MacAgent`s; the cells above and the operations are root's.
+        agents: AgentsSchema,
         connection: ConnectionSchema, held: union([nul(), ConversationSchema]), machine: ShownMachineSchema,
         // The conversation's machines, the move under way, and what the last move wants the user to know.
         machines: MachinesSchema, move: union([nul(), MoveStatusSchema]),
@@ -125,8 +128,7 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         // Piece 6: the settings and scheduled tasks sheets, through the side shown, and the avatar: a file chosen in
         // the open dialog becomes it at once (its URL comes back; null when nothing was chosen).
         updateSettings: method(obj({ main: ChatModelSettingsSchema, summary: ChatModelSettingsSchema,
-          instructions: str(), name: str(),
-          subagents: union([ChatModelSettingsSchema, nul()]) })),
+          instructions: str(), name: str() })),
         cancelScheduled: method(obj({ id: num(), replacement: opt(ScheduledInputSchema) }),
           bool()),
         // What the conversation has spent, for the settings sheet, read when it opens.
@@ -142,6 +144,33 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         // `workspaceId` is Anthropic's, saved with its key (`ProviderSignIn.setApiKey`).
         setApiKey: method(obj({ providerId: str(), key: str(), workspaceId: opt(str()) })),
         signOut: method(obj({ providerId: str() })),
+      },
+    },
+  },
+});
+
+/**
+ * One agent's chat as this app shows it, by its name in the tree: the cells of the machine's `InfiniChatAgent` as
+ * `ShownInfiniChat` carries them across moves, in the shape the thread reads a conversation in, and what the user
+ * does to an agent. The user's messages go to root alone (`MacInfiniChat.accept`). It lives while a window holds it.
+ */
+export const MacAgent = remote('infinichat.mac.agent', {
+  version: 1,
+  params: { name: paramStr() },
+  hostAddress: () => MacMain(),
+  variants: {
+    owner: {
+      state: {
+        snapshot: obj({ view: ChatViewSnapshotSchema }, { open: true }), controls: ControlsSchema,
+        messages: MessagesSchema,
+      },
+      methods: {
+        loadEarlier: method(),
+        fillGap: method(obj({ after: num(), upTo: num() })),
+        stop: method(),
+        continue: method(),
+        // The model and effort it runs on from its next response.
+        setModel: method(ChatModelSettingsSchema),
       },
     },
   },

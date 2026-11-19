@@ -17,7 +17,7 @@ export const RepeatSchema = obj({
 });
 export type Repeat = Static<typeof RepeatSchema>;
 
-/** What the main agent is sent, when (its first time, as a Harness clock time), and how often after that. */
+/** What root is sent, when (its first time, as a Harness clock time), and how often after that. */
 export const ScheduledInputProperties = { task: str(), until: num(), repeat: opt(RepeatSchema) };
 export const ScheduledInputSchema = obj(ScheduledInputProperties);
 export type ScheduledInput = Static<typeof ScheduledInputSchema>;
@@ -57,14 +57,14 @@ export function occurrence({ until, repeat }: ScheduledInput, run: number): numb
   return time.getTime();
 }
 
-/** Admits a work message to the main agent in the caller's commit, as OptChat admits an agent's report. */
+/** Admits a work message to root in the caller's commit, as OptChat admits a child's message to its parent. */
 type AdmitWork = (tx: Tx, root: ConversationId, input: { requestId: string; content: string; date: string }) =>
   Promise<void>;
 
 /**
- * A future message to the main agent. As pi-durable's own compaction retries, the task sleeps durably on the Harness
- * clock, holding no invocation, so a reopened Harness resumes it at the time, or at once when the time has passed while
- * the app was closed. The commit that ends the task admits the message, so it is sent once. A repeating task never
+ * A future message to root, the one agent that schedules. As pi-durable's own compaction retries, the task sleeps
+ * durably on the Harness clock, holding no invocation, so a reopened Harness resumes it at the time, or at once when
+ * the time has passed while the app was closed. The commit that ends the task admits the message, so it is sent once. A repeating task never
  * ends on its own: the commit that admits a run puts the task back to sleep until its next time.
  */
 /** `run` counts the repeats behind a task: it waits for its time after that many. */

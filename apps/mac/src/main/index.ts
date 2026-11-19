@@ -21,7 +21,7 @@ import { listenForWindows } from './listen';
 import { MacMachines, thisMac } from './machines';
 import { ScheduledNotifier } from './notifications';
 import { serveChats } from './serve-chats';
-import { serveInfiniChat, serveMcp } from './serve-infinichat';
+import { serveAgent, serveInfiniChat, serveMcp } from './serve-infinichat';
 import { serveMachines } from './serve-machines';
 import { readSettings, writeSettings } from './settings';
 import { SignInRelay } from './sign-in-relay';
@@ -116,6 +116,7 @@ async function main(): Promise<void> {
   const ui = { openSettings: (_target?: SettingsTarget) => {} };
   const host = await createMacHost({ version, userData }, ui, (served) => {
     serveInfiniChat(served, infinichat, avatar);
+    serveAgent(served, infinichat);
     serveMcp(served, infinichat);
     serveMachines(served, infinichat, machines);
     serveChats(served, chats, account, machines);

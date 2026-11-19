@@ -1,8 +1,8 @@
 import type { ChatMessage } from './types';
 
 /**
- * A turn of the thread: the input that opened it (OptChat's fresh turn: the person's message, or an agent's report
- * delivered on its own) and everything until the next, steers included.
+ * A turn of the thread: the input that opened it (OptChat's fresh turn: its parent's message, the person's for root,
+ * or a child's delivered on its own) and everything until the next, steers included.
  */
 export interface Turn {
   id: string;

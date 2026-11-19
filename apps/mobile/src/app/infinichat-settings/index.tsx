@@ -1,5 +1,5 @@
 import {
-  Button, Form, Host, HStack, RNHostView, Section, Spacer, Text, TextField, Toggle, useNativeState, VStack,
+  Button, Form, Host, HStack, RNHostView, Section, Spacer, Text, TextField, useNativeState, VStack,
 } from '@expo/ui/swift-ui';
 import { disabled as disable, font, foregroundStyle, lineLimit } from '@expo/ui/swift-ui/modifiers';
 import {
@@ -16,19 +16,17 @@ import { useChatApp, useChatControls, useInfiniChatAccount } from '@/chat/chat-p
 import { AgentMark, ChatAgentContext } from '@/components/chat/agent';
 import { ModelSection, SettingsNotice } from '@/components/chat/settings-controls';
 import {
-  roleSettings, useInfiniChatSettingsDraft, withRoleSettings, type InfiniChatRole,
+  useInfiniChatSettingsDraft, withRoleSettings, type InfiniChatRole,
 } from '@/components/chat/settings-drafts';
 import { useChatColors } from '@/hooks/use-chat-colors';
 
 const roles: readonly InfiniChatRole[] = ['main', 'summary'];
-const roleTitles: Record<InfiniChatRole, string> = {
-  main: 'Main model', summary: 'Summary model', subagents: 'Subagent model',
-};
+const roleTitles: Record<InfiniChatRole, string> = { main: 'Main model', summary: 'Summary model' };
 const roleCaptions: Record<InfiniChatRole, string> = {
-  main: 'The main model answers you. InfiniChat sends and summarizes nothing until both models are chosen.',
-  summary: 'The summary model condenses the chat into the memory each answer starts from. Summaries run in the '
-    + 'background after every message, so a fast, inexpensive model suits them.',
-  subagents: 'Subagents work in the background on tasks InfiniChat hands them, when you ask for them.',
+  main: 'The main model answers you. InfiniChat sends and summarizes nothing until both models are chosen. An agent '
+    + 'it starts runs on this model too, until you choose another from that agent’s chat.',
+  summary: 'The summary model condenses each agent’s chat into the memory its answers start from. Summaries run in '
+    + 'the background after every message, so a fast, inexpensive model suits them.',
 };
 /** How UniiChat's prompt.txt describes the user's own instructions, which follow the prompt. */
 const INSTRUCTIONS_PLACEHOLDER = 'Who you are, how your files are organized and how you want work done.';
@@ -37,8 +35,6 @@ const secondary = foregroundStyle({ type: 'hierarchical', style: 'secondary' });
 
 const sameSettings = (left: ChatModelSettings, right: ChatModelSettings) => left.model.provider === right.model.provider
   && left.model.modelId === right.model.modelId && left.thinkingLevel === right.thinkingLevel;
-const sameChoice = (left: ChatModelSettings | null, right: ChatModelSettings | null) =>
-  left === null || right === null ? left === right : sameSettings(left, right);
 
 function dismissSettings() {
   if (router.canGoBack()) router.back();
@@ -76,34 +72,27 @@ export default function InfiniChatSettingsScreen() {
   const blocked = !conversation;
   const disabled = blocked || saving || refreshing;
   const settingsChanged = !sameSettings(draft.main, initial.main) || !sameSettings(draft.summary, initial.summary)
-    || !sameChoice(draft.subagents, initial.subagents) || draft.instructions !== initial.instructions
-    || draft.name !== initial.name;
+    || draft.instructions !== initial.instructions || draft.name !== initial.name;
   const avatarChanged = draft.avatar !== initial.avatar;
   const errors: Record<InfiniChatRole, string | undefined> = {
     main: getModelSettingsError(catalog, draft.main), summary: getModelSettingsError(catalog, draft.summary),
-    subagents: draft.subagents ? getModelSettingsError(catalog, draft.subagents) : undefined,
   };
   // The avatar is this phone's alone, so a new one saves without the conversation's settings.
   const canSave = !disabled && (avatarChanged || settingsChanged)
-    && (!settingsChanged || (!errors.main && !errors.summary && !errors.subagents));
+    && (!settingsChanged || (!errors.main && !errors.summary));
   const providerName = (providerId: string) => catalog.find((entry) => entry.id === providerId)?.name || providerId;
   // A chosen provider that is not connected yet; the choices can still be saved.
-  const unconnected = [...new Set([draft.main.model.provider, draft.summary.model.provider,
-    ...(draft.subagents ? [draft.subagents.model.provider] : [])])]
+  const unconnected = [...new Set([draft.main.model.provider, draft.summary.model.provider])]
     .filter((providerId) => providerId && !providerAccess(providerId).connected);
   // A provider that was never chosen needs no notice: its row asks for one.
-  const choiceError = (role: InfiniChatRole) => !roleSettings(draft, role).model.provider ? undefined
-    : roleSettings(draft, role).model.modelId ? errors[role] : 'Choose a model to finish changing the provider.';
+  const choiceError = (role: InfiniChatRole) => !draft[role].model.provider ? undefined
+    : draft[role].model.modelId ? errors[role] : 'Choose a model to finish changing the provider.';
   const choose = (role: InfiniChatRole, settings: ChatModelSettings) => {
     setDraft((current) => withRoleSettings(current, role, settings));
   };
   const chooseModel = (role: InfiniChatRole) => {
     router.push({ pathname: '/infinichat-settings/model', params: { role } });
   };
-  // Subagents of their own start from the main model the user has chosen so far.
-  const sameAsMain = <Toggle label="Same as main model" isOn={draft.subagents === null}
-    modifiers={[disable(disabled)]}
-    onIsOnChange={(on) => setDraft((current) => ({ ...current, subagents: on ? null : { ...current.main } }))} />;
   const refresh = async () => {
     if (disabled) return;
     setRefreshing(true);
@@ -134,11 +123,11 @@ export default function InfiniChatSettingsScreen() {
     setSaving(true);
     setError(undefined);
     try {
-      // One commit: the main model and the instructions with pi-durable's `configure`, and the summary and subagent
-      // models and the name in OptChat's ConfigDoc.
+      // One commit: root's model and every agent's instructions with pi-durable's `configure`, and the summary
+      // model and the name in OptChat's ConfigDoc.
       if (settingsChanged) {
         await service.updateSettings({ main: draft.main, summary: draft.summary,
-          instructions: draft.instructions.trim(), name: draft.name.trim(), subagents: draft.subagents });
+          instructions: draft.instructions.trim(), name: draft.name.trim() });
       }
       if (avatarChanged) {
         if (draft.avatar) infiniChatAvatar.set(draft.avatar);
@@ -192,18 +181,9 @@ export default function InfiniChatSettingsScreen() {
             onPress={() => setDraft((current) => ({ ...current, avatar: undefined }))} />}
         </Section>
         {roles.map((role) => <ModelSection key={role} title={roleTitles[role]} catalog={catalog}
-          settings={roleSettings(draft, role)} disabled={disabled} error={choiceError(role)}
+          settings={draft[role]} disabled={disabled} error={choiceError(role)}
           caption={roleCaptions[role]} onChange={(settings) => choose(role, settings)}
           onChooseModel={() => chooseModel(role)} />)}
-        {draft.subagents === null
-          ? <Section title={roleTitles.subagents} footer={<Text>{roleCaptions.subagents}</Text>}>
-            {sameAsMain}
-          </Section>
-          : <ModelSection title={roleTitles.subagents} catalog={catalog} settings={draft.subagents}
-            disabled={disabled} error={choiceError('subagents')} caption={roleCaptions.subagents}
-            onChange={(settings) => choose('subagents', settings)} onChooseModel={() => chooseModel('subagents')}>
-            {sameAsMain}
-          </ModelSection>}
         {unconnected.map((providerId) => <SettingsNotice key={providerId} tone="neutral"
           testID={`infinichat-settings-connection-${providerId}`}
           message={providerAccess(providerId).error || (machine === undefined

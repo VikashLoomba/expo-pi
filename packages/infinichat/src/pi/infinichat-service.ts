@@ -1,20 +1,20 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { uuidv7, type Models, type UserMessage } from '@earendil-works/pi-ai';
 import {
-  AgentDoc, configure, type Harness, type HarnessOptions, type RegistryReader, type SessionEnd, type Storage,
-  type TaskGraphNode,
+  AgentDoc, configure, type ConversationId, type Harness, type HarnessOptions, type RegistryReader, type SessionEnd,
+  type Storage, type TaskGraphNode,
 } from '@earendil-works/pi-durable';
 
 import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
-import type { ChatViewSource } from './chat-view';
+import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
+import { AgentList, type AgentInfo } from './infinichat-agents';
 import { ScheduledTasks, type ScheduledTask } from './infinichat-scheduled';
 import type { Machine } from './infinichat-remote/contract';
 import {
   MachineList, patchMachine, putMachine, removeMachine, type MachinePatch, type MachinesState,
 } from './infinichat-remote/machines';
 import { InfiniChatView, type InfiniChatControls } from './infinichat-view';
-import { AGENT_TASK } from './infinichat/agents';
 import { openOptChat, optChatParts, type OptChat, type OptChatParts } from './infinichat/app';
 import type { InfiniChatDevices } from './infinichat/device-tools';
 import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
@@ -36,10 +36,8 @@ export type InfiniChatSettings = {
   summary: ChatModelSettings;
   /** The user's own instructions that follow the prompt; empty for none. */
   instructions: string;
-  /** The agent's name; empty for InfiniChat. */
+  /** The name the user gives InfiniChat; empty for InfiniChat. */
   name: string;
-  /** What subagents run on; `null` for the main model and effort, absent to leave it as it is. */
-  subagents?: ChatModelSettings | null;
 };
 
 /** A value the screens follow with `useSyncExternalStore`. */
@@ -49,11 +47,28 @@ interface Store<T> {
 }
 
 /**
+ * One agent's chat as the screens show it, as UniiChat's views show any unii's: the user reads it, stops its turn and
+ * picks its model, and talks only to root.
+ */
+export interface AgentChat {
+  view(): ChatViewSource<InfiniChatControls>;
+  /** Continues the run the view's `runFailure` names (pi-durable's continue). */
+  continue(): Promise<void>;
+  stop(): Promise<void>;
+  /** The model and effort this agent runs on from its next request. */
+  setModel(settings: ChatModelSettings): Promise<void>;
+}
+
+/**
  * InfiniChat as its screens use it, wherever its Harness runs: this core on the phone, or `RemoteInfiniChat` showing
- * a machine's. The store itself is the Harness's latest report.
+ * a machine's. The store itself is the Harness's latest report. `view`, `accept`, `continue`, `stop` and the
+ * settings' main model are root's; `agent` is any agent of the tree, by its name there.
  */
 export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   view(): ChatViewSource<InfiniChatControls>;
+  /** The tree of agents, root first; undefined until read. */
+  readonly agents: Store<readonly AgentInfo[] | undefined>;
+  agent(name: string): AgentChat;
   /** The conversation's machines document (`infinichat-remote/machines.ts`); undefined until read. */
   readonly machines: Store<MachinesState | undefined>;
   putMachine(record: Machine): Promise<void>;
@@ -95,14 +110,24 @@ export function infiniChatExtensions(devices: InfiniChatDevices, harness: () => 
 }
 
 const INFINICHAT = 'infinichat';
-const infiniChatWork = new Set([BuildNode.definition.name, AGENT_TASK]);
+const NO_MESSAGES: readonly never[] = [];
+const MISSING: ChatViewSnapshot = { status: 'missing' };
+/** The view of an agent the tree does not name. */
+const NO_AGENT: ChatViewSource<InfiniChatControls> = {
+  subscribe: () => () => {},
+  getSnapshot: () => MISSING,
+  getControls: () => undefined,
+  getMessages: () => NO_MESSAGES,
+  loadEarlier: async () => {},
+  fillGap: async () => {},
+};
 
 /**
- * InfiniChat is one chat. Its turns are foreground tasks, and its summary builds and private agents are work although
- * they are background tasks; its coordinator is always live, so it never is.
+ * InfiniChat's work, in one Harness: every agent's turns are foreground tasks, and their summary builds are work
+ * although they are background tasks; their coordinators are always live, so they never are.
  */
 export const infiniChatTasks = (task: TaskGraphNode): string | undefined =>
-  !task.background || infiniChatWork.has(task.kind) ? INFINICHAT : undefined;
+  !task.background || task.kind === BuildNode.definition.name ? INFINICHAT : undefined;
 
 /**
  * Owns InfiniChat's Harness, on its own database: OptChat's sequential tools, steer-all queueing and disabled
@@ -115,7 +140,9 @@ export class InfiniChatService implements InfiniChatHost {
   private snapshot: InfiniChatSnapshot = {};
   private closed = false;
   private closePromise?: Promise<void>;
-  private shownView?: InfiniChatView;
+  /** Each agent's view by its conversation, shared by the screens that show it; it attaches while one subscribes. */
+  private readonly views = new Map<ConversationId, InfiniChatView>();
+  private readonly chats = new Map<string, AgentChat>();
   private unfollowAccount = () => {};
 
   private constructor(
@@ -123,6 +150,7 @@ export class InfiniChatService implements InfiniChatHost {
     /** The scheduled tasks still waiting. */
     readonly scheduled: ScheduledTasks,
     readonly machines: MachineList,
+    readonly agents: AgentList,
     private readonly models: Models,
     private readonly authError?: (providerId: string) => string | undefined,
     private readonly machine?: string,
@@ -155,12 +183,17 @@ export class InfiniChatService implements InfiniChatHost {
       onReport: (report) => {
         if (report.kind !== 'task_interrupted') service?.report(report.error);
       },
-      // The chat view shows a conversation only with its metadata document; the phone device reads the workspace.
+      // Root's title is its metadata document's; the phone device reads the workspace, which every agent shares.
       init: async (tx, id) => {
         const metadata = await tx.doc(ChatMetadataDoc, id);
         metadata.title = TITLE;
         metadata.createdAt = Date.now();
         (await tx.doc(WorkspaceDoc, id)).id = uuidv7();
+      },
+      // A child's too: `watchDoc` finds no document that doesn't exist yet (below), so each conversation has its
+      // searches document from the commit that makes it.
+      conversationCreated: async (tx, conversation) => {
+        await tx.doc(SearchPresentationsDoc, conversation.id);
       },
     }, BACKGROUND_CONTEXT);
     // pi-durable's `watchDoc` finds no document that doesn't exist yet, and a view stays attached without it, so
@@ -171,9 +204,12 @@ export class InfiniChatService implements InfiniChatHost {
     }, BACKGROUND_CONTEXT);
     const scheduled = new ScheduledTasks(chat.harness, (error) => service?.report(error));
     const machines = new MachineList(chat.harness);
-    service = new InfiniChatService(chat, scheduled, machines, options.models, options.authError, options.machine);
+    const agents = new AgentList(chat.harness, chat.root.id);
+    service = new InfiniChatService(chat, scheduled, machines, agents, options.models, options.authError,
+      options.machine);
     void scheduled.start().catch((error: unknown) => service?.report(error));
     void machines.start().catch((error: unknown) => service?.report(error));
+    void agents.start().catch((error: unknown) => service?.report(error));
     // A new conversation is ready as soon as a provider is connected, now or at a later sign-in.
     const choose = () => {
       void service.chooseDefaults().catch((error: unknown) => service.report(error));
@@ -253,6 +289,35 @@ export class InfiniChatService implements InfiniChatHost {
     return this.chat.continue();
   }
 
+  /** An agent of the tree by its name there, root too; one the tree does not name shows as missing and refuses. */
+  agent(name: string): AgentChat {
+    let found = this.chats.get(name);
+    if (found === undefined) {
+      const conversation = () => {
+        this.assertOpen();
+        const id = this.agents.conversation(name);
+        if (id === undefined) throw new Error(`InfiniChat has no agent ${name}.`);
+        return id;
+      };
+      found = {
+        view: () => {
+          const id = this.agents.conversation(name);
+          return id === undefined ? NO_AGENT : this.viewOf(id);
+        },
+        continue: async () => this.chat.continue(conversation()),
+        stop: async () => this.chat.abort(conversation()),
+        setModel: async (settings) => {
+          const selected = { model: { ...settings.model }, thinkingLevel: settings.thinkingLevel };
+          assertModelSettings(buildModelCatalog(this.models), selected);
+          const id = conversation();
+          await this.chat.harness.commit((tx) => configure(tx, id, selected), BACKGROUND_CONTEXT);
+        },
+      };
+      this.chats.set(name, found);
+    }
+    return found;
+  }
+
   putMachine(record: Machine): Promise<void> {
     this.assertOpen();
     return putMachine(this.chat.harness, record);
@@ -268,33 +333,29 @@ export class InfiniChatService implements InfiniChatHost {
     return removeMachine(this.chat.harness, endpoint);
   }
 
-  /** Cancels accepted inputs not yet sent and aborts the running turn; summaries and agents keep running. */
+  /** Cancels root's accepted inputs not yet sent and aborts its running turn; summaries and the other agents go on. */
   stop(): Promise<void> {
     this.assertOpen();
     return this.chat.abort();
   }
 
   /**
-   * The main model and effort with pi-durable's `configure`, the summary and subagent models and efforts, the user's
-   * own instructions and the agent's name, in one commit.
+   * Root's model and effort with pi-durable's `configure`, and what the whole tree shares: the summary model and
+   * effort, the user's own instructions and the name, in one commit. Another agent's model is its own (`agent`).
    */
-  async updateSettings({ main, summary, instructions, name, subagents }: InfiniChatSettings,
+  async updateSettings({ main, summary, instructions, name }: InfiniChatSettings,
     context = BACKGROUND_CONTEXT): Promise<void> {
     const catalog = buildModelCatalog(this.models);
     const selectedMain = { model: { ...main.model }, thinkingLevel: main.thinkingLevel };
     const selectedSummary = { model: { ...summary.model }, thinkingLevel: summary.thinkingLevel };
-    const selectedSubagents = subagents
-      && { model: { ...subagents.model }, thinkingLevel: subagents.thinkingLevel };
     assertModelSettings(catalog, selectedMain);
     assertModelSettings(catalog, selectedSummary);
-    if (selectedSubagents) assertModelSettings(catalog, selectedSubagents);
     this.assertOpen();
     const root = this.chat.root;
     await root.commit(async (tx) => {
       await configure(tx, root.id, selectedMain);
       const config = await tx.doc(ConfigDoc, root.id);
       config.summary = selectedSummary;
-      if (selectedSubagents !== undefined) config.subagents = selectedSubagents;
       config.name = name.trim() || null;
       await this.chat.setInstructions(tx, instructions);
     }, context);
@@ -336,8 +397,8 @@ export class InfiniChatService implements InfiniChatHost {
   }
 
   /**
-   * pi-durable's ledger of the whole session (README "Usage and Cost"), which counts the main agent and every
-   * subagent, and OptChat's own of the summaries it wrote (`MemoryUsageDoc`).
+   * pi-durable's ledger of the whole session (README "Usage and Cost"), which counts every agent of the tree, and
+   * OptChat's own of the summaries it wrote for them (`MemoryUsageDoc`).
    */
   async usage(context = BACKGROUND_CONTEXT): Promise<InfiniChatUsage> {
     this.assertOpen();
@@ -357,13 +418,19 @@ export class InfiniChatService implements InfiniChatHost {
     return task ? this.chat.cancelScheduled(task.record.id, replacement) : false;
   }
 
-  /**
-   * InfiniChat's one conversation, shared by the screens that show it, so the settings opened over the conversation
-   * do not read its history again; it attaches while something subscribes.
-   */
+  /** Root's chat, where the user talks. */
   view(): InfiniChatView {
-    this.shownView ??= new InfiniChatView(this.chat.harness, this.chat.root.id);
-    return this.shownView;
+    return this.viewOf(this.chat.root.id);
+  }
+
+  /** A view is shared, so the settings opened over a chat do not read its history again. */
+  private viewOf(id: ConversationId): InfiniChatView {
+    let view = this.views.get(id);
+    if (view === undefined) {
+      view = new InfiniChatView(this.chat.harness, id);
+      this.views.set(id, view);
+    }
+    return view;
   }
 
   close(): Promise<void> {
@@ -377,6 +444,7 @@ export class InfiniChatService implements InfiniChatHost {
       } finally {
         this.scheduled.close();
         this.machines.close();
+        this.agents.close();
       }
     })();
     return this.closePromise;

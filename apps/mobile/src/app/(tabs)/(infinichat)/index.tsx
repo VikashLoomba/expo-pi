@@ -12,8 +12,8 @@ import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 're
 import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
 
 import {
-  useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatAvatar, useInfiniChatConnection, useInfiniChatError,
-  useInfiniChatView, useMachines,
+  useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatAgents, useInfiniChatAvatar, useInfiniChatConnection,
+  useInfiniChatError, useInfiniChatView, useMachines,
 } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { ChatAgentContext } from '@/components/chat/agent';
@@ -80,6 +80,12 @@ export default function InfiniChatScreen() {
   const connection = useInfiniChatConnection();
   const hosts = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   const listed = useMachines();
+  // The agents root started, and theirs: each one's chat opens from the header, as UniiChat's views list its tree.
+  const children = (useInfiniChatAgents() ?? []).filter((each) => each.parent !== null);
+  const depthOf = (parent: string | null): number => {
+    const above = children.find((each) => each.name === parent);
+    return above === undefined ? 0 : 1 + depthOf(above.parent);
+  };
   const remote = shown !== undefined;
   // The machine the conversation is on or moving to or from, by the name the conversation's document gives it, or
   // its host name until that is read; a launch never shows a placeholder name first.
@@ -305,6 +311,14 @@ export default function InfiniChatScreen() {
             Manage Machines…
           </Stack.Toolbar.MenuAction>
         </Stack.Toolbar.Menu>
+      </Stack.Toolbar.Menu>
+      <Stack.Toolbar.Menu icon="person.2" title="Agents" hidden={children.length === 0}
+        accessibilityLabel="Agents" accessibilityHint="Open an agent’s chat to read it, stop it or choose its model.">
+        {children.map((each) => <Stack.Toolbar.MenuAction key={each.name}
+          icon={each.awake ? 'circle.fill' : 'circle'} subtitle={each.description || undefined}
+          onPress={() => router.push({ pathname: '/agent/[name]', params: { name: each.name } })}>
+          {`${'\u2003'.repeat(depthOf(each.parent))}${each.name}`}
+        </Stack.Toolbar.MenuAction>)}
       </Stack.Toolbar.Menu>
       <Stack.Toolbar.Button icon="clock" accessibilityLabel="Scheduled tasks"
         onPress={() => router.push('/infinichat-schedule')} />

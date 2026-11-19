@@ -25,8 +25,8 @@ export const MemoryUsageDoc = defineDoc<{ models: Ledger }>({
  * summarization spend to `pi.usage` (`recordUsage` in its `harness/usage.js`, which it does not export): every
  * counter, an optional one once either side reports it.
  */
-export async function recordMemoryUsage(tx: Tx, root: ConversationId, model: string, usage: Usage): Promise<void> {
-  const totals = (await tx.doc(MemoryUsageDoc, root)).models;
+export async function recordMemoryUsage(tx: Tx, chat: ConversationId, model: string, usage: Usage): Promise<void> {
+  const totals = (await tx.doc(MemoryUsageDoc, chat)).models;
   // Own keys only, as pi-durable reads its ledger.
   if (!Object.hasOwn(totals, model)) {
     totals[model] = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,

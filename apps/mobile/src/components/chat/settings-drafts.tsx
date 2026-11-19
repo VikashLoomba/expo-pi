@@ -47,25 +47,43 @@ export function useChatSettingsDraft(): ChatSettingsDraft {
 }
 
 /**
- * The main model answers and works; the summary model writes the memory's summaries in the background; subagents
- * run on the main model unless they have their own.
+ * The main model is root's, which answers and works; the summary model writes every agent's memory in the
+ * background. Another agent's model is its own, chosen from its chat.
  */
-export type InfiniChatRole = 'main' | 'summary' | 'subagents';
-/** The settings the conversation keeps, the subagents' always shown, and the avatar, which stays on this phone. */
-export type InfiniChatSettingsDraftValues = Omit<InfiniChatSettings, 'subagents'> & {
-  subagents: ChatModelSettings | null;
-  avatar: string | undefined;
-};
-
-/** A role's model as the draft has it: subagents without their own show the main model they run on. */
-export function roleSettings(draft: InfiniChatSettingsDraftValues, role: InfiniChatRole): ChatModelSettings {
-  return role === 'subagents' ? draft.subagents ?? draft.main : draft[role];
-}
+export type InfiniChatRole = 'main' | 'summary';
+/** The settings the conversation keeps, and the avatar, which stays on this phone. */
+export type InfiniChatSettingsDraftValues = InfiniChatSettings & { avatar: string | undefined };
 
 export function withRoleSettings(draft: InfiniChatSettingsDraftValues, role: InfiniChatRole,
   settings: ChatModelSettings): InfiniChatSettingsDraftValues {
-  if (role === 'main') return { ...draft, main: settings };
-  return role === 'summary' ? { ...draft, summary: settings } : { ...draft, subagents: settings };
+  return role === 'main' ? { ...draft, main: settings } : { ...draft, summary: settings };
+}
+
+type AgentModelDraft = {
+  /** The agent, by its name in the tree. */
+  name: string;
+  /** The saved model the draft is compared with. */
+  initial: ChatModelSettings;
+  settings: ChatModelSettings;
+  setSettings: (settings: ChatModelSettings) => void;
+};
+
+const AgentModelDraftContext = createContext<AgentModelDraft | undefined>(undefined);
+
+/** One agent's unsaved model choice, shared by its sheet's screens until the user saves or cancels. */
+export function AgentModelDraftProvider({ name, initial, children }: {
+  name: string; initial: ChatModelSettings; children: ReactNode;
+}) {
+  const [settings, setSettings] = useState(initial);
+  return <AgentModelDraftContext value={{ name, initial, settings, setSettings }}>
+    {children}
+  </AgentModelDraftContext>;
+}
+
+export function useAgentModelDraft(): AgentModelDraft {
+  const draft = use(AgentModelDraftContext);
+  if (!draft) throw new Error('An agent’s model screens render inside its settings layout.');
+  return draft;
 }
 
 type InfiniChatSettingsDraft = {

@@ -9,13 +9,17 @@ import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/
 import { serverDevices } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
+import type { ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import {
-  InfiniChatMembers, InfiniChatRemote, type AccessSchema, type ControlsSchema, type ConversationState,
-  type InfiniChatPrincipal, type MachinesSchema, type MessagesSchema, type PendingHostKeys, type ReachSchema,
-  type ScheduledSchema, type SignInAttempt, type SnapshotSchema,
+  InfiniChatAgent, InfiniChatMembers, InfiniChatRemote, type AccessSchema, type AgentsSchema, type ControlsSchema,
+  type ConversationState, type InfiniChatPrincipal, type MachinesSchema, type MessagesSchema, type PendingHostKeys,
+  type ReachSchema, type ScheduledSchema, type SignInAttempt, type SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { CLAUDE_CODE_PROVIDER_ID } from '@pi-agent/infinichat/pi/claude-code';
-import { InfiniChatService, infiniChatExtensions } from '@pi-agent/infinichat/pi/infinichat-service';
+import {
+  InfiniChatService, infiniChatExtensions, type InfiniChatSettings,
+} from '@pi-agent/infinichat/pi/infinichat-service';
+import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
 import { validateOpenAICredential } from '@pi-agent/infinichat/pi/openai-auth/core';
 import {
@@ -40,7 +44,14 @@ interface ConversationView {
   messages: Static<typeof MessagesSchema>;
   scheduled: Static<typeof ScheduledSchema>;
   machines: Static<typeof MachinesSchema>;
+  agents: Static<typeof AgentsSchema>;
   conversation: ConversationState;
+}
+/** What one agent's chat shows, published together as the conversation's is. */
+interface AgentView {
+  snapshot: ChatViewSnapshot;
+  controls: Static<typeof ControlsSchema>;
+  messages: Static<typeof MessagesSchema>;
 }
 interface AccountView { catalog: ModelCatalog; access: Static<typeof AccessSchema>; signInAttempt: SignInAttempt }
 interface ReachView { reach: Static<typeof ReachSchema>; pendingHostKeys: PendingHostKeys }
@@ -48,7 +59,8 @@ interface ReachView { reach: Static<typeof ReachSchema>; pendingHostKeys: Pendin
 const LOADING = { status: 'loading' } as const;
 /** What the members read from the object's activation until its first routine has read the natives. */
 const NO_VIEW: ConversationView = { snapshot: { view: LOADING }, controls: null, messages: [], scheduled: null,
-  machines: null, conversation: { active: false } };
+  machines: null, agents: null, conversation: { active: false } };
+const NO_AGENT_VIEW: AgentView = { snapshot: LOADING, controls: null, messages: [] };
 const NO_ACCOUNT: AccountView = { catalog: [], access: {}, signInAttempt: null };
 const NO_REACH: ReachView = { reach: {}, pendingHostKeys: {} };
 
@@ -64,7 +76,7 @@ const NO_REACH: ReachView = { reach: {}, pendingHostKeys: {} };
  * contract change bump it; this plugin is its only consumer, so it accepts no older one.
  */
 export const InfiniChatMachine = local('infinichat.machine', {
-  version: 2,
+  version: 3,
   params: {},
   members: { ...InfiniChatMembers.state, ...InfiniChatMembers.methods },
 });
@@ -81,11 +93,31 @@ export const version = INFINICHAT_SERVER_VERSION;
  * need mapped (chord `docs/design.md` §27, "Mappings live with the provider"), so the apps released with them keep
  * working with this server. A version is dropped only once no app on it is in use.
  *
- * - 8: its `setApiKey` arguments are the newest's without a workspace ID.
+ * - 9: its controls keep a model for subagents, which the tree's agents have none of, and no name of the agent a chat
+ *   is; its `updateSettings` sends that model, which is dropped. It shows root's chat as the one chat, and no tree.
+ * - 8: 9's, and its `setApiKey` arguments are the newest's without a workspace ID.
  */
 const ACCEPTED: AcceptsTable<typeof InfiniChatRemote> = {
-  8: { methods: { setApiKey: { args: (old) => old } } },
+  9: {
+    state: { owner: { controls: (current) => beforeTree(current) } },
+    methods: { updateSettings: { args: (old) => withoutSubagents(old) } },
+  },
+  8: {
+    state: { owner: { controls: (current) => beforeTree(current) } },
+    methods: { setApiKey: { args: (old) => old }, updateSettings: { args: (old) => withoutSubagents(old) } },
+  },
 };
+
+/** The controls as versions 8 and 9 have them. */
+function beforeTree(current: Static<typeof ControlsSchema>) {
+  if (current === null) return null;
+  const { agent: _root, ...controls } = current;
+  return { ...controls, subagents: null };
+}
+
+/** The settings versions 8 and 9 send, as the newest takes them. */
+const withoutSubagents = ({ main, summary, instructions, name }: InfiniChatSettings): InfiniChatSettings =>
+  ({ main, summary, instructions, name });
 
 /**
  * InfiniChat's server plugin: the facet a server host loads from its runtime (`main.ts`), given the process as start
@@ -183,12 +215,13 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
         messages: open?.view().getMessages() ?? NO_VIEW.messages,
         scheduled: open?.scheduled.getSnapshot() ?? null,
         machines: open?.machines.getSnapshot() ?? null,
+        agents: open?.agents.getSnapshot() ?? null,
         conversation: conversation.value.getState(),
       };
     };
     // The natives' own stores, mirrored into in-process values an `onLive` routine keeps current (design §14, "set
     // up, wait for the end, clean up"); each member is a derive over one, so its changes go out as a diff. The
-    // conversation's six members share one value: a derive is recomputed in the flush of the change that marked it,
+    // conversation's seven members share one value: a derive is recomputed in the flush of the change that marked it,
     // so they travel in one message, and a client's first `ready` never arrives before its messages.
     const view = self.writable(NO_VIEW);
     const accountView = self.writable(NO_ACCOUNT);
@@ -230,6 +263,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       messages: self.derive([view], ([shown]) => [...shown.messages]),
       scheduled: self.derive([view], ([shown]) => shown.scheduled && [...shown.scheduled]),
       machines: self.derive([view], ([shown]) => shown.machines),
+      agents: self.derive([view], ([shown]) => shown.agents && [...shown.agents]),
       conversation: self.derive([view], ([shown]) => shown.conversation),
       // This code's release.
       server: constant({ version }),
@@ -304,7 +338,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       variant: 'owner',
       members: {
         snapshot: machine.snapshot, controls: machine.controls, messages: machine.messages,
-        scheduled: machine.scheduled, machines: machine.machines, conversation: machine.conversation,
+        scheduled: machine.scheduled, machines: machine.machines, agents: machine.agents,
+        conversation: machine.conversation,
         server: machine.server, catalog: machine.catalog, access: machine.access,
         signInAttempt: machine.signInAttempt, reach: machine.reach, pendingHostKeys: machine.pendingHostKeys,
         accept: machine.accept, stop: machine.stop, continue: machine.continue, loadEarlier: machine.loadEarlier,
@@ -319,4 +354,64 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       },
     };
   }, { accepts: ACCEPTED });
+
+  /**
+   * One agent's chat, by its name in the tree, while a client holds it: the open core's view of that agent, which it
+   * follows from the core's own stores as the store object follows the conversation's, and that agent's operations.
+   * It waits for the store object, which holds the conversation's holder. While this machine doesn't hold the
+   * conversation, the view is loading and the operations refuse; a name the tree does not have shows as missing.
+   */
+  host.serve(InfiniChatAgent, ({ name }, _principal, self) => {
+    self.get(InfiniChatMachine, {});
+    const chat = () => {
+      const open = conversationOpen?.current;
+      if (!open) throw new Error(`InfiniChat isn’t open on ${proc.device}.`);
+      return open.agent(name);
+    };
+    const shown = self.writable(NO_AGENT_VIEW);
+    self.onLive(async (ctx) => {
+      const held = conversationOpen;
+      // The view of the core open now; the core comes and goes with a move, and its tree is read after it opens.
+      let followed: ChatViewSource<InfiniChatControls> | undefined;
+      let unfollow = () => {};
+      const publish = () => {
+        const view = held?.current?.agent(name).view();
+        if (view !== followed) {
+          const previous = unfollow;
+          followed = view;
+          unfollow = view?.subscribe(publish) ?? (() => {});
+          previous();
+        }
+        const next: AgentView = view === undefined ? NO_AGENT_VIEW
+          : { snapshot: view.getSnapshot(), controls: view.getControls() ?? null, messages: view.getMessages() };
+        const last = shown.value;
+        // The holder tells of every change of the conversation; this agent's chat is published only when it changed.
+        if (next.snapshot !== last.snapshot || next.controls !== last.controls || next.messages !== last.messages) {
+          shown.set(next);
+        }
+      };
+      const stop = held?.subscribe(publish);
+      publish();
+      try {
+        await untilAborted(ctx);
+      } finally {
+        stop?.();
+        unfollow();
+      }
+    });
+    return {
+      variant: 'owner',
+      members: {
+        snapshot: self.derive([shown], ([view]) => view.snapshot),
+        controls: self.derive([shown], ([view]) => view.controls),
+        // Chord's JSON arrays are mutable types; the copy keeps its elements, which the diff compares by identity.
+        messages: self.derive([shown], ([view]) => [...view.messages]),
+        loadEarlier: async () => done(chat().view().loadEarlier()),
+        fillGap: async (gap) => done(chat().view().fillGap(gap)),
+        stop: async () => done(chat().stop()),
+        continue: async () => done(chat().continue()),
+        setModel: async (settings) => done(chat().setModel(settings)),
+      },
+    };
+  });
 });

@@ -39,8 +39,8 @@ const signalOf = (context: Context): AbortSignal => context.abortSignal ?? new A
  * machine opens its database only while it holds the conversation: from `adopt`, which a phone calls once it has
  * copied its files here, until `relinquish`. `state.json` keeps `active` across restarts, so a reboot reopens it, and
  * the phone a handover goes to, which every client reads. The operations run one at a time, also when several clients
- * call them. While something subscribes, it follows the open core's view, report and scheduled tasks, and also says
- * when the core comes or goes.
+ * call them. While something subscribes, it follows the open core's view, report, scheduled tasks and agents, and also
+ * says when the core comes or goes.
  */
 export class ServerConversation {
   private core?: InfiniChatService;
@@ -305,7 +305,8 @@ export class ServerConversation {
     const core = this.core;
     if (core) {
       const stops = [core.view().subscribe(this.notify), core.subscribe(this.notify),
-        core.scheduled.subscribe(this.notify), core.machines.subscribe(this.notify)];
+        core.scheduled.subscribe(this.notify), core.machines.subscribe(this.notify),
+        core.agents.subscribe(this.notify)];
       this.unfollow = () => {
         for (const stop of stops) stop();
       };

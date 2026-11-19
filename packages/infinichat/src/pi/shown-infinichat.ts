@@ -1,9 +1,10 @@
 import type { UserMessage } from '@earendil-works/pi-ai';
 import type { ChatMessage } from '../chat/types';
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
+import type { AgentInfo } from './infinichat-agents';
 import type { ScheduledTask } from './infinichat-scheduled';
 import type {
-  InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot,
+  AgentChat, InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot,
 } from './infinichat-service';
 import type { Machine } from './infinichat-remote/contract';
 import type { MachinePatch, MachinesState } from './infinichat-remote/machines';
@@ -35,6 +36,8 @@ export class ShownInfiniChat implements InfiniChatHost {
   private controls?: InfiniChatControls;
   private messages = NO_MESSAGES;
   private tasks?: readonly ScheduledTask[];
+  private tree?: readonly AgentInfo[];
+  private readonly chats = new Map<string, AgentChat>();
   private machineList?: MachinesState;
   private report = NO_REPORT;
 
@@ -53,6 +56,7 @@ export class ShownInfiniChat implements InfiniChatHost {
     };
   };
   readonly scheduled = { subscribe: this.subscribe, getSnapshot: () => this.tasks };
+  readonly agents = { subscribe: this.subscribe, getSnapshot: () => this.tree };
   readonly machines = { subscribe: this.subscribe, getSnapshot: () => this.machineList };
   private readonly shown: ChatViewSource<InfiniChatControls> = {
     subscribe: this.subscribe,
@@ -68,6 +72,70 @@ export class ShownInfiniChat implements InfiniChatHost {
 
   view(): ChatViewSource<InfiniChatControls> {
     return this.shown;
+  }
+
+  /**
+   * An agent's chat on the side shown, one for the app's lifetime as the conversation's own view is: while a screen
+   * follows it, it follows that side's view of the agent, and the next side's after a move. While held it keeps the
+   * last values, and its operations reject.
+   */
+  agent(name: string): AgentChat {
+    let chat = this.chats.get(name);
+    if (chat === undefined) {
+      const view = this.agentView(name);
+      chat = {
+        view: () => view,
+        continue: () => this.current().agent(name).continue(),
+        stop: () => this.current().agent(name).stop(),
+        setModel: (settings) => this.current().agent(name).setModel(settings),
+      };
+      this.chats.set(name, chat);
+    }
+    return chat;
+  }
+
+  private agentView(name: string): ChatViewSource<InfiniChatControls> {
+    const listeners = new Set<() => void>();
+    let followed: ChatViewSource<InfiniChatControls> | undefined;
+    let unfollow = noop;
+    let unsubscribe = noop;
+    const notify = () => {
+      for (const listener of [...listeners]) listener();
+    };
+    // The side shown tells of every change, a switch of sides and its tree's first read among them; the view it has
+    // for the agent is followed anew only when it is another one.
+    const resolve = () => {
+      const view = this.held ? followed : this.host?.agent(name).view();
+      if (view === followed) return;
+      const previous = unfollow;
+      followed = view;
+      unfollow = view?.subscribe(notify) ?? noop;
+      previous();
+      notify();
+    };
+    return {
+      subscribe: (listener) => {
+        listeners.add(listener);
+        if (listeners.size === 1) {
+          unsubscribe = this.subscribe(resolve);
+          resolve();
+        }
+        return () => {
+          listeners.delete(listener);
+          if (listeners.size) return;
+          unsubscribe();
+          unfollow();
+          unsubscribe = noop;
+          unfollow = noop;
+          followed = undefined;
+        };
+      },
+      getSnapshot: () => followed?.getSnapshot() ?? LOADING,
+      getControls: () => followed?.getControls(),
+      getMessages: () => followed?.getMessages() ?? NO_MESSAGES,
+      loadEarlier: async () => followed?.loadEarlier(),
+      fillGap: async (gap) => followed?.fillGap(gap),
+    };
   }
 
   /** Keeps the values on screen as they are; operations reject until a side is shown again. */
@@ -169,13 +237,14 @@ export class ShownInfiniChat implements InfiniChatHost {
       this.controls = view.getControls();
       this.messages = view.getMessages();
       this.tasks = host.scheduled.getSnapshot();
+      this.tree = host.agents.getSnapshot();
       this.machineList = host.machines.getSnapshot();
       this.report = host.getSnapshot();
       this.notify();
     };
     const stops = waiting ? [view.subscribe(update)]
       : [view.subscribe(update), host.subscribe(update), host.scheduled.subscribe(update),
-        host.machines.subscribe(update)];
+        host.agents.subscribe(update), host.machines.subscribe(update)];
     this.unfollow = () => {
       for (const stop of stops) stop();
     };

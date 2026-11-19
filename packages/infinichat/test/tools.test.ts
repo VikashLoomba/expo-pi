@@ -11,7 +11,7 @@ import { createBashTool } from '@earendil-works/pi-durable/tools';
 import { obj, str } from '@earendil-works/pi-schema';
 
 import { MemoryDoc, MessageDoc, clipToolText } from '../src/pi/infinichat/memory';
-import { sharedPrompt, subagentPrompt } from '../src/pi/infinichat/prompt';
+import { sharedPrompt } from '../src/pi/infinichat/prompt';
 import { memoryTools, toolPolicy } from '../src/pi/infinichat/tools';
 
 /** The tool results in the requests a model was sent, in order. */
@@ -21,19 +21,17 @@ const toolResults = (requests: ModelContext[]) => requests
 const textOf = (content: readonly (TextContent | ImageContent)[]) =>
   content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('');
 
-test('the prompts name the agent and drop the device paragraphs without device tools', () => {
-  // The program a device runs is the agent too; the kind "infinichat" of the agent's replies stays.
-  assert.ok(sharedPrompt('OptChat', true).includes('- infinichat: OptChat'));
+test('the prompt names the program and drops the devices paragraph without device tools', () => {
+  // "InfiniChat" is the program and its agents; the kind "infinichat" of an agent's replies stays.
+  assert.ok(sharedPrompt('OptChat', true).includes('You are one of OptChat\'s agents'));
+  assert.ok(sharedPrompt('OptChat', true).includes('- infinichat: your final replies, kept for yourself'));
   assert.ok(sharedPrompt('OptChat', true).includes('have OptChat open now'));
   assert.equal(sharedPrompt('Dot', false).includes('The user\'s computers'), false);
-  assert.ok(subagentPrompt('OptChat', true).includes('infinichat\n(OptChat\'s replies)'));
-  assert.ok(subagentPrompt('OptChat', true).includes('runs OptChat on'));
-  assert.equal(subagentPrompt('Dot', false).includes('Devices:'), false);
-  // UniiChat's SUB_HEAD: its first message is the view, then its chat so far, which it may be sent more of.
-  const head = subagentPrompt('Dot', false);
-  assert.ok(head.includes('view below, then your chat with Dot so far,\nits lines as "i|kind: text"'));
-  assert.ok(head.includes('Dot may\nsend you more messages, even while you work: answer the last.'));
-  assert.equal(subagentPrompt('Dot', false).includes('devices open now'), false);
+  // The children's paragraph and the compactions follow the devices', with or without them.
+  for (const prompt of [sharedPrompt('Dot', true), sharedPrompt('Dot', false)]) {
+    assert.ok(prompt.indexOf('Children are employees') < prompt.indexOf('# Compactions'));
+    assert.ok(prompt.indexOf('zoom is the only way.') < prompt.indexOf('Children are employees'));
+  }
 });
 
 test('real native zoom/date tools read permanent docs and preserve original image', async () => {
@@ -46,7 +44,7 @@ test('real native zoom/date tools read permanent docs and preserve original imag
   }, context);
   try {
     const root = await harness.root(context, { agent: { model: { provider: 'faux', modelId: 'test' } } });
-    const tools = memoryTools(root.id);
+    const tools = memoryTools();
     registry.install(defineExtension({ name: 'memory', tools }));
     registry.install(toolPolicy(tools, async () => undefined));
     await root.commit(async (tx) => {
