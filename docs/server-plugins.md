@@ -312,10 +312,15 @@ design has a contract change (§27, "Contract evolution in code"; `docs/layer-1.
 - Dropping a version from `ACCEPTED`, or a new base (a change of params or of the variant set is one), refuses the
   apps on the versions left out, which are told to update. That is the owner's decision.
 
-`infinichat.remote` is at version 10 over the base 8, which server 4.1.0 released: 10 is the tree of agents, and
-the versions before it are served root's chat as the one chat, with no tree. `infinichat.agent`, one agent's chat by
-its name, which server 5.0.0 added, and `infinichat.mcp` are at their bases, version 1. The Mac app's own contracts (`apps/mac/src/contract.ts`) are between its main process and its window, one
-build, so they have no older version to serve.
+`infinichat.remote` is at version 11 over the base 8, which server 4.1.0 released. 10 is the tree of agents, and
+the versions before it are served root's chat as the one chat, with no tree. 11 is the move as Chord's session sync
+(`infinichat-remote/sync.ts`): `relinquish`, `pull` and `adopt` name where the conversation ends where they named the
+database file, and `archive` is gone. The versions before it copied that file, which no mapping turns into a sync,
+so their four move methods are served by a call of the server's own that refuses with "Update this app to move
+InfiniChat" (`ACCEPTED`'s `call`, where `"refuse"` would show the app a contract error); everything else of theirs
+works as it did. `infinichat.agent`, one agent's chat by its name, which server 5.0.0 added, and `infinichat.mcp`
+are at their bases, version 1. The Mac app's own contracts (`apps/mac/src/contract.ts`) are between its main process
+and its window, one build, so they have no older version to serve.
 
 ## Release
 

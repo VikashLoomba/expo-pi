@@ -1,75 +1,65 @@
-import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync } from 'node:fs';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { Writable } from 'node:stream';
+import { existsSync } from 'node:fs';
+import { mkdir, rename, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
-import { promisify } from 'node:util';
-import { gunzip, gzip } from 'node:zlib';
 
-import type { DatabaseFiles } from '../pi/infinichat-remote/move';
+import { openNodeSqliteDatabase } from '@earendil-works/chord/sqlite/node';
+
+import type { StoreFiles } from '../pi/infinichat-remote/sync';
+
+const SUFFIXES = ['', '-wal', '-shm'];
 
 /**
- * InfiniChat's database files with Node: page diffs with `node:crypto` and `node:zlib`, the database's own
- * operations with `node:sqlite`, and a receiver's files with `node:fs`. Names are paths, as `node:fs` takes them.
+ * A machine's InfiniChat databases with Node, by their names in `directory`. A database a move replaces is kept in a
+ * folder of its own in `released`, where nothing opens it: a whole store takes a copy's place only where the copy
+ * was not what the sender continued, and what that copy was is for the machine's owner to say.
  */
-export const nodeDatabaseFiles: DatabaseFiles = {
-  sha256: async (bytes) => createHash('sha256').update(bytes).digest(),
-  gzip: promisify(gzip),
-  gunzip: promisify(gunzip),
-  read: (path) => readFile(path),
-  // Made for this account alone, as the server's other files are: the result of a patch is the conversation.
-  async write(path, bytes) {
-    const aside = `${path}.${process.pid}`;
-    await writeFile(aside, bytes, { mode: 0o600 });
-    await rename(aside, path);
-  },
-  async describe(path) {
-    let bytes: Buffer;
-    try {
-      bytes = await readFile(path);
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
-      throw error;
-    }
-    return { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.byteLength };
-  },
-  /**
-   * Chord's close checkpoints already, but a reader such as a `diff --live` still copying keeps it from finishing then,
-   * which that close doesn't report, so this checkpoint waits for readers (chord's 5 s busy timeout) and fails when it
-   * can't.
-   */
-  async fold(path) {
-    // Opening would create a database that isn't there.
-    if (!existsSync(path)) return;
-    const database = new DatabaseSync(path, { timeout: 5_000 });
-    try {
-      if (database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()?.busy !== 0) {
-        throw new Error('InfiniChat’s database on this machine is still in use. Try again.');
+export function nodeStoreFiles(directory: string, released: string): StoreFiles {
+  const at = (name: string) => join(directory, name);
+  return {
+    exists: (name) => existsSync(at(name)),
+    open: (name) => openNodeSqliteDatabase(at(name)),
+    /**
+     * Chord's close checkpoints already, but a reader still on the database keeps it from finishing then, which that
+     * close doesn't report, so this checkpoint waits for readers (chord's 5 s busy timeout) and fails when it can't.
+     */
+    async fold(name) {
+      // Opening would create a database that isn't there.
+      if (!existsSync(at(name))) return;
+      const database = new DatabaseSync(at(name), { timeout: 5_000 });
+      try {
+        if (database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()?.busy !== 0) {
+          throw new Error('InfiniChat’s database on this machine is still in use. Try again.');
+        }
+      } finally {
+        database.close();
       }
-    } finally {
-      database.close();
-    }
-  },
-  /**
-   * In one step, as expo-sqlite's backup does: a backup in steps starts over at each commit another connection makes
-   * between them, as the Harness holding the database open does while it streams.
-   */
-  async backup(from, to) {
-    // Read-only, so a database that isn't there fails instead of being created.
-    const source = new DatabaseSync(from, { readOnly: true });
-    try {
-      await backup(source, to, { rate: -1 });
-    } finally {
-      source.close();
-    }
-  },
-  async rename(from, to) {
-    for (const suffix of ['-wal', '-shm']) await rm(`${to}${suffix}`, { force: true });
-    await rename(from, to);
-    for (const suffix of ['-wal', '-shm']) await rm(`${from}${suffix}`, { force: true });
-  },
-  async remove(path) {
-    for (const suffix of ['', '-wal', '-shm']) await rm(`${path}${suffix}`, { force: true });
-  },
-  open: async (path) => Writable.toWeb(createWriteStream(path, { mode: 0o600 })),
-};
+    },
+    async rename(from, to) {
+      if (existsSync(at(to))) {
+        const kept = join(released, `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`);
+        await mkdir(kept, { recursive: true, mode: 0o700 });
+        for (const suffix of SUFFIXES) {
+          if (existsSync(at(`${to}${suffix}`))) await rename(at(`${to}${suffix}`), join(kept, `${to}${suffix}`));
+        }
+      }
+      for (const suffix of ['-wal', '-shm']) await rm(at(`${to}${suffix}`), { force: true });
+      await rename(at(from), at(to));
+      for (const suffix of ['-wal', '-shm']) await rm(at(`${from}${suffix}`), { force: true });
+    },
+    async remove(name) {
+      for (const suffix of SUFFIXES) await rm(at(`${name}${suffix}`), { force: true });
+    },
+  };
+}
+
+/** SQLite's backup API, from the database at `from` to the file `to`, in one step. */
+export async function backupDatabase(from: string, to: string): Promise<void> {
+  // Read-only, so a database that isn't there fails instead of being created.
+  const source = new DatabaseSync(from, { readOnly: true });
+  try {
+    await backup(source, to, { rate: -1 });
+  } finally {
+    source.close();
+  }
+}

@@ -66,24 +66,37 @@ export const ScheduledSchema = union([readonlyArr(ScheduledTaskSchema), nul()]);
 export const ServerSchema = obj({ version: str() }, { open: true });
 export type InfiniChatServer = Static<typeof ServerSchema>;
 
-const FileSchema = obj({ sha256: str(), size: num() });
-/** The conversation's database file, its WAL folded into it, by SHA-256 and size. */
-export const ConversationFilesSchema = obj({ db: FileSchema });
-export type ConversationFiles = Static<typeof ConversationFilesSchema>;
+/**
+ * The conversation's database file by SHA-256 and size, as versions 8 to 10 name what a move copied. Those versions
+ * copied the file; since 11 a move is Chord's session sync, which names where the conversation ends (`HeadSchema`).
+ */
+const ConversationFilesSchemaV8 = obj({ db: obj({ sha256: str(), size: num() }) });
 /**
  * Who can hold the conversation: a phone, by the client ID it keeps and the name it gives itself, or a machine another
  * machine hands it to directly, by its endpoint (`machineEndpoint`) and its name.
  */
 export const ClientSchema = obj({ id: str(), name: str() });
 export type InfiniChatClient = Static<typeof ClientSchema>;
+/** The machine's conversation as versions 8 to 10 read it: with the files it adopted, where 11 has `head`. */
+const ConversationSchemaV8 = obj({ active: bool(),
+  adopted: opt(ConversationFilesSchemaV8), heldBy: opt(ClientSchema) }, { open: true });
 /**
- * Whether this machine holds the conversation open, and the files it adopted then. Only the side that holds it opens
- * its database: the server opens it only while `active`, and a phone's home record says whether that phone holds it.
- * `heldBy` is the phone this machine handed it to, from `relinquish` until an `adopt` here, so every client reads
- * where it went.
+ * Where a conversation ends: its store's last commit. The side that gives the conversation names it, and the side that
+ * takes it opens its copy only once that copy ends there (`sync.ts`).
  */
-export const ConversationSchema = obj({ active: bool(),
-  adopted: opt(ConversationFilesSchema), heldBy: opt(ClientSchema) }, { open: true });
+const HeadSchema = obj({ head: num() });
+/**
+ * What a machine that gave the conversation answers: where it ends, and the endpoint of the machine whose folder it
+ * uploaded to when that is not its own, which is the folder the machine taking it pulls from.
+ */
+const GivenSchema = obj({ head: num(), folder: opt(str()) });
+/**
+ * Whether this machine holds the conversation open, and where the conversation ended when it adopted it. Only the side
+ * that holds it opens its store: the server opens it only while `active`, and a phone's home record says whether that
+ * phone holds it. `heldBy` is the phone this machine handed it to, from `relinquish` until an `adopt` here, so every
+ * client reads where it went.
+ */
+export const ConversationSchema = obj({ active: bool(), head: opt(num()), heldBy: opt(ClientSchema) }, { open: true });
 export type ConversationState = Static<typeof ConversationSchema>;
 
 /** An SSH host key as Remote machines shows it: its algorithm and OpenSSH's `SHA256:` fingerprint. */
@@ -165,7 +178,7 @@ export type SignInAttempt = Static<typeof SignInAttemptSchema>;
 const InfiniChatMembersV8 = {
   state: {
     snapshot: SnapshotSchema, controls: ControlsSchemaV8, messages: MessagesSchema, scheduled: ScheduledSchema,
-    server: ServerSchema, conversation: ConversationSchema, catalog: ModelCatalogSchema, access: AccessSchema,
+    server: ServerSchema, conversation: ConversationSchemaV8, catalog: ModelCatalogSchema, access: AccessSchema,
     // Not `signIn`, the method that starts one: a member name is state or a method, never both (design §5).
     signInAttempt: SignInAttemptSchema,
     machines: MachinesSchema, reach: ReachSchema, pendingHostKeys: PendingHostKeysSchema,
@@ -203,24 +216,17 @@ const InfiniChatMembersV8 = {
     // Fetches pi.dev's newer models for the machine's providers into `catalog` (`chat-providers.ts`); it rejects
     // when a provider's fetch failed, and that provider keeps the models it had.
     refreshCatalog: method(),
-    // Moving the conversation, as upstream's session sync hands a session over: one side closes its Harness, the
-    // files are copied, the other side opens them. `adopt` opens the files in `data/` when they match, and is
-    // refused while active; it clears `heldBy`. `relinquish` (Chord reserves `release`) records the phone it
-    // hands the conversation `to` as `heldBy`, stops input, closes the Harness and its storage, and names the files
-    // it left; called again with the same phone, it names them again, and with another it is refused, so one
-    // handover runs at a time. `archive` keeps the released database as the machine's copy, which nothing opens,
-    // and `heldBy` with it; it is refused while active.
-    adopt: method(ConversationFilesSchema),
+    // Moving the conversation, as these versions did it: one side closes its Harness, the database file is copied,
+    // the other side opens it. `adopt` opens the files in `data/` when they match; `relinquish` closes the Harness
+    // and names the files it left; `archive` keeps the released database as the machine's copy.
+    adopt: method(ConversationFilesSchemaV8),
     // Starts a conversation of this machine's own, for a person whose InfiniChat is on no device yet; refused while
     // this machine holds one, has handed one to a phone, or keeps a database a move left.
     create: method(),
-    relinquish: method(obj({ to: ClientSchema }), ConversationFilesSchema),
+    relinquish: method(obj({ to: ClientSchema }), ConversationFilesSchemaV8),
     archive: method(),
-    // `pull` brings the database another machine (`from`, as the conversation there lists it, since this one has
-    // no conversation open to read it from) released into `data/`, read over this machine's own SSH, once it
-    // matches `files`; refused while active, as a phone's upload is. A move between two machines is relinquish
-    // there, pull and adopt here, then archive there, with a client orchestrating.
-    pull: method(obj({ from: MachineSchema, files: ConversationFilesSchema })),
+    // `pull` brings the database another machine released into `data/`, read over this machine's own SSH.
+    pull: method(obj({ from: MachineSchema, files: ConversationFilesSchemaV8 })),
     // The conversation's machines document, edited through the side that holds it: a record whole, part of one
     // (what a check found, an accepted host key), or its removal. `acceptHostKey` trusts the pending keys with
     // these fingerprints here and records the key on the machine, so the next holder trusts it too.
@@ -251,10 +257,30 @@ const SettingsSchema = obj({
  * host's life, and the type clients hold re-exposes them (chord `docs/design.md` §6, "shared store, per-principal
  * views"). Version 8's, with each later version's edits.
  */
+const { archive: _archive, ...MethodsV8 } = InfiniChatMembersV8.methods;
+/** `pull`'s arguments since version 11: the machine whose folder holds the conversation, and where it ends. */
+const PullSchema = obj({ from: opt(MachineSchema), head: num() });
 export const InfiniChatMembers = {
-  state: { ...InfiniChatMembersV8.state, controls: ControlsSchema, agents: AgentsSchema },
+  state: {
+    ...InfiniChatMembersV8.state, controls: ControlsSchema, agents: AgentsSchema, conversation: ConversationSchema,
+  },
   methods: {
-    ...InfiniChatMembersV8.methods, setApiKey: method(ApiKeySchema), updateSettings: method(SettingsSchema),
+    ...MethodsV8, setApiKey: method(ApiKeySchema), updateSettings: method(SettingsSchema),
+    // Moving the conversation, as Chord's session sync hands a session over (`sync.ts`): the side that gives it
+    // closes its Harness and uploads what its store committed since the two last shared it, and the side that takes
+    // it applies that to its copy and opens it. `relinquish` (Chord reserves `release`) records the phone it hands
+    // the conversation `to` as `heldBy`, stops input, closes the Harness and its store, uploads to this machine's
+    // folder and names where the conversation ends; called again with the same phone, it names that again, and with
+    // another it is refused, so one handover runs at a time. Handed back to the machine whose folder it was taken
+    // from, it is uploaded to that folder, which the answer names.
+    relinquish: method(obj({ to: ClientSchema }), GivenSchema),
+    // `pull` brings this machine's copy to `head` from a folder: its own, which a phone uploaded to, or the one of
+    // the machine that released the conversation (`from`, as the conversation there lists it, since this machine has
+    // none open to read it from), read over this machine's own SSH. Refused while active. `adopt` opens the copy
+    // once it ends at `head`, and is refused while active; it clears `heldBy`. A move between two machines is
+    // relinquish there, pull and adopt here, with a client orchestrating.
+    pull: method(PullSchema),
+    adopt: method(HeadSchema),
   },
 };
 
@@ -278,12 +304,21 @@ const InfiniChatRemoteV8 = remote('infinichat.remote', {
  * - 10: the tree of agents. `agents` lists it; `controls` name the agent a chat is and keep no model for subagents,
  *   and `updateSettings` takes none. The view, `accept`, `stop` and `continue` are root's, as they were the one
  *   chat's; every agent's chat is an `InfiniChatAgent`.
+ * - 11: a move is Chord's session sync, where it copied the database file. `relinquish` names where the conversation
+ *   ends and no files, `pull` and `adopt` take that, `pull` also from this machine's own folder, and `conversation`
+ *   says it in place of the files adopted. `archive` is gone: a side's own store is its copy.
  */
 const InfiniChatRemoteV9 = evolve(InfiniChatRemoteV8, (edit) => edit.args('setApiKey', ApiKeySchema));
-export const InfiniChatRemote = evolve(InfiniChatRemoteV9, (edit) => edit
+const InfiniChatRemoteV10 = evolve(InfiniChatRemoteV9, (edit) => edit
   .state('owner', 'controls', ControlsSchema)
   .args('updateSettings', SettingsSchema)
   .addState('owner', 'agents', AgentsSchema));
+export const InfiniChatRemote = evolve(InfiniChatRemoteV10, (edit) => edit
+  .state('owner', 'conversation', ConversationSchema)
+  .result('relinquish', GivenSchema)
+  .args('pull', PullSchema)
+  .args('adopt', HeadSchema)
+  .removeMethod('archive'));
 
 /** An agent's chat as its object serves it: the view's own snapshot, with no report, which is the conversation's. */
 export const InfiniChatAgentMembers = {

@@ -73,7 +73,7 @@ const MoveFields = {
 };
 /** A move between machines as `InfiniChatMoves` reports it (`move-status.ts`), by phase. */
 export const MoveStatusSchema = union([
-  obj({ ...MoveFields, phase: lit('moving'), copied: opt(obj({ bytes: num(), total: num() })) }),
+  obj({ ...MoveFields, phase: lit('moving'), copied: opt(num()) }),
   obj({ ...MoveFields, phase: lit('failed'), error: str() }),
   obj({ ...MoveFields, phase: lit('undoing') }),
   obj({ ...MoveFields, phase: lit('undo-failed'), error: str() }),

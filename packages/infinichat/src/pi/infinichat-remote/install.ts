@@ -62,8 +62,6 @@ const LABEL = 'com.vikashloomba.piagent.infinichat';
 const DOWNLOAD_TIMEOUT = 300;
 const CONTROL = /[\x00-\x1f\x7f]/;
 const PID = `sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$s"`;
-/** The Node that runs the server, from `server.json` at `$s`, which move.ts runs the server's page commands with. */
-export const NODE = `sed -n 's/.*"node":"\\([^"]*\\)".*/\\1/p' "$s"`;
 /**
  * The server a machine runs, under its home: each runtime in a folder named after its key (`release.ts`), holding
  * its Chord host (`main.js`), the packages that host and every plugin share (`node_modules`, pi-env's daemons among
@@ -72,7 +70,7 @@ export const NODE = `sed -n 's/.*"node":"\\([^"]*\\)".*/\\1/p' "$s"`;
  */
 export const SERVER = '.infinichat/server';
 /** The host the service starts. */
-export const CURRENT = `${SERVER}/current/main.js`;
+const CURRENT = `${SERVER}/current/main.js`;
 /** `fetch <url> <file>`, with whichever of curl and wget the machine has. */
 const FETCH = 'fetch() { if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$2" "$1"; '
   + 'else wget -q -O "$2" "$1"; fi; }';

@@ -10,7 +10,7 @@ import { createExpoSqliteDatabase } from './expo-sqlite';
 export { createExpoSqliteDatabase, type ExpoSqliteConnection } from './expo-sqlite';
 
 /** One of the app's databases over a connection of its own, configured as every one of them is. */
-async function openExpoDatabase(databaseName: string): Promise<SqliteDatabase> {
+export async function openExpoDatabase(databaseName: string): Promise<SqliteDatabase> {
   // Own an isolated connection so Expo's connection cache cannot bypass our queue.
   const native = await openDatabaseAsync(databaseName, { useNewConnection: true });
   const database = createExpoSqliteDatabase(native);

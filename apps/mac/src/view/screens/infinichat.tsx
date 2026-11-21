@@ -51,7 +51,7 @@ function moving(move: MoveStatus, machine: string, stage: InstallStage | undefin
   if (move.phase === 'undoing') return 'Cancelling the move…';
   if (move.phase === 'undo-failed') return 'Couldn’t cancel the move';
   if (move.phase === 'failed') return `Can’t move to ${machine}`;
-  const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
+  const copied = move.copied ? ` · ${megabytes(move.copied)} MB` : '';
   return move.step === 'connecting' ? connecting(machine, stage)
     : move.step === 'closing' ? `Closing on ${from}…`
       : move.step === 'copying' ? `Copying from ${from} to ${machine}${copied}` : `Opening on ${machine}…`;

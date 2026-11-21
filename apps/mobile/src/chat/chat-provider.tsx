@@ -31,8 +31,8 @@ import { openPhoneInfiniChat, type PhoneInfiniChat } from '../pi/infinichat-phon
 import { phoneClient } from '../pi/infinichat-remote/phone-client';
 import { phoneDialer } from '../pi/infinichat-remote/phone-dialer';
 import { phoneMachines, shownMachines } from '../pi/infinichat-remote/phone-machines';
-import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
-import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
+import { phoneStoreFiles } from '../pi/infinichat-remote/phone-files';
+import { createPhoneHome, phoneBookmarks } from '../pi/infinichat-remote/phone-home';
 import { openPhoneStore } from '../pi/infinichat-store';
 import { createChatCredentialStore, createChatModels } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
@@ -195,8 +195,9 @@ function useChatRuntime() {
       unfollow = opened.subscribe(() => follow(opened, machineId));
     };
     // A move borrows the remote owner's connection to the machine, as the chats' tools do, and never closes it.
+    const own = { files: phoneStoreFiles, id: phoneClient().id, bookmarks: phoneBookmarks };
     const moves = new InfiniChatMoves(infiniChatHome, (machineId) => phoneMachines(machines, machineId),
-      (machineId) => remote.environment(machineId, undefined), phoneDatabaseFiles, 'this iPhone', {
+      (machineId) => remote.environment(machineId, undefined), own, 'this iPhone', {
       hold: () => infiniChat.hold(),
       closeLocal: () => queued(async () => {
         const closing = state.phone;
@@ -217,9 +218,8 @@ function useChatRuntime() {
     setMoves(moves);
     // Returning to the app retries a failed open; an open service ignores the call. While InfiniChat lives on a
     // machine, it connects there instead, and returning to the app reconnects a failed connection; a move the app
-    // left goes on. `refresh`, at launch and on a return from the background, also brings the other side's copy up to
-    // date unless a move runs, so the next move has little to send.
-    const open = (refresh = false) => serialize(async () => {
+    // left goes on.
+    const open = () => serialize(async () => {
       const failures: string[] = [];
       if (!state.service) {
         try {
@@ -264,22 +264,16 @@ function useChatRuntime() {
       } else {
         moves.resume();
       }
-      if (refresh) moves.refresh();
       setOpenError(failures.length ? failures.join('\n') : undefined);
     });
-    open(true);
+    open();
     // iOS suspends the app only in the background, Chord's pinger and the SSH keepalive with it, so only a return from
-    // there replaces InfiniChat's remote link and refreshes the copy; returning from inactive (Control Center, a system
-    // prompt) doesn't.
+    // there replaces InfiniChat's remote link; returning from inactive (Control Center, a system prompt) doesn't.
     let previousState = AppState.currentState;
     const subscription = AppState.addEventListener('change', (appState) => {
       if (appState === 'active') {
-        const returned = previousState === 'background';
-        if (returned) for (const client of state.remotes.values()) client.resume();
-        open(returned);
-      } else if (appState === 'background') {
-        // A refresh stopped here leaves the old copy, and the return from the background runs it again.
-        moves.stopRefresh();
+        if (previousState === 'background') for (const client of state.remotes.values()) client.resume();
+        open();
       }
       previousState = appState;
     });

@@ -13,7 +13,7 @@ import type { InfiniChatUsage } from '../infinichat/usage';
 import type { ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
 import {
-  InfiniChatRemote, type ConversationFiles, type ConversationState, type InfiniChatClient, type InfiniChatPrincipal,
+  InfiniChatRemote, type ConversationState, type InfiniChatClient, type InfiniChatPrincipal,
   type Machine, type PendingHostKeys, type Reach, type SignInAttempt,
 } from './contract';
 import { RemoteAgent } from './agent-client';
@@ -197,7 +197,7 @@ export class RemoteInfiniChat implements InfiniChatHost {
   readonly getCatalog = () => this.values?.catalog;
   readonly getAccess = () => this.values?.access;
   readonly getSignIn = () => this.values?.signIn;
-  /** Whether the machine holds the conversation open, and the files it adopted; undefined until connected. */
+  /** Whether the machine holds the conversation open, and where it ended when adopted; undefined until connected. */
   readonly getConversation = () => this.values?.conversation;
   /**
    * Whether the machine reached each other machine the last time it tried, and the host keys it found there that wait
@@ -263,26 +263,26 @@ export class RemoteInfiniChat implements InfiniChatHost {
     });
   }
 
-  /** Opens the files this phone copied to the machine, once they match these. */
-  adopt(files: ConversationFiles): Promise<void> {
-    return this.act((ref, ctx) => ref.adopt(files, ctx));
+  /** Has the machine open its copy of the conversation, once that ends at `head`. */
+  adopt(head: number): Promise<void> {
+    return this.act((ref, ctx) => ref.adopt({ head }, ctx));
   }
 
   /**
    * Closes the conversation on the machine for `to`, this app unless another machine takes it directly, which it
-   * records, and names the files it left there.
+   * records; the machine uploads it, and this resolves with where it ends and, when the upload went to the folder of
+   * the machine taking it, that machine's endpoint.
    */
-  relinquish(to: InfiniChatClient = this.client): Promise<ConversationFiles> {
+  relinquish(to: InfiniChatClient = this.client): Promise<{ head: number; folder?: string }> {
     return this.call((ref, ctx) => ref.relinquish({ to }, ctx));
   }
 
-  /** Has the machine bring the database the machine at `from` released into its own `data/`, once it matches. */
-  pull(from: Machine, files: ConversationFiles): Promise<void> {
-    return this.act((ref, ctx) => ref.pull({ from, files }, ctx));
-  }
-
-  archive(): Promise<void> {
-    return this.act((ref, ctx) => ref.archive(ctx));
+  /**
+   * Has the machine bring its copy to `head`: from its own folder, which this device uploaded to, or over its own
+   * SSH from the folder of the machine at `from`, which released the conversation.
+   */
+  pull(head: number, from?: Machine): Promise<void> {
+    return this.act((ref, ctx) => ref.pull(from === undefined ? { head } : { from, head }, ctx));
   }
 
   /** Starts a sign-in on the machine, ending one under way there, and resolves with its attempt number. */

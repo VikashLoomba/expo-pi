@@ -2,7 +2,6 @@ import { mkdir } from 'node:fs/promises';
 import { homedir, hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parseArgs } from 'node:util';
 
 import { createHost, type Facet, type HostError } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
@@ -13,17 +12,13 @@ import { machineIdentity, PLUGIN } from '@pi-agent/infinichat/pi/infinichat-remo
 import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
 import { listen } from './listen';
-import { writeDiff, writePages, writePatch } from './pages';
 import { ServerPlugins } from './plugins';
 import type { ServerProcess } from './process';
 import { restoreTimeZone } from './state';
 import tools from './tools-facet';
 import { installedRelease, ServerUpdates } from './update';
 
-const USAGE = ['Usage: node main.js serve',
-  '       node main.js pages <db> <out>',
-  '       node main.js diff <db> <pages> <out> [--live]',
-  '       node main.js patch <base> <patch> <out>'].join('\n');
+const USAGE = 'Usage: node main.js serve';
 
 /** The exit by which an update has the service manager start the new runtime (`update.ts`), EX_TEMPFAIL. */
 const UPDATED = 75;
@@ -141,25 +136,10 @@ async function serve(): Promise<number> {
   }
 }
 
-async function main(args: string[]): Promise<number> {
-  const { positionals: [command, ...paths], values } = parseArgs({ args, allowPositionals: true,
-    options: { live: { type: 'boolean' } } });
-  if (command === 'serve' && paths.length === 0) return serve();
-  const [first, second, third] = paths;
-  if (command === 'pages' && paths.length === 2) {
-    await writePages(first, second);
-  } else if (command === 'diff' && paths.length === 3) {
-    await writeDiff(first, second, third, values.live === true);
-  } else if (command === 'patch' && paths.length === 3) {
-    await writePatch(first, second, third);
-  } else {
-    throw new Error(USAGE);
-  }
-  return 0;
-}
-
 try {
-  process.exitCode = await main(process.argv.slice(2));
+  const [command, ...rest] = process.argv.slice(2);
+  if (command !== 'serve' || rest.length > 0) throw new Error(USAGE);
+  process.exitCode = await serve();
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

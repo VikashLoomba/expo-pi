@@ -1,35 +1,21 @@
 import { awaitWithContext, BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
+import type { SyncStateStore } from '@earendil-works/chord/sync';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
 import type { RemoteInfiniChat } from './client';
-import type { ConversationFiles, ConversationState, InfiniChatClient } from './contract';
+import type { ConversationState, InfiniChatClient } from './contract';
 import type { MachineDirectory } from './dialer';
 import { PHONE_HOME, type InfiniChatHomeStore } from './home';
 import { keyExchangeLines } from './keys';
-import { HASH, PRINT_MARKER, runScript } from './machine';
+import { PRINT_MARKER, runScript } from './machine';
 import { cancellable, moveError, type MoveBase, type MoveStatus, type MoveStep } from './move-status';
-import type { PagePlatform } from './pages';
-import {
-  copyFrom, copyTo, DATA, FOLDER, INFINICHAT_DATABASE, receivePatch, sendPatch, type Copied, type Copy,
-} from './transfer';
-
-export { INFINICHAT_DATABASE } from './transfer';
-/** This device's copy after a move there: never opened, kept fresh, and patched by the next move back. */
-const MOVED = 'infinichat-moved.db';
-/** Where a move back puts the machine's database before it is placed. */
-const INCOMING = 'infinichat-incoming.db';
-/** A backup of this device's open conversation, which a refresh patches the machine's copy with. */
-const BACKUP = 'infinichat-backup.db';
-/** The machine's copy while this device holds the conversation, which `archive` leaves there. */
-const COPY = `${FOLDER}/copy/${INFINICHAT_DATABASE}`;
-
-type ConversationFile = ConversationFiles['db'];
+import { conversationHead, FOLDER, give, INCOMING, SYNC, take, type HandoverFolder, type StoreFiles } from './sync';
 
 /** What a move does to the two sides through their owner, the app's provider. */
 export interface MoveSides {
   /** Keeps the screens on what they show, and their operations waiting, until `show` or `openLocal`. */
   hold(): void;
-  /** Closes InfiniChat on this device: its Harness, then its storage. */
+  /** Closes InfiniChat on this device: its Harness, then its store. */
   closeLocal(): Promise<void>;
   /** Opens InfiniChat on this device and shows it; it reports its own failure. */
   openLocal(): Promise<void>;
@@ -42,126 +28,29 @@ export interface MoveSides {
   closeMachine(machineId: string): Promise<void>;
 }
 
-/**
- * This device's InfiniChat database files, by name, which a move copies: the page diffs' platform, and what else a
- * move does to them.
- */
-export interface DatabaseFiles extends PagePlatform {
-  /** SHA-256 and size, or undefined when the file isn't there. */
-  describe(name: string): Promise<ConversationFile | undefined>;
-  /**
-   * Folds the WAL a close left into the closed database (`PRAGMA wal_checkpoint(TRUNCATE)`), so the database file alone
-   * is the conversation; fails while it is still in use, and does nothing when it isn't there.
-   */
-  fold(name: string): Promise<void>;
-  /** SQLite's backup API, from the open database to `to`, at the same page numbers. */
-  backup(from: string, to: string): Promise<void>;
-  /** Renames a closed database over `to`, removing both names' `-wal` and `-shm`. */
-  rename(from: string, to: string): Promise<void>;
-  /** Removes a database and its `-wal` and `-shm`. */
-  remove(name: string): Promise<void>;
-  /** A new, empty file a download writes into. */
-  open(name: string): Promise<WritableStream<Uint8Array>>;
+/** This device's own InfiniChat, for a device that holds the conversation at times, as a phone does. */
+export interface OwnConversation {
+  files: StoreFiles;
+  /** This device among those that upload to a machine's folder: the client ID it keeps. */
+  id: string;
+  /** What this device's copy last shared with the folder of the machine. */
+  bookmarks(machineId: string): SyncStateStore;
 }
 
-const same = (left: ConversationFile | undefined, right: ConversationFile | undefined) =>
-  left?.sha256 === right?.sha256 && left?.size === right?.size;
-/** The machine holds these files open: it adopted them, and the move there happened. */
-const adopted = (held: ConversationState | undefined, files: ConversationFiles) => held?.active === true
-  && same(held.adopted?.db, files.db);
+/** The machine holds the conversation that ends at `head` open: it adopted it, and the move there happened. */
+const adopted = (held: ConversationState | undefined, head: number | undefined) => held?.active === true
+  && head !== undefined && held.head === head;
 /** "this iPhone" → "This iPhone", for a message that starts with the device. */
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-/** The closed database, with its WAL folded in. The `-shm` index never moves: SQLite rebuilds it. */
-async function localFiles(files: DatabaseFiles, device: string): Promise<ConversationFiles> {
-  await files.fold(INFINICHAT_DATABASE);
-  const db = await files.describe(INFINICHAT_DATABASE);
-  if (!db) throw new Error(`${capitalized(device)} has no InfiniChat conversation to move.`);
-  return { db };
-}
-
-/** A patch from the machine, until it is applied. */
-const TRANSFER = 'infinichat-transfer';
-
-const run = (copy: Copy, lines: string[], failure: string, timeout?: null) =>
-  runScript(copy.machine, copy.signal, copy.name, lines, { failure, timeout });
-
-/**
- * Puts this device's closed database into the machine's `data/incoming/`: as a patch against the machine's copy, or as
- * the whole file when there is no copy or the patch fails, written in place, then verified by SHA-256. Neither has a
- * timeout of its own: they end with the copy, the user's Cancel, or the environment's connection, which notices a dead
- * machine. A file cut short stays only until the next copy replaces it, since only a verified one is placed. Moving it
- * into `data/` is refused while the machine holds a conversation open; a database an earlier one left there is kept in
- * `released/`.
- */
-async function upload(copy: Copy, files: ConversationFiles, onCopied: (copied: Copied) => void) {
-  const failure = `Check the account’s home folder permissions and disk space on ${copy.name}.`;
-  const incoming = `${DATA}/incoming/${INFINICHAT_DATABASE}`;
-  try {
-    await sendPatch(copy, INFINICHAT_DATABASE, COPY, incoming, onCopied);
-  } catch {
-    copy.signal.throwIfAborted();
-    // The folder is made first under umask 077, as an install makes its folders: a write would make it with the
-    // environment's default mode.
-    await run(copy, ['umask 077', `mkdir -p "$(dirname "$HOME/${incoming}")"`, PRINT_MARKER], failure);
-    await copyTo(copy, `~/${incoming}`, await copy.files.read(INFINICHAT_DATABASE), failure,
-      (bytes) => onCopied({ bytes, total: files.db.size }));
-    await run(copy, [HASH, `f="$HOME/${incoming}"`, `[ "$(hash "$f")" = ${files.db.sha256} ]`, 'chmod 600 "$f"',
-      PRINT_MARKER], failure, null);
-  }
-  const db = `"$d/${INFINICHAT_DATABASE}"`;
-  const [placed] = await run(copy, ['umask 077', `d="$HOME/${DATA}"`, 's="$HOME/.infinichat/state.json"', PRINT_MARKER,
-    `if [ -f "$s" ] && grep -q '"active":true' "$s"; then echo active; exit 0; fi`,
-    `if [ -e ${db} ]; then r="$HOME/.infinichat/released/$(date -u +%Y-%m-%dT%H-%M-%SZ)-$$"`,
-    `  mkdir -p "$r"; mv ${db}* "$r/"; fi`,
-    `rm -f ${db}-wal ${db}-shm`,
-    `mv -f "$d/incoming/${INFINICHAT_DATABASE}" ${db}`, 'echo placed'], failure);
-  if (placed === 'active') throw new Error(`InfiniChat is already open on ${copy.name}.`);
-  if (placed !== 'placed') throw new Error(failure);
-}
-
-/**
- * Brings the database the machine named to this device's incoming copy: as a patch against the moved copy, or as the
- * whole file when there is no copy or the patch fails. Either is checked against what the machine named.
- */
-async function download(copy: Copy, files: ConversationFiles, onCopied: (copied: Copied) => void) {
-  await copy.files.remove(INCOMING);
-  try {
-    await receivePatch(copy, false, MOVED, INCOMING, onCopied);
-    if (same(await copy.files.describe(INCOMING), files.db)) return;
-  } catch {
-    copy.signal.throwIfAborted();
-  }
-  await copyFrom(copy, `~/${DATA}/${INFINICHAT_DATABASE}`, INCOMING, onCopied);
-  if (!same(await copy.files.describe(INCOMING), files.db)) {
-    throw new Error(`The copy from ${copy.name} doesn’t match what InfiniChat left there. Try again.`);
-  }
-}
-
-/**
- * Patches the machine's copy with a backup of this device's open conversation, which SQLite's backup API takes
- * consistently and at the same page numbers while the Harness goes on writing.
- */
-async function refreshCopy(copy: Copy) {
-  await copy.files.remove(BACKUP);
-  try {
-    await copy.files.backup(INFINICHAT_DATABASE, BACKUP);
-    await sendPatch(copy, BACKUP, COPY, COPY, () => {});
-  } finally {
-    await copy.files.remove(BACKUP);
-  }
-}
-
 /**
  * Moves InfiniChat's conversation between this device and a machine, or straight from one machine to another with
- * this device orchestrating, one move at a time, as upstream's session sync hands a session over (pi `replication`
- * branch, `packages/durable/test/sync-e2e.test.ts:143-171`): the giving side
- * closes its Harness, the files are copied, and the other side opens them, where pi-durable's recovery resumes the work
- * the close interrupted. Nothing drains or waits. The home record names each phase before the step that needs it, so
- * `resume` carries a move on after a relaunch or a failure. The copy is the one seam upstream's replication could
- * replace: `upload` and `download`, which send the pages that changed since the other side's copy, and `refresh`,
- * which keeps that copy fresh. It reaches a machine through the `ExecutionEnv` the app borrows from the owner of its
- * connection there, and never closes it; cancelling stops only the move's own operations.
+ * this device orchestrating, one move at a time, as Chord's session sync hands a session over (`sync.ts`): the giving
+ * side closes its Harness and uploads what its store committed since the two sides last shared it, and the other side
+ * applies that to its copy and opens it, where pi-durable's recovery resumes the work the close interrupted. Nothing
+ * drains or waits. The home record names each phase before the step that needs it, so `resume` carries a move on
+ * after a relaunch or a failure. It reaches a machine's folder through the `ExecutionEnv` the app borrows from the
+ * owner of its connection there, and never closes it; cancelling stops only the move's own operations.
  */
 export class InfiniChatMoves {
   private readonly listeners = new Set<() => void>();
@@ -170,28 +59,25 @@ export class InfiniChatMoves {
   private notice?: string;
   private attempt?: { controller: AbortController; cancelled: boolean };
   private running: Promise<void> = Promise.resolve();
-  /** The refresh under way, which a move, the background and `close` stop. */
-  private refreshing?: AbortController;
-  private refreshed: Promise<void> = Promise.resolve();
   /** This attempt saw the machine without the conversation open, and has not asked it to adopt since. */
   private machineClosed = false;
   private closed = false;
 
   /**
    * `directory` gives a machine as the app knows it, `environment` its files and commands, and `device` names this
-   * device in messages, such as "this iPhone". `files` is this device's own InfiniChat; a device that never holds the
+   * device in messages, such as "this iPhone". `own` is this device's own InfiniChat; a device that never holds the
    * conversation, as the Mac app, has none, and moves it between machines only.
    */
   constructor(private readonly home: InfiniChatHomeStore,
     private readonly directory: (machineId: string) => MachineDirectory,
     private readonly environment: (machineId: string) => Promise<ExecutionEnv>,
-    private readonly files: DatabaseFiles | undefined, private readonly device: string,
+    private readonly own: OwnConversation | undefined, private readonly device: string,
     private readonly sides: MoveSides) {}
 
-  /** This device's files, on the paths that move the conversation to or from this device. */
-  private get ownFiles(): DatabaseFiles {
-    if (this.files === undefined) throw new Error(`${capitalized(this.device)} keeps no InfiniChat of its own.`);
-    return this.files;
+  /** This device's InfiniChat, on the paths that move the conversation to or from this device. */
+  private get mine(): OwnConversation {
+    if (this.own === undefined) throw new Error(`${capitalized(this.device)} keeps no InfiniChat of its own.`);
+    return this.own;
   }
 
   readonly subscribe = (listener: () => void) => {
@@ -223,43 +109,6 @@ export class InfiniChatMoves {
     if (this.attempt || home.home !== 'machine' || home.phase === 'there') return;
     if (home.phase === 'moving-there') this.run(home.machineId, 'machine', false, home.from);
     else this.run(home.machineId, 'phone');
-  }
-
-  /**
-   * Brings the copy the other side keeps up to date, at launch and when the app returns from the background, so the
-   * next move has little to send: this device's moved copy while the machine holds the conversation, the copy on
-   * `copyOn` while this device does, each from a backup of the open database. It writes only that copy, aside and
-   * renamed into place, so stopping it anywhere leaves the old one, and one that fails changes nothing and runs again
-   * next time.
-   */
-  refresh() {
-    const home = this.home.getSnapshot();
-    const machineId = home.home === 'phone' ? home.copyOn : home.phase === 'there' ? home.machineId : undefined;
-    if (this.closed || this.attempt || this.refreshing || machineId === undefined || this.files === undefined) return;
-    const controller = new AbortController();
-    this.refreshing = controller;
-    this.refreshed = (async () => {
-      try {
-        const copy = await this.copy(machineId, controller.signal);
-        if (home.home === 'phone') await refreshCopy(copy);
-        else await receivePatch(copy, true, MOVED, MOVED, () => {});
-      } catch {
-        // The next move works without it.
-      } finally {
-        this.refreshing = undefined;
-      }
-    })();
-  }
-
-  /** Stops a refresh where it is, as the app going to the background does. */
-  stopRefresh() {
-    this.refreshing?.abort();
-  }
-
-  /** A machine removed from the app's list keeps no copy for this device to refresh. */
-  forget(machineId: string) {
-    const home = this.home.getSnapshot();
-    if (home.home === 'phone' && home.copyOn === machineId) this.home.set(PHONE_HOME);
   }
 
   /**
@@ -315,14 +164,10 @@ export class InfiniChatMoves {
   close(): Promise<void> {
     this.closed = true;
     this.attempt?.controller.abort();
-    this.stopRefresh();
-    return Promise.all([this.running, this.refreshed]).then(() => {});
+    return this.running;
   }
 
   private run(machineId: string, to: MoveStatus['to'], cancelling = false, from?: string) {
-    // A move replaces the copies a refresh writes, so it waits until a refresh it stops has let go of them.
-    this.stopRefresh();
-    const refreshed = this.refreshed;
     const attempt = { controller: new AbortController(), cancelled: cancelling };
     this.attempt = attempt;
     this.machineClosed = false;
@@ -332,7 +177,6 @@ export class InfiniChatMoves {
     this.status = { ...base, step: first, phase: cancelling ? 'undoing' : 'moving' };
     this.notify();
     this.running = (async () => {
-      await refreshed;
       if (!cancelling) {
         try {
           // A move that got this far finished: a Cancel too late to stop it changes nothing.
@@ -371,8 +215,9 @@ export class InfiniChatMoves {
 
   /**
    * This device → machine. The machine is on the newest server release before this device closes anything
-   * (`receives`). Until the machine has adopted them, this device's files are the conversation; a machine that already
-   * holds them open finished the move.
+   * (`receives`). This device uploads to the machine's folder, and the machine brings its copy up to that and opens
+   * it. Until the machine has adopted it, this device's store is the conversation; a machine that already holds it
+   * open finished the move.
    */
   private async there(machineId: string, signal: AbortSignal) {
     const remote = this.sides.machine(machineId);
@@ -386,25 +231,31 @@ export class InfiniChatMoves {
       await this.sides.closeLocal();
     }
     signal.throwIfAborted();
-    const files = await localFiles(this.ownFiles, this.device);
+    const { files, id } = this.mine;
+    const head = await conversationHead(files);
+    if (head === undefined) throw new Error(`${capitalized(this.device)} has no InfiniChat conversation to move.`);
     const held = remote.getConversation();
-    if (!adopted(held, files)) {
+    if (!adopted(held, head)) {
       if (held?.active) throw new Error(`InfiniChat on ${name} already has another conversation open.`);
       this.machineClosed = true;
       this.step('copying');
-      await upload(await this.copy(machineId, signal), files, (copied) => this.step('copying', copied));
+      await give(files, id, await this.folder(machineId, signal));
+      signal.throwIfAborted();
+      await remote.pull(head);
       signal.throwIfAborted();
       this.machineClosed = false;
       this.step('opening');
-      await remote.adopt(files);
+      await remote.adopt(head);
     }
-    await this.arrived(machineId, remote);
+    this.arrived(machineId, remote);
   }
 
   /**
    * Machine → machine, this device orchestrating: the target is on the newest server release (`receives`), the source
-   * closes the conversation and names its files, the target pulls them over its own SSH and opens them, and the source
-   * keeps its released copy. This device's own copy stays set aside, as it was under the source.
+   * closes the conversation, uploads it and names where it ends, and the target brings its copy up to that and opens
+   * it. The upload is in the source's own folder, which the target reads over its own SSH, or in the target's, which
+   * the source took the conversation from and gives it back through. The source's store stays its copy, and this
+   * device's own stays as it was under the source.
    */
   private async between(fromId: string, toId: string, signal: AbortSignal) {
     const source = this.sides.machine(fromId);
@@ -423,25 +274,22 @@ export class InfiniChatMoves {
       this.home.set({ version: 1, home: 'machine', machineId: toId, phase: 'moving-there', from: fromId });
     }
     this.sides.hold();
-    const files = await source.relinquish(this.holder(toId));
+    const { head, folder } = await source.relinquish(this.holder(toId));
     signal.throwIfAborted();
     const held = target.getConversation();
-    if (!adopted(held, files)) {
+    if (!adopted(held, head)) {
       if (held?.active) throw new Error(`InfiniChat on ${this.name(toId)} already has another conversation open.`);
       this.machineClosed = true;
       this.step('copying');
       const record = this.directory(fromId).machine();
       if (record === undefined) throw new Error(`${this.name(fromId)} is no longer among the machines.`);
-      await target.pull(record, files);
+      await target.pull(head, folder === toId ? undefined : record);
       signal.throwIfAborted();
       this.machineClosed = false;
       this.step('opening');
-      await target.adopt(files);
+      await target.adopt(head);
     }
-    await this.arrived(toId, target);
-    // The released database stays the source's copy for a move back there; a machine that can't keep it sends the
-    // whole file next time.
-    await source.archive().catch(() => {});
+    this.arrived(toId, target);
     await this.sides.closeMachine(fromId);
   }
 
@@ -471,21 +319,22 @@ export class InfiniChatMoves {
     return { id: machineId, name: this.name(machineId) };
   }
 
-  /** The machine holds the conversation: the record says so, and the screens show it there. */
-  private async arrived(machineId: string, remote: RemoteInfiniChat) {
+  /**
+   * The machine holds the conversation: the record says so, and the screens show it there. This device's store is
+   * its copy from now on, which nothing opens while the record names a machine and the next move back brings up to
+   * date.
+   */
+  private arrived(machineId: string, remote: RemoteInfiniChat) {
     this.home.set({ version: 1, home: 'machine', machineId, phase: 'there' });
-    // Under either name this device's copy is never opened while the machine holds the conversation, and the next
-    // move back replaces it.
-    await this.files?.rename(INFINICHAT_DATABASE, MOVED).catch(() => {});
     this.sides.show(remote);
   }
 
   /**
-   * Machine → this device. The machine closes the conversation and names its files, which stay unchanged there until
-   * `archive`, so a relaunch downloads them again and Cancel has the machine open them again. Nothing here compares
-   * this app with the machine's server: whether this device can read the conversation is pi-durable's to say when it
-   * opens it (its spec §3.6, §11.2). An app too old for it reports that as its failure to open (`openLocal`); the
-   * files are then this device's, unopened, and a move to a machine sends them as any other.
+   * Machine → this device. The machine closes the conversation, uploads it to its folder and names where it ends;
+   * its store stays unchanged there, so a relaunch takes it again and Cancel has the machine open it again. Nothing
+   * here compares this app with the machine's server: whether this device can read the conversation is pi-durable's
+   * to say when it opens it (its spec §3.6, §11.2). An app too old for it reports that as its failure to open
+   * (`openLocal`); the store is then this device's, unopened, and a move to a machine sends it as any other.
    */
   private async back(machineId: string, signal: AbortSignal) {
     const remote = this.sides.machine(machineId);
@@ -497,22 +346,16 @@ export class InfiniChatMoves {
       this.home.set({ version: 1, home: 'machine', machineId, phase: 'moving-back' });
     }
     this.sides.hold();
-    const files = await remote.relinquish();
+    const { head } = await remote.relinquish();
     signal.throwIfAborted();
     this.step('copying');
-    await download(await this.copy(machineId, signal), files, (copied) => this.step('copying', copied));
+    await take(this.mine.files, head, await this.folder(machineId, signal));
     signal.throwIfAborted();
     this.step('opening');
-    await this.ownFiles.rename(INCOMING, INFINICHAT_DATABASE);
-    await this.ownFiles.remove(MOVED);
-    // The placed files are the conversation now, and nothing has opened them, so the record names this device before
-    // it opens them: a relaunch never downloads over work this device has done. The machine's copy is kept fresh from
-    // now.
-    this.home.set({ version: 1, home: 'phone', copyOn: machineId });
+    // This device's store is the conversation now, and nothing has opened it, so the record names this device before
+    // it opens it: a relaunch never takes the machine's over work this device has done.
+    this.home.set(PHONE_HOME);
     await this.sides.openLocal();
-    // A machine never opens released files, and the next move there sets them aside, so this may fail; the machine
-    // then has no copy to refresh, and the next move there sends the whole file.
-    await remote.archive().catch(() => {});
     await this.sides.closeMachine(machineId);
   }
 
@@ -523,13 +366,13 @@ export class InfiniChatMoves {
       await this.undoBetween(from, machineId, signal);
     } else if (to === 'machine') {
       if (home.home === 'machine' && home.phase === 'moving-there') {
-        // This device's files are the conversation only while the machine never opened them. A machine that did (its
-        // answer to `adopt` lost with the link) holds them now and may already be working, so finishing the move is
-        // the only outcome that never opens the conversation twice.
+        // This device's store is the conversation only while the machine never opened its copy of it. A machine that
+        // did (its answer to `adopt` lost with the link) holds it now and may already be working, so finishing the
+        // move is the only outcome that never opens the conversation twice.
         if (!this.machineClosed) {
           await remote.connected(signal);
-          if (adopted(remote.getConversation(), await localFiles(this.ownFiles, this.device))) {
-            await this.arrived(machineId, remote);
+          if (adopted(remote.getConversation(), await conversationHead(this.mine.files))) {
+            this.arrived(machineId, remote);
             this.notice = `InfiniChat had already opened on ${this.name(machineId)}, so the move finished and it `
               + `runs there now. Choose ${capitalized(this.device)} to move it back.`;
             return;
@@ -540,18 +383,19 @@ export class InfiniChatMoves {
       }
       await this.sides.closeMachine(machineId);
     } else if (home.home === 'machine' && home.phase === 'moving-back') {
-      // The machine's files are unchanged since it relinquished them, so it opens them again.
+      // The machine's store is unchanged since it relinquished it, so it opens it again.
       await remote.connected(signal);
-      if (!remote.getConversation()?.active) await remote.adopt(await remote.relinquish());
+      if (!remote.getConversation()?.active) await remote.adopt((await remote.relinquish()).head);
       this.home.set({ version: 1, home: 'machine', machineId, phase: 'there' });
-      await this.ownFiles.remove(INCOMING);
+      // What a take had restored of the whole store so far; a copy it was bringing up to date stays this device's.
+      await this.mine.files.remove(INCOMING);
       this.sides.show(remote);
     }
   }
 
   /**
-   * Puts a move between machines back: the source opens the files it released, unless the target already holds them,
-   * which finishes the move instead, as the undo of a move from this device does.
+   * Puts a move between machines back: the source opens the store it released, unless the target already holds the
+   * conversation, which finishes the move instead, as the undo of a move from this device does.
    */
   private async undoBetween(fromId: string, toId: string, signal: AbortSignal) {
     const home = this.home.getSnapshot();
@@ -559,30 +403,34 @@ export class InfiniChatMoves {
       const source = this.sides.machine(fromId);
       const target = this.sides.machine(toId);
       await source.connected(signal);
-      // Named again, unchanged since the source released them.
-      const files = await source.relinquish(this.holder(toId));
+      // Named again, unchanged since the source released it.
+      const { head } = await source.relinquish(this.holder(toId));
       if (!this.machineClosed) {
         await target.connected(signal);
-        if (adopted(target.getConversation(), files)) {
-          await this.arrived(toId, target);
+        if (adopted(target.getConversation(), head)) {
+          this.arrived(toId, target);
           this.notice = `InfiniChat had already opened on ${this.name(toId)}, so the move finished and it runs `
             + 'there now.';
-          await source.archive().catch(() => {});
           await this.sides.closeMachine(fromId);
           return;
         }
       }
-      await source.adopt(files);
+      await source.adopt(head);
       this.home.set({ version: 1, home: 'machine', machineId: fromId, phase: 'there' });
       this.sides.show(source);
     }
     await this.sides.closeMachine(toId);
   }
 
-  /** The machine's files and commands for a copy, borrowed from their owner; a cancel stops waiting for them. */
-  private async copy(machineId: string, signal: AbortSignal): Promise<Copy> {
-    const machine = await awaitWithContext(this.environment(machineId), withAbortSignal(signal, BACKGROUND_CONTEXT));
-    return { machine, files: this.ownFiles, signal, name: this.name(machineId), transfer: TRANSFER };
+  /**
+   * The machine's folder as this device reaches it, through the machine's files borrowed from their owner; a cancel
+   * stops waiting for them. What it copies shows with the step.
+   */
+  private async folder(machineId: string, signal: AbortSignal): Promise<HandoverFolder> {
+    const files = await awaitWithContext(this.environment(machineId), withAbortSignal(signal, BACKGROUND_CONTEXT));
+    let copied = 0;
+    return { files, root: `~/${FOLDER}/${SYNC}`, bookmarks: this.mine.bookmarks(machineId), signal,
+      machine: this.name(machineId), copied: (bytes) => this.step('copying', copied += bytes) };
   }
 
   /**
@@ -615,8 +463,8 @@ export class InfiniChatMoves {
     return `${step} ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  /** The forward move reached `step`; `copied` is how far its copy is. */
-  private step(step: MoveStep, copied?: Copied) {
+  /** The forward move reached `step`; `copied` is the bytes its copy has moved so far. */
+  private step(step: MoveStep, copied?: number) {
     const status = this.status;
     if (!status || this.closed) return;
     this.status = { machineId: status.machineId, to: status.to,

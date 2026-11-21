@@ -1,5 +1,6 @@
 import { machineEndpoint } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { createInfiniChatHome } from '@pi-agent/infinichat/pi/infinichat-remote/home';
+import { storedBookmarks } from '@pi-agent/infinichat/pi/infinichat-remote/sync';
 import Storage from 'expo-sqlite/kv-store';
 
 const HOSTS_KEY = 'pi.remote-hosts.v1';
@@ -48,3 +49,9 @@ export const createPhoneHome = () => createInfiniChatHome({
   },
   setItem: (key, value) => Storage.setItemSync(key, value),
 });
+
+/** What this phone's copy of the conversation last shared with a machine's folder, stored as the home record is. */
+export const phoneBookmarks = (machineId: string) => storedBookmarks({
+  getItem: (key) => Storage.getItemSync(key),
+  setItem: (key, value) => Storage.setItemSync(key, value),
+}, machineId);

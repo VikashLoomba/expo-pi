@@ -1,5 +1,3 @@
-import type { Copied } from './transfer';
-
 export type MoveStep = 'connecting' | 'closing' | 'copying' | 'opening';
 
 /** What every phase of a move says: the machine, the direction, and the step it reached. */
@@ -13,13 +11,13 @@ export type MoveBase = {
 };
 
 /**
- * A move between this device and a machine, as `InfiniChatMoves` reports it, by phase: `moving` while it runs,
- * `failed` once a failure stopped it, `undoing` while a Cancel puts the conversation back, and `undo-failed` once a
- * failure stopped that. A stopped move keeps its step, and the home record its phase, until it is tried again or
- * cancelled.
+ * A move between this device and a machine, as `InfiniChatMoves` reports it, by phase: `moving` while it runs, with
+ * the bytes this device has copied so far, `failed` once a failure stopped it, `undoing` while a Cancel puts the
+ * conversation back, and `undo-failed` once a failure stopped that. A stopped move keeps its step, and the home
+ * record its phase, until it is tried again or cancelled.
  */
 export type MoveStatus = MoveBase & (
-  | { phase: 'moving'; copied?: Copied }
+  | { phase: 'moving'; copied?: number }
   | { phase: 'failed'; error: string }
   | { phase: 'undoing' }
   | { phase: 'undo-failed'; error: string }

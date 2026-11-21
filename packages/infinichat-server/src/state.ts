@@ -1,22 +1,24 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { bool, compile, obj, opt, str } from '@earendil-works/pi-schema';
-import {
-  ClientSchema, ConversationFilesSchema, type ConversationState,
-} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { bool, compile, num, obj, opt, str } from '@earendil-works/pi-schema';
+import { ClientSchema, type ConversationState } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 
 /**
- * What `~/.infinichat/state.json` keeps across restarts: whether this machine holds the conversation, with the files
- * it adopted or the phone it handed them to, the phone's time zone, and the release that last opened the database
- * here. The agent reads local times (message dates, scheduled times); the phone sends its IANA zone on every connect,
- * so those times match the phone's clock wherever the machine is.
+ * What `~/.infinichat/state.json` keeps across restarts: whether this machine holds the conversation, with where it
+ * ended when adopted or the phone it was handed to, the phone's time zone, the release that last opened the
+ * database here, and what a move reads: the ID this machine uploads under (`syncId`), and the machine whose folder
+ * its copy was last taken from (`through`, an endpoint; none for its own folder). The agent reads local times
+ * (message dates, scheduled times); the phone sends its IANA zone on every connect, so those times match the phone's
+ * clock wherever the machine is.
  */
-export type ServerState = ConversationState & { timeZone?: string; opened?: string };
+export type ServerState = ConversationState & {
+  timeZone?: string; opened?: string; syncId?: string; through?: string;
+};
 
 const serverState = compile(obj({
-  active: bool(), adopted: opt(ConversationFilesSchema), heldBy: opt(ClientSchema),
-  timeZone: opt(str()), opened: opt(str()),
+  active: bool(), head: opt(num()), heldBy: opt(ClientSchema),
+  timeZone: opt(str()), opened: opt(str()), syncId: opt(str()), through: opt(str()),
 }, { open: true }));
 
 /** The kept state; nothing is kept before the phone's first connect. */
@@ -37,7 +39,8 @@ export function readState(home: string): ServerState {
 
 /**
  * Reads the state, changes it and writes it back. Synchronous, so two changes never interleave; written aside and
- * renamed into place, so a crash never leaves half of it. The phone's move script reads `"active":true` from it.
+ * renamed into place, so a crash never leaves half of it. The move script of an app from before session sync reads
+ * `"active":true` from it.
  */
 export function updateState(home: string, change: (state: ServerState) => ServerState): ServerState {
   const state = change(readState(home));

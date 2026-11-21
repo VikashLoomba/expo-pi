@@ -43,7 +43,7 @@ function moving(move: MoveStatus, machine: string, stage: InstallStage | undefin
   if (move.phase === 'failed') {
     return move.to === 'machine' ? `Can’t move to ${machine}` : `Can’t move from ${machine}`;
   }
-  const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
+  const copied = move.copied ? ` · ${megabytes(move.copied)} MB` : '';
   if (move.to === 'machine') {
     if (from !== undefined) {
       return move.step === 'connecting' ? connecting(machine, stage)

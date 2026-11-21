@@ -90,24 +90,47 @@ const callContext = (ctx: Ctx<InfiniChatPrincipal>) =>
 export const version = INFINICHAT_SERVER_VERSION;
 
 /**
+ * A move as an app on versions 8 to 10 asks for it, which copies the database file: refused, by a call of the
+ * server's own in place of each of its methods (design §27, "a removed or changed method served by the provider's own
+ * function"), so the app shows why instead of a contract error. `relinquish` is refused before it closes anything, so
+ * the conversation stays open here; an app whose move this stops puts it back with its Cancel.
+ */
+const refuseMove = { call: async (): Promise<never> => {
+  throw new Error('Update this app to move InfiniChat: this machine’s server moves the conversation in a newer way.');
+} };
+const MOVE_NEEDS_THE_APP_UPDATED = { adopt: refuseMove, relinquish: refuseMove, pull: refuseMove, archive: refuseMove };
+
+/**
  * The versions of `infinichat.remote` this server still serves besides the newest, each with what its later edits
  * need mapped (chord `docs/design.md` §27, "Mappings live with the provider"), so the apps released with them keep
  * working with this server. A version is dropped only once no app on it is in use.
  *
- * - 9: its controls keep a model for subagents, which the tree's agents have none of, and no name of the agent a chat
- *   is; its `updateSettings` sends that model, which is dropped. It shows root's chat as the one chat, and no tree.
+ * - 10: its move copies the database file, where a move is Chord's session sync now, so each method of its move is
+ *   refused with a message that says to update the app; chatting needs none of them. Its `conversation` has no
+ *   `head`, which only a move reads.
+ * - 9: 10's, and its controls keep a model for subagents, which the tree's agents have none of, and no name of the
+ *   agent a chat is; its `updateSettings` sends that model, which is dropped. It shows root's chat as the one chat,
+ *   and no tree.
  * - 8: 9's, and its `setApiKey` arguments are the newest's without a workspace ID.
  */
 const ACCEPTED: AcceptsTable<typeof InfiniChatRemote> = {
+  10: {
+    state: { owner: { conversation: (current) => beforeSync(current) } },
+    methods: { ...MOVE_NEEDS_THE_APP_UPDATED },
+  },
   9: {
-    state: { owner: { controls: (current) => beforeTree(current) } },
-    methods: { updateSettings: { args: (old) => withoutSubagents(old) } },
+    state: { owner: { controls: (current) => beforeTree(current), conversation: (current) => beforeSync(current) } },
+    methods: { updateSettings: { args: (old) => withoutSubagents(old) }, ...MOVE_NEEDS_THE_APP_UPDATED },
   },
   8: {
-    state: { owner: { controls: (current) => beforeTree(current) } },
-    methods: { setApiKey: { args: (old) => old }, updateSettings: { args: (old) => withoutSubagents(old) } },
+    state: { owner: { controls: (current) => beforeTree(current), conversation: (current) => beforeSync(current) } },
+    methods: { setApiKey: { args: (old) => old }, updateSettings: { args: (old) => withoutSubagents(old) },
+      ...MOVE_NEEDS_THE_APP_UPDATED },
   },
 };
+
+/** The machine's conversation as versions 8 to 10 read it. */
+const beforeSync = ({ active, heldBy }: ConversationState) => ({ active, ...(heldBy === undefined ? {} : { heldBy }) });
 
 /** The controls as versions 8 and 9 have them. */
 function beforeTree(current: Static<typeof ControlsSchema>) {
@@ -311,12 +334,11 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
         return null;
       },
       // The move goes on when the caller goes away: a dropped link never leaves it half done.
-      adopt: async (files) => done(conversation.value.adopt(files)),
+      adopt: async ({ head }) => done(conversation.value.adopt(head)),
       create: async () => done(conversation.value.create()),
-      relinquish: ({ to }) => conversation.value.relinquish(to),
-      archive: async () => done(conversation.value.archive()),
-      pull: async ({ from, files }, ctx) =>
-        done(conversation.value.pull(await machines.value.environment(from), files, callContext(ctx))),
+      relinquish: ({ to }) => conversation.value.relinquish(to, (endpoint) => machines.value.environmentAt(endpoint)),
+      pull: async ({ from, head }, ctx) => done(conversation.value.pull(
+        from === undefined ? undefined : await machines.value.environment(from), head, callContext(ctx))),
       putMachine: async (record) => done(core().putMachine(record)),
       patchMachine: async ({ endpoint, patch }) => done(core().patchMachine(endpoint, patch)),
       removeMachine: async ({ endpoint }) => done(core().removeMachine(endpoint)),
@@ -331,8 +353,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
   /**
    * InfiniChat as clients hold it (all act as the owner): the store object's members, re-exposed. While this machine
    * doesn't hold the conversation, there is no core: the view is loading, the scheduled tasks are null and the
-   * operations refuse. `conversation` says whether it holds it, or which phone it went to, and `adopt`, `relinquish`
-   * and `archive` move it. `server` says which release answers, and `setTimeZone` applies the phone's zone. The
+   * operations refuse. `conversation` says whether it holds it, or which phone it went to, and `relinquish`, `pull`
+   * and `adopt` move it. `server` says which release answers, and `setTimeZone` applies the phone's zone. The
    * account members mirror this machine's credential store and its sign-in; `catalog` is the machine's models, as
    * fetched from pi.dev at start and again on `refreshCatalog`. `reach` and `pendingHostKeys` mirror what this machine
    * found of the other machines its tools use, which any client trusts with `acceptHostKey`.
@@ -353,7 +375,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
         dismissError: machine.dismissError, setTimeZone: machine.setTimeZone, reloadPlugins: machine.reloadPlugins,
         signIn: machine.signIn, answer: machine.answer, cancelSignIn: machine.cancelSignIn,
         setApiKey: machine.setApiKey, signOut: machine.signOut, refreshCatalog: machine.refreshCatalog,
-        adopt: machine.adopt, relinquish: machine.relinquish, archive: machine.archive, pull: machine.pull,
+        adopt: machine.adopt, relinquish: machine.relinquish, pull: machine.pull,
         putMachine: machine.putMachine, patchMachine: machine.patchMachine, removeMachine: machine.removeMachine,
         acceptHostKey: machine.acceptHostKey,
       },

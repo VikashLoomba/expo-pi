@@ -28,7 +28,7 @@ const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
 /** The move back a removal runs first, worded as the InfiniChat header words its steps. */
 function movingBack(move: MoveStatus, name: string): string {
   if (move.phase !== 'moving') return `Cancelling the move to ${name}…`;
-  const copied = move.copied ? ` · ${megabytes(move.copied.bytes)} of ${megabytes(move.copied.total)} MB` : '';
+  const copied = move.copied ? ` · ${megabytes(move.copied)} MB` : '';
   return move.step === 'copying' ? `Copying InfiniChat from ${name}${copied}`
     : move.step === 'opening' ? 'Opening InfiniChat on this iPhone…' : `Closing InfiniChat on ${name}…`;
 }
@@ -117,7 +117,6 @@ export default function RemoteHostsScreen() {
         }
         await remoteHosts.remove(row.id, row.host);
       }
-      moves.forget(row.id);
       // Left behind, it would only clutter the Keychain.
       await forgetSecret(credentials, row.id).catch(() => {});
       // The conversation's record goes through the side that holds it; held or away, the credentials are gone and

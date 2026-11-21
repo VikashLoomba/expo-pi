@@ -123,13 +123,20 @@ export class ServerMachines {
   }
 
   /**
-   * A machine's files through this machine's own SSH, for a pull, with the account's home there. The record comes
-   * from the caller: a pull runs while no conversation is open here to list it.
+   * A machine's files through this machine's own SSH, for a pull, with the account's home there and the machine's
+   * endpoint. The record comes from the caller: a pull runs while no conversation is open here to list it.
    */
-  async environment(machine: Machine): Promise<{ env: RemoteExecutionEnv; home: string; name: string }> {
+  async environment(machine: Machine):
+  Promise<{ env: RemoteExecutionEnv; home: string; name: string; endpoint: string }> {
     const { connection, info } = await this.started(machine);
     return { env: new RemoteExecutionEnv({ connection, id: `pi-env:${endpoint(machine)}`, cwd: info.home }),
-      home: info.home, name: machine.name };
+      home: info.home, name: machine.name, endpoint: endpoint(machine) };
+  }
+
+  /** The machine at `key` as the document last listed it, as `environment` reaches one; undefined when it isn't. */
+  async environmentAt(key: string): Promise<Awaited<ReturnType<ServerMachines['environment']>> | undefined> {
+    const machine = this.machines.find((candidate) => endpoint(candidate) === key);
+    return machine && this.environment(machine);
   }
 
   /**

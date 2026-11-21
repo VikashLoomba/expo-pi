@@ -4,15 +4,15 @@ const KEY = 'pi.infinichat.home.v1';
 
 /**
  * Where InfiniChat's conversation lives: this device, or a machine in its list with the phase of a move between them.
- * It is the authority on who may open the conversation's database, since pi-durable has no cross-process locking:
- * this device opens it only at `phone`, and the machine only between its `adopt` and its `relinquish`. A move writes
- * each phase before the step that needs it, so a relaunch carries it on from there. `copyOn` is the machine this device
- * last moved it back from, whose copy it keeps fresh. `phone` is stored data, so it keeps its spelling; read it as
- * "this device".
+ * It is the authority on who may open the conversation's store, since pi-durable has no cross-process locking: this
+ * device opens it only at `phone`, and the machine only between its `adopt` and its `relinquish`. Each side that has
+ * held the conversation keeps its store as a copy, which the next move there brings up to date (`sync.ts`) and
+ * nothing else opens. A move writes each phase before the step that needs it, so a relaunch carries it on from there.
+ * `phone` is stored data, so it keeps its spelling; read it as "this device".
  */
 /** `from` names the machine a move straight to `machineId` leaves, while it is `moving-there`. */
 export type InfiniChatHome =
-  | { version: 1; home: 'phone'; copyOn?: string }
+  | { version: 1; home: 'phone' }
   | { version: 1; home: 'machine'; machineId: string; phase: 'moving-there' | 'there' | 'moving-back'; from?: string };
 
 export const PHONE_HOME: InfiniChatHome = { version: 1, home: 'phone' };
@@ -24,7 +24,7 @@ export interface InfiniChatHomeStorage {
 }
 
 const storedHome = compile(union([
-  obj({ version: lit(1), home: lit('phone'), copyOn: opt(str()) }, { open: true }),
+  obj({ version: lit(1), home: lit('phone') }, { open: true }),
   obj({ version: lit(1), home: lit('machine'), machineId: str(),
     phase: oneOf(['moving-there', 'there', 'moving-back']), from: opt(str()) }, { open: true }),
 ]));

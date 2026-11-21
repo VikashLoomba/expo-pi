@@ -1,24 +1,27 @@
 import type { Store } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { convertConversation, LEGACY_DATABASE } from '@pi-agent/infinichat/pi/infinichat-convert';
-import { INFINICHAT_DATABASE } from '@pi-agent/infinichat/pi/infinichat-remote/move';
-import { infiniChatStorage } from '@pi-agent/infinichat/pi/infinichat-store';
+import { INFINICHAT_DATABASE, infiniChatStorage } from '@pi-agent/infinichat/pi/infinichat-store';
 
-import { phoneDatabaseExists, phoneDatabaseFiles } from './infinichat-remote/phone-files';
+import { phoneStoreFiles as files } from './infinichat-remote/phone-files';
 import { openExpoSqliteStorage, openExpoStore } from './storage';
 
 const context = BACKGROUND_CONTEXT;
+/** This phone's copy while a machine held the conversation, as the builds that copied the database file named it. */
+const LEGACY_COPY = 'infinichat-moved.db';
 
 /**
  * A conversation an earlier build left on this phone in `infinichat.db`, pi-durable's own SQLite storage, becomes the
  * store, once, as a machine's server converts its own (`conversation.ts`): copied record by record into a store
  * aside, which takes the store's name only when the copy is whole, so a conversion the app's end cut off starts
- * over. The old file then goes.
+ * over. The old file then goes. So does the copy such a build kept while a machine held the conversation, which
+ * nothing reads now: this phone holds the conversation when it opens its store.
  */
 async function convert() {
-  if (phoneDatabaseExists(INFINICHAT_DATABASE) || !phoneDatabaseExists(LEGACY_DATABASE)) return;
+  await files.remove(LEGACY_COPY);
+  if (files.exists(INFINICHAT_DATABASE) || !files.exists(LEGACY_DATABASE)) return;
   const aside = `${INFINICHAT_DATABASE}.converting`;
-  await phoneDatabaseFiles.remove(aside);
+  await files.remove(aside);
   const from = await openExpoSqliteStorage(LEGACY_DATABASE);
   try {
     const store = await openExpoStore(aside);
@@ -33,9 +36,9 @@ async function convert() {
     await from.close(context);
   }
   // The rename takes the file alone, so its WAL is folded into it first.
-  await phoneDatabaseFiles.fold(aside);
-  await phoneDatabaseFiles.rename(aside, INFINICHAT_DATABASE);
-  await phoneDatabaseFiles.remove(LEGACY_DATABASE);
+  await files.fold(aside);
+  await files.rename(aside, INFINICHAT_DATABASE);
+  await files.remove(LEGACY_DATABASE);
 }
 
 /** InfiniChat's store on this phone, which its opener closes. */

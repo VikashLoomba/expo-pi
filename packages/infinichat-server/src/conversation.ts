@@ -1,49 +1,53 @@
-import { existsSync } from 'node:fs';
-import { mkdir, readdir, rename, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { Store } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
-import { openNodeSqliteDatabase } from '@earendil-works/chord/sqlite/node';
+import { FileSyncStateStore } from '@earendil-works/chord/sync';
 import type { Storage } from '@earendil-works/pi-durable';
 import { CODEMODE_TOOL_NAME } from '@earendil-works/pi-durable/codemode';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
+import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { nodeDatabaseFiles } from '@pi-agent/infinichat/node/database-files';
-import type {
-  ConversationFiles, ConversationState, InfiniChatClient,
-} from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { backupDatabase, nodeStoreFiles } from '@pi-agent/infinichat/node/database-files';
+import type { ConversationState, InfiniChatClient } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import {
+  conversationHead, FOLDER, give, SYNC, take, type HandoverFolder, type StoreFiles,
+} from '@pi-agent/infinichat/pi/infinichat-remote/sync';
 import { convertConversation, LEGACY_DATABASE } from '@pi-agent/infinichat/pi/infinichat-convert';
 import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
-import { infiniChatStorage, openInfiniChatStore } from '@pi-agent/infinichat/pi/infinichat-store';
 import {
-  copyFrom, DATA, INFINICHAT_DATABASE as DATABASE, receivePatch, type Copy,
-} from '@pi-agent/infinichat/pi/infinichat-remote/transfer';
+  INFINICHAT_DATABASE as DATABASE, infiniChatStorage, openInfiniChatStore,
+} from '@pi-agent/infinichat/pi/infinichat-store';
 
 import { readState, updateState } from './state';
 
 const noop = () => {};
-type ConversationFile = ConversationFiles['db'];
+/** Where this machine keeps what its copy last shared with each folder, as p2 keeps `backup/<target>/`. */
+const SYNCED = 'synced';
 
-const same = (left: ConversationFile | undefined, right: ConversationFile | undefined) =>
-  left?.sha256 === right?.sha256 && left?.size === right?.size;
-const ignoreMissing = (error: unknown) => {
-  if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-};
-
-/** Another machine's files through this machine's own SSH, the account's home there and its name, for a pull. */
-export interface PullSource { env: ExecutionEnv; home: string; name: string }
+/**
+ * Another machine's files through this machine's own SSH, the account's home there, its name and its endpoint, for a
+ * pull.
+ */
+export interface PullSource { env: ExecutionEnv; home: string; name: string; endpoint: string }
 
 /** The context's cancellation as the signal the transport takes; one that never fires when it has none. */
 const signalOf = (context: Context): AbortSignal => context.abortSignal ?? new AbortController().signal;
 
 /**
  * InfiniChat's conversation on this machine. One process owns a storage at a time (pi-durable README), so this
- * machine opens its database only while it holds the conversation: from `adopt`, which a phone calls once it has
- * copied its files here, until `relinquish`. `state.json` keeps `active` across restarts, so a reboot reopens it, and
- * the phone a handover goes to, which every client reads. The operations run one at a time, also when several clients
- * call them. While something subscribes, it follows the open core's view, report, scheduled tasks and agents, and also
- * says when the core comes or goes.
+ * machine opens its store only while it holds the conversation: from `adopt`, which a client calls once this
+ * machine's copy is the conversation, until `relinquish`. The store stays in `data/` in between, as this machine's
+ * copy, which the next `pull` brings up to date. `state.json` keeps `active` across restarts, so a reboot reopens it,
+ * and the phone a handover goes to, which every client reads. The operations run one at a time, also when several
+ * clients call them. While something subscribes, it follows the open core's view, report, scheduled tasks and agents,
+ * and also says when the core comes or goes.
+ *
+ * A move is Chord's session sync through a folder (`sync.ts`): `sync/` here is this machine's, which it uploads to
+ * when it gives the conversation, and which a phone, or a machine that took the conversation from it, uploads to when
+ * it gives it to this machine.
  */
 export class ServerConversation {
   private core?: InfiniChatService;
@@ -54,14 +58,19 @@ export class ServerConversation {
   private readonly listeners = new Set<() => void>();
   private unfollow = noop;
   private readonly data: string;
+  private readonly files: StoreFiles;
+  /** This machine's InfiniChat folder as Chord's sync reads and writes it, as p2 gives its backup the data folder. */
+  private readonly disk: NodeExecutionEnv;
 
   /** `loaded` is the host's (`ServerProcess.loaded`): the core's Harness resumes once it settles. */
   constructor(private readonly home: string,
     private readonly openCore: (storage: Storage) => Promise<InfiniChatService>,
     private readonly loaded: Promise<void>) {
     this.data = join(home, 'data');
-    const { active, adopted, heldBy } = readState(home);
-    this.state = { active, ...(adopted === undefined ? {} : { adopted }), ...(heldBy === undefined ? {} : { heldBy }) };
+    this.files = nodeStoreFiles(this.data, join(home, 'released'));
+    this.disk = new NodeExecutionEnv({ cwd: home });
+    const { active, head, heldBy } = readState(home);
+    this.state = { active, ...(head === undefined ? {} : { head }), ...(heldBy === undefined ? {} : { heldBy }) };
   }
 
   /** The core while this machine holds the conversation open. */
@@ -88,6 +97,8 @@ export class ServerConversation {
    */
   start(): Promise<void> {
     return this.run(async () => {
+      // For this account alone, as `data/` is: what a phone's upload makes inside has its environment's mode.
+      await mkdir(join(this.home, SYNC), { recursive: true, mode: 0o700 });
       if (!this.state.active) return;
       if (readState(this.home).opened !== INFINICHAT_SERVER_VERSION) await this.backUp();
       await this.open();
@@ -95,19 +106,19 @@ export class ServerConversation {
   }
 
   /**
-   * Opens the files the phone copied to `data/` and holds the conversation from then on; pi-durable's recovery then
-   * resumes the work the phone's close interrupted. Refused while this machine holds it, and when the files differ
-   * from the ones the phone verified. `active` is kept first, so a crash while opening reopens them at the restart. It
-   * ends a handover this machine started, as Cancel's undo opens the files it released.
+   * Opens this machine's copy, which a `pull` brought to `head`, and holds the conversation from then on;
+   * pi-durable's recovery then resumes the work the giver's close interrupted. Refused while this machine holds it,
+   * and when its copy does not end where the giver said the conversation does. `active` is kept first, so a crash
+   * while opening reopens it at the restart. It ends a handover this machine started, as Cancel's undo opens the
+   * store it released.
    */
-  adopt(files: ConversationFiles): Promise<void> {
+  adopt(head: number): Promise<void> {
     return this.run(async () => {
       if (this.state.active) throw new Error('InfiniChat is already open on this machine.');
-      const found = await this.files();
-      if (!same(found?.db, files.db)) {
-        throw new Error('The copied conversation does not match the one this iPhone sent. Try again.');
+      if (await conversationHead(this.files) !== head) {
+        throw new Error('This machine’s copy is not the conversation that was sent. Try again.');
       }
-      this.setState({ active: true, adopted: files });
+      this.setState({ active: true, head });
       try {
         await this.open();
       } catch (error) {
@@ -127,7 +138,9 @@ export class ServerConversation {
     return this.run(async () => {
       if (this.state.active) throw new Error('InfiniChat is already open on this machine.');
       if (this.state.heldBy !== undefined) throw new Error(`InfiniChat is on ${this.state.heldBy.name}.`);
-      if (await this.files()) throw new Error('This machine already keeps an InfiniChat conversation.');
+      if (this.files.exists(DATABASE) || this.files.exists(LEGACY_DATABASE)) {
+        throw new Error('This machine already keeps an InfiniChat conversation.');
+      }
       await mkdir(this.data, { recursive: true, mode: 0o700 });
       this.setState({ active: true });
       try {
@@ -141,11 +154,19 @@ export class ServerConversation {
 
   /**
    * Hands the conversation to phone `to`: keeps it as `heldBy`, stops input at once, closes the core (its Harness waits
-   * for running task code and writes the tasks it stopped back as pending) and its storage, folds its WAL, and names
-   * the database it left in `data/`. Called again for the same phone, it names it again; for another, it is refused,
-   * so two clients never move the conversation in two directions (upstream sync's slot, created once per handover).
+   * for running task code and writes the tasks it stopped back as pending) and its store, uploads what the store
+   * committed since the folder last had it, and names where the conversation ends. Called again for the same phone,
+   * it uploads nothing and names that again; for another, it is refused, so two clients never move the conversation
+   * in two directions.
+   *
+   * The folder is this machine's own, unless `to` is the machine whose folder this copy was taken from: then it
+   * goes back through that folder, which `reach` gives, and `folder` names that machine. Two machines that pass the
+   * conversation between them so share one folder's history, and each move sends only what the other lacks; given
+   * through its own folder, this copy would be one that folder has never held, and go whole. A machine that can't be
+   * reached gets it through this machine's folder after all.
    */
-  relinquish(to: InfiniChatClient): Promise<ConversationFiles> {
+  relinquish(to: InfiniChatClient, reach: (endpoint: string) => Promise<PullSource | undefined>,
+  ): Promise<{ head: number; folder?: string }> {
     return this.run(async () => {
       const { heldBy } = this.state;
       if (heldBy !== undefined && heldBy.id !== to.id) {
@@ -154,72 +175,37 @@ export class ServerConversation {
       // Kept before the Harness closes, so whatever happens next, every client reads where it goes.
       if (heldBy === undefined) this.setState({ active: false, heldBy: to });
       if (this.core) await this.shut();
-      await nodeDatabaseFiles.fold(join(this.data, DATABASE));
-      const files = await this.files();
-      if (!files) throw new Error('This machine holds no InfiniChat conversation.');
-      return files;
-    });
-  }
-
-  /**
-   * Moves the released database to `copy/`, replacing the copy there, where nothing opens it: the phone's next move
-   * here patches it, and the phone keeps it fresh meanwhile. `heldBy` stays. Refused while holding it.
-   */
-  archive(): Promise<void> {
-    return this.run(async () => {
-      if (this.state.active) throw new Error('InfiniChat is open on this machine.');
-      await mkdir(join(this.home, 'copy'), { recursive: true, mode: 0o700 });
-      try {
-        await rename(join(this.data, DATABASE), join(this.home, 'copy', DATABASE));
-      } catch (error) {
-        // Archived already.
-        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      if (!this.files.exists(DATABASE)) throw new Error('This machine holds no InfiniChat conversation.');
+      // The handover goes on when the caller goes away, so nothing cancels the upload.
+      const signal = signalOf(BACKGROUND_CONTEXT);
+      const { through, syncId = randomUUID() } = readState(this.home);
+      updateState(this.home, (kept) => ({ ...kept, syncId }));
+      if (through === to.id) {
+        try {
+          const source = await reach(through);
+          if (source) return { head: await give(this.files, syncId, this.folderOf(source, signal)), folder: through };
+        } catch {
+          // Through this machine's own folder, then.
+        }
       }
+      return { head: await give(this.files, syncId, this.folder(signal)) };
     });
   }
 
   /**
-   * Brings the database another machine released into `data/`, read over this machine's own SSH, as the phone's
-   * download brings it to the phone: as a patch of the pages that changed since the copy this machine kept from the
-   * last time it held the conversation (`archive`), or as the whole file when there is no copy or the patch fails.
-   * Either goes to `incoming/` first and is checked against what that machine named, then placed, with a database
-   * already here kept in `released/`. Refused while this machine holds the conversation.
+   * Brings this machine's copy to `head` from a folder: its own, which the giver uploaded to, or the one of the
+   * machine that released the conversation, read over this machine's own SSH. The copy takes what the folder has
+   * since the two last shared the conversation; where the folder does not continue from it, the whole store is
+   * restored beside it and put in its place, and the copy it replaces is kept in `released/`. Which folder it was
+   * is kept, for the next `relinquish`. Refused while this machine holds the conversation.
    */
-  pull(source: PullSource, files: ConversationFiles, context: Context): Promise<void> {
+  pull(source: PullSource | undefined, head: number, context: Context): Promise<void> {
     return this.run(async () => {
       if (this.state.active) throw new Error('InfiniChat is already open on this machine.');
-      await mkdir(join(this.data, 'incoming'), { recursive: true, mode: 0o700 });
-      const incoming = join(this.data, 'incoming', DATABASE);
-      const copy: Copy = { machine: source.env, files: nodeDatabaseFiles, signal: signalOf(context),
-        name: source.name, transfer: join(this.data, 'incoming', 'transfer') };
-      const kept = join(this.home, 'copy', DATABASE);
-      await nodeDatabaseFiles.remove(incoming);
-      let copied = false;
-      if (await nodeDatabaseFiles.describe(kept) !== undefined) {
-        try {
-          await receivePatch(copy, false, kept, incoming, noop);
-          copied = same(await nodeDatabaseFiles.describe(incoming), files.db);
-        } catch {
-          copy.signal.throwIfAborted();
-        }
-      }
-      if (!copied) {
-        await copyFrom(copy, `${source.home}/${DATA}/${DATABASE}`, incoming, noop);
-        if (!same(await nodeDatabaseFiles.describe(incoming), files.db)) {
-          throw new Error(`The copy from ${source.name} doesn’t match what InfiniChat left there. Try again.`);
-        }
-      }
-      const database = join(this.data, DATABASE);
-      if (await this.files()) {
-        const released = join(this.home, 'released',
-          `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`);
-        await mkdir(released, { recursive: true, mode: 0o700 });
-        for (const suffix of ['', '-wal', '-shm']) {
-          await rename(`${database}${suffix}`, join(released, `${DATABASE}${suffix}`)).catch(ignoreMissing);
-        }
-      }
-      for (const suffix of ['-wal', '-shm']) await rm(`${database}${suffix}`, { force: true });
-      await rename(incoming, database);
+      await mkdir(this.data, { recursive: true, mode: 0o700 });
+      const signal = signalOf(context);
+      await take(this.files, head, source === undefined ? this.folder(signal) : this.folderOf(source, signal));
+      updateState(this.home, (kept) => ({ ...kept, through: source?.endpoint }));
     });
   }
 
@@ -247,9 +233,16 @@ export class ServerConversation {
     return result;
   }
 
-  private async files(): Promise<ConversationFiles | undefined> {
-    const db = await nodeDatabaseFiles.describe(join(this.data, DATABASE));
-    return db && { db };
+  /** This machine's own folder, on its own disk. */
+  private folder(signal: AbortSignal): HandoverFolder {
+    return { files: this.disk, root: SYNC, bookmarks: new FileSyncStateStore(this.disk, join(SYNCED, 'here')), signal };
+  }
+
+  /** Another machine's folder, through this machine's SSH there; what this copy shares with it is kept by endpoint. */
+  private folderOf(source: PullSource, signal: AbortSignal): HandoverFolder {
+    const key = createHash('sha256').update(source.endpoint).digest('hex').slice(0, 12);
+    return { files: source.env, root: `${source.home}/${FOLDER}/${SYNC}`,
+      bookmarks: new FileSyncStateStore(this.disk, join(SYNCED, key)), signal, machine: source.name };
   }
 
   /**
@@ -261,14 +254,14 @@ export class ServerConversation {
    * which is copied under that name, as that release opens it.
    */
   private async backUp() {
-    const name = existsSync(join(this.data, DATABASE)) ? DATABASE : LEGACY_DATABASE;
+    const name = this.files.exists(DATABASE) ? DATABASE : LEGACY_DATABASE;
     const database = join(this.data, name);
-    if (!existsSync(database)) return;
+    if (!this.files.exists(name)) return;
     const backups = join(this.home, 'backup');
     const target = join(backups, `before-${INFINICHAT_SERVER_VERSION}`);
     await rm(target, { recursive: true, force: true });
     await mkdir(target, { recursive: true, mode: 0o700 });
-    await nodeDatabaseFiles.backup(database, join(target, name));
+    await backupDatabase(database, join(target, name));
     for (const name of await readdir(backups)) {
       if (join(backups, name) !== target) await rm(join(backups, name), { recursive: true, force: true });
     }
@@ -278,17 +271,16 @@ export class ServerConversation {
    * A conversation the releases before the store left in `infinichat.db`, pi-durable's own SQLite storage, becomes
    * the store, once: copied record by record (`convertConversation`) into a store aside, which takes the store's name
    * only when the copy is whole, so a conversion a stop cut off starts over. The old file then goes; `backUp` kept
-   * it. The files this machine adopted are no longer what it holds.
+   * it. With it goes what those releases kept beside it for a move that copied the file, which nothing reads now:
+   * this machine's copy of a conversation it had handed on (`copy/`), and where an upload waited (`data/incoming/`).
    */
   private async convert() {
-    const database = join(this.data, DATABASE);
-    const legacy = join(this.data, LEGACY_DATABASE);
-    if (existsSync(database) || !existsSync(legacy)) return;
-    const aside = `${database}.converting`;
-    await nodeDatabaseFiles.remove(aside);
-    const from = await openNodeSqliteStorage(legacy);
+    if (this.files.exists(DATABASE) || !this.files.exists(LEGACY_DATABASE)) return;
+    const aside = `${DATABASE}.converting`;
+    await this.files.remove(aside);
+    const from = await openNodeSqliteStorage(join(this.data, LEGACY_DATABASE));
     try {
-      const store = await openInfiniChatStore(await openNodeSqliteDatabase(aside), BACKGROUND_CONTEXT);
+      const store = await openInfiniChatStore(await this.files.open(aside), BACKGROUND_CONTEXT);
       try {
         const to = await infiniChatStorage(store, BACKGROUND_CONTEXT);
         await convertConversation(from, to, BACKGROUND_CONTEXT);
@@ -300,17 +292,16 @@ export class ServerConversation {
       await from.close(BACKGROUND_CONTEXT);
     }
     // The rename takes the file alone, so its WAL is folded into it first.
-    await nodeDatabaseFiles.fold(aside);
-    await nodeDatabaseFiles.rename(aside, database);
-    await nodeDatabaseFiles.remove(legacy);
-    const { adopted: _legacy, ...kept } = this.state;
-    this.setState(kept);
+    await this.files.fold(aside);
+    await this.files.rename(aside, DATABASE);
+    await this.files.remove(LEGACY_DATABASE);
+    await rm(join(this.home, 'copy'), { recursive: true, force: true });
+    await rm(join(this.data, 'incoming'), { recursive: true, force: true });
   }
 
   private async open() {
     await this.convert();
-    const store = await openInfiniChatStore(await openNodeSqliteDatabase(join(this.data, DATABASE)),
-      BACKGROUND_CONTEXT);
+    const store = await openInfiniChatStore(await this.files.open(DATABASE), BACKGROUND_CONTEXT);
     let core: InfiniChatService;
     try {
       core = await this.openCore(await infiniChatStorage(store, BACKGROUND_CONTEXT));
@@ -333,10 +324,11 @@ export class ServerConversation {
     });
   }
 
+  /** Keeps the conversation's state beside what the file keeps of this machine; a key without a value isn't written. */
   private setState(state: ConversationState) {
     this.state = state;
-    updateState(this.home, ({ timeZone, opened }) => ({ ...state, ...(timeZone === undefined ? {} : { timeZone }),
-      ...(opened === undefined ? {} : { opened }) }));
+    updateState(this.home, ({ timeZone, opened, syncId, through }) =>
+      ({ ...state, timeZone, opened, syncId, through }));
     this.changed();
   }
 
