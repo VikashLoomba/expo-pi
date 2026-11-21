@@ -27,6 +27,7 @@ export type Admission = {
   date: string;
   epoch: number;
   fresh: boolean;
+  /** `cancelled` is what a stop made of an input it withdrew, up to `AppDoc` 6; a stop withdraws none now. */
   phase: 'pending' | 'prepared' | 'submitted' | 'cancelled';
   envelope: JsonRepresentation<UserInput> | null;
   /** Its native submissions so far, less one: an input withdrawn after a failed or faulted run is submitted anew. */
@@ -74,7 +75,6 @@ export type AppState = {
   revision: number;
   stop: number;
   stopped: number;
-  stopPending: string[];
   /** Why the turn ended without a reply, a stop's or a failure's note, logged once its last entries are. */
   endNote: string | null;
   /** Tool calls projected but not logged yet: each is logged right before its result, as UniiChat logs them. */
@@ -86,7 +86,8 @@ export type AppState = {
   cut: { why: string; records: (Logged & { kind: 'infinichat' | 'tool' })[] } | null;
 };
 type Logged = { text: string; date: string; source: string };
-type AppStateV5 = Omit<AppState, 'resume'> & { coordinator: TaskId | null };
+type AppStateV6 = AppState & { stopPending: string[] };
+type AppStateV5 = Omit<AppStateV6, 'resume'> & { coordinator: TaskId | null };
 type AppStateV4 = Omit<AppStateV5, 'cut'> & {
   cut: { why: string; records: (Logged & { kind: 'unii' | 'tool' })[] } | null;
 };
@@ -116,17 +117,23 @@ function appStateV5(value: unknown, fromVersion: number): AppStateV5 {
   const { stopNote, ...rest } = stored;
   return { ...rest, endNote: stopNote, cut: null };
 }
+/** Version 6, from whatever came before: version 5's coordinator now names itself as its turn's (`CoordinatorDoc`). */
+function appStateV6(value: unknown, fromVersion: number): AppStateV6 {
+  if (fromVersion === 6) return value as AppStateV6;
+  const { coordinator: _one, ...rest } = appStateV5(value, fromVersion);
+  return { ...rest, resume: null };
+}
 export const AppDoc = defineDoc<AppState>({
   kind: 'optchat.app',
-  version: 6,
+  version: 7,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   checkpointWhen: () => true,
-  // Version 5's coordinator lived as long as its conversation; it now names itself as its turn's (`CoordinatorDoc`).
+  // Up to version 6 a stop listed the inputs it would withdraw; the inputs a stopped turn never took start its next.
   migrate: (value, fromVersion) => {
-    const { coordinator: _one, ...rest } = appStateV5(value, fromVersion);
-    return { ...rest, resume: null };
+    const { stopPending: _withdrawn, ...rest } = appStateV6(value, fromVersion);
+    return rest;
   },
   initial: () => ({
     promptVersion: PROMPT_VERSION,
@@ -140,7 +147,6 @@ export const AppDoc = defineDoc<AppState>({
     revision: 0,
     stop: 0,
     stopped: 0,
-    stopPending: [],
     endNote: null,
     held: {},
     cut: null,
@@ -587,15 +593,9 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
         } else if (app.stop > app.stopped) {
           if (projection.caughtUp) {
             stop = app.stop;
-            // A withdrawn input was never handed to the model, so it never enters memory.
-            for (const id of app.stopPending) {
-              const input = await storedInput(tx, chat, id);
-              input.phase = 'cancelled';
-              input.envelope = null;
-            }
-            app.pending = app.pending.filter((id) => !app.stopPending.includes(id));
-            app.stopPending = [];
-            app.revision++;
+            // As UniiChat's stopped turn "wakes again for those it never took" (Server.ts `Unii.turn`): an input
+            // still queued is counted for its next attempt before the abort withdraws this one.
+            await countRequeued(tx, chat);
             progressed = true;
           }
         } else if (app.resume !== null) {
@@ -703,6 +703,8 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
           const app = await tx.doc(AppDoc, chat);
           app.stopped = stop;
           app.revision++;
+          // The inputs the stopped turn had not taken, queued or not yet submitted, start the next turn.
+          await requeueAborted(tx, chat);
           return { status: 'running', checkpoint: after(2) };
         }, context);
       } else if (resume !== undefined) {
@@ -849,7 +851,10 @@ export type OptChat = {
    * while a turn is open or being closed, or inputs wait for the coordinator.
    */
   continue(agent?: ConversationId): Promise<void>;
-  /** The user's stop of one agent's turn, as UniiChat's: the others go on. */
+  /**
+   * The user's stop of one agent's turn, as UniiChat's: the others go on, and the messages the turn had not taken
+   * start the agent's next turn. Nothing to an agent at rest.
+   */
   abort(agent?: ConversationId): Promise<void>;
   /**
    * Aborts a scheduled task still waiting, as pi-durable's example 23 cancels a task, and schedules `replacement`
@@ -1017,15 +1022,15 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     async abort(agent = root.id) {
       const requested = await opened.commit(async (tx) => {
         const app = await tx.doc(AppDoc, agent);
-        // As UniiChat's stop: that agent's turn, which its note tells its later turns. A failed turn's note not
-        // logged yet stays, the stop's after it.
+        // As UniiChat's stop (Server.ts `Unii.act`, `Unii.turn`): of an agent at work only, whose note tells its later
+        // turns, after a failed turn's note not logged yet. It cuts the call that runs; the messages that call had
+        // not taken start the agent's next turn, since their senders, another agent or a scheduled task, cannot
+        // send them again.
+        const busy = (await tx.doc(LiveDoc, agent)).run !== undefined || app.open || app.resume !== null;
+        if (!busy) return app.stopped;
         const note = 'Stopped by the user.';
-        if ((await tx.doc(LiveDoc, agent)).run) app.endNote = app.endNote === null ? note : `${app.endNote}\n${note}`;
+        app.endNote = app.endNote === null ? note : `${app.endNote}\n${note}`;
         app.stop++;
-        app.stopPending.push(...app.pending);
-        app.open = false;
-        app.started = false;
-        app.requests = [];
         app.resume = null;
         app.revision++;
         await wake(tx, agent);

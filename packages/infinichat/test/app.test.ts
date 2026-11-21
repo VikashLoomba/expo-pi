@@ -79,25 +79,37 @@ test('two fresh turns retain only saved memory, append canonical originals once,
   }
 });
 
-test('abort withdraws accepted queued input and allows a new fresh turn', { timeout: 10000 }, async () => {
-  const faux = fauxProvider({ models: [{ id: 'faux-1', contextWindow: 100_000 }] });
-  faux.setResponses(Array.from({ length: 10 }, () => fauxAssistantMessage('answer')));
-  const models = createModels();
-  models.setProvider(faux.provider);
-  const chat = await openHosted(new MemoryStorage(), { models });
+test('a stop leaves the messages its turn had not taken to start the next turn', { timeout: 15000 }, async () => {
+  let turns = 0;
+  const { chat, reports } = await chatWith(() =>
+    fauxAssistantMessage(++turns === 1 ? `STREAMED ${'word '.repeat(2000)}` : 'read it'), 100);
   try {
-    await selectModels(chat, model);
-    await chat.accept({ requestId: 'cancel-me', content: 'withdrawn words never enter memory' });
+    await chat.accept({ requestId: 'one', content: 'hello' });
+    await until(
+      () => chat.harness.snapshot(LiveDoc, chat.root.id, context),
+      (live) => JSON.stringify(live?.generation?.message ?? {}).includes('STREAMED'),
+    );
+    // A child's message reaches the running turn, which has no tool round to take it at, and the user stops the turn.
+    await chat.accept({ requestId: 'report', kind: 'work', content: '[kid]\nits report' });
+    await until(
+      () => chat.harness.snapshot(InputDoc, chat.root.id, 'report', context),
+      (input) => input?.value?.phase === 'submitted',
+    );
     await chat.abort();
-    const memory = await chat.harness.snapshot(MemoryDoc, chat.root.id, context);
-    assert.ok(memory);
-    const messages = [];
-    for (let i = 0; i < memory.nextMessage; i++) {
-      messages.push(await chat.harness.snapshot(MessageDoc, chat.root.id, String(i), context));
-    }
-    assert.equal(messages.filter((m) => m?.text === 'withdrawn words never enter memory').length, 0);
+    // As UniiChat's stopped turn wakes again for the messages it never took: the stop cuts the reply, and the
+    // child's message, which the child cannot send again, starts a turn of its own.
+    assert.equal((await waitForAnswer(chat, 'report')).status, 'done');
+    const lines = await until(() => logged(chat), (all) => all.includes('infinichat: read it'));
+    assert.equal(lines.length, 5);
+    assert.equal(lines[0], 'user: hello');
+    assert.ok(lines[1].startsWith('infinichat: STREAMED') && lines[1].endsWith('\n[cut off: stopped]'));
+    assert.deepEqual(lines.slice(2), ['note: Stopped by the user.', 'work: [kid]\nits report', 'infinichat: read it']);
+    // A stop of an agent at rest stops nothing and notes nothing.
+    await chat.abort();
     await chat.accept({ requestId: 'after-stop', content: 'continue now' });
     assert.equal((await waitForAnswer(chat, 'after-stop')).status, 'done');
+    assert.ok(!(await logged(chat)).slice(5).some((line) => line.startsWith('note:')));
+    assert.deepEqual(reports, []);
   } finally {
     await chat.close();
   }
@@ -156,8 +168,8 @@ test('earlier application and input documents migrate as pi-durable reads them',
     coordinator: null, revision: 9, stop: 1, stopped: 1, stopPending: [],
   };
   // Up to version 5 the document named its conversation's one coordinator; a turn's own is named apart, and a
-  // Continue waits to be submitted here.
-  const { coordinator: _one, ...kept } = v2;
+  // Continue waits to be submitted here. Up to version 6 it listed the inputs a stop would withdraw.
+  const { coordinator: _one, stopPending: _withdrawn, ...kept } = v2;
   // Version 2 logged a call with its assistant message, so none waits for its result, and noted no stop.
   assert.deepEqual(AppDoc.definition.migrate?.(v2, 2), { ...kept, endNote: null, held: {}, cut: null, resume: null });
   const { promptVersion: _current, ...v1 } = v2;

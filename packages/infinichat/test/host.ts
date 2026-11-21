@@ -61,7 +61,7 @@ async function coordinatorFailure(chat: OptChat, waiting: Context): Promise<neve
   return new Promise<never>(() => {});
 }
 
-/** The admission once an attempt from `attempt` on is submitted, or once a stop cancelled it. */
+/** The admission once an attempt from `attempt` on is submitted. */
 async function submitted(chat: OptChat, requestId: string, attempt: number): Promise<Admission> {
   const watch = await chat.harness.watchDoc(InputDoc, chat.root.id, requestId, context);
   const accepted = watch?.value.value;
@@ -73,8 +73,7 @@ async function submitted(chat: OptChat, requestId: string, attempt: number): Pro
   const cancellation = new AbortController();
   const settled = new Promise<void>((resolve) => {
     const inspect = (value: typeof watch.value) => {
-      const phase = value.value?.phase;
-      if ((phase === 'submitted' && (value.value?.attempt ?? 0) >= attempt) || phase === 'cancelled') resolve();
+      if (value.value?.phase === 'submitted' && value.value.attempt >= attempt) resolve();
     };
     watch.start(async (call) => {
       if (call.kind === 'value') inspect(call.value);
@@ -105,7 +104,6 @@ export async function waitForAnswer(chat: OptChat, requestId: string): Promise<S
   let attempt = 0;
   for (;;) {
     const admission = await submitted(chat, requestId, attempt);
-    if (admission.phase === 'cancelled') throw new Error('Input was cancelled before native submission');
     const record = await chat.harness.commit(
       (tx) => tx.submissionByRequest(chat.root.id, nativeRequest(admission)),
       context,
