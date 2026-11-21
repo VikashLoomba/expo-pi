@@ -8,10 +8,12 @@ import { openNodeSqliteDatabase } from '@earendil-works/chord/sqlite/node';
 import type { Storage } from '@earendil-works/pi-durable';
 import { CODEMODE_TOOL_NAME } from '@earendil-works/pi-durable/codemode';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
+import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { nodeDatabaseFiles } from '@pi-agent/infinichat/node/database-files';
 import type {
   ConversationFiles, ConversationState, InfiniChatClient,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
+import { convertConversation, LEGACY_DATABASE } from '@pi-agent/infinichat/pi/infinichat-convert';
 import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
 import { infiniChatStorage, openInfiniChatStore } from '@pi-agent/infinichat/pi/infinichat-store';
 import {
@@ -255,22 +257,58 @@ export class ServerConversation {
    * release then refuses it (its spec §3.6), as SQLite storage refuses a database a newer one migrated (§11.2): a
    * server update moves the conversation one way. So before a release first opens the database another one left,
    * this copies it to `backup/before-<release>/` with SQLite's online backup, which the release that left it can open
-   * again; the copy replaces the one an earlier update made.
+   * again; the copy replaces the one an earlier update made. A release from before the store left `infinichat.db`,
+   * which is copied under that name, as that release opens it.
    */
   private async backUp() {
-    const database = join(this.data, DATABASE);
+    const name = existsSync(join(this.data, DATABASE)) ? DATABASE : LEGACY_DATABASE;
+    const database = join(this.data, name);
     if (!existsSync(database)) return;
     const backups = join(this.home, 'backup');
     const target = join(backups, `before-${INFINICHAT_SERVER_VERSION}`);
     await rm(target, { recursive: true, force: true });
     await mkdir(target, { recursive: true, mode: 0o700 });
-    await nodeDatabaseFiles.backup(database, join(target, DATABASE));
+    await nodeDatabaseFiles.backup(database, join(target, name));
     for (const name of await readdir(backups)) {
       if (join(backups, name) !== target) await rm(join(backups, name), { recursive: true, force: true });
     }
   }
 
+  /**
+   * A conversation the releases before the store left in `infinichat.db`, pi-durable's own SQLite storage, becomes
+   * the store, once: copied record by record (`convertConversation`) into a store aside, which takes the store's name
+   * only when the copy is whole, so a conversion a stop cut off starts over. The old file then goes; `backUp` kept
+   * it. The files this machine adopted are no longer what it holds.
+   */
+  private async convert() {
+    const database = join(this.data, DATABASE);
+    const legacy = join(this.data, LEGACY_DATABASE);
+    if (existsSync(database) || !existsSync(legacy)) return;
+    const aside = `${database}.converting`;
+    await nodeDatabaseFiles.remove(aside);
+    const from = await openNodeSqliteStorage(legacy);
+    try {
+      const store = await openInfiniChatStore(await openNodeSqliteDatabase(aside), BACKGROUND_CONTEXT);
+      try {
+        const to = await infiniChatStorage(store, BACKGROUND_CONTEXT);
+        await convertConversation(from, to, BACKGROUND_CONTEXT);
+        await to.close(BACKGROUND_CONTEXT);
+      } finally {
+        await store.close(BACKGROUND_CONTEXT);
+      }
+    } finally {
+      await from.close(BACKGROUND_CONTEXT);
+    }
+    // The rename takes the file alone, so its WAL is folded into it first.
+    await nodeDatabaseFiles.fold(aside);
+    await nodeDatabaseFiles.rename(aside, database);
+    await nodeDatabaseFiles.remove(legacy);
+    const { adopted: _legacy, ...kept } = this.state;
+    this.setState(kept);
+  }
+
   private async open() {
+    await this.convert();
     const store = await openInfiniChatStore(await openNodeSqliteDatabase(join(this.data, DATABASE)),
       BACKGROUND_CONTEXT);
     let core: InfiniChatService;

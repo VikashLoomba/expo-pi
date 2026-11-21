@@ -11,6 +11,9 @@ function phoneFile(name: string): File {
   return new File(`file://${directory}`, name);
 }
 
+/** Whether the phone's database folder holds the file, without reading it. */
+export const phoneDatabaseExists = (name: string): boolean => phoneFile(name).exists;
+
 function remove(name: string) {
   for (const suffix of ['', '-wal', '-shm']) {
     const file = phoneFile(`${name}${suffix}`);

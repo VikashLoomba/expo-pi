@@ -6,7 +6,7 @@ import { chatTasks, DurableChatService, type ChatServiceSnapshot } from '@pi-age
 import type { ChatView, ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import { RemoteInfiniChat, type RemoteConnection } from '@pi-agent/infinichat/pi/infinichat-remote/client';
 import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
-import { INFINICHAT_DATABASE, InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
+import { InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import type { AgentInfo } from '@pi-agent/infinichat/pi/infinichat-agents';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
@@ -33,10 +33,11 @@ import { phoneDialer } from '../pi/infinichat-remote/phone-dialer';
 import { phoneMachines, shownMachines } from '../pi/infinichat-remote/phone-machines';
 import { phoneDatabaseFiles } from '../pi/infinichat-remote/phone-files';
 import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
+import { openPhoneStore } from '../pi/infinichat-store';
 import { createChatCredentialStore, createChatModels } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
-import { openExpoSqliteStorage, openExpoStore } from '../pi/storage';
+import { openExpoSqliteStorage } from '../pi/storage';
 import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
 import { WorkspaceExecutionEnv } from '../pi/workspace/execution-env';
 import { createInfiniChatAvatar } from './infinichat-avatar';
@@ -124,8 +125,7 @@ function useChatRuntime() {
     const openPhone = async () => {
       if (state.phone || unmounted) return;
       const opened = await openPhoneInfiniChat({
-        store: await openExpoStore(INFINICHAT_DATABASE),
-        models, workspaces, remote, keepAlive, notifications, authError,
+        store: await openPhoneStore(), models, workspaces, remote, keepAlive, notifications, authError,
         accountChanges: credentials.subscribe,
         // One opt-in: the city is shared only while the user keeps background work on.
         city: () => keepAliveSettings.getSnapshot() ? currentCity() : Promise.resolve(undefined),
