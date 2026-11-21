@@ -2,24 +2,25 @@ import { existsSync } from 'node:fs';
 import { mkdir, readdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { Store } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
+import { openNodeSqliteDatabase } from '@earendil-works/chord/sqlite/node';
 import type { Storage } from '@earendil-works/pi-durable';
 import { CODEMODE_TOOL_NAME } from '@earendil-works/pi-durable/codemode';
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
-import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { nodeDatabaseFiles } from '@pi-agent/infinichat/node/database-files';
 import type {
   ConversationFiles, ConversationState, InfiniChatClient,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import type { InfiniChatService } from '@pi-agent/infinichat/pi/infinichat-service';
+import { infiniChatStorage, openInfiniChatStore } from '@pi-agent/infinichat/pi/infinichat-store';
 import {
-  copyFrom, DATA, receivePatch, type Copy,
+  copyFrom, DATA, INFINICHAT_DATABASE as DATABASE, receivePatch, type Copy,
 } from '@pi-agent/infinichat/pi/infinichat-remote/transfer';
 
 import { readState, updateState } from './state';
 
 const noop = () => {};
-const DATABASE = 'infinichat.db';
 type ConversationFile = ConversationFiles['db'];
 
 const same = (left: ConversationFile | undefined, right: ConversationFile | undefined) =>
@@ -44,6 +45,8 @@ const signalOf = (context: Context): AbortSignal => context.abortSignal ?? new A
  */
 export class ServerConversation {
   private core?: InfiniChatService;
+  /** The open core's store, which this closes once the core, whose Harness closes only its own storage in it, has. */
+  private store?: Store;
   private state: ConversationState;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
@@ -148,12 +151,7 @@ export class ServerConversation {
       }
       // Kept before the Harness closes, so whatever happens next, every client reads where it goes.
       if (heldBy === undefined) this.setState({ active: false, heldBy: to });
-      const core = this.core;
-      if (core) {
-        this.core = undefined;
-        this.changed();
-        await core.close();
-      }
+      if (this.core) await this.shut();
       await nodeDatabaseFiles.fold(join(this.data, DATABASE));
       const files = await this.files();
       if (!files) throw new Error('This machine holds no InfiniChat conversation.');
@@ -225,12 +223,20 @@ export class ServerConversation {
 
   /** At shutdown: closes the core and keeps `active`, so the next start reopens it. */
   close(): Promise<void> {
-    return this.run(async () => {
-      const core = this.core;
-      this.core = undefined;
-      this.changed();
+    return this.run(() => this.shut());
+  }
+
+  /** Closes the core, then its store; the screens hear at once that the core is gone. */
+  private async shut() {
+    const { core, store } = this;
+    this.core = undefined;
+    this.store = undefined;
+    this.changed();
+    try {
       await core?.close();
-    });
+    } finally {
+      await store?.close(BACKGROUND_CONTEXT);
+    }
   }
 
   private run<T>(operation: () => Promise<T>): Promise<T> {
@@ -265,16 +271,18 @@ export class ServerConversation {
   }
 
   private async open() {
-    const storage = await openNodeSqliteStorage(join(this.data, DATABASE));
+    const store = await openInfiniChatStore(await openNodeSqliteDatabase(join(this.data, DATABASE)),
+      BACKGROUND_CONTEXT);
     let core: InfiniChatService;
     try {
-      core = await this.openCore(storage);
+      core = await this.openCore(await infiniChatStorage(store, BACKGROUND_CONTEXT));
     } catch (error) {
-      // The Harness closes its storage; this closes it when the Harness never opened.
-      await storage.close(BACKGROUND_CONTEXT).catch(noop);
+      // Whatever the Harness opened or closed in it, the store is this object's to close.
+      await store.close(BACKGROUND_CONTEXT).catch(noop);
       throw error;
     }
     this.core = core;
+    this.store = store;
     updateState(this.home, (kept) => ({ ...kept, opened: INFINICHAT_SERVER_VERSION }));
     this.changed();
     // Paused until every plugin's extensions are installed, which a start waits for and an adopt finds done, so a tool

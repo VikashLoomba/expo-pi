@@ -10,8 +10,8 @@ import { apply, diff, pages } from './pages';
 export const FOLDER = '.infinichat';
 /** The machine's conversation folder. */
 export const DATA = `${FOLDER}/data`;
-/** The conversation's database, as both sides' folders name it. */
-export const INFINICHAT_DATABASE = 'infinichat.db';
+/** The conversation's database, as both sides' folders name it: a Chord store (`infinichat-store.ts`). */
+export const INFINICHAT_DATABASE = 'infinichat-store.db';
 /**
  * The bytes of one call of a copy, between progress reports. Each call keeps upstream's pipeline busy: writes of
  * 512 KiB and reads of 256 KiB, eight in flight (pi-env `remote-env.js`, which the phone's port matches).

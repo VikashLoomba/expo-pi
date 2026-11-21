@@ -21,7 +21,7 @@ const INCOMING = 'infinichat-incoming.db';
 /** A backup of this device's open conversation, which a refresh patches the machine's copy with. */
 const BACKUP = 'infinichat-backup.db';
 /** The machine's copy while this device holds the conversation, which `archive` leaves there. */
-const COPY = `${FOLDER}/copy/infinichat.db`;
+const COPY = `${FOLDER}/copy/${INFINICHAT_DATABASE}`;
 
 type ConversationFile = ConversationFiles['db'];
 

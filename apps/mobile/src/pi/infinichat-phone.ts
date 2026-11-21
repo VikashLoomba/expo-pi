@@ -1,8 +1,11 @@
+import type { Store } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
-import { createRegistry, type SessionEnd, type Storage } from '@earendil-works/pi-durable';
+import { createRegistry, type SessionEnd } from '@earendil-works/pi-durable';
 import {
   InfiniChatService, infiniChatExtensions, infiniChatTasks,
 } from '@pi-agent/infinichat/pi/infinichat-service';
+import { infiniChatStorage } from '@pi-agent/infinichat/pi/infinichat-store';
 import { infiniChatDevices } from '@pi-agent/infinichat/pi/infinichat/device-tools';
 
 import type { KeepAliveController } from '../keep-alive/controller';
@@ -19,10 +22,11 @@ export type PhoneInfiniChat = { service: InfiniChatService; close(): Promise<voi
  * Opens InfiniChat with the phone's devices: its workspace and the configured machines, over the remote owner the
  * chat service shares, whose connections InfiniChat uses and never closes. While it is open, the keep-alive counts
  * its work, and the notifier mirrors its scheduled tasks as local notifications that remind the user while the app is
- * closed.
+ * closed. It takes the conversation's store for its own: it closes it after the service, and when the service does
+ * not open.
  */
 export async function openPhoneInfiniChat(options: {
-  storage: Storage; models: Models; workspaces: Workspaces; remote: RemoteExecution;
+  store: Store; models: Models; workspaces: Workspaces; remote: RemoteExecution;
   authError?: (providerId: string) => string | undefined;
   /** Follows the credential store, so a conversation without models chooses them once a provider is connected. */
   accountChanges?: (listener: () => void) => () => void;
@@ -45,16 +49,21 @@ export async function openPhoneInfiniChat(options: {
   // The phone's code ships inside the app, so its registry is fixed: nothing reloads it, unlike a machine's server.
   const registry = createRegistry();
   for (const extension of parts.extensions) registry.install(extension);
-  service = await InfiniChatService.open({
-    storage: options.storage,
-    models: options.models,
-    parts,
-    registry,
-    authError: options.authError,
-    accountChanges: options.accountChanges,
-    env: deviceTools.env,
-    onClosed: options.onClosed,
-  });
+  try {
+    service = await InfiniChatService.open({
+      storage: await infiniChatStorage(options.store, BACKGROUND_CONTEXT),
+      models: options.models,
+      parts,
+      registry,
+      authError: options.authError,
+      accountChanges: options.accountChanges,
+      env: deviceTools.env,
+      onClosed: options.onClosed,
+    });
+  } catch (error) {
+    await options.store.close(BACKGROUND_CONTEXT).catch(() => {});
+    throw error;
+  }
   // Code mode is a machine's (its server's tools plugin), so here the model calls every tool itself, also in a
   // conversation a machine offered only code mode. Its registry already holds every extension, so recovered work
   // resumes now.
@@ -71,6 +80,7 @@ export async function openPhoneInfiniChat(options: {
       } finally {
         // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
         detachKeepAlive();
+        await options.store.close(BACKGROUND_CONTEXT);
       }
     },
   };

@@ -36,7 +36,7 @@ import { createPhoneHome } from '../pi/infinichat-remote/phone-home';
 import { createChatCredentialStore, createChatModels } from '../pi/models';
 import { OPENAI_PROVIDER_ID, openOpenAIManualBrowser } from '../pi/openai-auth';
 import { getOpenAILoginOptions } from '../pi/openai-auth/installation';
-import { openExpoSqliteStorage } from '../pi/storage';
+import { openExpoSqliteStorage, openExpoStore } from '../pi/storage';
 import { createDeviceWorkspaces } from '../pi/workspace/device-storage';
 import { WorkspaceExecutionEnv } from '../pi/workspace/execution-env';
 import { createInfiniChatAvatar } from './infinichat-avatar';
@@ -107,11 +107,11 @@ function useChatRuntime() {
     // credential cannot be read reports it in its own access state.
     void credentials.restore().catch(() => {});
     const authError = (providerId: string) => credentials.getProviderSnapshot(providerId).error;
-    // Release the database when its service does not open, so a later attempt never holds two connections.
-    const withStorage = async <T,>(databaseName: string | undefined, open: (storage: Storage) => Promise<T>) => {
+    // Release the chats' database when their service does not open, so a later attempt never holds two connections.
+    const withStorage = async <T,>(open: (storage: Storage) => Promise<T>) => {
       let storage: Storage | undefined;
       try {
-        storage = await openExpoSqliteStorage(databaseName);
+        storage = await openExpoSqliteStorage();
         return await open(storage);
       } catch (error) {
         // Closing again is a no-op.
@@ -119,11 +119,13 @@ function useChatRuntime() {
         throw error;
       }
     };
-    // InfiniChat has its own database and Harness, opened only while its home record names this phone.
+    // InfiniChat has its own store and Harness, opened only while its home record names this phone. The service
+    // takes the store for its own: it closes it with itself, and when it does not open.
     const openPhone = async () => {
       if (state.phone || unmounted) return;
-      const opened = await withStorage(INFINICHAT_DATABASE, (storage) => openPhoneInfiniChat({
-        storage, models, workspaces, remote, keepAlive, notifications, authError,
+      const opened = await openPhoneInfiniChat({
+        store: await openExpoStore(INFINICHAT_DATABASE),
+        models, workspaces, remote, keepAlive, notifications, authError,
         accountChanges: credentials.subscribe,
         // One opt-in: the city is shared only while the user keeps background work on.
         city: () => keepAliveSettings.getSnapshot() ? currentCity() : Promise.resolve(undefined),
@@ -137,7 +139,7 @@ function useChatRuntime() {
           });
           open();
         },
-      }));
+      });
       state.phone = opened;
       infiniChat.show(opened.service);
     };
@@ -221,7 +223,7 @@ function useChatRuntime() {
       const failures: string[] = [];
       if (!state.service) {
         try {
-          const opened = await withStorage(undefined, (storage) => DurableChatService.open({
+          const opened = await withStorage((storage) => DurableChatService.open({
             storage, models, images: createExpoImages(), machines: remote, newChat: NEW_CHAT_DEFAULTS, authError,
             local: {
               // Building it creates the workspace's directory and its temporary directory under the cache, which the
