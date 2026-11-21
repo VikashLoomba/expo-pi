@@ -358,6 +358,25 @@ its Harness and exits 75 for the service manager to restart it. Old runtime fold
 
 pi-durable migrates documents and tasks one way: once a newer release has opened the conversation, an older one
 refuses it (Durable `docs/spec.md` §3.6, §11.2). So before a release first opens the database another release left,
-the server copies it to `~/.infinichat/backup/before-<release>/infinichat.db` with SQLite's online backup, replacing
-the copy the previous update made; `state.json`'s `opened` records the release that last opened it. To go back,
-install the release that left the copy and put it in `~/.infinichat/data/` while the server is stopped.
+the server copies it to `~/.infinichat/backup/before-<release>/` with SQLite's online backup, under the name it had,
+replacing the copy the previous update made; `state.json`'s `opened` records the release that last opened it. To go
+back, install the release that left the copy and put it in `~/.infinichat/data/` while the server is stopped.
+
+## The conversation's files
+
+The conversation is a Chord store, and a move is Chord's session sync through a folder on a machine; why, and how
+each differs from upstream's use, is in `docs/infinichat-design.md`. What a machine keeps for it, in `~/.infinichat`:
+
+| Path | What |
+| --- | --- |
+| `data/infinichat-store.db` | The conversation while this machine holds it (`state.json`'s `active`), and its copy of it otherwise, which only the next `pull` touches |
+| `data/infinichat.db` | The conversation as releases before 5.1.0 kept it, in pi-durable's own storage. The first open converts it to the store and removes it, with those releases' `copy/` and `data/incoming/` |
+| `sync/` | This machine's folder for moves, Chord's `FileSystemSyncRemote`: what this machine uploaded as it gave the conversation, and what a phone, or a machine that took the conversation from here, uploaded as it gave it back. Made for the account alone |
+| `synced/<folder>/` | What this machine's copy last shared with each folder, its own (`here`) and other machines' (by a hash of the endpoint): Chord's `FileSyncStateStore`, as p2 keeps `backup/<target>/` |
+| `released/<time>/` | A copy that a whole restore replaced. Nothing opens or removes it |
+| `backup/before-<release>/` | The database as the release before left it (above) |
+| `state.json` | `active`, `head` (where the conversation ended when adopted), `heldBy`, the phone's time zone, `opened`, and for moves `syncId` (the ID this machine uploads under) and `through` (the machine whose folder its copy was last taken from) |
+
+`sync/` grows by what each move uploads and starts over whenever a giver sends its whole store, so it holds at most
+one whole store and the commits moved since. A machine's store keeps an outbox once it has moved, at most 10,000
+commits of it (`openInfiniChatStore`).

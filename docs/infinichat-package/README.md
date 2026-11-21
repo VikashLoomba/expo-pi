@@ -7,6 +7,10 @@ Before that app exists, the code that doesn't depend on where it runs moves into
 the Node server and the Mac app all build from it. These docs say how, piece by piece. Nothing is extracted yet, and
 nothing a user sees changes.
 
+These are the plan as it was written, and stay as its record. Since then a move is Chord's session sync, and the
+conversation a Chord store: the page diffs of pieces 4 and 9 (`pages.ts`, `transfer.ts`, `PagePlatform`, the refresh)
+are gone, and `docs/infinichat-design.md` says what replaced them.
+
 ## Owner decisions (2026-10-26)
 
 | Topic | Decision |

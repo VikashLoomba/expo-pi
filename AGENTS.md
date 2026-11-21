@@ -10,7 +10,10 @@ its design in chord's `docs/design.md`); `/reload-plugins` rebuilds and reloads 
 `mcp.json` again; InfiniChat's own plugin and the tools plugin (code mode and MCP) change only by a release, which
 restarts the service. A machine's agents write plugins and add MCP servers themselves when the user asks: a prompt
 section (`src/extending.ts`) names the guide a release ships (`packages/infinichat-server/docs/extending.md`, the
-reference for a plugin's layout and for `mcp.json`) and their `reload_plugins` tool. On a machine, Claude is offered
+reference for a plugin's layout and for `mcp.json`) and their `reload_plugins` tool. InfiniChat's design, what of
+UniiChat's each pi-durable and Chord mechanism carries, where it differs, and how the conversation is stored and moved
+between devices (a Chord store, and Chord's session sync through a folder on a machine), is in
+`docs/infinichat-design.md`: read it before work on the agent core or a move. On a machine, Claude is offered
 through its Claude Code login (pi-claude-code, a pinned git dependency of the server) beside pi-ai's Anthropic
 provider, which takes an API key. The phone's SSH library,
 `@automatalabs/react-native-ssh`, is the owner's fork of `@osuki-dev/react-native-ssh` in
@@ -58,16 +61,20 @@ Run lint and typecheck before declaring any task done.
 - No app-added limits by default; use library defaults. Never construct stress or adversarial scenarios (huge files, runaway loops, enormous outputs) to justify a limit or an optimization. Only ordinary, realistic use counts as evidence.
 - Upstream decides how; the product decides what. A missing upstream feature is never a reason to drop a product feature: build it in the simplest way consistent with upstream's mechanics. Any deviation from upstream's pattern needs the owner's approval.
 - Don't re-create what pi-durable, pi-ai, chord, just-bash or Expo already provide.
-- Expo packages should just work: no app-written polyfills and no patches to third-party bundles. If something is missing, report it instead of patching around it.
+- Expo packages should just work: no app-written polyfills and no patches to third-party bundles. If something is missing, report it instead of patching around it. One exception, the owner's (2026-11-20): the compression streams Chord's session sync needs on Hermes come from a library (`src/pi/compression-streams.ts`).
 - Never mint SDK-branded ids; look them up among the records the SDK returned.
 - Deletion is the default: no mechanism or API without a production caller or a stated product requirement. No production code that exists only for tests.
-- The app is unreleased: no backwards compatibility with existing on-device data. Don't preserve old chats, ids, document shapes or stored selections, and don't write compatibility or migration code. If old data breaks the app after a change, the fix is clearing app data; say so in your report.
+- The app is unreleased: no backwards compatibility with existing on-device data. Don't preserve old chats, ids, document shapes or stored selections, and don't write compatibility or migration code. If old data breaks the app after a change, the fix is clearing app data; say so in your report. The owner's exceptions: the conversation's upgrade to the tree of agents (2026-11-18) and its conversion to a Chord store (`infinichat-convert.ts`, 2026-11-20).
 - Stay on the latest pi releases: check npm before starting work, and upgrade as its own step. pi-durable, pi-ai,
   chord, pi-env, pi-codemode, pi-mcp and pi-schema take their versions from the `catalog` in `pnpm-workspace.yaml`,
   which `packages/infinichat`'s peer dependencies share, so upgrade all seven there together (pi-env depends on chord
   and pi-durable at exact versions, and they on pi-schema); `pnpm why -r @earendil-works/pi-durable` then finds one
   version. The server's `runtime/package.json` pins the same versions (`scripts/build.mjs --check`), and
-  `scripts/sync-daemons.mjs` pins pi-env's daemon to the same release.
+  `scripts/sync-daemons.mjs` pins pi-env's daemon to the same release. pnpm leaves the versions before in
+  `node_modules/.pnpm`, and the dev server's Metro keeps resolving the packages to them from its file map, so the
+  app runs the old packages under the new code and fails as it loads (`defineSignal` undefined, 2026-11-20). An
+  export resolves them anew. Before the first `@expo/agent-cli dev` after an upgrade, remove `metro-file-map-*` from
+  the temp folder, which fixed it (`npx expo start --clear` is Expo's own reset of Metro's cache).
 - An app and a server bind by `infinichat.remote` and `infinichat.mcp`. Change one with Chord's `evolve`, and map the
   version before it where the server serves the type (`accepts`), so released apps keep working with newer servers;
   never edit a released version or a schema it names (`docs/server-plugins.md`, "Contract versions").
@@ -89,7 +96,8 @@ Run lint and typecheck before declaring any task done.
 
 ## On a machine that runs the owner's server
 
-- The owner's live conversation is in `~/.infinichat/data/infinichat.db`. Read it only with
+- The owner's live conversation is in `~/.infinichat/data/infinichat-store.db`, a Chord store, and in
+  `infinichat.db` beside it until server 5.1.0 has converted it. Read it only with
   `sqlite3 "file:...?mode=ro"`; never write it, and never send a message into it.
 - `/reload-plugins` is the user's command, and restarting or signalling `infinichat.service` is the owner's call. Its
   log is `journalctl --user-unit infinichat.service`.
