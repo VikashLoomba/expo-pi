@@ -5,8 +5,6 @@ import {
   defineTask, defineTool, type ConversationId, type Harness, type TaskId, type Tx,
 } from '@earendil-works/pi-durable';
 
-import { AgentCallDoc } from './agents';
-
 /** The scheduled task's registered kind: a background task that waits, so the keep-alive never counts it as work. */
 export const SCHEDULED_TASK = 'optchat.scheduled-task';
 
@@ -195,15 +193,12 @@ export function scheduleTools(
     async execute({ task, run_after, repeat }, api, context) {
       const until = Date.parse(run_after);
       if (Number.isNaN(until)) return reply(invalidTime(run_after));
-      return reply(await api.commit(async (tx) => {
-        // A native tool task may replay after a lost result commit; its own ID makes it act once.
-        const done = await tx.doc(AgentCallDoc, rootId, String(api.taskId), null);
-        if (done.result !== null) return done.result;
-        const id = await create(tx, repeat === undefined ? { task, until } : { task, until, repeat });
-        done.result = `Scheduled as task ${id} for ${localTime(until)}${again(repeat)}. It will reach you then as a `
-          + 'message.';
-        return done.result;
-      }, context));
+      // A native tool task may replay after a lost result commit: the key names the task its first run made
+      // (pi-durable README "Tools that park", `api.createTask` with a `key`).
+      const id = await api.createTask(scheduled, repeat === undefined ? { task, until } : { task, until, repeat },
+        { key: 'scheduled', ownership: { kind: 'conversation' }, background: true }, context);
+      return reply(`Scheduled as task ${id} for ${localTime(until)}${again(repeat)}. It will reach you then as a `
+        + 'message.');
     },
   });
   const list = defineTool({
