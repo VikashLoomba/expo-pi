@@ -9,10 +9,11 @@ import {
 } from '@earendil-works/pi-durable';
 
 import {
-  MemoryDoc, bytes, end, first, flat, key, publishNode, readMessage, readNode, renderCompaction, retagged, shownMessage,
-  stallBuilds, type NodeRef,
+  MemoryDoc, bytes, end, first, flat, key, memoryReady, publishNode, readMessage, readNode, renderCompaction, retagged,
+  shownMessage, stallBuilds, type NodeRef,
 } from './memory';
 import { recordMemoryUsage } from './usage';
+import { rouse } from './wake';
 
 /** A model and effort the host selected. */
 export type ModelSelection = { model: ModelRef; thinkingLevel: ModelThinkingLevel };
@@ -341,6 +342,9 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
           bytes: bytes(d.shortest),
           builder: task.id,
         });
+        // A turn that waited for its earlier messages' lines starts now, as UniiChat's `settle` hears of each line
+        // made: the signal before this commit's table writes (pi-durable `docs/spec.md` §5.7).
+        if (await memoryReady(tx, r.conversationId)) await rouse(tx, r.conversationId);
         // As UniiChat's memory pumps itself when a summary is made (Memory.ts `job`): the merge this one made ready,
         // and the next one waiting for a place, start in the commit that publishes it.
         await pumpBuilds(tx, r.conversationId);

@@ -6,9 +6,10 @@ import {
 } from '@earendil-works/pi-durable';
 
 import {
-  AppDoc, InputDoc, openOptChat, optChatParts, type Admission, type OptChat, type OptChatExtensionOptions,
-  type OptChatOptions,
+  InputDoc, openOptChat, optChatParts, type Admission, type OptChat, type OptChatExtensionOptions,
+  type OptChatOptions, type OptChatParts,
 } from '../src/pi/infinichat/app';
+import { CoordinatorDoc } from '../src/pi/infinichat/wake';
 
 type HostOptions = Pick<OptChatOptions, 'models' | 'onReport'>
   & Pick<OptChatExtensionOptions, 'hasDeviceTools' | 'turnState'>;
@@ -24,21 +25,40 @@ export async function openHosted(storage: Storage, options: HostOptions): Promis
   const registry = createRegistry();
   for (const extension of parts.extensions) registry.install(extension);
   const chat = await openOptChat(storage, { models, registry, parts, onReport }, context);
+  wakes.set(chat, parts.wake);
   harness = chat.harness;
   chat.harness.resume();
   return chat;
 }
 
+const wakes = new WeakMap<OptChat, OptChatParts['wake']>();
+/**
+ * Wakes root's coordinator, or starts one, as every commit that gives an agent work does: for a test that writes the
+ * agent's documents itself, which no commit of OptChat's follows.
+ */
+export const wake = (chat: OptChat) => chat.harness.commit((tx) => {
+  const start = wakes.get(chat);
+  if (!start) throw new Error('This chat was not opened by openHosted');
+  return start(tx, chat.root.id);
+}, context);
+
 /** The request ID OptChat submits an input's attempt under: the first attempt's has no number. */
 const nativeRequest = ({ requestId, attempt }: Admission): string =>
   attempt === 0 ? `optchat:${requestId}` : `optchat:${requestId}:${attempt}`;
 
-/** Rejects once the coordinator ends, since no input is submitted without it. */
+/**
+ * Rejects once the turn's coordinator ends any other way than done, since no input is submitted without it. One that
+ * is done closed its turn, and the admission's own phase tells of the input.
+ */
 async function coordinatorFailure(chat: OptChat, waiting: Context): Promise<never> {
-  const app = await chat.harness.snapshot(AppDoc, chat.root.id, waiting);
-  if (!app?.coordinator) throw new Error('OptChat has no coordinator task');
-  const task = await chat.harness.waitForTask(app.coordinator, waiting);
-  throw new Error(`OptChat coordinator ended: ${JSON.stringify(task.state.outcome)}`);
+  const coordinator = (await chat.harness.snapshot(CoordinatorDoc, chat.root.id, waiting))?.task;
+  if (coordinator) {
+    const task = await chat.harness.waitForTask(coordinator, waiting);
+    if (task.state.outcome.status !== 'completed') {
+      throw new Error(`OptChat coordinator ended: ${JSON.stringify(task.state.outcome)}`);
+    }
+  }
+  return new Promise<never>(() => {});
 }
 
 /** The admission once an attempt from `attempt` on is submitted, or once a stop cancelled it. */

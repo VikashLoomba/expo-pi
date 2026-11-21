@@ -9,7 +9,7 @@ import { LiveDoc, MemoryStorage, configure, type ModelRef } from '@earendil-work
 import { AppDoc, InputDoc, type OptChat } from '../src/pi/infinichat/app';
 import { MemoryDoc, MessageDoc } from '../src/pi/infinichat/memory';
 import { ConfigDoc } from '../src/pi/infinichat/summary';
-import { openHosted, waitForAnswer } from './host';
+import { openHosted, waitForAnswer, wake } from './host';
 
 const model = { provider: 'faux', modelId: 'faux-1' };
 /** The host's one settings commit: main model through configure, summary model in ConfigDoc. */
@@ -155,15 +155,18 @@ test('earlier application and input documents migrate as pi-durable reads them',
     promptVersion: 2, epoch: 4, open: false, started: false, requests: [], pending: [], cursor: null,
     coordinator: null, revision: 9, stop: 1, stopped: 1, stopPending: [],
   };
+  // Up to version 5 the document named its conversation's one coordinator; a turn's own is named apart, and a
+  // Continue waits to be submitted here.
+  const { coordinator: _one, ...kept } = v2;
   // Version 2 logged a call with its assistant message, so none waits for its result, and noted no stop.
-  assert.deepEqual(AppDoc.definition.migrate?.(v2, 2), { ...v2, endNote: null, held: {}, cut: null });
+  assert.deepEqual(AppDoc.definition.migrate?.(v2, 2), { ...kept, endNote: null, held: {}, cut: null, resume: null });
   const { promptVersion: _current, ...v1 } = v2;
   assert.equal(AppDoc.definition.migrate?.(v1, 1)?.promptVersion, 1);
   // Version 3's stop note is the turn's end note, and it held no cut attempt.
   const held = { call: { text: 'zoom {"id":0}', date: 'd', source: 'e:0' } };
   const v3 = { ...v2, stopNote: 'Stopped by the user: OptChat\'s turn.', held };
   assert.deepEqual(AppDoc.definition.migrate?.(v3, 3), {
-    ...v2, endNote: 'Stopped by the user: OptChat\'s turn.', held, cut: null,
+    ...kept, endNote: 'Stopped by the user: OptChat\'s turn.', held, cut: null, resume: null,
   });
   const admission = {
     requestId: 'a', kind: 'user', content: 'hi', date: 'd', epoch: 1, fresh: true, phase: 'submitted', envelope: null,
@@ -470,6 +473,8 @@ test('an input prepared for a turn that ended before its submission starts a fre
       app.pending = ['two'];
       app.revision++;
     }, context);
+    // No admission made that state, so nothing woke the agent for it.
+    await wake(chat);
     assert.equal((await waitForAnswer(chat, 'two')).status, 'done');
     const two = (await chat.harness.snapshot(InputDoc, chat.root.id, 'two', context))?.value;
     assert.equal(two?.fresh, true);

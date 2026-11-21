@@ -124,7 +124,8 @@ const NO_AGENT: ChatViewSource<InfiniChatControls> = {
 
 /**
  * InfiniChat's work, in one Harness: every agent's turns are foreground tasks, and their summary builds are work
- * although they are background tasks; their coordinators are always live, so they never are.
+ * although they are background tasks. A turn's coordinator sleeps while the turn's own tasks work, and a scheduled
+ * task waits for its time, so neither is.
  */
 export const infiniChatTasks = (task: TaskGraphNode): string | undefined =>
   !task.background || task.kind === BuildNode.definition.name ? INFINICHAT : undefined;

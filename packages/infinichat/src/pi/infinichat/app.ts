@@ -2,8 +2,9 @@ import { awaitWithContext, withAbortSignal, type Context } from '@earendil-works
 import type { JsonRepresentation } from '@earendil-works/chord/json';
 import type { ImageContent, Models } from '@earendil-works/pi-ai';
 import {
-  AgentDoc as NativeAgentDoc, ConversationIdle, GenerationTask, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID,
-  ResetEntry, configure, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask, hook, hookTask, section,
+  AgentDoc as NativeAgentDoc, ConversationBusy, ConversationIdle, GenerationTask, Harness, InboxDoc, LiveDoc,
+  ROOT_CONVERSATION_ID, ResetEntry, SubmissionSettled, configure, defineDoc, defineDocFamily, defineEntry,
+  defineExtension, defineTask, hook, hookTask, section,
   type Conversation, type ConversationId, type ConversationInit, type EntryId, type EnvTarget, type Extension,
   type HarnessOptions, type RegistryReader, type Storage, type SubmissionId, type SubmissionRecord,
   type TaskId, type ToolHookCall, type ToolRegistration, type Tx, type UserInput,
@@ -17,6 +18,7 @@ import { sharedPrompt } from './prompt';
 import { abortScheduled, scheduleTools, scheduledTask, type ScheduledInput } from './schedule';
 import { BuildNode, ConfigDoc, pumpBuilds } from './summary';
 import { memoryTools, toolPolicy, type NativeContracts } from './tools';
+import { CoordinatorDoc, Wake, rouse, wakeKey } from './wake';
 
 export type Admission = {
   requestId: string;
@@ -67,7 +69,8 @@ export type AppState = {
   requests: string[];
   pending: string[];
   cursor: EntryId | null;
-  coordinator: TaskId | null;
+  /** The request ID of a Continue its coordinator has yet to submit: its run opens a turn that has no input. */
+  resume: string | null;
   revision: number;
   stop: number;
   stopped: number;
@@ -83,39 +86,47 @@ export type AppState = {
   cut: { why: string; records: (Logged & { kind: 'infinichat' | 'tool' })[] } | null;
 };
 type Logged = { text: string; date: string; source: string };
-type AppStateV4 = Omit<AppState, 'cut'> & {
+type AppStateV5 = Omit<AppState, 'resume'> & { coordinator: TaskId | null };
+type AppStateV4 = Omit<AppStateV5, 'cut'> & {
   cut: { why: string; records: (Logged & { kind: 'unii' | 'tool' })[] } | null;
 };
-type AppStateV3 = Omit<AppState, 'endNote' | 'cut'> & { stopNote: string | null };
+type AppStateV3 = Omit<AppStateV5, 'endNote' | 'cut'> & { stopNote: string | null };
 type AppStateV2 = Omit<AppStateV3, 'stopNote' | 'held'>;
+/** Version 5, which named the one coordinator its conversation had, from whatever came before. */
+function appStateV5(value: unknown, fromVersion: number): AppStateV5 {
+  if (fromVersion === 5) return value as AppStateV5;
+  if (fromVersion === 4) {
+    // Version 4 named the agent's replies `unii`.
+    const { cut, ...rest } = value as AppStateV4;
+    return { ...rest, cut: cut && { ...cut, records: cut.records.map((record) =>
+      record.kind === 'unii' ? { ...record, kind: 'infinichat' as const } : { ...record, kind: 'tool' as const }) } };
+  }
+  let stored: AppStateV3;
+  if (fromVersion < 3) {
+    // Version 1 had no prompt version; its instructions hold the composed prompt.
+    const older = fromVersion < 2
+      ? { ...(value as Omit<AppStateV2, 'promptVersion'>), promptVersion: 1 }
+      : (value as AppStateV2);
+    // Version 2 logged a call with its assistant message, so no call waits for its result, and noted no stop.
+    stored = { ...older, stopNote: null, held: {} };
+  } else {
+    stored = value as AppStateV3;
+  }
+  // Version 3 noted only a stop and logged a failed attempt as a reply, so none is held.
+  const { stopNote, ...rest } = stored;
+  return { ...rest, endNote: stopNote, cut: null };
+}
 export const AppDoc = defineDoc<AppState>({
   kind: 'optchat.app',
-  version: 5,
+  version: 6,
   scope: 'conversation',
   history: 'latest',
   fork: 'current',
   checkpointWhen: () => true,
+  // Version 5's coordinator lived as long as its conversation; it now names itself as its turn's (`CoordinatorDoc`).
   migrate: (value, fromVersion) => {
-    if (fromVersion === 4) {
-      // Version 4 named the agent's replies `unii`.
-      const { cut, ...rest } = value as AppStateV4;
-      return { ...rest, cut: cut && { ...cut, records: cut.records.map((record) =>
-        record.kind === 'unii' ? { ...record, kind: 'infinichat' as const } : { ...record, kind: 'tool' as const }) } };
-    }
-    let stored: AppStateV3;
-    if (fromVersion < 3) {
-      // Version 1 had no prompt version; its instructions hold the composed prompt.
-      const older = fromVersion < 2
-        ? { ...(value as Omit<AppStateV2, 'promptVersion'>), promptVersion: 1 }
-        : (value as AppStateV2);
-      // Version 2 logged a call with its assistant message, so no call waits for its result, and noted no stop.
-      stored = { ...older, stopNote: null, held: {} };
-    } else {
-      stored = value as AppStateV3;
-    }
-    // Version 3 noted only a stop and logged a failed attempt as a reply, so none is held.
-    const { stopNote, ...rest } = stored;
-    return { ...rest, endNote: stopNote, cut: null };
+    const { coordinator: _one, ...rest } = appStateV5(value, fromVersion);
+    return { ...rest, resume: null };
   },
   initial: () => ({
     promptVersion: PROMPT_VERSION,
@@ -125,7 +136,7 @@ export const AppDoc = defineDoc<AppState>({
     requests: [],
     pending: [],
     cursor: null,
-    coordinator: null,
+    resume: null,
     revision: 0,
     stop: 0,
     stopped: 0,
@@ -141,7 +152,7 @@ export const AppDoc = defineDoc<AppState>({
  * then a Continue is refused, and the screens show the conversation at work.
  */
 export const turnOpen = (app: AppState): boolean =>
-  app.open || app.pending.length > 0 || app.cut !== null || app.endNote !== null;
+  app.open || app.pending.length > 0 || app.cut !== null || app.endNote !== null || app.resume !== null;
 
 const textOf = (input: UserInput): string => typeof input === 'string'
   ? input
@@ -171,7 +182,8 @@ async function closeSettledEpoch(tx: Tx, chat: ConversationId): Promise<void> {
   const app = await tx.doc(AppDoc, chat);
   const live = await tx.doc(LiveDoc, chat);
   const inbox = await tx.doc(InboxDoc, chat);
-  if (!app.open || !app.started || live.run || inbox.items.some((i) => i.mode !== 'write')) return;
+  if (!app.open || !app.started || app.resume !== null || live.run
+    || inbox.items.some((i) => i.mode !== 'write')) return;
   const submissions: SubmissionId[] = [];
   for (const id of app.requests) {
     const receipt = await tx.submissionByRequest(chat, nativeRequest(await storedInput(tx, chat, id)));
@@ -483,12 +495,22 @@ const RoundEnd = defineTask<null, { phase: 'log' }, null>({
 });
 
 type CoordinatorState = { phase: 'coordinate'; tick: number };
-/** `turnState` is the host's; a turn reads it as it starts. */
+/**
+ * One turn's coordinator, as UniiChat's turn (Server.ts `Unii.turn`): the commit that admits a message to an agent at
+ * rest starts it (`wake` in `optChatParts`), and it ends in the commit that finds nothing left to do, so only a
+ * message wakes an agent. While it waits it holds no invocation (§5.6): it sleeps on `Wake`, which every commit that
+ * gives it work delivers, and on pi-durable's `SubmissionSettled` for each input it submitted, which `notify` delivers
+ * however the run ends (`test/examples/43-subagent-waits.ts`). A run it did not submit has no such signal, one a
+ * restart resumed for a coordinator of version 1, or the tail a plugin's `afterRun` hook keeps: it waits for that
+ * run's task instead, which a signal does not interrupt. `turnState` is the host's; a turn reads it as it starts.
+ */
 const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
   Record<string, never>, CoordinatorState, null
 >({
   name: 'optchat.coordinator',
-  version: 1,
+  version: 2,
+  // Version 1 lived as long as its conversation and waited on document watches; its checkpoint is this one's.
+  migrate: (_input, checkpoint) => ({ input: {}, checkpoint: checkpoint as CoordinatorState }),
   initial: () => ({ phase: 'coordinate', tick: 0 }),
   phases: {
     async coordinate(task, runtime, context) {
@@ -504,201 +526,238 @@ const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
       });
       const conversation = await runtime.conversation(chat, invocation);
       if (!conversation) throw new Error('The agent’s conversation is missing');
-      const acquired = await Promise.all([
-        runtime.watchDoc(AppDoc, chat, invocation),
-        runtime.watchDoc(MemoryDoc, chat, invocation),
-        runtime.watchDoc(LiveDoc, chat, invocation),
-        runtime.watchDoc(InboxDoc, chat, invocation),
-      ]);
-      if (acquired.some((watch) => !watch)) {
-        await Promise.all(acquired.map((watch) => watch?.stop()));
-        throw new Error('OptChat documents were not initialized');
-      }
-      const watches = acquired.flatMap((watch) => (watch ? [watch] : []));
-      const changed = new Promise<void>((resolve) => {
-        for (const watch of watches) {
-          const seen = JSON.stringify(watch.value);
-          watch.start(async (call) => {
-            if (call.kind === 'value' && JSON.stringify(call.value) !== seen) resolve();
-          });
-        }
-      });
+      const woke = task.state.wake;
+      const after = (steps: number): CoordinatorState =>
+        ({ phase: 'coordinate', tick: task.state.checkpoint.tick + steps });
       let dispatchId: string | undefined;
+      let resume: string | undefined;
       let stop = 0;
       let withdraw = false;
       let progressed = false;
-      try {
-        await runtime.commit(async (tx) => {
-          // All native table reads happen before reset/task creation table writes.
-          const projection = await projectEntries(tx, chat);
-          progressed = projection.progressed;
-          const now = new Date(runtime.now()).toISOString();
-          await closeSettledEpoch(tx, chat);
-          const app = await tx.doc(AppDoc, chat);
-          const running = (await tx.doc(LiveDoc, chat)).run !== undefined;
-          const ended = app.stopped >= app.stop && projection.caughtUp && !running;
-          if (ended && (app.cut || app.endNote !== null)) {
-            // As UniiChat ends a turn without a reply: what the cut attempt wrote, marked, then why.
-            for (const record of app.cut?.records ?? []) {
-              const mark = `\n[cut off: ${app.cut?.why.slice(0, 300)}]`;
-              await appendMessage(tx, chat, { ...record, text: record.text + mark, images: [] });
-            }
-            if (app.endNote !== null) {
-              await appendMessage(tx, chat, { kind: 'note', text: app.endNote, date: now, images: [],
-                source: `end:${app.epoch}:${app.stop}` });
-            }
-            app.cut = null;
-            app.endNote = null;
-            app.revision++;
-            progressed = true;
-          }
-          const next = app.pending[0];
-          if (ended && (await requeueWithdrawn(tx, chat))) {
-            progressed = true;
-          } else if (ended && (await tx.doc(InboxDoc, chat)).items.some((item) => item.mode !== 'write')) {
-            // pi-durable withdrew a failed run's queue above; one still queued is behind a run whose task faulted.
-            await countRequeued(tx, chat);
-            withdraw = true;
-          } else if (app.stop > app.stopped) {
-            if (projection.caughtUp) {
-              stop = app.stop;
-              // A withdrawn input was never handed to the model, so it never enters memory.
-              for (const id of app.stopPending) {
-                const input = await storedInput(tx, chat, id);
-                input.phase = 'cancelled';
-                input.envelope = null;
-              }
-              app.pending = app.pending.filter((id) => !app.stopPending.includes(id));
-              app.stopPending = [];
-              app.revision++;
-              progressed = true;
-            }
-          } else if (next !== undefined) {
-            const input = await storedInput(tx, chat, next);
-            if (input.kind === 'note' && projection.caughtUp) {
-              await appendMessage(tx, chat, {
-                kind: 'note',
-                text: textOf(input.content),
-                date: input.date,
-                images: imagesOf(input.content),
-                source: `input:${input.requestId}`,
-              }, false);
-              input.phase = 'submitted';
-              app.pending.shift();
-              app.revision++;
-              progressed = true;
-            } else if (!input.fresh) {
-              if (projection.caughtUp) {
-                // A message sent while a turn runs goes to it as it is, between its tool calls: admitted as a steer in
-                // this commit, which checks the run, so it never starts a run of its own (pi-durable example 34).
-                // Before this commit's first table write; a known request ID, one submitted before a crash, returns
-                // its submission.
-                await settleViews(tx, chat);
-                try {
-                  await conversation.submit(tx, {
-                    type: 'input',
-                    requestId: nativeRequest(input),
-                    content: input.content,
-                    whenBusy: 'steer',
-                    whenIdle: 'reject',
-                    entry: { kind: DeliveryEntry.kind, data: { requestId: input.requestId, kind: input.kind } },
-                  });
-                  input.phase = 'submitted';
-                  input.envelope = null;
-                  app.pending.shift();
-                  app.started = true;
-                  app.revision++;
-                } catch (error) {
-                  if (!(error instanceof ConversationIdle)) throw error;
-                  // Its turn ended before it reached it, so it starts the next, with the inputs after it.
-                  await carryOver(tx, chat, app.requests.filter((id) => app.pending.includes(id)));
-                }
-                progressed = true;
-              }
-            } else if (input.phase === 'prepared') {
-              dispatchId = input.requestId;
-            } else if (!read) {
-              // Accepted after the turn state was skipped: the next tick reads it.
-              progressed = true;
-            } else if (projection.caughtUp && (await memoryReady(tx, chat))) {
-              await settleViews(tx, chat);
-              // The view is frozen here; the original enters memory once pi-durable places the delivery.
-              input.envelope = envelope(await renderMain(tx, chat), input.content, state, await placeOf(tx, chat));
-              input.phase = 'prepared';
-              app.started = true;
-              app.revision++;
-              await tx.appendEntry(ResetEntry, chat, { head: 'self' });
-              dispatchId = input.requestId;
-              progressed = true;
-            }
-          }
-          const launched = await pumpBuilds(tx, chat);
-          if (launched.length > 0) progressed = true;
-          // A fresh turn is submitted after this commit: an idle admission places its input at once, after the reset
-          // this commit appends, and `submit(tx)` must come before a commit's table writes (durable
-          // `src/harness/submissions.ts`). So the preparation is checkpointed first.
-          if (dispatchId !== undefined || withdraw || progressed) {
-            return {
-              status: 'running',
-              checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 1 },
-            };
-          }
-        }, context);
-        if (withdraw) {
-          // With no run, an abort only withdraws the queued inputs.
-          await conversation.abort(context);
-          await runtime.commit(async (tx) => {
-            await requeueAborted(tx, chat);
-            return { status: 'running', checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 2 } };
-          }, context);
-        } else if (stop) {
-          await conversation.abort(context);
-          await runtime.commit(async (tx) => {
-            const app = await tx.doc(AppDoc, chat);
-            app.stopped = stop;
-            app.revision++;
-            return { status: 'running', checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 2 } };
-          }, context);
-        } else if (dispatchId !== undefined) {
-          const requestId = dispatchId;
-          // The prepared admission is read back committed: a draft is not readable after its commit.
-          const prepared = (await runtime.snapshot(InputDoc, chat, requestId, context))?.value;
-          if (!prepared?.envelope) throw new Error(`Prepared input has no envelope: ${requestId}`);
-          await conversation.submit({
-            type: 'input',
-            requestId: nativeRequest(prepared),
-            content: prepared.envelope,
-            whenBusy: 'steer',
-            entry: { kind: DeliveryEntry.kind, data: { requestId, kind: prepared.kind } },
-          }, context);
-          await runtime.commit(async (tx) => {
-            const app = await tx.doc(AppDoc, chat);
-            const saved = await storedInput(tx, chat, requestId);
-            saved.phase = 'submitted';
-            saved.envelope = null;
-            const position = app.pending.indexOf(requestId);
-            if (position >= 0) app.pending.splice(position, 1);
-            app.revision++;
-            return { status: 'running', checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 2 } };
-          }, context);
-        } else if (!progressed) {
-          const ended = Promise.race(watches.map((watch) => watch.closed)).then((end) => {
-            if (end.kind === 'failed' || end.kind === 'listener_error') throw end.error;
-            throw new Error(`OptChat watch ended: ${end.kind}`);
-          });
-          await awaitWithContext(Promise.race([changed, ended]), invocation);
-          await runtime.commit(() => ({
-            status: 'running',
-            checkpoint: { phase: 'coordinate', tick: task.state.checkpoint.tick + 1 },
-          }), context);
+      await runtime.commit(async (tx) => {
+        // All native table reads happen before reset/task creation table writes.
+        const projection = await projectEntries(tx, chat);
+        progressed = projection.progressed;
+        const now = new Date(runtime.now()).toISOString();
+        await closeSettledEpoch(tx, chat);
+        const app = await tx.doc(AppDoc, chat);
+        const coordinating = await tx.doc(CoordinatorDoc, chat);
+        // A coordinator of version 1 was its conversation's one, named nowhere a commit could signal: it names itself.
+        coordinating.task ??= task.id;
+        // One an admission replaced has no turn.
+        if (coordinating.task !== task.id) {
+          return { status: 'terminal', outcome: { status: 'completed', result: null } };
         }
-      } finally {
-        await Promise.all(watches.map((watch) => watch.stop()));
+        // The key that woke this run is used, so the next sleep waits on the one after it.
+        if (woke?.reason === 'signal' && woke.signal === Wake.name) {
+          coordinating.key = Math.max(coordinating.key, Number(woke.key.slice(1)) + 1);
+        }
+        // A submission that settled needs no wake, and its key, once it woke this task, serves no second sleep.
+        const unsettled: string[] = [];
+        for (const key of coordinating.settling) {
+          const status = (await tx.submissionByRequest(chat, key))?.status;
+          if (status === 'queued' || status === 'placed') unsettled.push(key);
+        }
+        if (unsettled.length !== coordinating.settling.length) coordinating.settling = unsettled;
+        const live = await tx.doc(LiveDoc, chat);
+        const running = live.run !== undefined;
+        const ended = app.stopped >= app.stop && projection.caughtUp && !running;
+        if (ended && (app.cut || app.endNote !== null)) {
+          // As UniiChat ends a turn without a reply: what the cut attempt wrote, marked, then why.
+          for (const record of app.cut?.records ?? []) {
+            const mark = `\n[cut off: ${app.cut?.why.slice(0, 300)}]`;
+            await appendMessage(tx, chat, { ...record, text: record.text + mark, images: [] });
+          }
+          if (app.endNote !== null) {
+            await appendMessage(tx, chat, { kind: 'note', text: app.endNote, date: now, images: [],
+              source: `end:${app.epoch}:${app.stop}` });
+          }
+          app.cut = null;
+          app.endNote = null;
+          app.revision++;
+          progressed = true;
+        }
+        const next = app.pending[0];
+        if (ended && (await requeueWithdrawn(tx, chat))) {
+          progressed = true;
+        } else if (ended && (await tx.doc(InboxDoc, chat)).items.some((item) => item.mode !== 'write')) {
+          // pi-durable withdrew a failed run's queue above; one still queued is behind a run whose task faulted.
+          await countRequeued(tx, chat);
+          withdraw = true;
+        } else if (app.stop > app.stopped) {
+          if (projection.caughtUp) {
+            stop = app.stop;
+            // A withdrawn input was never handed to the model, so it never enters memory.
+            for (const id of app.stopPending) {
+              const input = await storedInput(tx, chat, id);
+              input.phase = 'cancelled';
+              input.envelope = null;
+            }
+            app.pending = app.pending.filter((id) => !app.stopPending.includes(id));
+            app.stopPending = [];
+            app.revision++;
+            progressed = true;
+          }
+        } else if (app.resume !== null) {
+          // A Continue is submitted after this commit, as a fresh input is, with the signal that tells of its end.
+          if (projection.caughtUp) resume = app.resume;
+        } else if (next !== undefined) {
+          const input = await storedInput(tx, chat, next);
+          if (input.kind === 'note' && projection.caughtUp) {
+            await appendMessage(tx, chat, {
+              kind: 'note',
+              text: textOf(input.content),
+              date: input.date,
+              images: imagesOf(input.content),
+              source: `input:${input.requestId}`,
+            }, false);
+            input.phase = 'submitted';
+            app.pending.shift();
+            app.revision++;
+            progressed = true;
+          } else if (!input.fresh) {
+            if (projection.caughtUp) {
+              // A message sent while a turn runs goes to it as it is, between its tool calls: admitted as a steer in
+              // this commit, which checks the run, so it never starts a run of its own (pi-durable example 34).
+              // Before this commit's first table write; a known request ID, one submitted before a crash, returns
+              // its submission.
+              await settleViews(tx, chat);
+              try {
+                const key = nativeRequest(input);
+                await conversation.submit(tx, {
+                  type: 'input',
+                  requestId: key,
+                  content: input.content,
+                  whenBusy: 'steer',
+                  whenIdle: 'reject',
+                  entry: { kind: DeliveryEntry.kind, data: { requestId: input.requestId, kind: input.kind } },
+                  notify: { taskId: task.id, key },
+                });
+                if (!coordinating.settling.includes(key)) coordinating.settling.push(key);
+                input.phase = 'submitted';
+                input.envelope = null;
+                app.pending.shift();
+                app.started = true;
+                app.revision++;
+              } catch (error) {
+                if (!(error instanceof ConversationIdle)) throw error;
+                // Its turn ended before it reached it, so it starts the next, with the inputs after it.
+                await carryOver(tx, chat, app.requests.filter((id) => app.pending.includes(id)));
+              }
+              progressed = true;
+            }
+          } else if (input.phase === 'prepared') {
+            dispatchId = input.requestId;
+          } else if (!read) {
+            // Accepted after the turn state was skipped: the next run reads it.
+            progressed = true;
+          } else if (projection.caughtUp && (await memoryReady(tx, chat))) {
+            await settleViews(tx, chat);
+            // The view is frozen here; the original enters memory once pi-durable places the delivery.
+            input.envelope = envelope(await renderMain(tx, chat), input.content, state, await placeOf(tx, chat));
+            input.phase = 'prepared';
+            app.started = true;
+            app.revision++;
+            await tx.appendEntry(ResetEntry, chat, { head: 'self' });
+            dispatchId = input.requestId;
+            progressed = true;
+          }
+        }
+        const launched = await pumpBuilds(tx, chat);
+        if (launched.length > 0) progressed = true;
+        // A fresh turn is submitted after this commit: an idle admission places its input at once, after the reset
+        // this commit appends, and `submit(tx)` must come before a commit's table writes (durable
+        // `src/harness/submissions.ts`). So the preparation is checkpointed first.
+        if (dispatchId !== undefined || resume !== undefined || withdraw || progressed) {
+          return { status: 'running', checkpoint: after(1) };
+        }
+        // Nothing to do until something changes. With no turn open or closing, the agent rests: its next message
+        // starts a coordinator of its own.
+        const inbox = await tx.doc(InboxDoc, chat);
+        if (!turnOpen(app) && app.stopped >= app.stop && !running
+          && inbox.items.every((item) => item.mode === 'write')) {
+          coordinating.task = null;
+          return { status: 'terminal', outcome: { status: 'completed', result: null } };
+        }
+        // A run that tells this task nothing of its end is waited for by its task, round after round.
+        if (live.run !== undefined && coordinating.settling.length === 0) {
+          return { status: 'waiting', checkpoint: after(1), on: [live.run.taskId], policy: 'allSettled' };
+        }
+        return {
+          status: 'sleeping',
+          checkpoint: after(1),
+          signals: [Wake.key(wakeKey(coordinating.key)),
+            ...coordinating.settling.map((key) => SubmissionSettled.key(key))],
+        };
+      }, context);
+      if (withdraw) {
+        // With no run, an abort only withdraws the queued inputs.
+        await conversation.abort(context);
+        await runtime.commit(async (tx) => {
+          await requeueAborted(tx, chat);
+          return { status: 'running', checkpoint: after(2) };
+        }, context);
+      } else if (stop) {
+        await conversation.abort(context);
+        await runtime.commit(async (tx) => {
+          const app = await tx.doc(AppDoc, chat);
+          app.stopped = stop;
+          app.revision++;
+          return { status: 'running', checkpoint: after(2) };
+        }, context);
+      } else if (resume !== undefined) {
+        const requestId = resume;
+        // A known request ID, one submitted before a crash, returns its submission. A run something else started
+        // refuses it: that run is then the turn's, waited for by its task.
+        const submitted = await conversation.submit(
+          { type: 'continue', requestId, notify: { taskId: task.id, key: requestId } }, context,
+        ).then(() => true, (error: unknown) => {
+          if (error instanceof ConversationBusy) return false;
+          throw error;
+        });
+        await runtime.commit(async (tx) => {
+          const app = await tx.doc(AppDoc, chat);
+          if (app.resume === requestId) app.resume = null;
+          const { settling } = await tx.doc(CoordinatorDoc, chat);
+          if (submitted && !settling.includes(requestId)) settling.push(requestId);
+          app.revision++;
+          return { status: 'running', checkpoint: after(2) };
+        }, context);
+      } else if (dispatchId !== undefined) {
+        const requestId = dispatchId;
+        // The prepared admission is read back committed: a draft is not readable after its commit.
+        const prepared = (await runtime.snapshot(InputDoc, chat, requestId, context))?.value;
+        if (!prepared?.envelope) throw new Error(`Prepared input has no envelope: ${requestId}`);
+        const key = nativeRequest(prepared);
+        await conversation.submit({
+          type: 'input',
+          requestId: key,
+          content: prepared.envelope,
+          whenBusy: 'steer',
+          entry: { kind: DeliveryEntry.kind, data: { requestId, kind: prepared.kind } },
+          notify: { taskId: task.id, key },
+        }, context);
+        await runtime.commit(async (tx) => {
+          const app = await tx.doc(AppDoc, chat);
+          const saved = await storedInput(tx, chat, requestId);
+          saved.phase = 'submitted';
+          saved.envelope = null;
+          const position = app.pending.indexOf(requestId);
+          if (position >= 0) app.pending.splice(position, 1);
+          const { settling } = await tx.doc(CoordinatorDoc, chat);
+          if (!settling.includes(key)) settling.push(key);
+          app.revision++;
+          return { status: 'running', checkpoint: after(2) };
+        }, context);
       }
     },
   },
-  async abort(_task, runtime, context) {
-    await runtime.commit(() => ({ status: 'terminal', outcome: { status: 'aborted' } }), context);
+  async abort(task, runtime, context) {
+    await runtime.commit(async (tx) => {
+      const coordinating = await tx.doc(CoordinatorDoc, runtime.conversationId);
+      if (coordinating.task === task.id) coordinating.task = null;
+      return { status: 'terminal', outcome: { status: 'aborted' } };
+    }, context);
   },
 });
 
@@ -733,6 +792,13 @@ export type OptChatParts = {
   /** `tell` and `spawn`, which the model is offered itself beside a tool `offer` names. */
   readonly voice: readonly ToolRegistration[];
   readonly scheduled: ReturnType<typeof scheduledTask>;
+  /** Admits an input to an agent's chat, and wakes its coordinator or starts one for its turn (`wake`). */
+  readonly admit: typeof admitInput;
+  /**
+   * Wakes the agent's coordinator, or starts one for the turn the caller's commit opened: once in a commit, before
+   * its first table write, and in no commit that admits a submission.
+   */
+  readonly wake: (tx: Tx, conversationId: ConversationId) => Promise<void>;
 };
 
 export type OptChatOptions = {
@@ -804,19 +870,30 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
   const coordinator = coordinatorTask(turnState);
   const init = async (tx: Tx, conversationId: ConversationId) => {
     await tx.doc(MemoryDoc, conversationId);
-    const app = await tx.doc(AppDoc, conversationId);
-    app.coordinator = await tx.createTask(coordinator, {}, {
+    await tx.doc(AppDoc, conversationId);
+  };
+  const wake = async (tx: Tx, conversationId: ConversationId) => {
+    // One that ended, or that pi-durable ended for a fault, takes no signal: the turn gets its own.
+    if (await rouse(tx, conversationId)) return;
+    const coordinating = await tx.doc(CoordinatorDoc, conversationId);
+    coordinating.task = await tx.createTask(coordinator, {}, {
       conversationId,
       ownership: { kind: 'conversation' },
       background: true,
     });
+    coordinating.key = 0;
+    coordinating.settling = [];
   };
-  const scheduled = scheduledTask((tx, id, input) => admitInput(tx, id, { ...input, kind: 'work' }));
+  const admit: typeof admitInput = async (tx, chat, input) => {
+    await admitInput(tx, chat, input);
+    await wake(tx, chat);
+  };
+  const scheduled = scheduledTask((tx, id, input) => admit(tx, id, { ...input, kind: 'work' }));
   // What only root has, an extension of its own, which a child's conversation goes without: nothing wakes a child
   // but a message.
   const schedule = scheduleTools(ROOT_CONVERSATION_ID, scheduled, options.harness);
   const master: Extension = defineExtension({ name: 'optchat.master', tools: schedule });
-  const tree = agentTools({ master: () => master, init, admit: admitInput });
+  const tree = agentTools({ master: () => master, init, admit });
   const tools: ToolRegistration[] = [...memoryTools(), ...(options.tools ?? []), ...Object.values(tree)];
   const policy = toolPolicy([...tools, ...schedule], async (call, api, ctx) => {
     const { conversationId } = api;
@@ -840,7 +917,7 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
     }),
     master, policy, ...(options.extensions ?? []),
   ];
-  return { name, extensions, init, voice: [tree.tell, tree.spawn], scheduled };
+  return { name, extensions, init, voice: [tree.tell, tree.spawn], scheduled, admit, wake };
 }
 
 /**
@@ -849,7 +926,7 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
  * and Resume"): a fixed registry right away, a machine's server once its plugins have loaded.
  */
 export async function openOptChat(storage: Storage, options: OptChatOptions, context: Context): Promise<OptChat> {
-  const { init, voice, scheduled } = options.parts;
+  const { init, voice, scheduled, admit, wake } = options.parts;
   const opened = await Harness.open(storage, {
     models: options.models,
     registry: options.registry,
@@ -867,8 +944,9 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       // An input queued behind a failed run starts a fresh turn, as UniiChat's next call takes it, never the failed
       // turn's context.
       afterFailedRun: 'withdraw',
-      // A coordinator is stored running while idle, so every iOS kill of the app would count toward the restart
-      // limit, which ends a task that reaches it (durable README "Crash loops").
+      // On a phone every iOS kill of the app counts toward the restart limit for whatever task ran then, and
+      // pi-durable ends a task of ours that reaches it with no code of ours run (durable README "Crash loops"): a
+      // summary's build ended so would keep its place among the builds, and its line would never be written.
       restartLimit: Infinity,
     },
   }, context);
@@ -903,7 +981,7 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
     async accept(input) {
       if (!input.requestId) throw new Error('Provide a stable request ID for each original input');
       const date = new Date(input.date ?? Date.now()).toISOString();
-      await opened.commit((tx) => admitInput(tx, root.id, { ...input, kind: input.kind ?? 'user', date }), context);
+      await opened.commit((tx) => admit(tx, root.id, { ...input, kind: input.kind ?? 'user', date }), context);
       return input.requestId;
     },
     async setInstructions(tx, text) {
@@ -922,18 +1000,18 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
       }, context);
     },
     async continue(agent = root.id) {
-      const conversation = await opened.conversation(agent, context);
-      if (!conversation) throw new Error('That agent has no conversation.');
+      if (!await opened.conversation(agent, context)) throw new Error('That agent has no conversation.');
       await opened.commit(async (tx) => {
         const app = await tx.doc(AppDoc, agent);
         if (turnOpen(app)) throw new Error('The agent is still finishing its turn. Try again in a moment.');
-        // Admitted in this commit, before its table writes, with the turn it opens (pi-durable's
-        // `34-submit-in-commit.ts`); a run at work refuses it with `ConversationBusy`.
-        await conversation.submit(tx, { type: 'continue' });
+        // The turn opens here, and its coordinator submits the Continue, as it submits a fresh input: the run then
+        // tells it of its end, and a commit cannot both admit a submission and wake a task.
         app.open = true;
         app.started = true;
         app.requests = [];
         app.revision++;
+        app.resume = `optchat:continue:${app.epoch}:${app.revision}`;
+        await wake(tx, agent);
       }, context);
     },
     async abort(agent = root.id) {
@@ -948,9 +1026,17 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
         app.open = false;
         app.started = false;
         app.requests = [];
+        app.resume = null;
         app.revision++;
+        await wake(tx, agent);
         return app.stop;
       }, context);
+      // A coordinator that waits for a run it did not submit hears no signal before the run's task ends, so the stop
+      // ends that run here; the coordinator then makes the stop as any other.
+      const coordinator = (await opened.snapshot(CoordinatorDoc, agent, context))?.task;
+      if (coordinator && (await opened.getTask(coordinator, context))?.state.status === 'waiting') {
+        await (await opened.conversation(agent, context))?.abort(context);
+      }
       const watch = await opened.watchDoc(AppDoc, agent, context);
       if (!watch) throw new Error('OptChat application state is missing');
       const cancellation = new AbortController();
@@ -994,9 +1080,14 @@ export async function openOptChat(storage: Storage, options: OptChatOptions, con
   };
 }
 
+/** Rejects when the turn's coordinator ends any other way than done: one that is done, or gone, made the stop. */
 async function coordinatorFailure(harness: Harness, chat: ConversationId, context: Context): Promise<never> {
-  const app = await harness.snapshot(AppDoc, chat, context);
-  if (!app?.coordinator) throw new Error('OptChat has no coordinator task');
-  const task = await harness.waitForTask(app.coordinator, context);
-  throw new Error(`OptChat coordinator ended: ${JSON.stringify(task.state.outcome)}`);
+  const coordinator = (await harness.snapshot(CoordinatorDoc, chat, context))?.task;
+  if (coordinator) {
+    const task = await harness.waitForTask(coordinator, context);
+    if (task.state.outcome.status !== 'completed') {
+      throw new Error(`OptChat coordinator ended: ${JSON.stringify(task.state.outcome)}`);
+    }
+  }
+  return new Promise<never>(() => {});
 }

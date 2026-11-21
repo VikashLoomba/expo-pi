@@ -7,7 +7,7 @@ import {
 /**
  * UniiChat's tree of agents (VictorTaelin/UniiChat ff32319, a commit its author pushed to `main` and withdrew the same
  * day; Server.ts `Unii.tell`, `spawn`, `hide` and `Tools.place`). Every agent is a conversation with a chat of its own
- * that never ends: its memory, its coordinator and its summaries, as the root's are. The user talks to `root`; an
+ * that never ends: its memory, its turns' coordinators and its summaries, as the root's are. The user talks to `root`; an
  * agent talks only to its parent and its children, by `tell`, and its final reply stays in its own chat.
  *
  * The owner's changes (2026-11-18): an agent works in a folder of its own on a device, as agents here always have,
@@ -113,7 +113,7 @@ export const AgentCallDoc = defineDocFamily<{ result: string | null }, null>({
 export type AgentSetup = {
   /** The extension only root has, which a child's conversation goes without. */
   master: () => Extension;
-  /** Gives a new conversation its chat: its memory and its coordinator. */
+  /** Gives a new conversation its chat: its memory and its application state. */
   init: (tx: Tx, conversationId: ConversationId) => Promise<void>;
   /** Admits a message to an agent's chat in the caller's commit: it wakes the agent, or reaches its running turn. */
   admit: (tx: Tx, conversationId: ConversationId, input: {
