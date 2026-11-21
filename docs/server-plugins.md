@@ -260,6 +260,12 @@ through Durable's own `registryReader`. Chord orders the table by plugin name: o
 extension of one name the first by name is installed, and the other is reported in the reply and left out, as is one
 Durable refuses.
 
+InfiniChat's facet also contributes pi-durable's own `fit-images` extension (`createFitImagesExtension`, durable
+`test/examples/47-fit-images.ts`) with the machine's Photon processor, the one `read` uses: the images in a result
+the model gets, a script's `image()` of an MCP tool's screenshot for one, are fitted to its model's limits before the
+result is stored, and the result says by what factor to scale coordinates back. Without it such an image reached
+the provider as the tool made it.
+
 At shutdown the host closes its links, then ends its objects, the last to go live first. A running script finds its
 sandbox closed and waits for the Harness's abort, so it resumes at the next start (durable
 `src/codemode/codemode.ts`); an MCP server closes once its calls settle, which the Harness's close aborts.

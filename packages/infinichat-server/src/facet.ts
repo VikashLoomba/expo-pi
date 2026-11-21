@@ -4,9 +4,10 @@ import { constant, defineFacet, local, untilAborted, type AcceptsTable, type Ctx
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
 import { registryReader } from '@earendil-works/pi-durable';
+import { createFitImagesExtension } from '@earendil-works/pi-durable/images/fit';
 import type { Static } from '@earendil-works/pi-schema';
 import { fileCredentialBackend, openAILoginOptions } from '@pi-agent/infinichat/node/credentials';
-import { serverDevices } from '@pi-agent/infinichat/node/devices';
+import { serverDevices, serverImages } from '@pi-agent/infinichat/node/devices';
 import { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
 import type { ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
@@ -135,14 +136,18 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
   };
   // This machine, holding the chat, then the other machines: the device tools' devices and the conversation's
   // environment.
+  const images = serverImages();
   const devices = serverDevices(() => ({ name: proc.device, description: proc.description }), () => {
     if (machinesOpen === undefined) throw new Error('This machine’s connections are not open yet.');
     return machinesOpen;
-  });
+  }, images);
   const parts = infiniChatExtensions(devices, () => conversationOpen?.current?.harness, report);
   // From the facet, so the table holds them before the Harness opens (a task whose definition is missing stays
-  // blocked, design §24). With them, what only a machine's agents have: how they extend this server.
-  facet.contribute(Extensions, [...parts.extensions, extending(proc)]);
+  // blocked, design §24). With them, what only a machine's agents have: how they extend this server, and pi-durable's
+  // own fitting of the images a call's result holds to the agent's model, before the result is stored (durable
+  // `test/examples/47-fit-images.ts`). A machine's images come from MCP tools and from scripts (`image()`), which no
+  // tool of InfiniChat's fits, as `read` fits its own.
+  facet.contribute(Extensions, [...parts.extensions, createFitImagesExtension(images), extending(proc)]);
   host.serve(Extensions, { compose: composeExtensions });
 
   host.serve(InfiniChatMachine, (_params, self) => {
