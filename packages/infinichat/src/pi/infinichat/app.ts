@@ -457,17 +457,19 @@ function envelope(view: string, content: UserInput, turnState: string, where: st
   ];
 }
 
-/** The agent's place as its turn starts (`place`): a child is awake while its turn runs or waits to. */
+/**
+ * The agent's place as its turn starts (`place`). A child is awake while its turn runs or waits to, as UniiChat's
+ * `busy`: while its turn's coordinator lives, which is what the screens' list of agents shows too (`AgentList`).
+ */
 async function placeOf(tx: Tx, chat: ConversationId): Promise<string> {
   const tree = await tx.doc(TreeDoc, ROOT_CONVERSATION_ID);
   const name = agentNamed(tree.agents, chat);
   if (name === undefined) throw new Error('This conversation is no agent of the tree');
   const awake = new Set<string>();
   for (const child of tree.agents[name].children) {
-    const { conversationId } = tree.agents[child.name];
-    if ((await tx.doc(LiveDoc, conversationId)).run || turnOpen(await tx.doc(AppDoc, conversationId))) {
-      awake.add(child.name);
-    }
+    const { task } = await tx.doc(CoordinatorDoc, tree.agents[child.name].conversationId);
+    const coordinator = task === null ? undefined : await tx.task(task);
+    if (coordinator !== undefined && coordinator.state.status !== 'terminal') awake.add(child.name);
   }
   return place(tree, name, awake);
 }
@@ -501,6 +503,8 @@ const RoundEnd = defineTask<null, { phase: 'log' }, null>({
 });
 
 type CoordinatorState = { phase: 'coordinate'; tick: number };
+/** The coordinator's registered kind: an agent is awake while a task of it lives in its conversation. */
+export const COORDINATOR_TASK = 'optchat.coordinator';
 /**
  * One turn's coordinator, as UniiChat's turn (Server.ts `Unii.turn`): the commit that admits a message to an agent at
  * rest starts it (`wake` in `optChatParts`), and it ends in the commit that finds nothing left to do, so only a
@@ -513,7 +517,7 @@ type CoordinatorState = { phase: 'coordinate'; tick: number };
 const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
   Record<string, never>, CoordinatorState, null
 >({
-  name: 'optchat.coordinator',
+  name: COORDINATOR_TASK,
   version: 2,
   // Version 1 lived as long as its conversation and waited on document watches; its checkpoint is this one's.
   migrate: (_input, checkpoint) => ({ input: {}, checkpoint: checkpoint as CoordinatorState }),

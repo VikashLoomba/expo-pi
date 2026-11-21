@@ -3,10 +3,14 @@ import type { ConversationId, DocumentWatch, Harness, TaskGraphWatch } from '@ea
 import { bool, nul, obj, str, union, type Static } from '@earendil-works/pi-schema';
 
 import { ROOT, TreeDoc, type Tree } from './infinichat/agents';
+import { COORDINATOR_TASK } from './infinichat/app';
 
 const context = BACKGROUND_CONTEXT;
 
-/** An agent of the tree as the screens list it: `parent` is null for root, and `awake` says its turn runs. */
+/**
+ * An agent of the tree as the screens list it: `parent` is null for root, and `awake` says its turn runs or waits
+ * to, from the message that woke it until its turn is closed.
+ */
 export const AgentInfoSchema = obj({
   name: str(), description: str(), parent: union([str(), nul()]), awake: bool(),
 }, { open: true });
@@ -15,7 +19,8 @@ export type AgentInfo = Static<typeof AgentInfoSchema>;
 /**
  * The tree of agents as the screens show it, as UniiChat's views list its uniis: root first, each agent before its
  * children in spawn order, a hidden one and its children left out. It follows the tree's document and pi-durable's
- * task graph, where an agent's turn is the live work of its conversation that is not background.
+ * task graph, where an agent is awake while its turn's coordinator lives, as UniiChat's `awake` is its `busy`: what
+ * a turn's own message tells an agent of its children too (`placeOf`).
  */
 export class AgentList {
   private tree?: DocumentWatch<Tree>;
@@ -71,12 +76,12 @@ export class AgentList {
   private read() {
     const tree = this.tree?.value;
     if (this.closed || tree === undefined) return;
-    const working = new Set(Object.values(this.graph?.value.tasks ?? {})
-      .flatMap((task) => task.background ? [] : [task.conversationId]));
+    const awake = new Set(Object.values(this.graph?.value.tasks ?? {})
+      .flatMap((task) => task.kind === COORDINATOR_TASK ? [task.conversationId] : []));
     const agents: AgentInfo[] = [];
     const visit = (name: string) => {
       const { conversationId, parent, description, children } = tree.agents[name];
-      agents.push({ name, description, parent, awake: working.has(conversationId) });
+      agents.push({ name, description, parent, awake: awake.has(conversationId) });
       for (const child of children) if (!child.hidden) visit(child.name);
     };
     visit(ROOT);
