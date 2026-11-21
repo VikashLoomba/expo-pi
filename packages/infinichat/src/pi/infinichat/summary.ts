@@ -311,6 +311,8 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
             return { status: 'sleeping', checkpoint: { phase: 'retry', attempt, retries: retries + 1, until }, until };
           }
           await release(tx, r.conversationId, task.input.ref, task.id);
+          // Its place among the builds goes to the next one ready.
+          await pumpBuilds(tx, r.conversationId);
           return { status: 'terminal', outcome: { status: 'failed', error: { message } } };
         }
         await stallBuilds(tx, r.conversationId, null);
@@ -339,6 +341,9 @@ export const BuildNode = defineTask<{ ref: NodeRef }, Phase, string>({
           bytes: bytes(d.shortest),
           builder: task.id,
         });
+        // As UniiChat's memory pumps itself when a summary is made (Memory.ts `job`): the merge this one made ready,
+        // and the next one waiting for a place, start in the commit that publishes it.
+        await pumpBuilds(tx, r.conversationId);
         return { status: 'terminal', outcome: { status: 'completed', result: key(task.input.ref) } };
       }, ctx);
     },

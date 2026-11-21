@@ -5,20 +5,34 @@ import {
   createModels, fauxAssistantMessage, fauxProvider, fauxText, type TranscriptContext,
 } from '@earendil-works/pi-ai';
 import {
-  Harness, MemoryStorage, createRegistry, defineExtension, type HarnessSettings,
+  Harness, MemoryStorage, createRegistry, defineExtension, defineTask, type HarnessSettings,
 } from '@earendil-works/pi-durable';
 
 import {
-  MemoryDoc, MessageDoc, NodeDoc, advanceMessageProgress, appendMessage, clipToolText, renderCompaction, renderMain,
+  MemoryDoc, MessageDoc, NodeDoc, advanceMessageProgress, appendMessage, clipToolText, publishNode, renderCompaction,
+  renderMain,
 } from '../src/pi/infinichat/memory';
 import { BuildNode, ConfigDoc, pumpBuilds } from '../src/pi/infinichat/summary';
+
+/** A task to name as the builder of a line a test publishes itself, as the guide's tests name one. */
+const Publisher = defineTask<null, { phase: 'done' }, string>({
+  name: 'memory-tests.publisher',
+  version: 1,
+  initial: () => ({ phase: 'done' }),
+  phases: {
+    done: (_task, runtime, context) =>
+      runtime.commit(() => ({ status: 'terminal', outcome: { status: 'completed', result: 'done' } }), context),
+  },
+  abort: (_task, runtime, context) =>
+    runtime.commit(() => ({ status: 'terminal', outcome: { status: 'aborted' } }), context),
+});
 
 async function fixture(settings?: HarnessSettings) {
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
   const registry = createRegistry();
-  registry.install(defineExtension({ name: 'memory-tests', tasks: [BuildNode] }));
+  registry.install(defineExtension({ name: 'memory-tests', tasks: [BuildNode, Publisher] }));
   const h = await Harness.open(new MemoryStorage(), { models, registry, settings }, ctx);
   const model = { provider: 'faux', modelId: faux.getModel().id };
   const root = await h.root(ctx, {
@@ -37,8 +51,10 @@ async function fixture(settings?: HarnessSettings) {
   const drain = async () => {
     for (;;) {
       const ids = await pump();
-      if (!ids.length) return;
-      await Promise.all(ids.map((id) => h.waitForTask(id, ctx)));
+      // A build starts the ones it made ready itself, so those under way are waited for too.
+      const active = Object.values((await h.snapshot(MemoryDoc, root.id, ctx))?.active ?? {});
+      if (!ids.length && !active.length) return;
+      await Promise.all([...ids, ...active].map((id) => h.waitForTask(id, ctx)));
     }
   };
   return { h, root, faux, add, pump, drain };
@@ -168,15 +184,20 @@ test('with the Harness\'s retries off, failed leaves keep their places until the
 test('64 builds start at once, up to the 64th unbuilt leaf, in message order, a merge first at a tie', async () => {
   const f = await fixture();
   try {
-    // Two long messages built: their merge's context ends where the next leaf's does.
+    // Two long messages with their lines published, as a build publishes one, by no build: a build would start their
+    // merge itself. Their merge's context ends where the next leaf's does.
     await f.add('first '.repeat(200));
     await f.add('second '.repeat(200));
-    f.faux.setResponses([fauxAssistantMessage('a'.repeat(300)), fauxAssistantMessage('b'.repeat(300))]);
-    const leaves = await f.pump();
-    await Promise.all(leaves.map((id) => f.h.waitForTask(id, ctx)));
+    const builder = await f.h.commit((tx) => tx.createTask(Publisher, null,
+      { conversationId: f.root.id, ownership: { kind: 'conversation' }, background: true }), ctx);
+    await f.h.commit(async (tx) => {
+      await publishNode(tx, f.root.id, { ref: [0, 0], text: 'a'.repeat(300), bytes: 300, builder });
+      await publishNode(tx, f.root.id, { ref: [0, 1], text: 'b'.repeat(300), bytes: 300, builder });
+    }, ctx);
     assert.deepEqual((await f.h.snapshot(MemoryDoc, f.root.id, ctx))?.readyParents, [[1, 0]]);
     for (let i = 0; i < 70; i++) await f.add('long '.repeat(200));
-    f.faux.setResponses(Array.from({ length: 64 }, () => fauxAssistantMessage([fauxText('built')])));
+    // Enough answers for the 64 and for the builds those start as they finish.
+    f.faux.setResponses(Array.from({ length: 200 }, () => fauxAssistantMessage([fauxText('built')])));
     const ids = await f.pump();
     assert.equal(ids.length, 64);
     const s = await f.h.snapshot(MemoryDoc, f.root.id, ctx);

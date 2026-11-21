@@ -2,8 +2,8 @@ import { awaitWithContext, withAbortSignal, type Context } from '@earendil-works
 import type { JsonRepresentation } from '@earendil-works/chord/json';
 import type { ImageContent, Models } from '@earendil-works/pi-ai';
 import {
-  AgentDoc as NativeAgentDoc, ConversationIdle, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID, ResetEntry,
-  configure, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask, section,
+  AgentDoc as NativeAgentDoc, ConversationIdle, GenerationTask, Harness, InboxDoc, LiveDoc, ROOT_CONVERSATION_ID,
+  ResetEntry, configure, defineDoc, defineDocFamily, defineEntry, defineExtension, defineTask, hook, hookTask, section,
   type Conversation, type ConversationId, type ConversationInit, type EntryId, type EnvTarget, type Extension,
   type HarnessOptions, type RegistryReader, type Storage, type SubmissionId, type SubmissionRecord,
   type TaskId, type ToolHookCall, type ToolRegistration, type Tx, type UserInput,
@@ -454,6 +454,34 @@ async function placeOf(tx: Tx, chat: ConversationId): Promise<string> {
   return place(tree, name, awake);
 }
 
+/**
+ * Logs a tool round as it ends, in a task its generation waits for (pi-durable `docs/spec.md` §7.2, `afterTools`; its
+ * `test/examples/46-after-tools-terminate.ts` asks for a task there): the round's calls and results enter memory, and
+ * their summaries start, while the turn runs, as UniiChat logs a call's entries as they are made (Server.ts
+ * `Unii.on`) and its memory starts their summaries (Memory.ts `push`). The turn's last reply has no round after it:
+ * its coordinator logs that.
+ */
+const RoundEnd = defineTask<null, { phase: 'log' }, null>({
+  name: 'optchat.round-end',
+  version: 1,
+  initial: () => ({ phase: 'log' }),
+  phases: {
+    async log(_task, runtime, context) {
+      for (let caughtUp = false; !caughtUp;) {
+        await runtime.commit(async (tx) => {
+          // A page of entries a commit; the last one ends the task.
+          ({ caughtUp } = await projectEntries(tx, runtime.conversationId));
+          if (!caughtUp) return undefined;
+          await pumpBuilds(tx, runtime.conversationId);
+          return { status: 'terminal', outcome: { status: 'completed', result: null } };
+        }, context);
+      }
+    },
+  },
+  abort: (_task, runtime, context) =>
+    runtime.commit(() => ({ status: 'terminal', outcome: { status: 'aborted' } }), context),
+});
+
 type CoordinatorState = { phase: 'coordinate'; tick: number };
 /** `turnState` is the host's; a turn reads it as it starts. */
 const coordinatorTask = (turnState: () => Promise<string>) => defineTask<
@@ -807,7 +835,8 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
         (await read.snapshot(ConfigDoc, ROOT_CONVERSATION_ID, sectionContext))?.name ?? name, hasDeviceTools),
       { tag: false })],
       tools,
-      tasks: [coordinator, BuildNode, AgentAnchor, scheduled],
+      tasks: [coordinator, RoundEnd, BuildNode, AgentAnchor, scheduled],
+      hooks: [hook(GenerationTask, { afterTools: async () => ({ tasks: [hookTask(RoundEnd, null)] }) })],
     }),
     master, policy, ...(options.extensions ?? []),
   ];
