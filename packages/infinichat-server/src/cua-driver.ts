@@ -29,11 +29,11 @@ const SWITCHES = {
 };
 
 /**
- * The one tool of the driver's 66 that code mode's prompt section declares. The section leaves out the tools of the
- * default exposure, and a server none of whose tools it declares gets no heading there (durable
- * `src/codemode/codemode.ts`, `describe.ts`), so the model would learn of the driver only by searching. With its
- * guide declared, the section names the server with Cua's own one-line description, and the guide tells of the rest.
- * The section's budget is shared with InfiniChat's own tools, which the driver's larger tools would crowd out.
+ * The one tool of the driver's 66 that code mode's prompt section declares. The section names every server with its
+ * one-line description (durable `src/codemode/describe.ts`), Cua's own for the driver, and leaves out the tools of
+ * the default exposure, which scripts find by searching. With its guide declared the model can read it without a
+ * search, and the guide tells of the rest. The section's budget is shared with InfiniChat's own tools, which the
+ * driver's larger tools would crowd out.
  */
 const LISTED = { get_guide: 'direct' } as const;
 

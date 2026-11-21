@@ -105,6 +105,8 @@ others: `cua-driver`, which the server adds itself, is the machine's computer us
 - A stdio server has `command`, and optionally `args`, `env` and `cwd`; a leading `~/` in them is the account's home.
   A streamable HTTP server has `url`, and optionally `headers` and `oauth`. SSE is not supported.
 - Both take `enabled`, `description`, `timeout` (seconds per request, 60 by default), `exposure` and `toolExposure`.
+  Every agent's prompt names the server as `mcp__<server>` with the first line of `description`, or else of the
+  instructions the server sends: write one line that says what the server is for.
 - `${NAME}` in `env`, `headers` and `oauth.clientSecret` expands from the server process's environment, which a
   service gets when it starts. A name it lacks skips the server, and the reply names it. A secret can instead be
   written into the file, which stays readable by the account alone (`chmod 600`).

@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 
 // The npm artifact is pinned independently of mutable registry metadata.
-const version = '1.5.2';
-const integrity = 'sha512-yw9dPqPHHP567m7+TDAmuzWC9AU1I3aV3FFdNQlo+UXASYGEIW4QgbYXNTka6Y/Z4+KcifSdgDSiMiTM3ZXBfg==';
+const version = '1.6.0';
+const integrity = 'sha512-UjMM0b75zRDadNXzABfy9gnRO3p8NAWvRBNab5LtnhFYbNJhqnEfOTPASO6LV0Tsrx4HywMEkDchY3bFtICoBw==';
 const tarball = `https://registry.npmjs.org/@earendil-works/pi-env/-/pi-env-${version}.tgz`;
 const targets = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'];
 const root = fileURLToPath(new URL('../', import.meta.url));

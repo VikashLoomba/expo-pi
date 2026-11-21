@@ -1,18 +1,16 @@
-import { createHash } from 'node:crypto';
-
 import { copyJson } from '@earendil-works/chord/json';
 import type { CodemodeSandbox } from '@earendil-works/pi-codemode';
 import { defineExtension, defineTool, type Extension, type ToolRegistration } from '@earendil-works/pi-durable';
-import { createCodemodeExtension, type CodemodeNamespace } from '@earendil-works/pi-durable/codemode';
-import { toLlmContent, type ContentBlock, type Tool } from '@earendil-works/pi-mcp';
+import { createCodemodeExtension } from '@earendil-works/pi-durable/codemode';
+import {
+  createMcpToolName, mcpNamespace, mcpServerSummary, toLlmContent, type ContentBlock, type Tool,
+} from '@earendil-works/pi-mcp';
 import { arr, bool, obj, opt, str, unknown, type Schema } from '@earendil-works/pi-schema';
 import type { McpExposure } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 
 import { toolExposure, type McpServerConfig } from './mcp-config';
 import type { McpServer } from './mcp-server';
 
-/** Provider tool names are at most 64 characters of `[A-Za-z0-9_-]`. */
-const MAX_TOOL_NAME = 64;
 /** The resource tools Codex and opencode use, which the coding agent adds too (`docs/mcp.md` "Use resources"). */
 const LIST_RESOURCES = 'list_mcp_resources';
 const LIST_TEMPLATES = 'list_mcp_resource_templates';
@@ -53,18 +51,6 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 export interface ConnectedServer {
   readonly config: McpServerConfig;
   readonly server: McpServer;
-}
-
-/**
- * `mcp__<server>__<tool>` as the coding agent names it (`src/extensions/mcp/tools.ts:84-93`): everything but
- * `[A-Za-z0-9_]` becomes `_`, so the name is also the identifier scripts call it by, with a hash suffix when it is too
- * long or another tool already took it.
- */
-function toolName(server: string, tool: string, taken: ReadonlySet<string>): string {
-  const name = `mcp__${server}__${tool}`.replace(/[^A-Za-z0-9_]/g, '_');
-  if (name.length <= MAX_TOOL_NAME && !taken.has(name)) return name;
-  const hash = createHash('sha256').update(`${server}\0${tool}`).digest('hex').slice(0, 8);
-  return `${name.slice(0, MAX_TOOL_NAME - hash.length - 1)}_${hash}`;
 }
 
 /**
@@ -219,38 +205,50 @@ function resourceTools(servers: readonly McpServer[], exposure: McpExposure): To
   ];
 }
 
+/** Whether the configuration lets scripts reach any tool of the server: not one whose every tool is hidden. */
+const reachable = ({ exposure, toolExposure: overrides }: McpServerConfig): boolean =>
+  [exposure, ...overrides.map(([, override]) => override)].some((each) => each !== 'hidden');
+
 /**
- * Code mode over `sandbox`, with a namespace per server, the servers' tools as they last listed them, and the resource
- * tools while a server offers resources: fresh extension objects on every call, never one a running phase already
- * holds.
+ * Code mode over `sandbox`; an extension per server, with the server's tools as it last listed them and its
+ * namespace, which is how code mode groups tools (durable README "Code Mode": "one extension per MCP server"); and
+ * the resource tools while a server offers resources. Tools and namespaces are named as pi-mcp names them, so they
+ * rank and group in tool search as the coding agent's do (`createMcpToolName`, `mcpNamespace`), a tool whose name
+ * another took getting the hash suffix. Code mode's section lists every namespace with its one-line summary, also of
+ * a server that has not listed its tools yet, so the prompt stays the same when they arrive; a server none of whose
+ * tools scripts can reach gets no extension, as the coding agent leaves it out of its servers section
+ * (`src/extensions/mcp/index.ts`, `renderServersSection`). Fresh extension objects on every call, never one a running
+ * phase already holds.
  */
 export function serverExtensions(sandbox: CodemodeSandbox, servers: readonly ConnectedServer[]): readonly Extension[] {
   const taken = new Set<string>();
-  const tools: ToolRegistration[] = [];
-  for (const { config, server } of servers) {
+  const perServer = servers.filter(({ config }) => reachable(config)).map(({ config, server }) => {
+    const tools: ToolRegistration[] = [];
     for (const tool of server.tools) {
       const exposure = toolExposure(config, tool.name);
       if (exposure === 'hidden') continue;
-      const name = toolName(config.name, tool.name, taken);
+      const name = createMcpToolName(config.name, tool.name, (candidate) => taken.has(candidate));
       taken.add(name);
       tools.push(mcpTool(server, exposure, tool, name));
     }
-  }
+    const name = mcpNamespace(config.name);
+    return defineExtension({
+      name,
+      namespace: {
+        name,
+        description: mcpServerSummary(config.description, server.instructions),
+        ...(server.instructions === undefined ? {} : { instructions: server.instructions }),
+      },
+      tools,
+    });
+  });
   const readable = servers.filter(({ config, server }) => config.exposure !== 'hidden' && server.hasResources);
   const exposures = new Set(readable.map(({ config }) => config.exposure));
   const widest = (['direct', 'codemode', 'deferred'] as const).find((exposure) => exposures.has(exposure));
-  if (widest !== undefined) tools.push(...resourceTools(readable.map(({ server }) => server), widest));
-  const namespaces: CodemodeNamespace[] = servers.map(({ config, server }) => {
-    const description = config.description ?? server.instructions?.split('\n')[0];
-    return {
-      name: `mcp__${config.name}`,
-      prefix: `mcp__${config.name.replace(/[^A-Za-z0-9_]/g, '_')}__`,
-      ...(description ? { description } : {}),
-      ...(server.instructions === undefined ? {} : { instructions: server.instructions }),
-    };
-  });
+  const resources = widest === undefined ? [] : resourceTools(readable.map(({ server }) => server), widest);
   return [
-    createCodemodeExtension({ sandbox, namespaces }),
-    ...(tools.length === 0 ? [] : [defineExtension({ name: 'mcp', tools })]),
+    createCodemodeExtension({ sandbox }),
+    ...perServer,
+    ...(resources.length === 0 ? [] : [defineExtension({ name: 'mcp', tools: resources })]),
   ];
 }

@@ -1,7 +1,7 @@
 # Server plugins, MCP and code mode
 
-The server uses Pi Durable / Chord **1.5.2**, upstream tag `v1.5.2`, commit
-`b4afddd`. Chord 1.5.1 made Chord v2 the package and removed v1, so the server follows v2's design
+The server uses Pi Durable / Chord **1.6.0**, upstream tag `v1.6.0`, commit
+`faac585`. Chord 1.5.1 made Chord v2 the package and removed v1, so the server follows v2's design
 (`packages/chord/docs/design.md` §3 "The low-level host API", §6 "shared store, per-principal views", §13 natives,
 §17 registries, §21 reload, §24 Durable), its plugins component (`src/node/plugins/README.md`) and Durable's
 `test/examples/37-harness-registry.ts`, with Durable's README sections **Extensions**, **Reload** and **Code Mode**.
@@ -109,6 +109,14 @@ them with `searchTools()`. Durable's `tool_search` is not installed: the model i
 tools are not registered. `toolExposure` overrides it per tool, as pi's coding agent reads it: exact tool names win
 over `*` patterns, and the first matching pattern wins. This is not a separate per-server authorization boundary.
 
+Each server's tools are an extension of their own, which declares the server's namespace, as Durable groups tools
+for code mode (README "Code Mode"; `serverExtensions` in `src/mcp-tools.ts`). Tools and namespaces are named by
+pi-mcp (`createMcpToolName`, `mcpNamespace`): `mcp__<server>__<tool>` and `mcp__<server>`, with `_` for whatever is no
+letter, digit or `_`. Code mode's section names every server scripts can reach, with one line, the first of its
+`description` or else of the instructions it sent (`mcpServerSummary`), also before it has connected, so the prompt
+stays the same when its tools arrive; `describeNamespace()` returns the whole instructions. A server whose every tool
+is `hidden` is not named.
+
 Scripts also get the coding agent's resource tools, `list_mcp_resources`, `list_mcp_resource_templates` and
 `read_mcp_resource`, while a connected, non-hidden server offers resources; their exposure is the widest of those
 servers'. A tool's progress notifications show as its running output. The servers get `~/.infinichat/work`, where the
@@ -117,7 +125,7 @@ past 5 MB).
 
 ## OAuth and `/mcp`
 
-The server's MCP client is pi-mcp 1.5.2, signed in the way pi's coding agent signs in (`docs/mcp.md` "Authenticate with
+The server's MCP client is pi-mcp 1.6.0, signed in the way pi's coding agent signs in (`docs/mcp.md` "Authenticate with
 OAuth", `src/extensions/mcp/oauth.ts`). A streamable HTTP server without an `Authorization` header signs in with OAuth
 when it answers 401: its connection fails as *needs sign-in*, and the user signs in from a client's `/mcp`. The
 optional `oauth` entry takes the coding agent's `clientId`, `clientSecret`, `callbackPort`, `callbackUrl`, `scope`,
@@ -172,11 +180,11 @@ before each `/reload-plugins` reads `mcp.json`, when the account has no `~/.loca
 - The entry runs `~/.local/bin/cua-driver mcp`, the link Cua's updates keep (`cua-driver mcp-config` prints the folder
   of one version), on Linux inside a desktop of its own (below). The driver has 66 tools, which keep the default
   exposure and which scripts find with `searchTools()`, except its guide:
-  `"toolExposure": { "get_guide": "direct" }`. Code mode's prompt section leaves
-  out the tools of the default exposure, and a server with no tool declared there gets no heading, so without this
-  the model learns of a server only by searching. With it the section names `mcp__cua-driver` with Cua's own one-line
-  description and declares `get_guide`, about 240 tokens, and the guide tells of the rest. The section's 3,000-token
-  budget is shared with InfiniChat's own tools, which the driver's larger tools would crowd out.
+  `"toolExposure": { "get_guide": "direct" }`. Code mode's prompt section names `mcp__cua_driver` with Cua's own
+  one-line description, as it names every server, and leaves out the tools of the default exposure. With this it
+  also declares `get_guide`, about 240 tokens, so the model reads the guide without a search, and the guide tells of
+  the rest. The section's 3,000-token budget is shared with InfiniChat's own tools, which the driver's larger tools
+  would crowd out.
 - On macOS the driver's process hands over to Cua's app (`/Applications/CuaDriver.app`), which the system's
   Accessibility and Screen Recording permissions belong to. The server does nothing about them: Cua asks.
 
