@@ -392,14 +392,18 @@ export class MobileRemoteExecutionEnv implements ExecutionEnv {
 			} finally {
 				await handle.close();
 			}
-			// Node's `readdir` fails on any entry it cannot lstat, and libuv sorts names by their bytes on POSIX.
+			// Like `NodeExecutionEnv.listDir`, leave out entries removed between enumeration and lstat; any other entry error
+			// fails the listing (Pi Env 1.6.0). libuv sorts names by their bytes on POSIX.
 			const key = (entry: RemoteDirEntry) => Buffer.from(entry.raw ?? Buffer.from(entry.name, "utf8"));
 			entries.sort((a, b) => Buffer.compare(key(a), key(b)));
 			const infos: FileInfo[] = [];
 			for (const entry of entries) {
 				if (context.abortSignal?.aborted) throw new FileError("aborted", "aborted", resolved);
 				const entryPath = posix.resolve(resolved, entry.name);
-				if ("error" in entry) throw toFileError(new RemoteError(entry.error), entryPath);
+				if ("error" in entry) {
+					if (entry.error.code === "ENOENT") continue;
+					throw toFileError(new RemoteError(entry.error), entryPath);
+				}
 				const info = toInfo(entryPath, entry.info, posix);
 				if (info.ok) infos.push(info.value);
 			}
