@@ -4,7 +4,7 @@ import {
 import { ModelThinkingLevelSchema } from '@earendil-works/pi-ai/providers/model-schema';
 import { arr, bool, num, obj, opt, str, type Static } from '@earendil-works/pi-schema';
 import type { ModelRef } from '@earendil-works/pi-durable';
-import { DEFAULT_IMAGE_LIMITS } from '@earendil-works/pi-durable/tools';
+import { imageLimits } from '@earendil-works/pi-durable/tools';
 
 export type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 
@@ -44,14 +44,12 @@ export const ModelOptionSchema = obj({
 }, { open: true });
 export type ModelOption = Static<typeof ModelOptionSchema>;
 
-/** The limits pi-durable's `read` tool fits an image to for this model: its own, else pi-durable's defaults. */
+/** The limits pi-durable's `read` tool fits an image to for this model, by pi-durable's own `imageLimits`. */
 function imageInput(model: Model<Api>): ImageInput | undefined {
   if (!model.input.includes('image')) return undefined;
   const limits = model.inputLimits?.images;
   return {
-    maxWidth: limits?.resize?.maxWidth ?? DEFAULT_IMAGE_LIMITS.maxWidth,
-    maxHeight: limits?.resize?.maxHeight ?? DEFAULT_IMAGE_LIMITS.maxHeight,
-    maxBytes: limits?.resize?.maxBytes ?? DEFAULT_IMAGE_LIMITS.maxBytes,
+    ...imageLimits(model),
     jpegQuality: limits?.resize?.jpegQuality ?? DEFAULT_JPEG_QUALITY,
     ...(limits?.maxPerMessage === undefined ? {} : { maxPerMessage: limits.maxPerMessage }),
   };
