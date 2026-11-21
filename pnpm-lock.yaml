@@ -169,6 +169,9 @@ importers:
       buffer:
         specifier: 6.0.3
         version: 6.0.3
+      compression-streams-polyfill:
+        specifier: ^0.1.7
+        version: 0.1.7
       expo:
         specifier: ~58.0.17
         version: 58.0.17(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.15)(expo-router@58.0.25)(expo-widgets@58.0.22)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native-worklets@0.13.0(@babel/core@7.29.7)(@react-native/metro-config@0.88.0(@babel/core@7.29.7))(react-native@0.88.0(@babel/core@7.29.7)(@react-native/metro-config@0.88.0(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0))(react-native@0.88.0(@babel/core@7.29.7)(@react-native/metro-config@0.88.0(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
@@ -2841,6 +2844,9 @@ packages:
     resolution: {integrity: sha512-AF3r7P5dWxL8MxyITRMlORQNaOA2IkAFaTr4k7BUumjPtRpGDTZpl0Pb1XCO6JeDCBdp126Cgs9sMxqSjgYyRg==}
     engines: {node: '>= 0.6'}
 
+  compression-streams-polyfill@0.1.7:
+    resolution: {integrity: sha512-Y6VkJzi9JkvmcgDuJ2jJZ5DGljNhUrFBGxx5+gQ2RNg+uPesuRDDL5zN1NTk5NTuynyVkQ4MNip5z37MmtbdpQ==}
+
   compression@1.8.2:
     resolution: {integrity: sha512-o8vI5RE5A6EVVOd9o41jKp41aJom+QTEO/Bx8MYNjexMo/Bv2WOjUfZr+aL0WnYSgymUy6zeguqLTsIhV0gMvQ==}
     engines: {node: '>= 0.8.0'}
@@ -3661,6 +3667,9 @@ packages:
 
   fetch-nodeshim@0.4.10:
     resolution: {integrity: sha512-m6I8ALe4L4XpdETy7MJZWs6L1IVMbjs99bwbpIKphxX+0CTns4IKDWJY0LWfr4YsFjfg+z1TjzTMU8lKl8rG0w==}
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   figures@6.1.0:
     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
@@ -8175,9 +8184,7 @@ snapshots:
       metro-runtime: 0.87.1
     transitivePeerDependencies:
       - '@babel/core'
-      - bufferutil
       - supports-color
-      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89':
     optional: true
@@ -9140,6 +9147,10 @@ snapshots:
   compressible@2.0.18:
     dependencies:
       mime-db: 1.54.0
+
+  compression-streams-polyfill@0.1.7:
+    dependencies:
+      fflate: 0.8.3
 
   compression@1.8.2:
     dependencies:
@@ -10187,6 +10198,8 @@ snapshots:
       web-streams-polyfill: 3.3.3
 
   fetch-nodeshim@0.4.10: {}
+
+  fflate@0.8.3: {}
 
   figures@6.1.0:
     dependencies:

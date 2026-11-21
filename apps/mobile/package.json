@@ -15,6 +15,7 @@
     "@shopify/flash-list": "2.3.2",
     "@strawberrytech/react-native-nitro-zlib": "^0.3.1",
     "buffer": "6.0.3",
+    "compression-streams-polyfill": "^0.1.7",
     "expo": "~58.0.17",
     "expo-asset": "~58.0.18",
     "expo-auth-session": "~58.0.14",

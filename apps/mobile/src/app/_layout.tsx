@@ -1,5 +1,7 @@
 // Installs `crypto.getRandomValues` for Pi before any Pi module can run; side effect only.
 import '@/pi/random-values';
+// Installs the compression streams Chord's session sync moves InfiniChat's conversation with; side effect only.
+import '@/pi/compression-streams';
 
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
