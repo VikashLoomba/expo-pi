@@ -9,6 +9,8 @@ const writeArguments = compile(createWriteTool().parameters);
 const editArguments = compile(edit.parameters);
 /** The edit tool's details as the card shows them; other stored details, such as the patch, stay out. */
 const editDetails = compile(obj({ diff: str(), firstChangedLine: opt(int({ minimum: 1 })) }, { open: true }));
+/** `read`'s details for an image the conversation's model could not take (pi-durable's `ReadToolDetails`). */
+const unseenImage = compile(obj({ imageUnsupportedByModel: str() }, { open: true }));
 /** A line the card can name. */
 const line = compile(int({ minimum: 1 }));
 const lines = (value: number | undefined) => value === undefined || line.check(value);
@@ -34,6 +36,16 @@ export function fileToolPresentation(name: string, args: unknown): FileToolPrese
   if (!editArguments.check(prepared) || !prepared.path || prepared.edits.length === 0) return;
   const count = prepared.edits.length;
   return { kind: name, path: prepared.path, summary: `${count} replacement${count === 1 ? '' : 's'}` };
+}
+
+/**
+ * What a `read` of an image adds to its output on screen when the model then had no image input. pi-durable keeps it
+ * out of the stored result, which a model that takes images may read later, and names the model in the result's
+ * details for UIs to say so.
+ */
+export function unseenImageNote(name: string, details: unknown): string | undefined {
+  if (name !== 'read' || !unseenImage.check(details)) return undefined;
+  return `${details.imageUnsupportedByModel} takes no images, so it was shown a placeholder in place of this one.`;
 }
 
 /** The edit card shows pi's own diff and where it starts. */

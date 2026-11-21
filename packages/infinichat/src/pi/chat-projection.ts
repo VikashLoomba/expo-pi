@@ -12,7 +12,7 @@ import type { ChatMetadata } from './chat-metadata';
 import {
   DEFAULT_LOCAL_ROOT, executionSettings, type ExecutionTargetState, type LocalRoot,
 } from './execution/document';
-import { fileToolPresentation, withFileToolDetails } from './file-tool-presentation';
+import { fileToolPresentation, unseenImageNote, withFileToolDetails } from './file-tool-presentation';
 import type { ChatModelSettings } from './model-catalog';
 import type { SearchPresentationsState } from './native-web-search/documents';
 import { isSearchObservationEntry } from './native-web-search/entries';
@@ -135,9 +135,13 @@ function userRows(message: UserMessage, key: string): ChatMessage[] {
   return [{ id: key, role: 'user', text, createdAt: message.timestamp, ...(images.length ? { images } : {}) }];
 }
 
-/** `read` answers an image file with one image block; the diagnostics that follow it stay the text output. */
+/**
+ * `read` answers an image file with one image block; the diagnostics that follow it stay the text output, and with
+ * them the note that the model could not see it.
+ */
 function toolResultRow(message: ToolResultMessage, key: string, call: ChatMessage | undefined): ChatMessage {
-  const output = textOf(message.content);
+  const note = unseenImageNote(message.toolName, message.details);
+  const output = [textOf(message.content), ...(note === undefined ? [] : [note])].filter(Boolean).join('\n');
   const images = imagesOf(message.content);
   const status = message.isError ? 'error' : 'completed';
   if (!call?.tool) {
