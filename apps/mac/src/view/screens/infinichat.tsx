@@ -46,6 +46,51 @@ const connecting = (machine: string, stage: InstallStage | undefined) => stage =
   : stage === 'starting' ? `Starting InfiniChat on ${machine}…` : `Connecting to ${machine}…`;
 const megabytes = (bytes: number) => (bytes / 1_000_000).toFixed(1);
 
+/** An agent of the tree as the Agents menu reads it; root is the one without a parent. */
+type Agent = { name: string; parent: string | null; awake: boolean };
+const NO_AGENTS: readonly Agent[] = [];
+
+/** How far under root an agent's parent is, which the Agents menu indents by. */
+function depth(agents: readonly Agent[], parent: string | null): number {
+  const above = agents.find((each) => each.name === parent);
+  return above === undefined || above.parent === null ? 0 : 1 + depth(agents, above.parent);
+}
+
+/**
+ * The header's Agents menu: root, then the agents it started and theirs, as UniiChat's views list its tree; choosing
+ * one shows its chat in place of root's. Nothing while root has started none. It is a component of its own for the
+ * list it makes: in the screen's component the React Compiler took that list as still changing down to the menu
+ * that draws it, and gave up the callbacks the screen memoizes (`react-hooks/preserve-manual-memoization`).
+ */
+function AgentsMenu({ agents, rootName, watched, onWatch }: {
+  agents: readonly Agent[]; rootName: string; watched: string | undefined;
+  onWatch: (name: string | undefined) => void;
+}) {
+  const children = agents.filter((each) => each.parent !== null);
+  if (children.length === 0) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm"
+        aria-label={`Agents. Showing ${watched ?? rootName}`} />}>
+        <UsersIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onWatch(undefined)}>
+          {watched === undefined ? <CheckIcon /> : <span className="size-4" />}
+          {rootName}
+        </DropdownMenuItem>
+        {children.map((each) => (
+          <DropdownMenuItem key={each.name} onClick={() => onWatch(each.name)}>
+            {each.name === watched ? <CheckIcon /> : <span className="size-4" />}
+            <span style={{ paddingLeft: `${(depth(agents, each.parent) + 1) * 12}px` }}>{each.name}</span>
+            {each.awake && <span className="text-[11px] text-muted-foreground">working</span>}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /** The step of a move, as the header's subtitle says it (the phone's `moving`), between machines only here. */
 function moving(move: MoveStatus, machine: string, stage: InstallStage | undefined, from: string): string {
   if (move.phase === 'undoing') return 'Cancelling the move…';
@@ -92,15 +137,11 @@ function InfiniChat() {
   const avatar = useWatch(ref.avatar) ?? undefined;
   const catalog = useWatch(ref.catalog);
   const accesses = useWatch(ref.access);
-  // The agents root started, and theirs: the header's menu shows one's chat in place of root's, as UniiChat's views
-  // list its tree. One that left the tree, hidden by its parent, gives way to root's again.
-  const children = (useWatch(ref.agents) ?? []).filter((each) => each.parent !== null);
+  // The agent the header's menu chose, whose chat shows in place of root's. One that left the tree, hidden by its
+  // parent, gives way to root's again.
+  const agents = useWatch(ref.agents) ?? NO_AGENTS;
   const [chosenAgent, setChosenAgent] = useState<string>();
-  const watched = children.some((each) => each.name === chosenAgent) ? chosenAgent : undefined;
-  const depthOf = (parent: string | null): number => {
-    const above = children.find((each) => each.name === parent);
-    return above === undefined ? 0 : 1 + depthOf(above.parent);
-  };
+  const watched = agents.some((each) => each.parent !== null && each.name === chosenAgent) ? chosenAgent : undefined;
   const openSettings = useOpenSettings();
   const openMachines = () => openSettings({ pane: 'machines' });
   const settingsSheet = useSheet();
@@ -244,27 +285,7 @@ function InfiniChat() {
             </span>
           </Button>
           <div className="col-start-3 flex gap-1 justify-self-end [-webkit-app-region:no-drag] [app-region:no-drag]">
-            {children.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm"
-                  aria-label={`Agents. Showing ${watched ?? name}`} />}>
-                  <UsersIcon />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setChosenAgent(undefined)}>
-                    {watched === undefined ? <CheckIcon /> : <span className="size-4" />}
-                    {name}
-                  </DropdownMenuItem>
-                  {children.map((each) => (
-                    <DropdownMenuItem key={each.name} onClick={() => setChosenAgent(each.name)}>
-                      {each.name === watched ? <CheckIcon /> : <span className="size-4" />}
-                      <span style={{ paddingLeft: `${(depthOf(each.parent) + 1) * 12}px` }}>{each.name}</span>
-                      {each.awake && <span className="text-[11px] text-muted-foreground">working</span>}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            <AgentsMenu agents={agents} rootName={name} watched={watched} onWatch={setChosenAgent} />
             <Tooltip>
               <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Scheduled tasks"
                 onClick={scheduledSheet.show} />}>
