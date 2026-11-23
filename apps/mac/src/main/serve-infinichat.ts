@@ -19,6 +19,7 @@ function connection(infinichat: Shown): Connection {
     ...(current.status === 'connecting' && current.stage !== undefined ? { stage: current.stage } : {}),
     ...(current.status === 'failed' ? { error: current.error } : {}),
     ...(current.notice === undefined ? {} : { notice: current.notice }),
+    ...(current.update === undefined ? {} : { update: current.update }),
   };
 }
 
@@ -84,6 +85,7 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         dismissError: async () => done(shown.dismissError()),
         dismissNotice: async () => done(infinichat.dismissNotice()),
         reconnect: async () => done(infinichat.reconnect()),
+        requestUpdate: async () => done(infinichat.requestUpdate()),
         chooseMove: async ({ machineId }) => done(infinichat.chooseMove(machineId)),
         cancelMove: async () => done(infinichat.moves.cancel()),
         retryMove: async () => done(infinichat.moves.retry()),

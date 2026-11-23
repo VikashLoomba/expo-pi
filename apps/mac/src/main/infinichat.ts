@@ -170,6 +170,14 @@ export class MacInfiniChat {
     this.current?.remote.reconnect();
   }
 
+  /**
+   * Asks the server of the machine shown to update itself. It restarts into the newest release, so the connection
+   * closes and comes back by itself; a server that could not be asked rejects.
+   */
+  requestUpdate(): Promise<void> {
+    return this.connected().requestUpdate();
+  }
+
   /** Moves the conversation to the machine, from the one it lives on. */
   chooseMove(machineId: string): void {
     this.moves.choose(machineId);

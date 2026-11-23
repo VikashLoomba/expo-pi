@@ -221,6 +221,13 @@ function InfiniChat() {
       setLocalError(errorText(cause, 'InfiniChat could not be started here. Try again.'));
     }).finally(() => setStarting(false));
   };
+  // The server restarts into its update, so the connection closes and comes back by itself.
+  const updateServer = () => {
+    setLocalError(undefined);
+    void ref.requestUpdate(BACKGROUND_CONTEXT).catch((cause: unknown) => {
+      setLocalError(errorText(cause, 'The update could not be started. Try again.'));
+    });
+  };
   const machines = Object.entries(listed?.machines ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name));
   const failure = !busy && offers.available ? controls?.runFailure : undefined;
   return (
@@ -338,6 +345,13 @@ function InfiniChat() {
         {connection?.notice && !moveNotice && !messageError && (
           <Notice tone="neutral" message={connection.notice} action="Dismiss"
             onAction={() => { void ref.dismissNotice(BACKGROUND_CONTEXT); }} />
+        )}
+        {/* The machine's server is behind the newest release, as the phone's screen says it too. */}
+        {connection?.update && machine && place.at !== 'moving' && !messageError && (
+          <Notice tone="neutral"
+            message={connection.update === 'requested' ? `InfiniChat on ${machineName} is updating and will reconnect.`
+              : `An update is available for InfiniChat on ${machineName}.`}
+            action={connection.update === 'available' ? 'Update' : undefined} onAction={updateServer} />
         )}
         {commandResult && (
           <Notice tone={commandResult.failed ? 'error' : 'neutral'} message={commandResult.text} action="Dismiss"

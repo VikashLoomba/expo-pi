@@ -341,7 +341,7 @@ their contracts' versions, and pi-durable versions what a conversation stores (a
 (`behindNewest`, `infinichat-remote/release.ts`), which it reads from this repository's releases as an install does:
 
 - A connected server behind the newest release is offered its update: the connection says so
-  (`RemoteConnection.update`), and the iPhone's chat screen shows a notice with Update above the input, which asks
+  (`RemoteConnection.update`), and each app's chat screen shows a notice with Update above the input, which asks
   the server to update itself (`requestUpdate`, SIGHUP). The server takes the newest release, restarts, and the app
   connects again. So a release that changes only the server shows in the apps already installed.
 - A server whose contract does not fit the app is asked to update itself when it is behind the newest release. One

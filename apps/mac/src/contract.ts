@@ -55,12 +55,17 @@ export const MacApp = remote('infinichat.mac', {
 export const AttachmentSchema = obj({ ...ChatImageProperties, id: str() });
 export type Attachment = Static<typeof AttachmentSchema>;
 
-/** This app's connection to the machine shown, as `RemoteInfiniChat` reports it; null before a machine is shown. */
+/**
+ * This app's connection to the machine shown, as `RemoteInfiniChat` reports it; null before a machine is shown.
+ * `update` is there while that machine's server is behind the newest published release, and `requested` once it was
+ * asked to update itself, until it restarts into the release.
+ */
 export const ConnectionSchema = union([nul(), obj({
   status: oneOf(['connecting', 'connected', 'failed']),
   stage: opt(oneOf(['connecting', 'checking', 'installing', 'starting'])),
   error: opt(str()),
   notice: opt(str()),
+  update: opt(oneOf(['available', 'requested'])),
 })]);
 export type Connection = Static<typeof ConnectionSchema>;
 /** The machine whose InfiniChat the windows show: its endpoint and its name. */
@@ -85,7 +90,7 @@ export type MoveStatus = Static<typeof MoveStatusSchema>;
  * `ShownInfiniChat` carries them across moves, the connection to that machine, and the operations of its screen.
  */
 export const MacInfiniChat = remote('infinichat.mac.conversation', {
-  version: 3,
+  version: 4,
   params: {},
   hostAddress: () => MacMain(),
   variants: {
@@ -113,6 +118,8 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
         dismissError: method(),
         dismissNotice: method(),
         reconnect: method(),
+        // Asks the server of the machine shown to update itself to the newest release, as the phone's notice does.
+        requestUpdate: method(),
         // Moving the conversation to a listed machine from the one it lives on, as the phone's menu does.
         chooseMove: method(obj({ machineId: str() })),
         cancelMove: method(),
