@@ -12,6 +12,9 @@ const hostApis = {
 
 module.exports = defineConfig([
   expoConfig,
+  // The Expo configuration's React rules ask which React they lint for and look for the package, which this one
+  // never has (`hostApis`), so each run warned that it found none. It is named: the apps'.
+  { settings: { react: { version: '19.3.0' } } },
   {
     files: ['src/**'],
     ignores: ['src/node/**'],
