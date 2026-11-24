@@ -386,12 +386,14 @@ function InfiniChat() {
           attaching={attaching} imagesSupported={configured} commands={INFINICHAT_COMMANDS} onCommand={runCommand} />
         </div>
         )}
-        <SettingsSheet key={settingsSheet.session} open={settingsSheet.open} onClose={settingsSheet.hide}
+        {/* Each sheet mounts afresh at each opening (`useSheet`); siblings, so each key names its sheet. */}
+        <SettingsSheet key={`settings-${settingsSheet.session}`} open={settingsSheet.open} onClose={settingsSheet.hide}
           onOpenProviders={openProviders} />
-        <ProvidersSheet key={providersSheet.session} open={providersSheet.open} onClose={providersSheet.hide}
-          focus={focusProvider} />
-        <ScheduledSheet key={scheduledSheet.session} open={scheduledSheet.open} onClose={scheduledSheet.hide} />
-        <McpSheet key={mcpSheet.session} open={mcpSheet.open} onClose={mcpSheet.hide} />
+        <ProvidersSheet key={`providers-${providersSheet.session}`} open={providersSheet.open}
+          onClose={providersSheet.hide} focus={focusProvider} />
+        <ScheduledSheet key={`scheduled-${scheduledSheet.session}`} open={scheduledSheet.open}
+          onClose={scheduledSheet.hide} />
+        <McpSheet key={`mcp-${mcpSheet.session}`} open={mcpSheet.open} onClose={mcpSheet.hide} />
       </div>
     </ChatAgentContext>
   );
