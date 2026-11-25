@@ -10,6 +10,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { ServerHost, type InfiniChatPrincipal } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { machineIdentity, PLUGIN } from '@pi-agent/infinichat/pi/infinichat-remote/install';
 import { machineDescription } from '@pi-agent/infinichat/pi/infinichat/device-tools';
+import { SecretVault } from '@pi-agent/infinichat/pi/infinichat/secrets';
 
 import { listen } from './listen';
 import { ServerPlugins } from './plugins';
@@ -93,9 +94,11 @@ async function serve(): Promise<number> {
     await mkdir(join(home, 'plugins'), { recursive: true, mode: 0o700 });
     const plugins = new ServerPlugins(host, join(home, 'plugins'));
     closes.push(() => plugins.close());
+    const secrets = new SecretVault();
+    closes.push(() => secrets.close());
     const loaded = Promise.withResolvers<void>();
     const proc: ServerProcess = {
-      home, runtime, device, description, loaded: loaded.promise,
+      home, runtime, device, description, loaded: loaded.promise, secrets,
       fail: (error: unknown) => stopping.resolve({ failed: error }),
       reloadPlugins: () => plugins.reload(),
     };
@@ -104,7 +107,7 @@ async function serve(): Promise<number> {
     // so `/reload-plugins` passes them as they are.
     const failures = await plugins.load([
       { name: '@infinichat/core', facet: infinichat.facet(proc) },
-      { name: '@infinichat/tools', facet: tools(infinichat.version) },
+      { name: '@infinichat/tools', facet: tools(infinichat.version, secrets) },
     ]);
     for (const failure of failures) console.error(failure);
     // Durable resumes once every extension is installed (its `docs/spec.md` §2.2), as chord's design has base code

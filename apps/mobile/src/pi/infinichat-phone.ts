@@ -7,6 +7,7 @@ import {
 } from '@pi-agent/infinichat/pi/infinichat-service';
 import { infiniChatStorage } from '@pi-agent/infinichat/pi/infinichat-store';
 import { infiniChatDevices } from '@pi-agent/infinichat/pi/infinichat/device-tools';
+import { SecretVault } from '@pi-agent/infinichat/pi/infinichat/secrets';
 
 import type { KeepAliveController } from '../keep-alive/controller';
 import type { RemoteExecution } from './execution/remote/owner';
@@ -42,10 +43,11 @@ export async function openPhoneInfiniChat(options: {
   let service: InfiniChatService | undefined;
   const devices = createDevices(options.workspaces, options.remote, () => service?.machines.getSnapshot(),
     options.city);
+  const secrets = new SecretVault();
   // The phone, holding the chat, is also the conversation's environment.
-  const deviceTools = infiniChatDevices(devices, createExpoImages());
+  const deviceTools = infiniChatDevices(devices, createExpoImages(), secrets);
   const parts = infiniChatExtensions(deviceTools, () => service?.harness,
-    (error) => service?.report(error));
+    (error) => service?.report(error), secrets);
   // The phone's code ships inside the app, so its registry is fixed: nothing reloads it, unlike a machine's server.
   const registry = createRegistry();
   for (const extension of parts.extensions) registry.install(extension);
@@ -58,9 +60,11 @@ export async function openPhoneInfiniChat(options: {
       authError: options.authError,
       accountChanges: options.accountChanges,
       env: deviceTools.env,
+      secrets,
       onClosed: options.onClosed,
     });
   } catch (error) {
+    secrets.close();
     await options.store.close(BACKGROUND_CONTEXT).catch(() => {});
     throw error;
   }
@@ -78,6 +82,7 @@ export async function openPhoneInfiniChat(options: {
       try {
         await service.close();
       } finally {
+        secrets.close();
         // Keep-alive stops counting this Harness's work; disposing its task graph after the close is safe.
         detachKeepAlive();
         await options.store.close(BACKGROUND_CONTEXT);

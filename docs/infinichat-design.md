@@ -64,6 +64,12 @@ machine's server is described in `docs/server-plugins.md`.
   The tools are root's alone.
 - **Continue.** A run that ended without an answer can be continued: the host's commit opens the turn and names the
   Continue, and the coordinator submits it, so its end is told as an input's is.
+- **Structured questions and ephemeral credentials (`ask_user`, `SecretVault`).** Any agent in the tree can park
+  on `ask_user` (`ask.ts`, following pi-durable `39-ask-a-person.ts` and `40-tool-waits-for-webhook.ts`) with a batch
+  of `text` and `secret` questions, offered directly beside `codemode`, `tell` and `spawn`. Secret values never enter
+  pi-durable signals, SQLite, Memory, or sync folders: the host keeps them in RAM (`secrets.ts`, 30 min TTL, wiped on
+  clear/relinquish/restart), returns opaque handles (`{{secret:s_...}}`), resolves handles at `bash` (`secrets` env
+  map), `write`, `edit`, and MCP (`mcp-tools.ts`) execution boundaries, and redacts active values across tool outputs.
 - **Code mode and MCP on a machine**, with the images in their results fitted to the model before they are stored
   (`docs/server-plugins.md`).
 - **The conversation moves** between the phone and machines, below.
@@ -126,10 +132,9 @@ What a move costs, on a copy of the owner's conversation (9,535 messages, a 216 
 to send, a turn is about 0.1 MiB, and a hop to another device and back, after the first, sends only the turns made
 there.
 
-**The contract.** `infinichat.remote` is at version 11 for the move: `relinquish` answers where the conversation
-ends and whose folder holds it, `pull` and `adopt` take that head. Apps on versions 8 to 10 keep chatting with a
-newer server, and their move is refused with a message that says to update the app (`docs/server-plugins.md`,
-"Contract versions").
+**The contract.** `infinichat.remote` is at version 12 (`pendingQuestions`, `activeSecrets`, `answerQuestions`,
+`clearSecrets`, added over v11's session-sync move). Apps on versions 8 to 11 keep chatting with a newer server;
+versions 8 to 10 have moves refused with a message to update the app (`docs/server-plugins.md`, "Contract versions").
 
 ## Choices that are the implementer's, for the owner to change
 

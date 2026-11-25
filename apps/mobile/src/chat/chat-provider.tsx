@@ -9,6 +9,8 @@ import type { SignInAttempt } from '@pi-agent/infinichat/pi/infinichat-remote/co
 import { InfiniChatMoves } from '@pi-agent/infinichat/pi/infinichat-remote/move';
 import type { AgentInfo } from '@pi-agent/infinichat/pi/infinichat-agents';
 import type { ScheduledTask } from '@pi-agent/infinichat/pi/infinichat-scheduled';
+import type { PendingQuestionBatch } from '@pi-agent/infinichat/pi/infinichat/ask';
+import type { ActiveSecretInfo } from '@pi-agent/infinichat/pi/infinichat/secrets';
 import type { InfiniChatControls } from '@pi-agent/infinichat/pi/infinichat-view';
 import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/machines';
 import { buildModelCatalog, type ModelCatalog } from '@pi-agent/infinichat/pi/model-catalog';
@@ -640,6 +642,20 @@ export function useScheduledTasks(): readonly ScheduledTask[] | undefined {
   const { infiniChat } = useChatApp();
   return useSyncExternalStore(infiniChat.scheduled.subscribe, infiniChat.scheduled.getSnapshot,
     infiniChat.scheduled.getSnapshot);
+}
+
+/** Parked `ask_user` batches waiting across the agent tree; undefined until read. */
+export function useInfiniChatQuestions(): readonly PendingQuestionBatch[] | undefined {
+  const { infiniChat } = useChatApp();
+  return useSyncExternalStore(infiniChat.questions.subscribe, infiniChat.questions.getSnapshot,
+    infiniChat.questions.getSnapshot);
+}
+
+/** Metadata of user-provided secrets currently live in RAM on the host (never values). */
+export function useInfiniChatSecrets(): readonly ActiveSecretInfo[] {
+  const { infiniChat } = useChatApp();
+  return useSyncExternalStore(infiniChat.secrets.subscribe, infiniChat.secrets.getSnapshot,
+    infiniChat.secrets.getSnapshot);
 }
 
 /** InfiniChat's tree of agents, root first, as the side shown serves it; undefined until read. */

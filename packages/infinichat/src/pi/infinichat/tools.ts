@@ -3,11 +3,12 @@ import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { int, obj, opt, str, union } from '@earendil-works/pi-schema';
 import {
   GenerationTask, ToolTask, defineExtension, defineTool, hook, wrapTool,
-  type HookApi, type ToolHookCall, type ToolRegistration,
+  type HookApi, type ToolExecutionResult, type ToolHookCall, type ToolRegistration,
 } from '@earendil-works/pi-durable';
 import { getOrThrow, type ExecutionEnv } from '@earendil-works/pi-durable/env';
 
 import { MemoryDoc, MessageDoc, NodeDoc, clipToolText, key, nodeLine, shownMessage, type NodeRef } from './memory';
+import type { SecretVault } from './secrets';
 
 const PAGE = 29_000;
 
@@ -143,10 +144,27 @@ function spillPath(value: unknown): string | undefined {
  * bash spill text is decoded from the raw stdout/stderr byte sequence, not
  * reconstructed from separately decoded stream callbacks. Arbitrary tools must
  * return full explicit text; discarded stream bytes cannot be reconstructed. */
+function redactResult(result: ToolExecutionResult, secrets: SecretVault | undefined): ToolExecutionResult {
+  if (!secrets?.hasActive()) return result;
+  return {
+    ...result,
+    ...(result.output === undefined ? {} : {
+      output: result.output.map((part) => part.type === 'text'
+        ? { ...part, text: secrets.redactString(part.text) }
+        : part),
+    }),
+    ...(result.structuredOutput === undefined ? {} : {
+      structuredOutput: secrets.redactJson(result.structuredOutput),
+    }),
+    ...(result.details === undefined ? {} : { details: secrets.redactJson(result.details) }),
+  };
+}
+
 export function toolPolicy(
   tools: readonly ToolRegistration[],
   environment: (call: ToolHookCall, api: HookApi, context: Context) => Promise<ExecutionEnv | undefined>,
   nativeContracts: NativeContracts = {},
+  secrets?: SecretVault,
 ) {
   return defineExtension({
     name: 'optchat.tool-policy',
@@ -159,7 +177,7 @@ export function toolPolicy(
       hook(ToolTask, {
         async afterTool(call, result, api, context) {
           const contract = nativeContracts[call.name];
-          if (contract === 'read') return undefined;
+          if (contract === 'read') return secrets?.hasActive() ? redactResult(result, secrets) : undefined;
           const path = contract === 'bash' ? spillPath(result.structuredOutput)
             : contract === 'codemode' ? spillPath(result.details) : undefined;
           const env = path === undefined ? undefined : await environment(call, api, context);
@@ -169,13 +187,13 @@ export function toolPolicy(
           const text = path !== undefined && env
             ? await clippedSpill(env, path, context)
             : clipToolText(textOf(result.output ?? []));
-          return {
+          return redactResult({
             ...result,
             output: [
               { type: 'text' as const, text },
               ...(result.output ?? []).filter((x): x is ImageContent => x.type === 'image'),
             ],
-          };
+          }, secrets);
         },
       }),
       hook(GenerationTask, {

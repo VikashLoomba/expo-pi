@@ -5,6 +5,7 @@ import {
 } from '@pi-agent/infinichat/chat/commands';
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import { chosenMachine, placement, placementOffers } from '@pi-agent/infinichat/pi/infinichat-remote/placement';
+import { pendingQuestionsBanner } from '@pi-agent/infinichat/pi/infinichat/ask';
 import { getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import type { ProviderAccess } from '@pi-agent/infinichat/pi/provider-credentials';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
@@ -25,7 +26,9 @@ import { AgentPane } from '../components/infinichat/agent-pane';
 import { useSheet } from '../components/infinichat/form-sheet';
 import { McpSheet } from '../components/infinichat/mcp-sheet';
 import { ProvidersSheet } from '../components/infinichat/providers-sheet';
+import { QuestionsSheet } from '../components/infinichat/questions-sheet';
 import { ScheduledSheet } from '../components/infinichat/scheduled-sheet';
+import { SecretsSheet } from '../components/infinichat/secrets-sheet';
 import { SettingsSheet } from '../components/infinichat/settings-sheet';
 import { Button } from '../components/ui/button';
 import {
@@ -148,7 +151,17 @@ function InfiniChat() {
   const providersSheet = useSheet();
   const scheduledSheet = useSheet();
   const mcpSheet = useSheet();
+  const questionsSheet = useSheet();
+  const secretsSheet = useSheet();
+  const [focusQuestionAgent, setFocusQuestionAgent] = useState<string>();
   const [focusProvider, setFocusProvider] = useState<string>();
+  const pendingQuestions = useWatch(ref.pendingQuestions) ?? [];
+  const activeSecrets = useWatch(ref.activeSecrets) ?? [];
+  const showQuestions = questionsSheet.show;
+  const openQuestions = useCallback((agent?: string) => {
+    setFocusQuestionAgent(agent);
+    showQuestions();
+  }, [showQuestions]);
   const { draft, changeDraft, removeImage, choosePrompt, attach, attachFiles, attaching, localError, setLocalError,
     reset, input } = useDraft(ref);
   const [admitting, setAdmitting] = useState(false);
@@ -323,7 +336,7 @@ function InfiniChat() {
             </DropdownMenu>
           </div>
         </header>
-        {watched !== undefined && !away ? <AgentPane key={watched} name={watched} rootName={name} />
+        {watched !== undefined && !away ? <AgentPane key={watched} name={watched} rootName={name} onAnswerQuestions={() => openQuestions(watched)} />
           : !away ? <Transcript stopping={stopping} onChoose={choosePrompt} />
           : !startable ? <Placeholder>{away}</Placeholder> : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3">
@@ -378,6 +391,15 @@ function InfiniChat() {
           <Notice tone={commandResult.failed ? 'error' : 'neutral'} message={commandResult.text} action="Dismiss"
             onAction={() => setCommandResult(undefined)} />
         )}
+        {pendingQuestions.length > 0 && (
+          <Notice tone="neutral" message={pendingQuestionsBanner(pendingQuestions, name)} action="Answer"
+            onAction={() => openQuestions()} />
+        )}
+        {activeSecrets.length > 0 && (
+          <Notice tone="neutral"
+            message={`${activeSecrets.length} active ${activeSecrets.length === 1 ? 'credential' : 'credentials'} in memory`}
+            action="Manage" onAction={secretsSheet.show} />
+        )}
         <Composer value={draft.text} onChange={changeDraft} onSend={send} onStop={stop} busy={busy}
           admitting={admitting} disabled={!controls || stopping || !offers.available
             || (!busy && (!configured || !connected || settingsError !== undefined))}
@@ -394,6 +416,10 @@ function InfiniChat() {
         <ScheduledSheet key={`scheduled-${scheduledSheet.session}`} open={scheduledSheet.open}
           onClose={scheduledSheet.hide} />
         <McpSheet key={`mcp-${mcpSheet.session}`} open={mcpSheet.open} onClose={mcpSheet.hide} />
+        <QuestionsSheet key={`questions-${questionsSheet.session}`} open={questionsSheet.open}
+          onClose={questionsSheet.hide} focusAgent={focusQuestionAgent} />
+        <SecretsSheet key={`secrets-${secretsSheet.session}`} open={secretsSheet.open}
+          onClose={secretsSheet.hide} />
       </div>
     </ChatAgentContext>
   );

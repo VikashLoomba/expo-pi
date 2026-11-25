@@ -7,6 +7,7 @@ import type { ImageProcessor } from '@earendil-works/pi-durable/tools';
 import photon from '@silvia-odwyer/photon/photon_rs_bg.wasm';
 
 import { MACHINE_WORK, infiniChatDevices } from '../pi/infinichat/device-tools';
+import type { SecretVault } from '../pi/infinichat/secrets';
 import type { ServerMachines } from './machines';
 
 /**
@@ -22,8 +23,8 @@ export const serverImages = (): ImageProcessor => createPhotonImages(photon);
  * run in the work dir the phone uses for machines, and `read` prepares an image with `images`.
  */
 export function serverDevices(self: () => { name: string; description: string }, machines: () => ServerMachines,
-  images: ImageProcessor) {
+  images: ImageProcessor, secrets?: SecretVault) {
   const work = join(homedir(), MACHINE_WORK);
   const environment = async (who: string) => new NodeExecutionEnv({ cwd: join(work, who) });
-  return infiniChatDevices(async () => [{ ...self(), environment }, ...machines().devices()], images);
+  return infiniChatDevices(async () => [{ ...self(), environment }, ...machines().devices()], images, secrets);
 }

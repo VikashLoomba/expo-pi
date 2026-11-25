@@ -9,6 +9,7 @@ import { ChatMetadataDoc } from './chat-metadata';
 import { settingsOf } from './chat-projection';
 import type { ChatViewSnapshot, ChatViewSource } from './chat-view';
 import { AgentList, type AgentInfo } from './infinichat-agents';
+import { PendingQuestions } from './infinichat-questions';
 import { ScheduledTasks, type ScheduledTask } from './infinichat-scheduled';
 import type { Machine } from './infinichat-remote/contract';
 import {
@@ -16,8 +17,12 @@ import {
 } from './infinichat-remote/machines';
 import { InfiniChatView, type InfiniChatControls } from './infinichat-view';
 import { openOptChat, optChatParts, type OptChat, type OptChatParts } from './infinichat/app';
+import {
+  answerQuestionBatch, type PendingQuestionBatch, type UserQuestionAnswer,
+} from './infinichat/ask';
 import type { InfiniChatDevices } from './infinichat/device-tools';
 import { SCHEDULED_TASK, type ScheduledInput } from './infinichat/schedule';
+import { SecretVault, type ActiveSecretInfo } from './infinichat/secrets';
 import { MemoryUsageDoc, usageRows, type InfiniChatUsage } from './infinichat/usage';
 import { BuildNode, ConfigDoc } from './infinichat/summary';
 import { requireModelAuth } from './model-auth';
@@ -87,6 +92,14 @@ export interface InfiniChatHost extends Store<InfiniChatSnapshot> {
   dismissError(): void;
   /** The scheduled tasks still waiting, soonest first; undefined until they are first read. */
   readonly scheduled: Store<readonly ScheduledTask[] | undefined>;
+  /** Parked `ask_user` batches waiting across the agent tree; undefined until read. */
+  readonly questions: Store<readonly PendingQuestionBatch[] | undefined>;
+  /** Metadata of user-provided secrets currently live in RAM (never values). */
+  readonly secrets: Store<readonly ActiveSecretInfo[]>;
+  /** Delivers answers to a parked `ask_user` batch by its task ID. */
+  answerQuestions(taskId: number, answers: readonly UserQuestionAnswer[]): Promise<void>;
+  /** Clears one active secret by ID, or all active secrets when omitted. */
+  clearSecrets(id?: string): Promise<void>;
 }
 
 const TITLE = 'InfiniChat';
@@ -98,12 +111,13 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
  * host's registry may hold the extensions before and after.
  */
 export function infiniChatExtensions(devices: InfiniChatDevices, harness: () => Harness | undefined,
-  report: (error: unknown) => void): OptChatParts {
+  report: (error: unknown) => void, secrets?: SecretVault): OptChatParts {
   return optChatParts({
     name: TITLE,
     harness,
     hasDeviceTools: true,
     ...devices,
+    secrets,
     nativeContracts: { bash: 'bash', read: 'read' },
     extensions: [createNativeWebSearchBridge(report, harness)],
   });
@@ -150,6 +164,9 @@ export class InfiniChatService implements InfiniChatHost {
     private readonly chat: OptChat,
     /** The scheduled tasks still waiting. */
     readonly scheduled: ScheduledTasks,
+    readonly questions: PendingQuestions,
+    readonly secrets: SecretVault,
+    private readonly ownsSecrets: boolean,
     readonly machines: MachineList,
     readonly agents: AgentList,
     private readonly models: Models,
@@ -171,6 +188,8 @@ export class InfiniChatService implements InfiniChatHost {
     machine?: string;
     /** The conversation's environment for pi-durable's own tools (`HarnessOptions.env`); device tools bring theirs. */
     env?: HarnessOptions['env'];
+    /** Ephemeral RAM secret store; borrowed when passed by a host that shares it with MCP tools. */
+    secrets?: SecretVault;
     /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
     onClosed?: (end: SessionEnd) => void;
   }): Promise<InfiniChatService> {
@@ -204,11 +223,15 @@ export class InfiniChatService implements InfiniChatHost {
       await tx.doc(SearchPresentationsDoc, chat.root.id);
     }, BACKGROUND_CONTEXT);
     const scheduled = new ScheduledTasks(chat.harness, (error) => service?.report(error));
+    const questions = new PendingQuestions(chat.harness, (error) => service?.report(error));
+    const ownsSecrets = options.secrets === undefined;
+    const secrets = options.secrets ?? new SecretVault();
     const machines = new MachineList(chat.harness);
     const agents = new AgentList(chat.harness, chat.root.id);
-    service = new InfiniChatService(chat, scheduled, machines, agents, options.models, options.authError,
-      options.machine);
+    service = new InfiniChatService(chat, scheduled, questions, secrets, ownsSecrets, machines, agents,
+      options.models, options.authError, options.machine);
     void scheduled.start().catch((error: unknown) => service?.report(error));
+    void questions.start().catch((error: unknown) => service?.report(error));
     void machines.start().catch((error: unknown) => service?.report(error));
     void agents.start().catch((error: unknown) => service?.report(error));
     // A new conversation is ready as soon as a provider is connected, now or at a later sign-in.
@@ -419,6 +442,16 @@ export class InfiniChatService implements InfiniChatHost {
     return task ? this.chat.cancelScheduled(task.record.id, replacement) : false;
   }
 
+  async answerQuestions(taskId: number, answers: readonly UserQuestionAnswer[],
+    context = BACKGROUND_CONTEXT): Promise<void> {
+    this.assertOpen();
+    await answerQuestionBatch(this.chat.harness, this.secrets, taskId, answers, context);
+  }
+
+  async clearSecrets(id?: string): Promise<void> {
+    this.secrets.clear(id);
+  }
+
   /** Root's chat, where the user talks. */
   view(): InfiniChatView {
     return this.viewOf(this.chat.root.id);
@@ -444,6 +477,8 @@ export class InfiniChatService implements InfiniChatHost {
         await this.chat.close();
       } finally {
         this.scheduled.close();
+        this.questions.close();
+        if (this.ownsSecrets) this.secrets.close();
         this.machines.close();
         this.agents.close();
       }

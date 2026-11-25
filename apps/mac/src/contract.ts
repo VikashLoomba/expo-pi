@@ -5,8 +5,9 @@ import { ChatControlsSchema } from '@pi-agent/infinichat/chat/types';
 import { ChatExecutionSettingsSchema } from '@pi-agent/infinichat/pi/execution/document';
 import { ChatViewSnapshotSchema } from '@pi-agent/infinichat/pi/chat-view';
 import {
-  AccessSchema, AgentsSchema, ControlsSchema, ConversationSchema, MachinesSchema, MessagesSchema,
-  PendingHostKeysSchema, ReachSchema, ScheduledSchema, SignInAttemptSchema, SnapshotSchema,
+  AccessSchema, ActiveSecretsSchema, AgentsSchema, AnswerQuestionsSchema, ClearSecretsSchema, ControlsSchema,
+  ConversationSchema, MachinesSchema, MessagesSchema, PendingHostKeysSchema, PendingQuestionsSchema, ReachSchema,
+  ScheduledSchema, SignInAttemptSchema, SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { McpServerStatusSchema, McpSignInAttemptSchema } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { ScheduledInputSchema } from '@pi-agent/infinichat/pi/infinichat/schedule';
@@ -90,13 +91,14 @@ export type MoveStatus = Static<typeof MoveStatusSchema>;
  * `ShownInfiniChat` carries them across moves, the connection to that machine, and the operations of its screen.
  */
 export const MacInfiniChat = remote('infinichat.mac.conversation', {
-  version: 4,
+  version: 5,
   params: {},
   hostAddress: () => MacMain(),
   variants: {
     owner: {
       state: {
         snapshot: SnapshotSchema, controls: ControlsSchema, messages: MessagesSchema, scheduled: ScheduledSchema,
+        pendingQuestions: PendingQuestionsSchema, activeSecrets: ActiveSecretsSchema,
         // The tree of agents, root first, whose chats are `MacAgent`s; the cells above and the operations are root's.
         agents: AgentsSchema,
         connection: ConnectionSchema, held: union([nul(), ConversationSchema]), machine: ShownMachineSchema,
@@ -138,6 +140,8 @@ export const MacInfiniChat = remote('infinichat.mac.conversation', {
           instructions: str(), name: str() })),
         cancelScheduled: method(obj({ id: num(), replacement: opt(ScheduledInputSchema) }),
           bool()),
+        answerQuestions: method(AnswerQuestionsSchema),
+        clearSecrets: method(ClearSecretsSchema),
         // What the conversation has spent, for the settings sheet, read when it opens.
         usage: method(undefined, InfiniChatUsageSchema),
         // Starts a conversation on the machine shown when no device holds one (`ServerConversation.create`).

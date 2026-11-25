@@ -5,6 +5,7 @@ import {
 import type { InstallStage } from '@pi-agent/infinichat/pi/infinichat-remote/dialer';
 import type { MoveStatus } from '@pi-agent/infinichat/pi/infinichat-remote/move-status';
 import { chosenMachine, placement, placementOffers } from '@pi-agent/infinichat/pi/infinichat-remote/placement';
+import { pendingQuestionsBanner } from '@pi-agent/infinichat/pi/infinichat/ask';
 import { findCatalogModel, getModelSettingsError } from '@pi-agent/infinichat/pi/model-catalog';
 import { userInput } from '@pi-agent/infinichat/pi/user-input';
 import { router, Stack } from 'expo-router';
@@ -13,7 +14,7 @@ import { PlatformColor, Pressable, StyleSheet, Text, View, type TextInputInstanc
 
 import {
   useChatApp, useChatControls, useInfiniChatAccount, useInfiniChatAgents, useInfiniChatAvatar, useInfiniChatConnection,
-  useInfiniChatError, useInfiniChatView, useMachines,
+  useInfiniChatError, useInfiniChatQuestions, useInfiniChatSecrets, useInfiniChatView, useMachines,
 } from '@/chat/chat-provider';
 import { pickPhotos, type PhotoAttachment, type PhotoSource } from '@/chat/photo-attachments';
 import { ChatAgentContext } from '@/components/chat/agent';
@@ -81,6 +82,8 @@ export default function InfiniChatScreen() {
   const hosts = useSyncExternalStore(remoteHosts.subscribe, remoteHosts.getSnapshot, remoteHosts.getSnapshot);
   const listed = useMachines();
   // The agents root started, and theirs: each one's chat opens from the header, as UniiChat's views list its tree.
+  const pendingQuestions = useInfiniChatQuestions() ?? [];
+  const activeSecrets = useInfiniChatSecrets();
   const children = (useInfiniChatAgents() ?? []).filter((each) => each.parent !== null);
   const depthOf = (parent: string | null): number => {
     const above = children.find((each) => each.name === parent);
@@ -366,6 +369,16 @@ export default function InfiniChatScreen() {
             : `An update is available for InfiniChat on ${machine}.`}
           action={connection.update === 'available' ? 'Update' : undefined}
           onAction={() => { void updateServer(); }} />
+      </View>}
+      {pendingQuestions.length > 0 && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-pending-questions" tone="neutral"
+          message={pendingQuestionsBanner(pendingQuestions, agentName)}
+          action="Answer" onAction={() => router.push('/infinichat-questions')} />
+      </View>}
+      {activeSecrets.length > 0 && <View style={styles.banner}>
+        <InlineNotice testID="infinichat-active-secrets" tone="neutral"
+          message={`${activeSecrets.length} active ${activeSecrets.length === 1 ? 'credential' : 'credentials'} in memory`}
+          action="Manage" onAction={() => router.push('/infinichat-secrets')} />
       </View>}
       <Composer value={draft.text} onChange={changeDraft} onSend={() => { void sendMessage(); }}
         onStop={() => { void stop(); }}

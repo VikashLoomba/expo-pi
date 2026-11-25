@@ -13,9 +13,11 @@ import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 
 import { SearchObservationEntry } from '../native-web-search/entries';
 import { AgentAnchor, TreeDoc, agentNamed, agentTools, place } from './agents';
+import { askUserTool } from './ask';
 import { MemoryDoc, advanceMessageProgress, appendMessage, memoryReady, renderMain, settleViews } from './memory';
 import { sharedPrompt } from './prompt';
 import { abortScheduled, scheduleTools, scheduledTask, type ScheduledInput } from './schedule';
+import type { SecretVault } from './secrets';
 import { BuildNode, ConfigDoc, pumpBuilds } from './summary';
 import { memoryTools, toolPolicy, type NativeContracts } from './tools';
 import { CoordinatorDoc, Wake, rouse, wakeKey } from './wake';
@@ -784,6 +786,8 @@ export type OptChatExtensionOptions = {
   extensions?: readonly Extension[];
   /** What changes between turns, such as the devices: read as a turn starts, it follows the view. */
   turnState?: () => Promise<string>;
+  /** Ephemeral RAM secret store used to scrub active secrets from tool outputs. */
+  secrets?: SecretVault;
 };
 
 /**
@@ -903,13 +907,14 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
   const schedule = scheduleTools(ROOT_CONVERSATION_ID, scheduled, options.harness);
   const master: Extension = defineExtension({ name: 'optchat.master', tools: schedule });
   const tree = agentTools({ master: () => master, init, admit });
-  const tools: ToolRegistration[] = [...memoryTools(), ...(options.tools ?? []), ...Object.values(tree)];
+  const ask = askUserTool();
+  const tools: ToolRegistration[] = [...memoryTools(), ...(options.tools ?? []), ...Object.values(tree), ask];
   const policy = toolPolicy([...tools, ...schedule], async (call, api, ctx) => {
     const { conversationId } = api;
     const stored = await api.snapshot(NativeAgentDoc, conversationId, ctx);
     const target: EnvTarget = { conversationId, cwd: stored?.cwd, read: api };
     return options.callEnv ? options.callEnv(call, target, ctx) : options.env?.(target, ctx);
-  }, options.nativeContracts);
+  }, options.nativeContracts, options.secrets);
   // The prompt is an extension's own section and the offered tools follow the host, so an edited prompt or tool set
   // reaches an existing conversation as pi-durable's system entry instead of staying as created. Every agent has the
   // one prompt, as UniiChat's do, with the name the user gave the whole, which root's conversation keeps, so a rename
@@ -926,7 +931,7 @@ export function optChatParts(options: OptChatExtensionOptions): OptChatParts {
     }),
     master, policy, ...(options.extensions ?? []),
   ];
-  return { name, extensions, init, voice: [tree.tell, tree.spawn], scheduled, admit, wake };
+  return { name, extensions, init, voice: [tree.tell, tree.spawn, ask], scheduled, admit, wake };
 }
 
 /**

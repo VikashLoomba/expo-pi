@@ -12,9 +12,10 @@ import { ServerMachines } from '@pi-agent/infinichat/node/machines';
 import { createServerModels } from '@pi-agent/infinichat/node/models';
 import type { ChatViewSnapshot, ChatViewSource } from '@pi-agent/infinichat/pi/chat-view';
 import {
-  InfiniChatAgent, InfiniChatMembers, InfiniChatRemote, type AccessSchema, type AgentsSchema, type ControlsSchema,
-  type ConversationState, type InfiniChatPrincipal, type MachinesSchema, type MessagesSchema, type PendingHostKeys,
-  type ReachSchema, type ScheduledSchema, type SignInAttempt, type SnapshotSchema,
+  InfiniChatAgent, InfiniChatMembers, InfiniChatRemote, type AccessSchema, type ActiveSecretsSchema,
+  type AgentsSchema, type ControlsSchema, type ConversationState, type InfiniChatPrincipal, type MachinesSchema,
+  type MessagesSchema, type PendingHostKeys, type PendingQuestionsSchema, type ReachSchema, type ScheduledSchema,
+  type SignInAttempt, type SnapshotSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { CLAUDE_CODE_PROVIDER_ID } from '@pi-agent/infinichat/pi/claude-code';
 import {
@@ -44,6 +45,8 @@ interface ConversationView {
   controls: Static<typeof ControlsSchema>;
   messages: Static<typeof MessagesSchema>;
   scheduled: Static<typeof ScheduledSchema>;
+  pendingQuestions: Static<typeof PendingQuestionsSchema>;
+  activeSecrets: Static<typeof ActiveSecretsSchema>;
   machines: Static<typeof MachinesSchema>;
   agents: Static<typeof AgentsSchema>;
   conversation: ConversationState;
@@ -60,7 +63,7 @@ interface ReachView { reach: Static<typeof ReachSchema>; pendingHostKeys: Pendin
 const LOADING = { status: 'loading' } as const;
 /** What the members read from the object's activation until its first routine has read the natives. */
 const NO_VIEW: ConversationView = { snapshot: { view: LOADING }, controls: null, messages: [], scheduled: null,
-  machines: null, agents: null, conversation: { active: false } };
+  pendingQuestions: null, activeSecrets: [], machines: null, agents: null, conversation: { active: false } };
 const NO_AGENT_VIEW: AgentView = { snapshot: LOADING, controls: null, messages: [] };
 const NO_ACCOUNT: AccountView = { catalog: [], access: {}, signInAttempt: null };
 const NO_REACH: ReachView = { reach: {}, pendingHostKeys: {} };
@@ -114,6 +117,7 @@ const MOVE_NEEDS_THE_APP_UPDATED = { adopt: refuseMove, relinquish: refuseMove, 
  * - 8: 9's, and its `setApiKey` arguments are the newest's without a workspace ID.
  */
 const ACCEPTED: AcceptsTable<typeof InfiniChatRemote> = {
+  11: {},
   10: {
     state: { owner: { conversation: (current) => beforeSync(current) } },
     methods: { ...MOVE_NEEDS_THE_APP_UPDATED },
@@ -163,8 +167,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
   const devices = serverDevices(() => ({ name: proc.device, description: proc.description }), () => {
     if (machinesOpen === undefined) throw new Error('This machine’s connections are not open yet.');
     return machinesOpen;
-  }, images);
-  const parts = infiniChatExtensions(devices, () => conversationOpen?.current?.harness, report);
+  }, images, proc.secrets);
+  const parts = infiniChatExtensions(devices, () => conversationOpen?.current?.harness, report, proc.secrets);
   // From the facet, so the table holds them before the Harness opens (a task whose definition is missing stays
   // blocked, design §24). With them, what only a machine's agents have: how they extend this server, and pi-durable's
   // own fitting of the images a call's result holds to the agent's model, before the result is stored (durable
@@ -209,6 +213,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       const registry = registryReader(extensions, context);
       const held = new ServerConversation(home, (storage) => InfiniChatService.open({
         storage, models: account.value.models, parts, registry, machine: device, env: devices.env,
+        secrets: proc.secrets,
         accountChanges: account.value.credentials.subscribe,
         onClosed: (end) => {
           if (end.kind === 'failed') proc.fail(end.error);
@@ -242,6 +247,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
         controls: open?.view().getControls() ?? null,
         messages: open?.view().getMessages() ?? NO_VIEW.messages,
         scheduled: open?.scheduled.getSnapshot() ?? null,
+        pendingQuestions: open?.questions.getSnapshot() ?? null,
+        activeSecrets: proc.secrets.getSnapshot(),
         machines: open?.machines.getSnapshot() ?? null,
         agents: open?.agents.getSnapshot() ?? null,
         conversation: conversation.value.getState(),
@@ -275,8 +282,9 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       publishAccount();
       publishReach();
       void readClaudeCode();
-      const stops = [conversation.value.subscribe(publishView), account.value.credentials.subscribe(publishAccount),
-        signIn.value.subscribe(publishAccount), machines.value.subscribe(publishReach)];
+      const stops = [conversation.value.subscribe(publishView), proc.secrets.subscribe(publishView),
+        account.value.credentials.subscribe(publishAccount), signIn.value.subscribe(publishAccount),
+        machines.value.subscribe(publishReach)];
       try {
         await untilAborted(ctx);
       } finally {
@@ -290,6 +298,8 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       // Chord's JSON arrays are mutable types; the copies keep their elements, which the diff compares by identity.
       messages: self.derive([view], ([shown]) => [...shown.messages]),
       scheduled: self.derive([view], ([shown]) => shown.scheduled && [...shown.scheduled]),
+      pendingQuestions: self.derive([view], ([shown]) => shown.pendingQuestions && [...shown.pendingQuestions]),
+      activeSecrets: self.derive([view], ([shown]) => [...shown.activeSecrets]),
       machines: self.derive([view], ([shown]) => shown.machines),
       agents: self.derive([view], ([shown]) => shown.agents && [...shown.agents]),
       conversation: self.derive([view], ([shown]) => shown.conversation),
@@ -308,6 +318,9 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       updateSettings: async (settings, ctx) => done(core().updateSettings(settings, callContext(ctx))),
       cancelScheduled: async ({ id, replacement }, ctx) =>
         core().cancelScheduled(id, replacement, callContext(ctx)),
+      answerQuestions: async ({ taskId, answers }, ctx) =>
+        done(core().answerQuestions(taskId, answers, callContext(ctx))),
+      clearSecrets: async ({ id }) => done(proc.secrets.clear(id)),
       dismissError: async () => done(core().dismissError()),
       // Chord's JSON arrays are mutable types.
       usage: async () => [...await core().usage()],
@@ -336,7 +349,11 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       // The move goes on when the caller goes away: a dropped link never leaves it half done.
       adopt: async ({ head }) => done(conversation.value.adopt(head)),
       create: async () => done(conversation.value.create()),
-      relinquish: ({ to }) => conversation.value.relinquish(to, (endpoint) => machines.value.environmentAt(endpoint)),
+      relinquish: async ({ to }) => {
+        // Wipe ephemeral RAM secrets whenever the conversation leaves this machine.
+        proc.secrets.clear();
+        return conversation.value.relinquish(to, (endpoint) => machines.value.environmentAt(endpoint));
+      },
       pull: async ({ from, head }, ctx) => done(conversation.value.pull(
         from === undefined ? undefined : await machines.value.environment(from), head, callContext(ctx))),
       putMachine: async (record) => done(core().putMachine(record)),
@@ -365,12 +382,14 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       variant: 'owner',
       members: {
         snapshot: machine.snapshot, controls: machine.controls, messages: machine.messages,
-        scheduled: machine.scheduled, machines: machine.machines, agents: machine.agents,
+        scheduled: machine.scheduled, pendingQuestions: machine.pendingQuestions, activeSecrets: machine.activeSecrets,
+        machines: machine.machines, agents: machine.agents,
         conversation: machine.conversation,
         server: machine.server, catalog: machine.catalog, access: machine.access,
         signInAttempt: machine.signInAttempt, reach: machine.reach, pendingHostKeys: machine.pendingHostKeys,
         accept: machine.accept, stop: machine.stop, continue: machine.continue, loadEarlier: machine.loadEarlier,
         fillGap: machine.fillGap, updateSettings: machine.updateSettings, cancelScheduled: machine.cancelScheduled,
+        answerQuestions: machine.answerQuestions, clearSecrets: machine.clearSecrets,
         usage: machine.usage, create: machine.create,
         dismissError: machine.dismissError, setTimeZone: machine.setTimeZone, reloadPlugins: machine.reloadPlugins,
         signIn: machine.signIn, answer: machine.answer, cancelSignIn: machine.cancelSignIn,

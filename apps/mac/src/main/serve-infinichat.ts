@@ -41,6 +41,8 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         controls: view.getControls() ?? null,
         messages: view.getMessages(),
         scheduled: shown.scheduled.getSnapshot() ?? null,
+        pendingQuestions: shown.questions.getSnapshot() ?? null,
+        activeSecrets: shown.secrets.getSnapshot(),
         agents: shown.agents.getSnapshot() ?? null,
         machines: shown.machines.getSnapshot() ?? null,
       };
@@ -66,6 +68,8 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         // Chord's JSON arrays are mutable types; the copies keep their elements, which the diff compares by identity.
         messages: self.derive([conversation], ([value]) => [...value.messages]),
         scheduled: self.derive([conversation], ([value]) => value.scheduled && [...value.scheduled]),
+        pendingQuestions: self.derive([conversation], ([value]) => value.pendingQuestions && [...value.pendingQuestions]),
+        activeSecrets: self.derive([conversation], ([value]) => [...value.activeSecrets]),
         agents: self.derive([conversation], ([value]) => value.agents && [...value.agents]),
         machines: self.derive([conversation], ([value]) => value.machines),
         connection: self.derive([link], ([value]) => value.connection),
@@ -95,6 +99,8 @@ export function serveInfiniChat(host: FacetHost<MacPrincipal>, infinichat: Shown
         attach: async ({ mimeType, data }) => infinichat.attach(Buffer.from(data, 'base64'), mimeType),
         updateSettings: async (settings) => done(shown.updateSettings(settings)),
         cancelScheduled: async ({ id, replacement }) => shown.cancelScheduled(id, replacement),
+        answerQuestions: async ({ taskId, answers }) => done(shown.answerQuestions(taskId, answers)),
+        clearSecrets: async ({ id }) => done(shown.clearSecrets(id)),
         usage: async () => [...await shown.usage()],
         start: async () => done(infinichat.start()),
         setAvatar: async () => avatar.choose(),

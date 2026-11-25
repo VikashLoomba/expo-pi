@@ -3,8 +3,10 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { PlatformColor, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { pendingQuestionsBanner } from '@pi-agent/infinichat/pi/infinichat/ask';
+
 import {
-  useAgentView, useChatApp, useChatControls, useInfiniChatAgents, useInfiniChatView,
+  useAgentView, useChatApp, useChatControls, useInfiniChatAgents, useInfiniChatQuestions, useInfiniChatView,
 } from '@/chat/chat-provider';
 import { ChatAgentContext } from '@/components/chat/agent';
 import { ChatIcon } from '@/components/chat/icon';
@@ -33,6 +35,7 @@ function AgentScreen({ name }: { name: string }) {
   const conversation = useChatControls(view);
   const rootName = useChatControls(useInfiniChatView())?.name || TITLE;
   const description = useInfiniChatAgents()?.find((each) => each.name === name)?.description;
+  const pendingForAgent = (useInfiniChatQuestions() ?? []).filter((batch) => batch.agent === name);
   const agent = useMemo(() => ({ name, avatar: undefined }), [name]);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string>();
@@ -76,6 +79,9 @@ function AgentScreen({ name }: { name: string }) {
             'The response could not continue. Try again.'); }} />}
         {error && <InlineNotice testID="agent-error" message={error} action="Dismiss"
           onAction={() => setError(undefined)} />}
+        {pendingForAgent.length > 0 && <InlineNotice testID="agent-pending-questions" tone="neutral"
+          message={pendingQuestionsBanner(pendingForAgent, rootName)}
+          action="Answer" onAction={() => router.push({ pathname: '/infinichat-questions', params: { agent: name } })} />}
         <GlassView style={styles.note}>
           <Text style={[styles.noteText, { color: PlatformColor('secondaryLabel') }]}>
             Only {rootName} takes your messages. Ask it to tell {name}.

@@ -1,14 +1,16 @@
 import type { Context } from '@earendil-works/chord/context';
 import {
-  AgentDoc, ROOT_CONVERSATION_ID, defineTool, type ConversationId, type DocumentReader, type ToolRegistration,
+  AgentDoc, ROOT_CONVERSATION_ID, defineTool, type ConversationId, type DocumentReader, type ToolExecutionApi,
+  type ToolRegistration,
 } from '@earendil-works/pi-durable';
 import { getOrThrow, type ExecutionEnv } from '@earendil-works/pi-durable/env';
 import {
   createBashTool, createEditTool, createReadTool, createWriteTool, type ImageProcessor,
 } from '@earendil-works/pi-durable/tools';
-import { str, type Schema } from '@earendil-works/pi-schema';
+import { map, opt, str, type Schema } from '@earendil-works/pi-schema';
 
 import type { OptChatExtensionOptions } from './app';
+import type { SecretVault } from './secrets';
 
 /**
  * UniiChat's work dirs: a device's tools run in <work>/<who>, `main` for root and its name for any other agent.
@@ -36,6 +38,10 @@ export type InfiniChatDevices = Required<Pick<OptChatExtensionOptions, 'tools' |
 const deviceParameter = str({
   description: 'The device to run on, from the list at the start of the message; by default the one holding this chat',
 });
+const secretsParameter = opt(map(str(), {
+  description: 'Optional map of environment variable names to secret handles from ask_user (e.g. '
+    + '{ SUDO_PW: "{{secret:...}}" }), injected into the command environment without exposing values.',
+}));
 
 /**
  * A built-in tool's parameters with an optional `device` first: the same JSON Schema object, as pi's built-in tools
@@ -47,6 +53,15 @@ function withDevice<T>(parameters: Schema<T>): Schema<T & { device?: string }> {
   const keywords = Object.fromEntries(Object.entries(parameters));
   const own = typeof keywords.properties === 'object' && keywords.properties !== null ? keywords.properties : {};
   return { ...keywords, properties: { device: deviceParameter, ...own } };
+}
+
+/** `bash` parameters with optional `device` and `secrets` env-var bindings. */
+function withBashParameters<T>(
+  parameters: Schema<T>,
+): Schema<T & { device?: string; secrets?: Record<string, string> }> {
+  const keywords = Object.fromEntries(Object.entries(parameters));
+  const own = typeof keywords.properties === 'object' && keywords.properties !== null ? keywords.properties : {};
+  return { ...keywords, properties: { device: deviceParameter, ...own, secrets: secretsParameter } };
 }
 
 /**
@@ -76,7 +91,9 @@ const deviceArgument = (args: unknown): { device?: string } =>
  * into every call. The holder is also the conversation's environment. Each use builds a fresh environment, as the chat
  * service's resolver does.
  */
-export function infiniChatDevices(list: () => Promise<readonly Device[]>, images: ImageProcessor): InfiniChatDevices {
+export function infiniChatDevices(
+  list: () => Promise<readonly Device[]>, images: ImageProcessor, secrets?: SecretVault,
+): InfiniChatDevices {
   /** The device's environment, the holder's without a name, in the calling conversation's folder as UniiChat's. */
   async function environment(
     name: string | undefined, read: DocumentReader, conversationId: ConversationId, context: Context,
@@ -96,7 +113,14 @@ export function infiniChatDevices(list: () => Promise<readonly Device[]>, images
     getOrThrow(await env.createDir(env.cwd, { recursive: true }, context));
     return env;
   }
-  const bash = createBashTool();
+  // Per-call resolved secret env vars carried into `createBashTool({ prepare })` without mutating stored args.
+  const injectedEnvs = new WeakMap<ToolExecutionApi, Readonly<Record<string, string>>>();
+  const bash = createBashTool({
+    prepare: (execution, callApi) => {
+      const extra = injectedEnvs.get(callApi);
+      if (extra !== undefined) Object.assign(execution.env, extra);
+    },
+  });
   const read = createReadTool({ images });
   const write = createWriteTool();
   const edit = createEditTool();
@@ -108,9 +132,43 @@ export function infiniChatDevices(list: () => Promise<readonly Device[]>, images
     tools: [
       defineTool({
         ...kept(bash),
-        parameters: withDevice(bash.parameters),
-        execute: async ({ device, ...args }, api, context) =>
-          bash.execute(args, { ...api, env: await envFor(device, api, context) }, context),
+        parameters: withBashParameters(bash.parameters),
+        execute: async ({ device, secrets: bindings, ...args }, api, context) => {
+          if (secrets?.containsHandle(args.command)) {
+            throw new Error('Pass secret handles to bash through the `secrets` map '
+              + '(e.g. secrets: { PW: "{{secret:...}}" }) and reference "$PW" in command.');
+          }
+          let resolvedEnv: Record<string, string> | undefined;
+          if (bindings !== undefined && Object.keys(bindings).length > 0) {
+            if (secrets === undefined) throw new Error('Secret handles are not available in this host.');
+            resolvedEnv = secrets.resolveEnvMap(bindings);
+          }
+          const env = await envFor(device, api, context);
+          const redactor = secrets?.hasActive()
+            ? secrets.createStreamRedactor((chunk) => api.output(chunk))
+            : undefined;
+          const callApi: ToolExecutionApi = redactor === undefined
+            ? { ...api, env }
+            : {
+              ...api,
+              env,
+              // Transforming streaming output requires dropping outputWindow so skipped chunks never bypass scrubbing.
+              outputWindow: undefined,
+              output: (chunk) => {
+                redactor.push(typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk));
+              },
+              retainedOutput: () => {
+                redactor.flush();
+                return api.retainedOutput();
+              },
+            };
+          if (resolvedEnv !== undefined) injectedEnvs.set(callApi, resolvedEnv);
+          try {
+            return await bash.execute(args, callApi, context);
+          } finally {
+            redactor?.flush();
+          }
+        },
       }),
       defineTool({
         ...kept(read),
@@ -121,15 +179,23 @@ export function infiniChatDevices(list: () => Promise<readonly Device[]>, images
       defineTool({
         ...kept(write),
         parameters: withDevice(write.parameters),
-        execute: async ({ device, ...args }, api, context) =>
-          write.execute(args, { ...api, env: await envFor(device, api, context) }, context),
+        execute: async ({ device, ...args }, api, context) => {
+          const content = secrets === undefined ? args.content : secrets.resolveString(args.content);
+          return write.execute({ ...args, content }, { ...api, env: await envFor(device, api, context) }, context);
+        },
       }),
       defineTool({
         ...kept(edit),
         parameters: withDevice(edit.parameters),
         prepareArguments: prepareEdit && ((args) => ({ ...prepareEdit(args), ...deviceArgument(args) })),
-        execute: async ({ device, ...args }, api, context) =>
-          edit.execute(args, { ...api, env: await envFor(device, api, context) }, context),
+        execute: async ({ device, ...args }, api, context) => {
+          const edits = secrets === undefined ? args.edits : args.edits.map((item) => ({
+            ...item,
+            oldText: secrets.resolveString(item.oldText),
+            newText: secrets.resolveString(item.newText),
+          }));
+          return edit.execute({ ...args, edits }, { ...api, env: await envFor(device, api, context) }, context);
+        },
       }),
     ],
     /** The device a completed call ran on, so its spilled output is read on the machine that produced it. */

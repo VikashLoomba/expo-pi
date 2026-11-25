@@ -1,6 +1,7 @@
 import { local, method } from '@earendil-works/chord';
 import { str } from '@earendil-works/pi-schema';
 import { InfiniChatMcpMembers } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
+import type { SecretVault } from '@pi-agent/infinichat/pi/infinichat/secrets';
 
 /**
  * What the host process gives the plugins of its runtime, as start data (chord `docs/design.md` §18): InfiniChat's
@@ -21,6 +22,8 @@ export interface ServerProcess {
   readonly loaded: Promise<void>;
   /** Ends the process as failed, so its service manager starts it again: reopening is how pi-durable recovers. */
   fail(error: unknown): void;
+  /** Ephemeral RAM secret vault shared between core tools, output redaction, and the MCP tools plugin. */
+  readonly secrets: SecretVault;
   /**
    * Reloads the user's plugins and reads the MCP configuration again (`plugins.ts`); says what happened. The user's
    * `/reload-plugins` and the agents' `reload_plugins` (`extending.ts`) share it.

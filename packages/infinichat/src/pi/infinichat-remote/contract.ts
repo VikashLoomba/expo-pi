@@ -9,7 +9,9 @@ import { ChatViewSnapshotSchema } from '../chat-view';
 import { AgentInfoSchema } from '../infinichat-agents';
 import { ScheduledTaskSchema } from '../infinichat-scheduled';
 import { InfiniChatControlsSchema } from '../infinichat-view';
+import { PendingQuestionBatchSchema, UserQuestionAnswerSchema } from '../infinichat/ask';
 import { ScheduledInputSchema } from '../infinichat/schedule';
+import { ActiveSecretInfoSchema } from '../infinichat/secrets';
 import { InfiniChatUsageSchema } from '../infinichat/usage';
 import { ChatModelSettingsSchema, ModelCatalogSchema } from '../model-catalog';
 import { ProviderAccessSchema } from '../provider-credentials';
@@ -59,6 +61,12 @@ export const AgentsSchema = union([readonlyArr(AgentInfoSchema), nul()]);
  * hasn't read them yet, so the phone never takes an empty list it was not given for its notifications.
  */
 export const ScheduledSchema = union([readonlyArr(ScheduledTaskSchema), nul()]);
+/** Parked `ask_user` batches waiting across the tree; null while this machine doesn't hold the conversation open. */
+export const PendingQuestionsSchema = union([readonlyArr(PendingQuestionBatchSchema), nul()]);
+/** Metadata of user-provided secrets currently live in RAM on this machine; never values. */
+export const ActiveSecretsSchema = readonlyArr(ActiveSecretInfoSchema);
+export const AnswerQuestionsSchema = obj({ taskId: num(), answers: arr(UserQuestionAnswerSchema) });
+export const ClearSecretsSchema = obj({ id: opt(str()) });
 /**
  * Which server answers: its release (`release.ts`). A conversation moves only to a side of the same release or a newer
  * one, because pi-durable's migrations are one-way.
@@ -263,9 +271,12 @@ const PullSchema = obj({ from: opt(MachineSchema), head: num() });
 export const InfiniChatMembers = {
   state: {
     ...InfiniChatMembersV8.state, controls: ControlsSchema, agents: AgentsSchema, conversation: ConversationSchema,
+    pendingQuestions: PendingQuestionsSchema, activeSecrets: ActiveSecretsSchema,
   },
   methods: {
     ...MethodsV8, setApiKey: method(ApiKeySchema), updateSettings: method(SettingsSchema),
+    answerQuestions: method(AnswerQuestionsSchema),
+    clearSecrets: method(ClearSecretsSchema),
     // Moving the conversation, as Chord's session sync hands a session over (`sync.ts`): the side that gives it
     // closes its Harness and uploads what its store committed since the two last shared it, and the side that takes
     // it applies that to its copy and opens it. `relinquish` (Chord reserves `release`) records the phone it hands
@@ -307,18 +318,25 @@ const InfiniChatRemoteV8 = remote('infinichat.remote', {
  * - 11: a move is Chord's session sync, where it copied the database file. `relinquish` names where the conversation
  *   ends and no files, `pull` and `adopt` take that, `pull` also from this machine's own folder, and `conversation`
  *   says it in place of the files adopted. `archive` is gone: a side's own store is its copy.
+ * - 12: `ask_user` parked question batches (`pendingQuestions`, `answerQuestions`) and RAM secret metadata/clearing
+ *   (`activeSecrets`, `clearSecrets`).
  */
 const InfiniChatRemoteV9 = evolve(InfiniChatRemoteV8, (edit) => edit.args('setApiKey', ApiKeySchema));
 const InfiniChatRemoteV10 = evolve(InfiniChatRemoteV9, (edit) => edit
   .state('owner', 'controls', ControlsSchema)
   .args('updateSettings', SettingsSchema)
   .addState('owner', 'agents', AgentsSchema));
-export const InfiniChatRemote = evolve(InfiniChatRemoteV10, (edit) => edit
+const InfiniChatRemoteV11 = evolve(InfiniChatRemoteV10, (edit) => edit
   .state('owner', 'conversation', ConversationSchema)
   .result('relinquish', GivenSchema)
   .args('pull', PullSchema)
   .args('adopt', HeadSchema)
   .removeMethod('archive'));
+export const InfiniChatRemote = evolve(InfiniChatRemoteV11, (edit) => edit
+  .addState('owner', 'pendingQuestions', PendingQuestionsSchema)
+  .addState('owner', 'activeSecrets', ActiveSecretsSchema)
+  .addMethod('owner', 'answerQuestions', AnswerQuestionsSchema, nul())
+  .addMethod('owner', 'clearSecrets', ClearSecretsSchema, nul()));
 
 /** An agent's chat as its object serves it: the view's own snapshot, with no report, which is the conversation's. */
 export const InfiniChatAgentMembers = {

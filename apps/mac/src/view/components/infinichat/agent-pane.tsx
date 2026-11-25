@@ -1,6 +1,7 @@
 import type { Held } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { useHold, useWatch } from '@earendil-works/chord/react';
+import { pendingQuestionsBanner } from '@pi-agent/infinichat/pi/infinichat/ask';
 import {
   getModelSettingsError, type ChatModelSettings, type ModelCatalog,
 } from '@pi-agent/infinichat/pi/model-catalog';
@@ -29,19 +30,25 @@ const sameSettings = (left: ChatModelSettings, right: ChatModelSettings) => left
  * source meanwhile. The user reads it, stops its turn, continues a run that failed and picks its model, and talks
  * only to root, so there is no composer. The phone's `agent/[name].tsx` is its counterpart.
  */
-export function AgentPane({ name, rootName }: { name: string; rootName: string }) {
+export function AgentPane({ name, rootName, onAnswerQuestions }: {
+  name: string; rootName: string; onAnswerQuestions: () => void;
+}) {
   const ref = useHold(MacAgent, { name });
   if (ref === undefined) return <Placeholder>Opening {name}…</Placeholder>;
   return (
     <ThreadSourceContext value={ref}>
-      <AgentChat name={name} rootName={rootName} agent={ref} />
+      <AgentChat name={name} rootName={rootName} agent={ref} onAnswerQuestions={onAnswerQuestions} />
     </ThreadSourceContext>
   );
 }
 
-function AgentChat({ name, rootName, agent }: { name: string; rootName: string; agent: AgentRef }) {
+function AgentChat({ name, rootName, agent, onAnswerQuestions }: {
+  name: string; rootName: string; agent: AgentRef; onAnswerQuestions: () => void;
+}) {
+  const infinichat = useInfiniChatRef();
   const controls = useWatch(agent.controls);
-  const catalog = useWatch(useInfiniChatRef().catalog) ?? [];
+  const catalog = useWatch(infinichat.catalog) ?? [];
+  const pendingForAgent = (useWatch(infinichat.pendingQuestions) ?? []).filter((batch) => batch.agent === name);
   const modelSheet = useSheet();
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string>();
@@ -71,6 +78,10 @@ function AgentChat({ name, rootName, agent }: { name: string; rootName: string; 
             action="Continue" onAction={resume} />
         )}
         {error !== undefined && <Notice message={error} action="Dismiss" onAction={() => setError(undefined)} />}
+        {pendingForAgent.length > 0 && (
+          <Notice tone="neutral" message={pendingQuestionsBanner(pendingForAgent, rootName)} action="Answer"
+            onAction={onAnswerQuestions} />
+        )}
         <div className="flex items-center gap-2 rounded-xl border px-4 py-2 text-sm text-muted-foreground">
           <span className="flex-1">Only {rootName} takes your messages. Ask it to tell {name}.</span>
           <Button type="button" variant="outline" size="sm" disabled={!controls} onClick={modelSheet.show}>

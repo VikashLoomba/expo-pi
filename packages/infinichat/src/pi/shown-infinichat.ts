@@ -9,12 +9,15 @@ import type {
 import type { Machine } from './infinichat-remote/contract';
 import type { MachinePatch, MachinesState } from './infinichat-remote/machines';
 import type { InfiniChatControls } from './infinichat-view';
+import type { PendingQuestionBatch, UserQuestionAnswer } from './infinichat/ask';
 import type { ScheduledInput } from './infinichat/schedule';
+import type { ActiveSecretInfo } from './infinichat/secrets';
 import type { InfiniChatUsage } from './infinichat/usage';
 
 const noop = () => {};
 const LOADING: ChatViewSnapshot = { status: 'loading' };
 const NO_MESSAGES: readonly ChatMessage[] = [];
+const NO_SECRETS: readonly ActiveSecretInfo[] = [];
 const NO_REPORT: InfiniChatSnapshot = {};
 
 /**
@@ -36,6 +39,8 @@ export class ShownInfiniChat implements InfiniChatHost {
   private controls?: InfiniChatControls;
   private messages = NO_MESSAGES;
   private tasks?: readonly ScheduledTask[];
+  private pendingQuestions?: readonly PendingQuestionBatch[];
+  private activeSecrets: readonly ActiveSecretInfo[] = NO_SECRETS;
   private tree?: readonly AgentInfo[];
   private readonly chats = new Map<string, AgentChat>();
   private machineList?: MachinesState;
@@ -56,6 +61,8 @@ export class ShownInfiniChat implements InfiniChatHost {
     };
   };
   readonly scheduled = { subscribe: this.subscribe, getSnapshot: () => this.tasks };
+  readonly questions = { subscribe: this.subscribe, getSnapshot: () => this.pendingQuestions };
+  readonly secrets = { subscribe: this.subscribe, getSnapshot: () => this.activeSecrets };
   readonly agents = { subscribe: this.subscribe, getSnapshot: () => this.tree };
   readonly machines = { subscribe: this.subscribe, getSnapshot: () => this.machineList };
   private readonly shown: ChatViewSource<InfiniChatControls> = {
@@ -176,6 +183,14 @@ export class ShownInfiniChat implements InfiniChatHost {
     return this.current().cancelScheduled(id, replacement);
   }
 
+  answerQuestions(taskId: number, answers: readonly UserQuestionAnswer[]): Promise<void> {
+    return this.current().answerQuestions(taskId, answers);
+  }
+
+  clearSecrets(id?: string): Promise<void> {
+    return this.current().clearSecrets(id);
+  }
+
   usage(): Promise<InfiniChatUsage> {
     return this.current().usage();
   }
@@ -237,6 +252,8 @@ export class ShownInfiniChat implements InfiniChatHost {
       this.controls = view.getControls();
       this.messages = view.getMessages();
       this.tasks = host.scheduled.getSnapshot();
+      this.pendingQuestions = host.questions.getSnapshot();
+      this.activeSecrets = host.secrets.getSnapshot();
       this.tree = host.agents.getSnapshot();
       this.machineList = host.machines.getSnapshot();
       this.report = host.getSnapshot();
@@ -244,6 +261,7 @@ export class ShownInfiniChat implements InfiniChatHost {
     };
     const stops = waiting ? [view.subscribe(update)]
       : [view.subscribe(update), host.subscribe(update), host.scheduled.subscribe(update),
+        host.questions.subscribe(update), host.secrets.subscribe(update),
         host.agents.subscribe(update), host.machines.subscribe(update)];
     this.unfollow = () => {
       for (const stop of stops) stop();

@@ -4,7 +4,7 @@ import {
   type AgentState, type ConversationId, type ConversationView, type EntryId, type EntryRecord,
   type InboxState, type LiveState, type RunFailure, type TaskId, type TranscriptItem,
 } from '@earendil-works/pi-durable';
-import { compile, obj, str } from '@earendil-works/pi-schema';
+import { arr, compile, obj, opt, str } from '@earendil-works/pi-schema';
 
 import type { ChatControls, ChatMessage, ChatSummary } from '../chat/types';
 import type { WebSearchPresentation } from '../chat/web-search-types';
@@ -24,12 +24,41 @@ import { imagesOf, textOf } from './user-input';
  * which constructs an `Intl.Segmenter` as it loads, and the phone's Hermes has none, so the app crashed at launch.
  */
 const CODEMODE_TOOL_NAME = 'codemode';
+const ASK_USER_TOOL_NAME = 'ask_user';
 /** Code mode's arguments, `{ code }` (durable `src/codemode/codemode.ts`). */
 const codemodeArguments = compile(obj({ code: str() }, { open: true }));
+const askArguments = compile(obj({
+  title: opt(str()),
+  questions: arr(obj({
+    id: str(),
+    kind: str(),
+    label: opt(str()),
+    prompt: str(),
+    purpose: opt(str()),
+  }, { open: true })),
+}, { open: true }));
 
-/** A call's input as its step shows it: a code mode script as the source the model wrote, any other as JSON. */
+/** Formats `ask_user` arguments cleanly for the transcript instead of raw JSON. */
+function formatAskInput(args: {
+  title?: string;
+  questions: readonly { id: string; kind: string; label?: string; prompt: string; purpose?: string }[];
+}): string {
+  const lines: string[] = [];
+  if (args.title) lines.push(args.title);
+  for (const question of args.questions) {
+    const tag = question.kind === 'secret' ? '[secret] ' : '';
+    const head = question.label ? `${question.label}: ${question.prompt}` : question.prompt;
+    lines.push(`- ${tag}${head}`);
+    if (question.purpose) lines.push(`  Purpose: ${question.purpose}`);
+  }
+  return lines.join('\n');
+}
+
+/** A call's input as its step shows it: a code mode script as source, `ask_user` as readable questions, else JSON. */
 function toolInput(name: string, args: unknown): string {
-  return name === CODEMODE_TOOL_NAME && codemodeArguments.check(args) ? args.code : JSON.stringify(args, null, 2);
+  if (name === CODEMODE_TOOL_NAME && codemodeArguments.check(args)) return args.code;
+  if (name === ASK_USER_TOOL_NAME && askArguments.check(args)) return formatAskInput(args);
+  return JSON.stringify(args, null, 2);
 }
 
 /** Committed state of one chat: its conversation view's documents and the chat's app documents. */
@@ -141,7 +170,12 @@ function userRows(message: UserMessage, key: string): ChatMessage[] {
  */
 function toolResultRow(message: ToolResultMessage, key: string, call: ChatMessage | undefined): ChatMessage {
   const note = unseenImageNote(message.toolName, message.details);
-  const output = [textOf(message.content), ...(note === undefined ? [] : [note])].filter(Boolean).join('\n');
+  const rawOutput = [textOf(message.content), ...(note === undefined ? [] : [note])].filter(Boolean).join('\n');
+  const output = message.toolName === ASK_USER_TOOL_NAME
+    ? rawOutput
+      .replace(/secret handle \{\{secret:s_[0-9a-f]+\}\}/g, '•••••••• (provided securely)')
+      .replace(/\n\nUse secret handles without exposing them:[\s\S]*$/, '')
+    : rawOutput;
   const images = imagesOf(message.content);
   const status = message.isError ? 'error' : 'completed';
   if (!call?.tool) {

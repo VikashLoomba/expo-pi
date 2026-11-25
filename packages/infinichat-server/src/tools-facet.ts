@@ -11,6 +11,7 @@ import {
   InfiniChatMcp, type McpServerStatus, type McpSignInAttempt,
 } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
 import { MACHINE_WORK } from '@pi-agent/infinichat/pi/infinichat/device-tools';
+import type { SecretVault } from '@pi-agent/infinichat/pi/infinichat/secrets';
 
 import { CuaDriver } from './cua-driver';
 import { mcpConfiguration } from './mcp-config';
@@ -52,7 +53,7 @@ const report = (error: unknown) => console.error('InfiniChat:', message(error));
  * closes once its requests settle (`McpServer.retire`). `version` is the release the servers are told is connecting,
  * InfiniChat's plugin's.
  */
-export default (version: string) => defineFacet<InfiniChatPrincipal>((host) => {
+export default (version: string, secrets: SecretVault) => defineFacet<InfiniChatPrincipal>((host) => {
   host.serve(InfiniChatTools, (_params, self) => {
     const sandbox = self.open(async () => new CodemodeSandbox(), (value) => value.close());
     // One backend for the file, so its writes run one at a time (`node/credentials.ts`).
@@ -64,7 +65,7 @@ export default (version: string) => defineFacet<InfiniChatPrincipal>((host) => {
     const shown = self.writable(NO_SERVERS);
     self.onLive(async (ctx) => {
       const publish = () => {
-        extensions.set(serverExtensions(sandbox.value, servers.value.connected()));
+        extensions.set(serverExtensions(sandbox.value, servers.value.connected(), secrets));
         shown.set({ servers: servers.value.statuses(), problems: servers.value.problems(),
           signInAttempt: servers.value.signIns.getSnapshot() });
       };

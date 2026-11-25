@@ -7,6 +7,7 @@ import {
 } from '@earendil-works/pi-mcp';
 import { arr, bool, obj, opt, str, unknown, type Schema } from '@earendil-works/pi-schema';
 import type { McpExposure } from '@pi-agent/infinichat/pi/infinichat-remote/mcp-contract';
+import type { SecretVault } from '@pi-agent/infinichat/pi/infinichat/secrets';
 
 import { toolExposure, type McpServerConfig } from './mcp-config';
 import type { McpServer } from './mcp-server';
@@ -67,7 +68,9 @@ function mcpParameters(tool: Tool): Schema<Record<string, unknown>> {
  * Progress goes out as the call's running output, as the mcp-codemode example forwards it to `onUpdate`
  * (`packages/agent/examples/mcp-codemode/tools.ts`), and asking for it renews the request's timeout (pi-mcp README).
  */
-function mcpTool(server: McpServer, exposure: McpExposure, tool: Tool, name: string): ToolRegistration {
+function mcpTool(
+  server: McpServer, exposure: McpExposure, tool: Tool, name: string, secrets: SecretVault,
+): ToolRegistration {
   return defineTool({
     name,
     description: tool.description ?? tool.title ?? `${tool.name} of the MCP server ${server.name}`,
@@ -75,9 +78,12 @@ function mcpTool(server: McpServer, exposure: McpExposure, tool: Tool, name: str
     structuredOutputSchema: CallResultSchema,
     ...(exposure === 'direct' ? {} : { deferred: true as const }),
     async execute(args, api, context) {
-      const result = await server.call(tool.name, args, context.abortSignal, (progress) => {
+      // Resolve opaque secret handles only at the MCP execution boundary so stored tool args keep handles alone.
+      const resolved = secrets.resolveRecord(args);
+      const result = await server.call(tool.name, resolved, context.abortSignal, (progress) => {
         const total = progress.total === undefined ? '' : `/${progress.total}`;
-        api.output(`${progress.message ?? `Progress ${progress.progress}${total}`}\n`);
+        const line = `${progress.message ?? `Progress ${progress.progress}${total}`}\n`;
+        api.output(secrets.redactString(line));
       });
       const { content, structuredContent, isError } = result;
       return {
@@ -220,7 +226,9 @@ const reachable = ({ exposure, toolExposure: overrides }: McpServerConfig): bool
  * (`src/extensions/mcp/index.ts`, `renderServersSection`). Fresh extension objects on every call, never one a running
  * phase already holds.
  */
-export function serverExtensions(sandbox: CodemodeSandbox, servers: readonly ConnectedServer[]): readonly Extension[] {
+export function serverExtensions(
+  sandbox: CodemodeSandbox, servers: readonly ConnectedServer[], secrets: SecretVault,
+): readonly Extension[] {
   const taken = new Set<string>();
   const perServer = servers.filter(({ config }) => reachable(config)).map(({ config, server }) => {
     const tools: ToolRegistration[] = [];
@@ -229,7 +237,7 @@ export function serverExtensions(sandbox: CodemodeSandbox, servers: readonly Con
       if (exposure === 'hidden') continue;
       const name = createMcpToolName(config.name, tool.name, (candidate) => taken.has(candidate));
       taken.add(name);
-      tools.push(mcpTool(server, exposure, tool, name));
+      tools.push(mcpTool(server, exposure, tool, name, secrets));
     }
     const name = mcpNamespace(config.name);
     return defineExtension({

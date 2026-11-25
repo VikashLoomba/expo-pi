@@ -8,7 +8,9 @@ import type { AgentInfo } from '../infinichat-agents';
 import type { ScheduledTask } from '../infinichat-scheduled';
 import type { AgentChat, InfiniChatHost, InfiniChatSettings, InfiniChatSnapshot } from '../infinichat-service';
 import type { InfiniChatControls } from '../infinichat-view';
+import type { PendingQuestionBatch, UserQuestionAnswer } from '../infinichat/ask';
 import type { ScheduledInput } from '../infinichat/schedule';
+import type { ActiveSecretInfo } from '../infinichat/secrets';
 import type { InfiniChatUsage } from '../infinichat/usage';
 import type { ModelCatalog } from '../model-catalog';
 import type { ProviderAccess } from '../provider-credentials';
@@ -47,6 +49,7 @@ interface Session { server?: DialedServer; live: boolean; behind?: Promise<boole
 
 const LOADING: ChatViewSnapshot = { status: 'loading' };
 const NO_MESSAGES: readonly ChatMessage[] = [];
+const NO_SECRETS: readonly ActiveSecretInfo[] = [];
 const NO_REPORT: InfiniChatSnapshot = {};
 /**
  * The server and this app do not fit: its handshake failed, which the host reports as `protocol_error` (chord
@@ -88,6 +91,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private mismatched?: () => void;
   private readonly listeners = new Set<() => void>();
   private readonly scheduledListeners = new Set<() => void>();
+  private readonly questionListeners = new Set<() => void>();
+  private readonly secretListeners = new Set<() => void>();
   private ref?: InfiniChatRef;
   private session?: Session;
   /** The attempt under way, which `close` and `resume` cancel. */
@@ -107,7 +112,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private unfit?: { version: string; behind: boolean };
   private values?: {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
-    scheduled: readonly ScheduledTask[] | undefined; agents: readonly AgentInfo[] | undefined;
+    scheduled: readonly ScheduledTask[] | undefined; questions: readonly PendingQuestionBatch[] | undefined;
+    secrets: readonly ActiveSecretInfo[]; agents: readonly AgentInfo[] | undefined;
     catalog: ModelCatalog; access: MachineAccess;
     signIn: SignInAttempt; conversation: ConversationState; machines: MachinesState | undefined; reach: Reach;
     pendingHostKeys: PendingHostKeys;
@@ -153,6 +159,20 @@ export class RemoteInfiniChat implements InfiniChatHost {
       return () => { this.scheduledListeners.delete(listener); };
     },
     getSnapshot: () => this.values?.scheduled,
+  };
+  readonly questions = {
+    subscribe: (listener: () => void) => {
+      this.questionListeners.add(listener);
+      return () => { this.questionListeners.delete(listener); };
+    },
+    getSnapshot: () => this.values?.questions,
+  };
+  readonly secrets = {
+    subscribe: (listener: () => void) => {
+      this.secretListeners.add(listener);
+      return () => { this.secretListeners.delete(listener); };
+    },
+    getSnapshot: () => this.values?.secrets ?? NO_SECRETS,
   };
   /** The tree of agents as the machine serves it; undefined until connected and while it holds no conversation. */
   readonly agents = {
@@ -360,6 +380,14 @@ export class RemoteInfiniChat implements InfiniChatHost {
     return this.call((ref, ctx) => ref.cancelScheduled(replacement === undefined ? { id } : { id, replacement }, ctx));
   }
 
+  answerQuestions(taskId: number, answers: readonly UserQuestionAnswer[]): Promise<void> {
+    return this.act((ref, ctx) => ref.answerQuestions({ taskId, answers: [...answers] }, ctx));
+  }
+
+  clearSecrets(id?: string): Promise<void> {
+    return this.act((ref, ctx) => ref.clearSecrets(id === undefined ? {} : { id }, ctx));
+  }
+
   usage(): Promise<InfiniChatUsage> {
     return this.call((ref, ctx) => ref.usage(ctx));
   }
@@ -444,6 +472,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
       this.calls.abort(new Error(`InfiniChat no longer runs on ${this.name}.`));
       this.listeners.clear();
       this.scheduledListeners.clear();
+      this.questionListeners.clear();
+      this.secretListeners.clear();
       this.machineListeners.clear();
       this.agentListeners.clear();
       await this.running;
@@ -621,8 +651,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const context = withAbortSignal(this.released.signal, BACKGROUND_CONTEXT);
     const ref = this.host.hold(InfiniChatRemote, {}, context);
     this.ref = ref;
-    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.scheduled, ref.agents, ref.access,
-      ref.signInAttempt, ref.conversation, ref.machines, ref.reach, ref.pendingHostKeys]) {
+    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.scheduled, ref.pendingQuestions,
+      ref.activeSecrets, ref.agents, ref.access, ref.signInAttempt, ref.conversation, ref.machines, ref.reach,
+      ref.pendingHostKeys]) {
       follow(member, this.refresh, context);
     }
     return ref;
@@ -637,17 +668,23 @@ export class RemoteInfiniChat implements InfiniChatHost {
     // The values are copied here only, once the reference is live, so the list's own store compares; Chord replaces a
     // member's value only when that member changes.
     const rescheduled = scheduled !== this.values?.scheduled;
+    const questions = ref.pendingQuestions.value ?? undefined;
+    const questioned = questions !== this.values?.questions;
+    const secrets = ref.activeSecrets.value;
+    const secretted = secrets !== this.values?.secrets;
     const machines = ref.machines.value ?? undefined;
     const relisted = machines !== this.values?.machines;
     const agents = ref.agents.value ?? undefined;
     const regrown = agents !== this.values?.agents;
-    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled, agents,
-      catalog: ref.catalog.value, access: ref.access.value, signIn: ref.signInAttempt.value,
-      conversation: ref.conversation.value, machines, reach: ref.reach.value,
+    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled,
+      questions, secrets, agents, catalog: ref.catalog.value, access: ref.access.value,
+      signIn: ref.signInAttempt.value, conversation: ref.conversation.value, machines, reach: ref.reach.value,
       pendingHostKeys: ref.pendingHostKeys.value };
     if (report !== this.report.error) this.report = report === undefined ? NO_REPORT : { error: report };
     this.notify();
     if (rescheduled) for (const listener of [...this.scheduledListeners]) listener();
+    if (questioned) for (const listener of [...this.questionListeners]) listener();
+    if (secretted) for (const listener of [...this.secretListeners]) listener();
     if (relisted) for (const listener of [...this.machineListeners]) listener();
     if (regrown) for (const listener of [...this.agentListeners]) listener();
   };
