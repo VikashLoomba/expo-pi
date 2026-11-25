@@ -134,12 +134,13 @@ and build once: `npx eas-cli@latest build:list --limit 5`, then `build:view <id>
 the submission got: `finished` is the upload to App Store Connect, and Apple's processing after it shows only there
 and in TestFlight.
 
-The build number is `ios.buildNumber` in `app.json` (`appVersionSource: "local"` in `eas.json`), which
-`autoIncrement` raises by one in that file as a store build starts: commit the change with the build. Expo
-recommends the remote source, but expo-widgets gives its extension the number the app config has at prebuild
-(`withTargetXcodeProject` in its plugin; expo/expo issue 43740), and EAS writes a remote number only into the
-`Info.plist` files, after prebuild. With the remote source the extension stayed at 1, and each archive warned that
-it did not match the app's.
+The build number is `ios.buildNumber` in `app.json` (`appVersionSource: "local"` in `eas.json`). Expo recommends the
+remote source, but expo-widgets gives its extension the number the app config has at prebuild (`withTargetXcodeProject`
+in its plugin; expo/expo issue 43740), and EAS writes a remote number only into the `Info.plist` files, after prebuild.
+With the remote source the extension stayed at 1, and each archive warned that it did not match the app's. Releases
+run through `.github/workflows/release.yml` (`workflow_dispatch`, backed by `scripts/release-plan.mjs`), which diffs
+against the latest `server/v*`, `mobile/b*` and `mac/v*` tags, bumps only the targets with changes in one commit,
+releases the server first, and then ships iOS (via EAS using `EXPO_TOKEN`) and Mac (via Hutch on `macos-26`).
 
 Without the Mac (a Linux machine such as the owner's server machine), the app runs on an EAS Simulator session, which
 `@expo/agent-cli` plans, starts, drives and ends (`npx @expo/agent-cli dev --help`). It automates Expo's "Use an iOS
