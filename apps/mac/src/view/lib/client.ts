@@ -31,7 +31,11 @@ export async function connectToMain({ port, secret }: { port: number; secret: st
       console.warn('The link to the main process closed; connecting again.');
       setTimeout(connect, RECONNECT_MS);
     });
-    host.connect(webSocketLink(socket), { principal: { kind: 'host' } }, BACKGROUND_CONTEXT);
+    // Private per-launch loopback IPC with the app's own main process: match listen.ts's uncapped part limit.
+    host.connect(webSocketLink(socket), {
+      principal: { kind: 'host' },
+      limits: { part: Number.POSITIVE_INFINITY, decoded: Number.POSITIVE_INFINITY },
+    }, BACKGROUND_CONTEXT);
   };
   connect();
   return host;

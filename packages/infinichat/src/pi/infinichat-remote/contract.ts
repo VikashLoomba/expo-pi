@@ -8,7 +8,9 @@ import { ChatControlsProperties, ChatMessageSchema } from '../../chat/types';
 import { ChatViewSnapshotSchema } from '../chat-view';
 import { AgentInfoSchema } from '../infinichat-agents';
 import { ScheduledTaskSchema } from '../infinichat-scheduled';
-import { InfiniChatControlsSchema } from '../infinichat-view';
+import {
+  HistoryPageQuerySchema, HistoryPageSchema, InfiniChatControlsSchema, TranscriptBoundsSchema,
+} from '../infinichat-view';
 import { PendingQuestionBatchSchema, UserQuestionAnswerSchema } from '../infinichat/ask';
 import { ScheduledInputSchema } from '../infinichat/schedule';
 import { ActiveSecretInfoSchema } from '../infinichat/secrets';
@@ -54,6 +56,8 @@ const ControlsSchemaV8 = union([obj({
 }, { open: true }), nul()]);
 export const ControlsSchema = union([InfiniChatControlsSchema, nul()]);
 export const MessagesSchema = readonlyArr(ChatMessageSchema);
+/** Entry-ID span of the server's bounded live `messages` window; null while inactive or not yet projected. */
+export const TranscriptBoundsStateSchema = union([TranscriptBoundsSchema, nul()]);
 /** The tree of agents, root first (`AgentList`); null while this machine doesn't hold the conversation open. */
 export const AgentsSchema = union([readonlyArr(AgentInfoSchema), nul()]);
 /**
@@ -272,11 +276,13 @@ export const InfiniChatMembers = {
   state: {
     ...InfiniChatMembersV8.state, controls: ControlsSchema, agents: AgentsSchema, conversation: ConversationSchema,
     pendingQuestions: PendingQuestionsSchema, activeSecrets: ActiveSecretsSchema,
+    transcriptBounds: TranscriptBoundsStateSchema,
   },
   methods: {
     ...MethodsV8, setApiKey: method(ApiKeySchema), updateSettings: method(SettingsSchema),
     answerQuestions: method(AnswerQuestionsSchema),
     clearSecrets: method(ClearSecretsSchema),
+    loadHistory: method(HistoryPageQuerySchema, HistoryPageSchema),
     // Moving the conversation, as Chord's session sync hands a session over (`sync.ts`): the side that gives it
     // closes its Harness and uploads what its store committed since the two last shared it, and the side that takes
     // it applies that to its copy and opens it. `relinquish` (Chord reserves `release`) records the phone it hands
@@ -320,6 +326,8 @@ const InfiniChatRemoteV8 = remote('infinichat.remote', {
  *   says it in place of the files adopted. `archive` is gone: a side's own store is its copy.
  * - 12: `ask_user` parked question batches (`pendingQuestions`, `answerQuestions`) and RAM secret metadata/clearing
  *   (`activeSecrets`, `clearSecrets`).
+ * - 13: bounded live `messages` window on the server (`transcriptBounds`) and per-client stateless history pagination
+ *   (`loadHistory`), keeping every Chord state part well below the 16 MiB wire limit.
  */
 const InfiniChatRemoteV9 = evolve(InfiniChatRemoteV8, (edit) => edit.args('setApiKey', ApiKeySchema));
 const InfiniChatRemoteV10 = evolve(InfiniChatRemoteV9, (edit) => edit
@@ -332,14 +340,17 @@ const InfiniChatRemoteV11 = evolve(InfiniChatRemoteV10, (edit) => edit
   .args('pull', PullSchema)
   .args('adopt', HeadSchema)
   .removeMethod('archive'));
-export const InfiniChatRemote = evolve(InfiniChatRemoteV11, (edit) => edit
+const InfiniChatRemoteV12 = evolve(InfiniChatRemoteV11, (edit) => edit
   .addState('owner', 'pendingQuestions', PendingQuestionsSchema)
   .addState('owner', 'activeSecrets', ActiveSecretsSchema)
   .addMethod('owner', 'answerQuestions', AnswerQuestionsSchema, nul())
   .addMethod('owner', 'clearSecrets', ClearSecretsSchema, nul()));
+export const InfiniChatRemote = evolve(InfiniChatRemoteV12, (edit) => edit
+  .addState('owner', 'transcriptBounds', TranscriptBoundsStateSchema)
+  .addMethod('owner', 'loadHistory', HistoryPageQuerySchema, HistoryPageSchema));
 
-/** An agent's chat as its object serves it: the view's own snapshot, with no report, which is the conversation's. */
-export const InfiniChatAgentMembers = {
+/** An agent's chat as version 1 served it, kept as released so older clients still bind with `accepts`. */
+const InfiniChatAgentMembersV1 = {
   state: { snapshot: ChatViewSnapshotSchema, controls: ControlsSchema, messages: MessagesSchema },
   methods: {
     loadEarlier: method(),
@@ -352,16 +363,30 @@ export const InfiniChatAgentMembers = {
   },
 };
 
+/** An agent's chat as its object serves it: the view's own snapshot, bounded live window, and stateless history RPC. */
+export const InfiniChatAgentMembers = {
+  state: { ...InfiniChatAgentMembersV1.state, transcriptBounds: TranscriptBoundsStateSchema },
+  methods: {
+    ...InfiniChatAgentMembersV1.methods,
+    loadHistory: method(HistoryPageQuerySchema, HistoryPageSchema),
+  },
+};
+
 /**
  * One agent of the tree as the machine serves it, by its name there, root too: its chat as the phone shows any
  * chat, which the user reads while its screen is open, and what the user does to it, as UniiChat's views show any
  * unii and stop it or pick its model. The user's messages go to root alone (`InfiniChatRemote.accept`). An object
  * lives while a client holds it (chord `docs/design.md` §6, "Lifetime follows from kind and params"), so only the
  * chats on screen are followed. A name the tree does not have shows as a missing view.
+ *
+ * - 2: `transcriptBounds` and stateless `loadHistory` pagination.
  */
-export const InfiniChatAgent = remote('infinichat.agent', {
+const InfiniChatAgentV1 = remote('infinichat.agent', {
   version: 1,
   params: { name: paramStr() },
   hostAddress: () => ServerHost(),
-  variants: { owner: InfiniChatAgentMembers },
+  variants: { owner: InfiniChatAgentMembersV1 },
 });
+export const InfiniChatAgent = evolve(InfiniChatAgentV1, (edit) => edit
+  .addState('owner', 'transcriptBounds', TranscriptBoundsStateSchema)
+  .addMethod('owner', 'loadHistory', HistoryPageQuerySchema, HistoryPageSchema));

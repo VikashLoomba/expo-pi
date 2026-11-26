@@ -43,7 +43,12 @@ export async function listenForWindows(host: Host<MacPrincipal>): Promise<Window
     handleProtocols: () => secret,
   });
   server.on('connection', (socket) => {
-    host.accept(webSocketLink(socket), { principal: { kind: 'owner' } }, BACKGROUND_CONTEXT);
+    // Private per-launch loopback IPC with the app's own windows: scrolling far back through inline images must not
+    // hit Chord's untrusted 16 MiB wire limit.
+    host.accept(webSocketLink(socket), {
+      principal: { kind: 'owner' },
+      limits: { part: Number.POSITIVE_INFINITY, decoded: Number.POSITIVE_INFINITY },
+    }, BACKGROUND_CONTEXT);
   });
   await new Promise<void>((resolve, reject) => {
     server.once('listening', resolve);

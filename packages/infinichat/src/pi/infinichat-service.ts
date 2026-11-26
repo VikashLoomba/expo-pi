@@ -172,6 +172,7 @@ export class InfiniChatService implements InfiniChatHost {
     private readonly models: Models,
     private readonly authError?: (providerId: string) => string | undefined,
     private readonly machine?: string,
+    private readonly windowed = false,
   ) {}
 
   /**
@@ -190,6 +191,8 @@ export class InfiniChatService implements InfiniChatHost {
     env?: HarnessOptions['env'];
     /** Ephemeral RAM secret store; borrowed when passed by a host that shares it with MCP tools. */
     secrets?: SecretVault;
+    /** Keep views bounded to pi-durable's live window (true on servers serving clients over Chord). */
+    windowed?: boolean;
     /** The Harness closed: `failed` after a storage error (pi-durable README "Errors"), `closed` after close(). */
     onClosed?: (end: SessionEnd) => void;
   }): Promise<InfiniChatService> {
@@ -229,7 +232,7 @@ export class InfiniChatService implements InfiniChatHost {
     const machines = new MachineList(chat.harness);
     const agents = new AgentList(chat.harness, chat.root.id);
     service = new InfiniChatService(chat, scheduled, questions, secrets, ownsSecrets, machines, agents,
-      options.models, options.authError, options.machine);
+      options.models, options.authError, options.machine, options.windowed ?? false);
     void scheduled.start().catch((error: unknown) => service?.report(error));
     void questions.start().catch((error: unknown) => service?.report(error));
     void machines.start().catch((error: unknown) => service?.report(error));
@@ -457,11 +460,17 @@ export class InfiniChatService implements InfiniChatHost {
     return this.viewOf(this.chat.root.id);
   }
 
+  /** One agent's underlying `InfiniChatView` (for server-side bounds and stateless history paging). */
+  agentView(name: string): InfiniChatView | undefined {
+    const id = this.agents.conversation(name);
+    return id === undefined ? undefined : this.viewOf(id);
+  }
+
   /** A view is shared, so the settings opened over a chat do not read its history again. */
   private viewOf(id: ConversationId): InfiniChatView {
     let view = this.views.get(id);
     if (view === undefined) {
-      view = new InfiniChatView(this.chat.harness, id);
+      view = new InfiniChatView(this.chat.harness, id, this.windowed);
       this.views.set(id, view);
     }
     return view;

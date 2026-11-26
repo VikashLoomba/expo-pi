@@ -15,7 +15,7 @@ import {
   InfiniChatAgent, InfiniChatMembers, InfiniChatRemote, type AccessSchema, type ActiveSecretsSchema,
   type AgentsSchema, type ControlsSchema, type ConversationState, type InfiniChatPrincipal, type MachinesSchema,
   type MessagesSchema, type PendingHostKeys, type PendingQuestionsSchema, type ReachSchema, type ScheduledSchema,
-  type SignInAttempt, type SnapshotSchema,
+  type SignInAttempt, type SnapshotSchema, type TranscriptBoundsStateSchema,
 } from '@pi-agent/infinichat/pi/infinichat-remote/contract';
 import { CLAUDE_CODE_PROVIDER_ID } from '@pi-agent/infinichat/pi/claude-code';
 import {
@@ -44,6 +44,7 @@ interface ConversationView {
   snapshot: Static<typeof SnapshotSchema>;
   controls: Static<typeof ControlsSchema>;
   messages: Static<typeof MessagesSchema>;
+  transcriptBounds: Static<typeof TranscriptBoundsStateSchema>;
   scheduled: Static<typeof ScheduledSchema>;
   pendingQuestions: Static<typeof PendingQuestionsSchema>;
   activeSecrets: Static<typeof ActiveSecretsSchema>;
@@ -56,15 +57,17 @@ interface AgentView {
   snapshot: ChatViewSnapshot;
   controls: Static<typeof ControlsSchema>;
   messages: Static<typeof MessagesSchema>;
+  transcriptBounds: Static<typeof TranscriptBoundsStateSchema>;
 }
 interface AccountView { catalog: ModelCatalog; access: Static<typeof AccessSchema>; signInAttempt: SignInAttempt }
 interface ReachView { reach: Static<typeof ReachSchema>; pendingHostKeys: PendingHostKeys }
 
 const LOADING = { status: 'loading' } as const;
 /** What the members read from the object's activation until its first routine has read the natives. */
-const NO_VIEW: ConversationView = { snapshot: { view: LOADING }, controls: null, messages: [], scheduled: null,
-  pendingQuestions: null, activeSecrets: [], machines: null, agents: null, conversation: { active: false } };
-const NO_AGENT_VIEW: AgentView = { snapshot: LOADING, controls: null, messages: [] };
+const NO_VIEW: ConversationView = { snapshot: { view: LOADING }, controls: null, messages: [],
+  transcriptBounds: null, scheduled: null, pendingQuestions: null, activeSecrets: [], machines: null, agents: null,
+  conversation: { active: false } };
+const NO_AGENT_VIEW: AgentView = { snapshot: LOADING, controls: null, messages: [], transcriptBounds: null };
 const NO_ACCOUNT: AccountView = { catalog: [], access: {}, signInAttempt: null };
 const NO_REACH: ReachView = { reach: {}, pendingHostKeys: {} };
 
@@ -80,7 +83,7 @@ const NO_REACH: ReachView = { reach: {}, pendingHostKeys: {} };
  * contract change bump it; this plugin is its only consumer, so it accepts no older one.
  */
 export const InfiniChatMachine = local('infinichat.machine', {
-  version: 3,
+  version: 4,
   params: {},
   members: { ...InfiniChatMembers.state, ...InfiniChatMembers.methods },
 });
@@ -117,6 +120,7 @@ const MOVE_NEEDS_THE_APP_UPDATED = { adopt: refuseMove, relinquish: refuseMove, 
  * - 8: 9's, and its `setApiKey` arguments are the newest's without a workspace ID.
  */
 const ACCEPTED: AcceptsTable<typeof InfiniChatRemote> = {
+  12: {},
   11: {},
   10: {
     state: { owner: { conversation: (current) => beforeSync(current) } },
@@ -213,7 +217,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       const registry = registryReader(extensions, context);
       const held = new ServerConversation(home, (storage) => InfiniChatService.open({
         storage, models: account.value.models, parts, registry, machine: device, env: devices.env,
-        secrets: proc.secrets,
+        secrets: proc.secrets, windowed: true,
         accountChanges: account.value.credentials.subscribe,
         onClosed: (end) => {
           if (end.kind === 'failed') proc.fail(end.error);
@@ -246,6 +250,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
           : NO_VIEW.snapshot,
         controls: open?.view().getControls() ?? null,
         messages: open?.view().getMessages() ?? NO_VIEW.messages,
+        transcriptBounds: open?.view().getBounds() ?? null,
         scheduled: open?.scheduled.getSnapshot() ?? null,
         pendingQuestions: open?.questions.getSnapshot() ?? null,
         activeSecrets: proc.secrets.getSnapshot(),
@@ -297,6 +302,7 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       controls: self.derive([view], ([shown]) => shown.controls),
       // Chord's JSON arrays are mutable types; the copies keep their elements, which the diff compares by identity.
       messages: self.derive([view], ([shown]) => [...shown.messages]),
+      transcriptBounds: self.derive([view], ([shown]) => shown.transcriptBounds),
       scheduled: self.derive([view], ([shown]) => shown.scheduled && [...shown.scheduled]),
       pendingQuestions: self.derive([view], ([shown]) => shown.pendingQuestions && [...shown.pendingQuestions]),
       activeSecrets: self.derive([view], ([shown]) => [...shown.activeSecrets]),
@@ -313,8 +319,11 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       accept: async ({ content, requestId }, ctx) => done(core().accept(content, requestId, callContext(ctx))),
       stop: async () => done(core().stop()),
       continue: async () => done(core().continue()),
-      loadEarlier: async () => done(core().view().loadEarlier()),
-      fillGap: async (gap) => done(core().view().fillGap(gap)),
+      // Legacy v8-v12 methods are no-ops: the server keeps `messages` bounded to the live window and serves
+      // older pages per client through `loadHistory` so no client's scrollback can push `messages` past 16 MiB.
+      loadEarlier: async () => null,
+      fillGap: async () => null,
+      loadHistory: async (query, ctx) => core().view().loadHistory(query, callContext(ctx)),
       updateSettings: async (settings, ctx) => done(core().updateSettings(settings, callContext(ctx))),
       cancelScheduled: async ({ id, replacement }, ctx) =>
         core().cancelScheduled(id, replacement, callContext(ctx)),
@@ -382,13 +391,15 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
       variant: 'owner',
       members: {
         snapshot: machine.snapshot, controls: machine.controls, messages: machine.messages,
+        transcriptBounds: machine.transcriptBounds,
         scheduled: machine.scheduled, pendingQuestions: machine.pendingQuestions, activeSecrets: machine.activeSecrets,
         machines: machine.machines, agents: machine.agents,
         conversation: machine.conversation,
         server: machine.server, catalog: machine.catalog, access: machine.access,
         signInAttempt: machine.signInAttempt, reach: machine.reach, pendingHostKeys: machine.pendingHostKeys,
         accept: machine.accept, stop: machine.stop, continue: machine.continue, loadEarlier: machine.loadEarlier,
-        fillGap: machine.fillGap, updateSettings: machine.updateSettings, cancelScheduled: machine.cancelScheduled,
+        fillGap: machine.fillGap, loadHistory: machine.loadHistory,
+        updateSettings: machine.updateSettings, cancelScheduled: machine.cancelScheduled,
         answerQuestions: machine.answerQuestions, clearSecrets: machine.clearSecrets,
         usage: machine.usage, create: machine.create,
         dismissError: machine.dismissError, setTimeZone: machine.setTimeZone, reloadPlugins: machine.reloadPlugins,
@@ -428,11 +439,16 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
           unfollow = view?.subscribe(publish) ?? (() => {});
           previous();
         }
+        const agentView = held?.current?.agentView(name);
         const next: AgentView = view === undefined ? NO_AGENT_VIEW
-          : { snapshot: view.getSnapshot(), controls: view.getControls() ?? null, messages: view.getMessages() };
+          : {
+            snapshot: view.getSnapshot(), controls: view.getControls() ?? null, messages: view.getMessages(),
+            transcriptBounds: agentView?.getBounds() ?? null,
+          };
         const last = shown.value;
         // The holder tells of every change of the conversation; this agent's chat is published only when it changed.
-        if (next.snapshot !== last.snapshot || next.controls !== last.controls || next.messages !== last.messages) {
+        if (next.snapshot !== last.snapshot || next.controls !== last.controls || next.messages !== last.messages
+          || next.transcriptBounds !== last.transcriptBounds) {
           shown.set(next);
         }
       };
@@ -452,12 +468,19 @@ export default (proc: ServerProcess) => defineFacet<InfiniChatPrincipal>((host, 
         controls: self.derive([shown], ([view]) => view.controls),
         // Chord's JSON arrays are mutable types; the copy keeps its elements, which the diff compares by identity.
         messages: self.derive([shown], ([view]) => [...view.messages]),
-        loadEarlier: async () => done(chat().view().loadEarlier()),
-        fillGap: async (gap) => done(chat().view().fillGap(gap)),
+        transcriptBounds: self.derive([shown], ([view]) => view.transcriptBounds),
+        loadEarlier: async () => null,
+        fillGap: async () => null,
+        loadHistory: async (query, ctx) => {
+          const open = conversationOpen?.current;
+          if (!open) throw new Error(`InfiniChat isn’t open on ${proc.device}.`);
+          const view = open.agentView(name);
+          return view === undefined ? { messages: [], more: false } : view.loadHistory(query, callContext(ctx));
+        },
         stop: async () => done(chat().stop()),
         continue: async () => done(chat().continue()),
         setModel: async (settings) => done(chat().setModel(settings)),
       },
     };
-  });
+  }, { accepts: { 1: {} } });
 });

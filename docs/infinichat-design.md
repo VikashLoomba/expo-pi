@@ -135,8 +135,9 @@ What a move costs, on a copy of the owner's conversation (9,535 messages, a 216 
 to send, a turn is about 0.1 MiB, and a hop to another device and back, after the first, sends only the turns made
 there.
 
-**The contract.** `infinichat.remote` is at version 12 (`pendingQuestions`, `activeSecrets`, `answerQuestions`,
-`clearSecrets`, added over v11's session-sync move). Apps on versions 8 to 11 keep chatting with a newer server;
+**The contract.** `infinichat.remote` is at version 13 (bounded live `messages` window with `transcriptBounds` and
+per-client stateless `loadHistory` pagination, added over v12's `ask_user` / secrets) and `infinichat.agent` is at
+version 2. Apps on versions 8 to 12 keep chatting with a newer server;
 versions 8 to 10 have moves refused with a message to update the app (`docs/server-plugins.md`, "Contract versions").
 
 ## Choices that are the implementer's, for the owner to change

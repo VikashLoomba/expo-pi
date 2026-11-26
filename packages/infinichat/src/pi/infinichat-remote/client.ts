@@ -25,6 +25,7 @@ import type { MachinePatch, MachinesState } from './machines';
 import { RemoteMcp } from './mcp-client';
 import { behindNewest } from './release';
 import { attemptStep } from './sign-in-attempt';
+import { RemoteTranscript } from './transcript';
 
 type ConnectionStatus =
   | { status: 'connecting'; stage?: InstallStage }
@@ -127,6 +128,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
   private readonly agentListeners = new Set<() => void>();
   /** Each agent's chat by its name, which a screen holds while it shows it (`RemoteAgent`). */
   private readonly chats = new Map<string, RemoteAgent>();
+  /** This client's own transcript combining the server's bounded live window with paged history. */
+  private readonly transcript = new RemoteTranscript();
 
   /** The machine's MCP servers, which `/mcp` shows, over this host's link. */
   readonly mcp: RemoteMcp;
@@ -195,9 +198,16 @@ export class RemoteInfiniChat implements InfiniChatHost {
     getSnapshot: () => this.values?.view ?? LOADING,
     getControls: () => this.values?.controls,
     getMessages: () => this.values?.messages ?? NO_MESSAGES,
-    // The machine's view loads them into the transcript every client reads.
-    loadEarlier: () => this.act((ref, ctx) => ref.loadEarlier(ctx)),
-    fillGap: (gap) => this.act((ref, ctx) => ref.fillGap(gap, ctx)),
+    loadEarlier: async () => {
+      if (await this.transcript.loadEarlier((query) => this.call((ref, ctx) => ref.loadHistory(query, ctx)))) {
+        this.publishTranscript();
+      }
+    },
+    fillGap: async (gap) => {
+      if (await this.transcript.fillGap(gap, (query) => this.call((ref, ctx) => ref.loadHistory(query, ctx)))) {
+        this.publishTranscript();
+      }
+    },
   };
 
   view(): ChatViewSource<InfiniChatControls> {
@@ -651,9 +661,9 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const context = withAbortSignal(this.released.signal, BACKGROUND_CONTEXT);
     const ref = this.host.hold(InfiniChatRemote, {}, context);
     this.ref = ref;
-    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.scheduled, ref.pendingQuestions,
-      ref.activeSecrets, ref.agents, ref.access, ref.signInAttempt, ref.conversation, ref.machines, ref.reach,
-      ref.pendingHostKeys]) {
+    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.transcriptBounds, ref.scheduled,
+      ref.pendingQuestions, ref.activeSecrets, ref.agents, ref.access, ref.signInAttempt, ref.conversation,
+      ref.machines, ref.reach, ref.pendingHostKeys]) {
       follow(member, this.refresh, context);
     }
     return ref;
@@ -676,7 +686,8 @@ export class RemoteInfiniChat implements InfiniChatHost {
     const relisted = machines !== this.values?.machines;
     const agents = ref.agents.value ?? undefined;
     const regrown = agents !== this.values?.agents;
-    this.values = { view, controls: ref.controls.value ?? undefined, messages: ref.messages.value, scheduled,
+    this.transcript.applyLive(ref.messages.value, ref.transcriptBounds.value);
+    this.values = { view, controls: ref.controls.value ?? undefined, messages: this.transcript.getMessages(), scheduled,
       questions, secrets, agents, catalog: ref.catalog.value, access: ref.access.value,
       signIn: ref.signInAttempt.value, conversation: ref.conversation.value, machines, reach: ref.reach.value,
       pendingHostKeys: ref.pendingHostKeys.value };
@@ -711,6 +722,12 @@ export class RemoteInfiniChat implements InfiniChatHost {
       : session === this.updating ? 'requested' : 'available';
     this.connection = { ...this.status, ...(this.notice === undefined ? {} : { notice: this.notice }),
       ...(update === undefined ? {} : { update }) };
+    this.notify();
+  }
+
+  private publishTranscript() {
+    if (this.values === undefined) return;
+    this.values = { ...this.values, messages: this.transcript.getMessages() };
     this.notify();
   }
 

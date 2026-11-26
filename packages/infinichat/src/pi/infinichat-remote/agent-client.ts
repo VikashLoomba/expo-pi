@@ -8,6 +8,7 @@ import type { InfiniChatControls } from '../infinichat-view';
 import type { ChatModelSettings } from '../model-catalog';
 import { InfiniChatAgent, type InfiniChatPrincipal } from './contract';
 import { follow } from './follow';
+import { RemoteTranscript } from './transcript';
 
 type AgentRef = Held<typeof InfiniChatAgent>;
 
@@ -28,6 +29,7 @@ export class RemoteAgent implements AgentChat {
     view: ChatViewSnapshot; controls: InfiniChatControls | undefined; messages: readonly ChatMessage[];
   };
   private readonly listeners = new Set<() => void>();
+  private readonly transcript = new RemoteTranscript();
 
   constructor(private readonly host: Host<InfiniChatPrincipal>, private readonly name: string,
     private readonly ready: () => boolean,
@@ -45,9 +47,16 @@ export class RemoteAgent implements AgentChat {
     getSnapshot: () => this.values?.view ?? LOADING,
     getControls: () => this.values?.controls,
     getMessages: () => this.values?.messages ?? NO_MESSAGES,
-    // The machine's view loads them into the transcript every client reads.
-    loadEarlier: () => this.act((ref, ctx) => ref.loadEarlier(ctx)),
-    fillGap: (gap) => this.act((ref, ctx) => ref.fillGap(gap, ctx)),
+    loadEarlier: async () => {
+      if (await this.transcript.loadEarlier((query) => this.call((ref, ctx) => ref.loadHistory(query, ctx)))) {
+        this.publishTranscript();
+      }
+    },
+    fillGap: async (gap) => {
+      if (await this.transcript.fillGap(gap, (query) => this.call((ref, ctx) => ref.loadHistory(query, ctx)))) {
+        this.publishTranscript();
+      }
+    },
   };
 
   view(): ChatViewSource<InfiniChatControls> {
@@ -72,7 +81,9 @@ export class RemoteAgent implements AgentChat {
     const context = withAbortSignal(this.released.signal, BACKGROUND_CONTEXT);
     const ref = this.host.hold(InfiniChatAgent, { name: this.name }, context);
     this.ref = ref;
-    for (const member of [ref.snapshot, ref.controls, ref.messages]) follow(member, this.refresh, context);
+    for (const member of [ref.snapshot, ref.controls, ref.messages, ref.transcriptBounds]) {
+      follow(member, this.refresh, context);
+    }
     follow(ref.state, this.refresh, context);
   }
 
@@ -87,21 +98,32 @@ export class RemoteAgent implements AgentChat {
   private readonly refresh = () => {
     const ref = this.ref;
     if (ref === undefined || ref.state.value.kind !== 'live') return;
+    this.transcript.applyLive(ref.messages.value, ref.transcriptBounds.value);
     this.values = { view: ref.snapshot.value, controls: ref.controls.value ?? undefined,
-      messages: ref.messages.value };
+      messages: this.transcript.getMessages() };
     for (const listener of [...this.listeners]) listener();
   };
+
+  private publishTranscript(): void {
+    if (this.values === undefined) return;
+    this.values = { ...this.values, messages: this.transcript.getMessages() };
+    for (const listener of [...this.listeners]) listener();
+  }
+
+  private async act(call: (ref: AgentRef, ctx: Ctx<InfiniChatPrincipal>) => Promise<null>): Promise<void> {
+    await this.call(call);
+  }
 
   /**
    * A method of the agent's object, on the reference a screen holds, or on one held for the call: a call on a
    * loading reference waits until it is live.
    */
-  private async act(call: (ref: AgentRef, ctx: Ctx<InfiniChatPrincipal>) => Promise<null>): Promise<void> {
-    await this.run(async (ctx) => {
+  private call<T>(run: (ref: AgentRef, ctx: Ctx<InfiniChatPrincipal>) => Promise<T>): Promise<T> {
+    return this.run(async (ctx) => {
       const held = this.ref;
       const ref = held ?? this.host.hold(InfiniChatAgent, { name: this.name }, BACKGROUND_CONTEXT);
       try {
-        return await call(ref, ctx);
+        return await run(ref, ctx);
       } finally {
         if (held === undefined) ref.release();
       }
