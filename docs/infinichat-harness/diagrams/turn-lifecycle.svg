@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 780" width="1160" height="780">
+  <defs>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .title { font-size: 20px; font-weight: 700; fill: #0F172A; }
+      .subtitle { font-size: 13px; fill: #475569; }
+      .stage { font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; }
+      .box-title { font-size: 12.2px; font-weight: 700; fill: #0F172A; }
+      .small { font-size: 10.3px; fill: #475569; }
+      .code { font-size: 9.8px; fill: #0F172A; }
+      .badge { font-size: 9.8px; font-weight: 700; letter-spacing: 0.03em; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#475569"/>
+    </marker>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#4338CA"/>
+    </marker>
+    <marker id="arr-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#0F766E"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas -->
+  <rect x="1" y="1" width="1158" height="778" rx="14" fill="#FAFAF8" stroke="#E2E0D8" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="32" y="38" class="sans title">Turn Lifecycle &amp; Event-Driven Coordinator</text>
+  <text x="32" y="58" class="sans subtitle">How an input wakes an agent, passes the memoryReady gate, submits or steers, logs rounds live, and exits to zero-cost rest.</text>
+
+  <!-- STAGE 1: ADMISSION -->
+  <rect x="32" y="80" width="244" height="404" rx="10" fill="#FFFFFF" stroke="#6366F1" stroke-width="1.4"/>
+  <rect x="32" y="80" width="244" height="30" rx="10" fill="#E0E7FF"/>
+  <rect x="32" y="96" width="244" height="14" fill="#E0E7FF"/>
+  <text x="46" y="100" class="sans stage" style="fill: #312E81;">1. ADMIT &amp; WAKE (ONE COMMIT)</text>
+
+  <rect x="44" y="122" width="220" height="74" rx="7" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="54" y="140" class="sans box-title">Input Sources</text>
+  <text x="54" y="157" class="sans small">• User: <tspan class="mono">accept()</tspan> → root (<tspan class="mono">user</tspan>)</text>
+  <text x="54" y="172" class="sans small">• Agent: <tspan class="mono">tell()</tspan> → child / parent</text>
+  <text x="54" y="187" class="sans small">• Clock: <tspan class="mono">scheduledTask</tspan> → root</text>
+
+  <line x1="154" y1="196" x2="154" y2="216" stroke="#4338CA" stroke-width="1.5" marker-end="url(#arr-indigo)"/>
+
+  <rect x="44" y="218" width="220" height="128" rx="7" fill="#EEF2FF" stroke="#818CF8"/>
+  <text x="54" y="236" class="mono code" font-weight="700" style="fill: #3730A3;">admitInput(tx, chat, input)</text>
+  <text x="54" y="254" class="sans small">1. Dedupe <tspan class="mono">requestId</tspan> in <tspan class="mono">InputDoc</tspan></text>
+  <text x="54" y="270" class="sans small">2. Call <tspan class="mono">closeSettledEpoch()</tspan></text>
+  <text x="54" y="286" class="sans small">3. If <tspan class="mono">!app.open</tspan>: <tspan class="mono">epoch++</tspan>, <tspan class="mono">fresh=true</tspan></text>
+  <text x="54" y="302" class="sans small">   Else: join open epoch (<tspan class="mono">fresh=false</tspan>)</text>
+  <text x="54" y="318" class="sans small">4. Push to <tspan class="mono">requests</tspan> &amp; <tspan class="mono">pending</tspan></text>
+  <text x="54" y="334" class="sans small">5. <tspan class="mono">advanceMessageProgress()</tspan></text>
+
+  <line x1="154" y1="346" x2="154" y2="366" stroke="#4338CA" stroke-width="1.5" marker-end="url(#arr-indigo)"/>
+
+  <rect x="44" y="368" width="220" height="100" rx="7" fill="#F0FDFA" stroke="#2DD4BF"/>
+  <text x="54" y="386" class="mono code" font-weight="700" style="fill: #115E59;">wake(tx, chat)</text>
+  <text x="54" y="404" class="sans small">• If coordinator lives:</text>
+  <text x="62" y="419" class="mono code" style="fill: #0F766E;">tx.signal(task, Wake, wN, {})</text>
+  <text x="54" y="438" class="sans small">• Else (agent was asleep):</text>
+  <text x="62" y="453" class="mono code" style="fill: #0F766E;">tx.createTask(Coordinator)</text>
+
+  <!-- Arrow Stage 1 -> Stage 2 -->
+  <line x1="276" y1="280" x2="304" y2="280" stroke="#4338CA" stroke-width="1.8" marker-end="url(#arr-indigo)"/>
+
+  <!-- STAGE 2: COORDINATOR -->
+  <rect x="306" y="80" width="334" height="404" rx="10" fill="#FFFFFF" stroke="#4338CA" stroke-width="1.4"/>
+  <rect x="306" y="80" width="334" height="30" rx="10" fill="#E0E7FF"/>
+  <rect x="306" y="96" width="334" height="14" fill="#E0E7FF"/>
+  <text x="320" y="100" class="sans stage" style="fill: #312E81;">2. COORDINATOR (optchat.coordinator)</text>
+
+  <rect x="320" y="122" width="306" height="62" rx="7" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="330" y="139" class="sans box-title">Every Wake Commit Starts By:</text>
+  <text x="330" y="156" class="sans small">• <tspan class="mono">projectEntries()</tspan> &amp; <tspan class="mono">closeSettledEpoch()</tspan></text>
+  <text x="330" y="172" class="sans small">• Advance <tspan class="mono">Wake</tspan> key; prune <tspan class="mono">settling[]</tspan>; flush <tspan class="mono">cut</tspan>/<tspan class="mono">endNote</tspan></text>
+
+  <!-- Branch A: Fresh Turn -->
+  <rect x="320" y="196" width="306" height="146" rx="7" fill="#F0FDF4" stroke="#4ADE80"/>
+  <text x="330" y="214" class="sans badge" style="fill: #166534;">PATH A · FRESH TURN (input.fresh === true)</text>
+  <text x="330" y="232" class="sans small"><tspan font-weight="700" style="fill: #14532D;">Gate:</tspan> Wait for <tspan class="mono">memoryReady</tspan> (<tspan class="mono">frontier ≥ nextMessage</tspan>).</text>
+  <text x="330" y="248" class="sans small">If not ready: <tspan class="mono">pumpBuilds()</tspan> and sleep on <tspan class="mono">Wake</tspan>.</text>
+  <text x="330" y="266" class="sans small"><tspan font-weight="700" style="fill: #14532D;">Commit 1 (Prepare):</tspan> <tspan class="mono">settleViews()</tspan>, freeze</text>
+  <text x="330" y="281" class="mono code">envelope(renderMain, input, turnState, placeOf)</text>
+  <text x="330" y="297" class="sans small">Append <tspan class="mono">ResetEntry({ head: 'self' })</tspan> &amp; checkpoint.</text>
+  <text x="330" y="315" class="sans small"><tspan font-weight="700" style="fill: #14532D;">After Commit (avoids ReadAfterWrite):</tspan></text>
+  <text x="330" y="331" class="mono code">submit({ content: env, entry: Delivery, notify })</text>
+
+  <!-- Branch B: Steer -->
+  <rect x="320" y="354" width="306" height="114" rx="7" fill="#FFFBEB" stroke="#F59E0B"/>
+  <text x="330" y="372" class="sans badge" style="fill: #92400E;">PATH B · MID-TURN STEER (input.fresh === false)</text>
+  <text x="330" y="390" class="sans small">Inside coordinator commit (before table writes):</text>
+  <text x="330" y="406" class="mono code" style="font-size: 9.2px;">submit(tx, { whenBusy: 'steer', whenIdle: 'reject' })</text>
+  <text x="330" y="424" class="sans small">• <tspan font-weight="700">If busy:</tspan> lands between tool rounds; raw input, no reset.</text>
+  <text x="330" y="440" class="sans small">• <tspan font-weight="700">If ConversationIdle:</tspan> turn finished first → <tspan class="mono">carryOver()</tspan></text>
+  <text x="330" y="455" class="sans small">  promotes pending inputs into a fresh epoch (<tspan class="mono">Path A</tspan>).</text>
+
+  <!-- Arrows Stage 2 -> Stage 3 -->
+  <line x1="640" y1="268" x2="668" y2="268" stroke="#0F766E" stroke-width="1.8" marker-end="url(#arr-teal)"/>
+  <line x1="640" y1="410" x2="668" y2="410" stroke="#4338CA" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arr-indigo)"/>
+
+  <!-- STAGE 3: GENERATION & LIVE LOGGING -->
+  <rect x="670" y="80" width="232" height="404" rx="10" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.4"/>
+  <rect x="670" y="80" width="232" height="30" rx="10" fill="#CCFBF1"/>
+  <rect x="670" y="96" width="232" height="14" fill="#CCFBF1"/>
+  <text x="684" y="100" class="sans stage" style="fill: #115E59;">3. RUN &amp; LIVE LOGGING</text>
+
+  <rect x="684" y="122" width="204" height="92" rx="7" fill="#F0FDFA" stroke="#2DD4BF"/>
+  <text x="694" y="140" class="mono code" font-weight="700" style="fill: #115E59;">pi.generation</text>
+  <text x="694" y="157" class="sans small">• Reads from newest <tspan class="mono">ResetEntry</tspan></text>
+  <text x="694" y="173" class="sans small">• Streams thinking + text + calls</text>
+  <text x="694" y="189" class="sans small">• Sequential <tspan class="mono">pi.tool</tspan> execution</text>
+  <text x="694" y="204" class="sans small">  (<tspan class="mono">toolPolicy</tspan> clips &amp; redacts)</text>
+
+  <line x1="786" y1="214" x2="786" y2="236" stroke="#0F766E" stroke-width="1.5" marker-end="url(#arr-teal)"/>
+
+  <rect x="684" y="238" width="204" height="136" rx="7" fill="#FFFFFF" stroke="#0D9488"/>
+  <text x="694" y="256" class="mono code" font-weight="700" style="fill: #0F766E;">RoundEnd (afterTools hook)</text>
+  <text x="694" y="274" class="sans small">Runs after EVERY tool round while</text>
+  <text x="694" y="289" class="sans small">generation waits:</text>
+  <text x="694" y="306" class="sans small">1. <tspan class="mono">projectEntries()</tspan> from <tspan class="mono">cursor</tspan>:</text>
+  <text x="694" y="321" class="sans small">   • Logs original <tspan class="mono">DeliveryEntry</tspan></text>
+  <text x="694" y="336" class="sans small">   • Pairs <tspan class="mono">held</tspan> call before <tspan class="mono">echo</tspan></text>
+  <text x="694" y="352" class="sans small">2. <tspan class="mono">pumpBuilds()</tspan> starts <tspan class="mono">BuildNode</tspan></text>
+  <text x="694" y="366" class="sans small">   tasks during the active turn!</text>
+
+  <!-- Loop back from RoundEnd to Generation -->
+  <path d="M 888 302 C 908 302 908 168 888 168" fill="none" stroke="#0F766E" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr-teal)"/>
+
+  <!-- Parked ask_user note -->
+  <rect x="684" y="388" width="204" height="80" rx="7" fill="#FFFBEB" stroke="#FCD34D"/>
+  <text x="694" y="406" class="sans badge" style="fill: #92400E;">PARKED TOOL (ask_user)</text>
+  <text x="694" y="423" class="sans small">Sleeps on <tspan class="mono">AskAnswer</tspan> signal with</text>
+  <text x="694" y="438" class="sans small">zero active process. User answer</text>
+  <text x="694" y="453" class="sans small">mints RAM handles &amp; resumes round.</text>
+
+  <!-- Arrow Stage 3 -> Stage 4 -->
+  <line x1="902" y1="280" x2="930" y2="280" stroke="#475569" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <!-- STAGE 4: SETTLE & SLEEP/REST -->
+  <rect x="932" y="80" width="196" height="404" rx="10" fill="#FFFFFF" stroke="#64748B" stroke-width="1.4"/>
+  <rect x="932" y="80" width="196" height="30" rx="10" fill="#E2E8F0"/>
+  <rect x="932" y="96" width="196" height="14" fill="#E2E8F0"/>
+  <text x="946" y="100" class="sans stage" style="fill: #1E293B;">4. SETTLE OR REST</text>
+
+  <rect x="946" y="122" width="168" height="88" rx="7" fill="#EEF2FF" stroke="#818CF8"/>
+  <text x="956" y="140" class="sans badge" style="fill: #3730A3;">SLEEPING (WAITING)</text>
+  <text x="956" y="157" class="sans small">Holds zero invocation.</text>
+  <text x="956" y="173" class="sans small">Wakes on:</text>
+  <text x="956" y="189" class="mono code">• Wake(wN)</text>
+  <text x="956" y="203" class="mono code">• SubmissionSettled</text>
+
+  <line x1="1030" y1="210" x2="1030" y2="236" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="946" y="238" width="168" height="110" rx="7" fill="#F8FAFC" stroke="#94A3B8"/>
+  <text x="956" y="256" class="sans box-title">Run Ends</text>
+  <text x="956" y="273" class="sans small">1. Final <tspan class="mono">projectEntries</tspan></text>
+  <text x="956" y="288" class="sans small">   logs final reply &amp; pumps</text>
+  <text x="956" y="303" class="sans small">   remaining builds.</text>
+  <text x="956" y="320" class="sans small">2. <tspan class="mono">closeSettledEpoch()</tspan></text>
+  <text x="956" y="335" class="sans small">   sets <tspan class="mono">app.open = false</tspan>.</text>
+
+  <line x1="1030" y1="348" x2="1030" y2="374" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="946" y="376" width="168" height="92" rx="7" fill="#DCFCE7" stroke="#4ADE80"/>
+  <text x="956" y="394" class="sans badge" style="fill: #166534;">TERMINAL (ASLEEP)</text>
+  <text x="956" y="411" class="sans small">If <tspan class="mono">!turnOpen(app)</tspan> &amp; idle:</text>
+  <text x="956" y="427" class="mono code" style="fill: #14532D;">coordinating.task = null</text>
+  <text x="956" y="444" class="sans small">Coordinator completes.</text>
+  <text x="956" y="458" class="sans small">Agent shows as asleep.</text>
+
+  <!-- BOTTOM ROW: FAILURE, STOP, CONTINUE & RECOVERY BAND -->
+  <rect x="32" y="502" width="1096" height="248" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.3"/>
+  <rect x="32" y="502" width="1096" height="28" rx="10" fill="#F1F5F9"/>
+  <rect x="32" y="518" width="1096" height="12" fill="#F1F5F9"/>
+  <text x="48" y="521" class="sans stage" style="fill: #334155;">EDGE PATHS: STOP, FAILURE REQUEUE, CONTINUE &amp; CRASH RECOVERY</text>
+
+  <!-- Edge 1: Stop & Requeue -->
+  <rect x="48" y="544" width="342" height="190" rx="8" fill="#FFF1F2" stroke="#FDA4AF"/>
+  <text x="60" y="563" class="sans box-title" style="fill: #9F1239;">User Stop &amp; Failed Run Requeue</text>
+  <text x="60" y="582" class="sans small">• <tspan class="mono">abort()</tspan> bumps <tspan class="mono">app.stop</tspan>, sets <tspan class="mono">endNote</tspan>, wakes coord.</text>
+  <text x="60" y="599" class="sans small">• Coordinator runs <tspan class="mono">countRequeued()</tspan> (bumps <tspan class="mono">attempt</tspan>),</text>
+  <text x="60" y="614" class="sans small">  then calls <tspan class="mono">conversation.abort()</tspan> to withdraw inbox.</text>
+  <text x="60" y="631" class="sans small">• <tspan class="mono">afterFailedRun: 'withdraw'</tspan> also withdraws inputs</text>
+  <text x="60" y="646" class="sans small">  queued behind a failed run.</text>
+  <text x="60" y="663" class="sans small">• <tspan class="mono">requeueAborted</tspan> / <tspan class="mono">requeueWithdrawn</tspan> → <tspan class="mono">carryOver()</tspan>:</text>
+  <text x="60" y="678" class="sans small">  untaken inputs open a <tspan font-weight="700">fresh turn</tspan> with a new <tspan class="mono">ResetEntry</tspan>.</text>
+  <text x="60" y="699" class="sans small" style="fill: #881337;"><tspan font-weight="700">Why not onAbort:'keep'?</tspan> Kept inputs would sit ahead</text>
+  <text x="60" y="714" class="sans small" style="fill: #881337;">of the next view, breaking envelope shape &amp; prompt cache.</text>
+
+  <!-- Edge 2: Cut Attempts & Notes -->
+  <rect x="406" y="544" width="346" height="190" rx="8" fill="#FFFBEB" stroke="#FCD34D"/>
+  <text x="418" y="563" class="sans box-title" style="fill: #92400E;">Partial/Failed Attempts &amp; Continue</text>
+  <text x="418" y="582" class="sans small">• On <tspan class="mono">error</tspan> / <tspan class="mono">aborted</tspan>: partial text &amp; calls go into</text>
+  <text x="418" y="597" class="sans small">  <tspan class="mono">app.cut</tspan> (never logged immediately). If pi-durable</text>
+  <text x="418" y="612" class="sans small">  retries and succeeds, <tspan class="mono">app.cut</tspan> is dropped cleanly.</text>
+  <text x="418" y="631" class="sans small">• When the run ends without succeeding, coordinator</text>
+  <text x="418" y="646" class="sans small">  flushes <tspan class="mono">app.cut</tspan> as <tspan class="mono">[cut off: ...]</tspan> + <tspan class="mono">app.endNote</tspan>.</text>
+  <text x="418" y="667" class="sans small">• <tspan font-weight="700" style="fill: #78350F;">Continue:</tspan> <tspan class="mono">chat.continue()</tspan> opens an empty epoch with</text>
+  <text x="418" y="682" class="sans small">  <tspan class="mono">app.resume = id</tspan> and wakes the coordinator, which</text>
+  <text x="418" y="698" class="sans small">  submits <tspan class="mono code">{ type: 'continue', notify }</tspan> (no ResetEntry).</text>
+
+  <!-- Edge 3: Crash Recovery & Move Resume -->
+  <rect x="768" y="544" width="344" height="190" rx="8" fill="#F0FDFA" stroke="#5EEAD4"/>
+  <text x="780" y="563" class="sans box-title" style="fill: #115E59;">Crash Recovery &amp; Device Moves</text>
+  <text x="780" y="582" class="sans small">• Every state transition is a durable commit; native IDs</text>
+  <text x="780" y="597" class="sans small">  (<tspan class="mono">optchat:&lt;id&gt;[:attempt]</tspan>) make submits idempotent.</text>
+  <text x="780" y="616" class="sans small">• <tspan class="mono">restartLimit: Infinity</tspan>: iOS background kills never</text>
+  <text x="780" y="631" class="sans small">  fault a <tspan class="mono">BuildNode</tspan> or coordinator mid-flight.</text>
+  <text x="780" y="650" class="sans small">• Server opens Harness <tspan font-weight="700">paused</tspan> until all plugins load,</text>
+  <text x="780" y="665" class="sans small">  so interrupted replay-safe tools rerun on <tspan class="mono">resume()</tspan>.</text>
+  <text x="780" y="684" class="sans small">• Moving via Chord sync closes Harness, syncs commits,</text>
+  <text x="780" y="699" class="sans small">  reopens on target device, and resumes mid-turn.</text>
+</svg>

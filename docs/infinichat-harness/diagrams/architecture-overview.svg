@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 760" width="1160" height="760">
+  <defs>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .title { font-size: 20px; font-weight: 700; fill: #0F172A; }
+      .subtitle { font-size: 13px; fill: #475569; }
+      .box-title { font-size: 12.5px; font-weight: 700; fill: #0F172A; }
+      .label { font-size: 11.5px; fill: #334155; }
+      .small { font-size: 10.5px; fill: #475569; }
+      .code { font-size: 10.2px; fill: #1E293B; }
+      .badge { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#0F766E"/>
+    </marker>
+    <marker id="arrow-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#4338CA"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas -->
+  <rect x="1" y="1" width="1158" height="758" rx="14" fill="#FAFAF8" stroke="#E2E0D8" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="32" y="38" class="sans title">InfiniChat Harness — One Durable Session, Always One Conversation</text>
+  <text x="32" y="58" class="sans subtitle">Every agent in the tree is a pi-durable conversation inside one Chord store, driven by event-driven tasks and logarithmic memory.</text>
+
+  <!-- Top Strip: Clients & Projections -->
+  <rect x="32" y="76" width="1096" height="66" rx="10" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1.2"/>
+  <text x="48" y="97" class="sans badge" style="fill: #334155;">CLIENTS &amp; LIVE PROJECTIONS</text>
+  <text x="255" y="97" class="sans small">Read pi-durable watches &amp; Chord contracts directly — no duplicated chat state</text>
+
+  <rect x="48" y="106" width="248" height="26" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="60" y="123" class="sans label"><tspan font-weight="700">iPhone &amp; Mac UI</tspan> · chord refs / local</text>
+
+  <rect x="312" y="106" width="256" height="26" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="324" y="123" class="sans small"><tspan class="mono code">InfiniChatView</tspan> strips envelopes &amp; resets</text>
+
+  <rect x="584" y="106" width="236" height="26" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="596" y="123" class="sans small"><tspan class="mono code">AgentList</tspan> TreeDoc + live coordinators</text>
+
+  <rect x="836" y="106" width="276" height="26" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="848" y="123" class="sans small"><tspan class="mono code">PendingQuestions</tspan> &amp; <tspan class="mono code">ScheduledTasks</tspan></text>
+
+  <!-- Bidirectional connector from clients to Harness -->
+  <line x1="220" y1="142" x2="220" y2="174" stroke="#475569" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="230" y="162" class="sans small">accept / continue / abort / answerQuestions</text>
+  <line x1="700" y1="142" x2="700" y2="174" stroke="#475569" stroke-width="1.5" marker-start="url(#arrow)"/>
+  <text x="710" y="162" class="sans small">watchDoc / watchTaskGraph / ConversationView</text>
+
+  <!-- Main Harness Container -->
+  <rect x="32" y="176" width="1096" height="552" rx="12" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.8"/>
+  <rect x="32" y="176" width="1096" height="34" rx="12" fill="#0F766E"/>
+  <rect x="32" y="196" width="1096" height="14" fill="#0F766E"/>
+  <text x="48" y="198" class="sans badge" style="fill: #FFFFFF;">ONE PI-DURABLE HARNESS  ·  CHORD STORE (infinichat-store.db)</text>
+  <text x="1112" y="198" text-anchor="end" class="sans small" style="fill: #CCFBF1;">Sequential tools · Steer-all · Native compaction OFF · cacheRetention: long · restartLimit: ∞</text>
+
+  <!-- LEFT TOP: Root Conversation -->
+  <rect x="52" y="226" width="520" height="224" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="1.3"/>
+  <rect x="52" y="226" width="520" height="28" rx="10" fill="#E2E8F0"/>
+  <rect x="52" y="242" width="520" height="12" fill="#E2E8F0"/>
+  <text x="66" y="245" class="sans box-title">Root Conversation  (<tspan class="mono" font-size="11.2">ROOT_CONVERSATION_ID</tspan>)</text>
+  <text x="558" y="245" text-anchor="end" class="sans small" style="fill: #334155;">work dir: &lt;work&gt;/main</text>
+
+  <!-- Root: Shared Tree Docs -->
+  <rect x="66" y="264" width="234" height="82" rx="7" fill="#EEF2FF" stroke="#A5B4FC"/>
+  <text x="76" y="281" class="sans badge" style="fill: #3730A3;">TREE-WIDE DOCUMENTS (ROOT)</text>
+  <text x="76" y="299" class="sans small"><tspan class="mono code">optchat.tree</tspan>  agent graph &amp; flags</text>
+  <text x="76" y="316" class="sans small"><tspan class="mono code">optchat.config</tspan>  summary &amp; name</text>
+  <text x="76" y="333" class="sans small"><tspan class="mono code">optchat.usage</tspan>  summary spend</text>
+
+  <!-- Root: Per-agent Turn State -->
+  <rect x="312" y="264" width="246" height="82" rx="7" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="322" y="281" class="sans badge" style="fill: #334155;">PER-AGENT TURN &amp; NATIVE STATE</text>
+  <text x="322" y="299" class="sans small"><tspan class="mono code">optchat.app</tspan>  epoch, pending, cursor</text>
+  <text x="322" y="316" class="sans small"><tspan class="mono code">optchat.coordinating</tspan>  task &amp; key</text>
+  <text x="322" y="333" class="sans small"><tspan class="mono code">optchat.input/*</tspan>  admissions</text>
+
+  <!-- Root: Memory Tree Docs -->
+  <rect x="66" y="356" width="286" height="82" rx="7" fill="#F0FDFA" stroke="#5EEAD4"/>
+  <text x="76" y="373" class="sans badge" style="fill: #115E59;">OWN BINARY MEMORY TREE</text>
+  <text x="76" y="391" class="sans small"><tspan class="mono code">optchat.memory</tspan>  frontier &amp; views</text>
+  <text x="76" y="408" class="sans small"><tspan class="mono code">optchat.message/*</tspan>  canonical ≤ 30k</text>
+  <text x="76" y="425" class="sans small"><tspan class="mono code">optchat.node/*</tspan>  [l, i] ≤ 512 B</text>
+
+  <!-- Root-only extension -->
+  <rect x="364" y="356" width="194" height="82" rx="7" fill="#FFFBEB" stroke="#FCD34D"/>
+  <text x="374" y="373" class="sans badge" style="fill: #92400E;">ROOT-ONLY EXTENSION</text>
+  <text x="374" y="391" class="mono code">optchat.master</text>
+  <text x="374" y="408" class="sans small">schedule / list / change / cancel</text>
+  <text x="374" y="425" class="sans small">Sleeps on Harness clock</text>
+
+  <!-- Arrow: Root -> Children (spawn / tell) -->
+  <line x1="572" y1="312" x2="634" y2="312" stroke="#4338CA" stroke-width="1.8" marker-start="url(#arrow-indigo)" marker-end="url(#arrow-indigo)"/>
+  <text x="603" y="302" text-anchor="middle" class="mono code" style="fill: #3730A3;">spawn</text>
+  <text x="603" y="328" text-anchor="middle" class="mono code" style="fill: #3730A3;">tell</text>
+
+  <!-- RIGHT TOP: Child Conversations -->
+  <rect x="636" y="226" width="472" height="224" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="1.3"/>
+  <rect x="636" y="226" width="472" height="28" rx="10" fill="#E2E8F0"/>
+  <rect x="636" y="242" width="472" height="12" fill="#E2E8F0"/>
+  <text x="650" y="245" class="sans box-title">Child &amp; Grandchild Conversations  (0..N lasting agents)</text>
+
+  <!-- Child 1 -->
+  <rect x="652" y="264" width="214" height="132" rx="8" fill="#FFFFFF" stroke="#6366F1" stroke-width="1.3"/>
+  <text x="664" y="282" class="sans box-title">research</text>
+  <rect x="794" y="269" width="60" height="18" rx="9" fill="#DCFCE7" stroke="#86EFAC"/>
+  <text x="824" y="282" text-anchor="middle" class="sans badge" style="fill: #166534;">AWAKE</text>
+  <text x="664" y="300" class="sans small">Owned by background</text>
+  <text x="664" y="314" class="mono code">optchat.agent-anchor</text>
+  <text x="664" y="334" class="sans small">• Own MemoryDoc &amp; Nodes</text>
+  <text x="664" y="350" class="sans small">• Own AppDoc &amp; Coordinator</text>
+  <text x="664" y="366" class="sans small">• Own model (pi.agent) &amp; cwd</text>
+  <text x="664" y="382" class="sans small">• No optchat.master</text>
+
+  <!-- Child 2 -->
+  <rect x="880" y="264" width="214" height="132" rx="8" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.2"/>
+  <text x="892" y="282" class="sans box-title">ops</text>
+  <rect x="1018" y="269" width="64" height="18" rx="9" fill="#F1F5F9" stroke="#CBD5E1"/>
+  <text x="1050" y="282" text-anchor="middle" class="sans badge" style="fill: #475569;">ASLEEP</text>
+  <text x="892" y="300" class="sans small">CoordinatorDoc.task = null</text>
+  <text x="892" y="314" class="sans small">(zero running invocations)</text>
+  <text x="892" y="334" class="sans small">• Wakes only on parent/child</text>
+  <text x="892" y="350" class="sans small">  tell() cross-conv commit</text>
+  <text x="892" y="366" class="sans small">• Survives parent abort</text>
+  <text x="892" y="382" class="sans small">• Can spawn own children</text>
+
+  <!-- Child note bar -->
+  <rect x="652" y="406" width="442" height="32" rx="6" fill="#EEF2FF" stroke="#C7D2FE"/>
+  <text x="664" y="426" class="sans small" style="fill: #312E81;"><tspan font-weight="700">Voice:</tspan> Replies (<tspan class="mono">infinichat</tspan>) stay private; talk only via <tspan class="mono">tell(parent|child)</tspan>.</text>
+
+  <!-- Connectors down from conversations to engines -->
+  <line x1="285" y1="450" x2="285" y2="482" stroke="#4338CA" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+  <line x1="820" y1="450" x2="820" y2="482" stroke="#0F766E" stroke-width="1.5" marker-start="url(#arrow-teal)" marker-end="url(#arrow-teal)"/>
+
+  <!-- BOTTOM LEFT: Turn & Context Engine -->
+  <rect x="52" y="484" width="520" height="226" rx="10" fill="#F8FAFC" stroke="#4338CA" stroke-width="1.3"/>
+  <rect x="52" y="484" width="520" height="28" rx="10" fill="#E0E7FF"/>
+  <rect x="52" y="500" width="520" height="12" fill="#E0E7FF"/>
+  <text x="66" y="503" class="sans box-title" style="fill: #312E81;">Turn &amp; Context Engine (per awake conversation)</text>
+
+  <!-- Step boxes inside Turn Engine -->
+  <rect x="68" y="524" width="234" height="76" rx="7" fill="#FFFFFF" stroke="#818CF8"/>
+  <text x="78" y="541" class="mono code" font-weight="700" style="fill: #3730A3;">optchat.coordinator</text>
+  <text x="78" y="558" class="sans small">1. Gate: wait for memoryReady</text>
+  <text x="78" y="573" class="sans small">2. Append ResetEntry + envelope</text>
+  <text x="78" y="588" class="sans small">3. Submit Delivery or steer; sleep</text>
+
+  <line x1="302" y1="562" x2="326" y2="562" stroke="#4338CA" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+
+  <rect x="328" y="524" width="228" height="76" rx="7" fill="#FFFFFF" stroke="#818CF8"/>
+  <text x="338" y="541" class="mono code" font-weight="700" style="fill: #3730A3;">pi.generation + pi.tool</text>
+  <text x="338" y="558" class="sans small">• Shared static prompt section</text>
+  <text x="338" y="573" class="sans small">• toolPolicy clips spills (≤ 30k chars)</text>
+  <text x="338" y="588" class="sans small">• Signals SubmissionSettled on end</text>
+
+  <!-- RoundEnd hook box -->
+  <rect x="68" y="614" width="488" height="82" rx="7" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="78" y="632" class="sans small"><tspan class="mono code" font-weight="700" style="fill: #0F172A;">optchat.round-end</tspan>  (hooked via <tspan class="mono">GenerationTask.afterTools</tspan>)</text>
+  <text x="78" y="650" class="sans small">Scans immutable native entries from <tspan class="mono">AppDoc.cursor</tspan> after every tool round:</text>
+  <text x="78" y="667" class="sans small">• Logs original inputs, replies, held <tspan class="mono">tool</tspan> calls &amp; <tspan class="mono">echo</tspan> results → <tspan class="mono">MessageDoc</tspan></text>
+  <text x="78" y="684" class="sans small">• Calls <tspan class="mono">pumpBuilds()</tspan> immediately so summaries build while the turn continues</text>
+
+  <!-- Arrow from Turn Engine to Memory Engine -->
+  <line x1="572" y1="654" x2="604" y2="654" stroke="#0F766E" stroke-width="1.6" marker-end="url(#arrow-teal)"/>
+  <line x1="604" y1="562" x2="574" y2="562" stroke="#0F766E" stroke-width="1.6" marker-end="url(#arrow-teal)"/>
+  <text x="589" y="553" text-anchor="middle" class="sans small" style="fill: #0F766E;">Wake</text>
+
+  <!-- BOTTOM RIGHT: Memory, Zoom & Interactive Tasks -->
+  <rect x="606" y="484" width="502" height="226" rx="10" fill="#F8FAFC" stroke="#0F766E" stroke-width="1.3"/>
+  <rect x="606" y="484" width="502" height="28" rx="10" fill="#CCFBF1"/>
+  <rect x="606" y="500" width="502" height="12" fill="#CCFBF1"/>
+  <text x="620" y="503" class="sans box-title" style="fill: #115E59;">Background Summarization, Recall &amp; Parked Tools</text>
+
+  <!-- BuildNode box -->
+  <rect x="622" y="524" width="236" height="92" rx="7" fill="#FFFFFF" stroke="#2DD4BF"/>
+  <text x="632" y="541" class="mono code" font-weight="700" style="fill: #0F766E;">optchat.build-node  (×64)</text>
+  <text x="632" y="558" class="sans small">• ≤ 512 B fast-path skips LLM</text>
+  <text x="632" y="574" class="sans small">• Same prompt + compact view (cache)</text>
+  <text x="632" y="590" class="sans small">• Publishes NodeDoc, advances frontier,</text>
+  <text x="632" y="605" class="sans small">  rouses coordinator, pumps parents</text>
+
+  <!-- Zoom & Date box -->
+  <rect x="870" y="524" width="224" height="92" rx="7" fill="#FFFFFF" stroke="#2DD4BF"/>
+  <text x="880" y="541" class="mono code" font-weight="700" style="fill: #0F766E;">zoom(id, n) &amp; date(id)</text>
+  <text x="880" y="558" class="sans small">• n &gt; 1: expands line into 2 children</text>
+  <text x="880" y="574" class="sans small">• n = 1: verbatim MessageDoc (29k/pg)</text>
+  <text x="880" y="590" class="sans small">  + original lossless images on page 0</text>
+  <text x="880" y="605" class="sans small">• date: local timestamp (keeps cache)</text>
+
+  <!-- ask_user & SecretVault + Device tools strip -->
+  <rect x="622" y="628" width="236" height="68" rx="7" fill="#FFFBEB" stroke="#F59E0B"/>
+  <text x="632" y="645" class="mono code" font-weight="700" style="fill: #92400E;">ask_user + SecretVault</text>
+  <text x="632" y="662" class="sans small">• Tool parks on AskAnswer signal</text>
+  <text x="632" y="678" class="sans small">• Secrets stay in RAM (30m TTL, handles)</text>
+
+  <rect x="870" y="628" width="224" height="68" rx="7" fill="#FFFBEB" stroke="#F59E0B"/>
+  <text x="880" y="645" class="mono code" font-weight="700" style="fill: #92400E;">Device &amp; Server Tools</text>
+  <text x="880" y="662" class="sans small">• bash/read/write/edit per device</text>
+  <text x="880" y="678" class="sans small">• Code mode &amp; MCP on machine server</text>
+</svg>

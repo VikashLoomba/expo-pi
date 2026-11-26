@@ -16,6 +16,10 @@ model, reasoning effort and execution environment.
 | Server | `packages/infinichat-server` | What a machine runs to hold InfiniChat; a Chord host with plugins and MCP. |
 | SSH library | `packages/react-native-ssh` | The phone's SSH engine (Rust, C FFI, Nitro module). |
 
+For how the InfiniChat harness assembles context, coordinates turns, builds summaries, handles `zoom`, and runs the
+agent tree on `pi-durable`, see [`docs/infinichat-harness/`](docs/infinichat-harness/README.md) (and
+[`docs/infinichat-design.md`](docs/infinichat-design.md) for the UniiChat comparison and Chord session-sync moves).
+
 pi's packages (`pi-durable`, `pi-ai`, `chord`, `pi-env` and the rest) take one version from the `catalog` in
 `pnpm-workspace.yaml`. [`AGENTS.md`](AGENTS.md) holds the rules for working in this repository.
 [`babel-plugins/pi-compat.js`](apps/mobile/babel-plugins/pi-compat.js) makes pi's published modules bundle and run on

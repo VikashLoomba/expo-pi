@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 540" width="1160" height="540">
+  <defs>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .title { font-size: 20px; font-weight: 700; fill: #0F172A; }
+      .subtitle { font-size: 13px; fill: #475569; }
+      .sec { font-size: 11.8px; font-weight: 700; letter-spacing: 0.04em; }
+      .box-title { font-size: 12.5px; font-weight: 700; fill: #0F172A; }
+      .small { font-size: 10.4px; fill: #475569; }
+      .code { font-size: 10px; fill: #0F172A; }
+      .badge { font-size: 9.6px; font-weight: 700; letter-spacing: 0.03em; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas -->
+  <rect x="1" y="1" width="1158" height="538" rx="14" fill="#FAFAF8" stroke="#E2E0D8" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="32" y="38" class="sans title">The Three Distinct Roles of Chord Alongside pi-durable</text>
+  <text x="32" y="58" class="sans subtitle">pi-durable owns the agent state machine; Chord supplies storage/sync everywhere, plus RPC and plugin composition on servers.</text>
+
+  <!-- COLUMN 1: ROLE A — STORAGE & SYNC -->
+  <rect x="32" y="80" width="350" height="310" rx="10" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.5"/>
+  <rect x="32" y="80" width="350" height="30" rx="10" fill="#CCFBF1"/>
+  <rect x="32" y="96" width="350" height="14" fill="#CCFBF1"/>
+  <text x="46" y="100" class="sans sec" style="fill: #115E59;">ROLE 1 · STORAGE &amp; SESSION SYNC</text>
+
+  <rect x="48" y="124" width="318" height="32" rx="6" fill="#F0FDFA" stroke="#5EEAD4"/>
+  <text x="60" y="144" class="sans small" style="fill: #115E59;"><tspan font-weight="700">Where used:</tspan> Phone AND every machine server</text>
+
+  <text x="48" y="176" class="sans box-title">Backing Store (infinichat-store.ts)</text>
+  <text x="48" y="194" class="sans small">• <tspan class="mono">openStore(sqliteBackend(db))</tspan> wraps SQLite</text>
+  <text x="48" y="210" class="sans small">  (Node SQLite on machines, <tspan class="mono">expo-sqlite</tspan> on iOS).</text>
+  <text x="48" y="226" class="sans small">• <tspan class="mono">StoreStorage.open(store, 'infinichat')</tspan> lets</text>
+  <text x="48" y="242" class="sans small">  <tspan class="mono">pi-durable</tspan> store all conversations &amp; docs inside.</text>
+  <text x="48" y="258" class="sans small">• Trims outbox past 10,000 commits.</text>
+
+  <text x="48" y="286" class="sans box-title">Moving Devices (infinichat-remote/sync.ts)</text>
+  <text x="48" y="304" class="sans small">• <tspan class="mono">@earendil-works/chord/sync</tspan> pushes/pulls delta</text>
+  <text x="48" y="320" class="sans small">  commits via <tspan class="mono">FileSystemSyncRemote</tspan> (<tspan class="mono">sync/</tspan>).</text>
+  <text x="48" y="336" class="sans small">• Each device keeps bookmarks (<tspan class="mono">synced/</tspan>) so</text>
+  <text x="48" y="352" class="sans small">  back-and-forth moves send only new turns (~0.1 MiB).</text>
+  <text x="48" y="370" class="sans small">• Diverged folder? Falls back to full-store upload.</text>
+
+  <!-- COLUMN 2: ROLE B — REACTIVE RPC -->
+  <rect x="405" y="80" width="350" height="310" rx="10" fill="#FFFFFF" stroke="#4338CA" stroke-width="1.5"/>
+  <rect x="405" y="80" width="350" height="30" rx="10" fill="#E0E7FF"/>
+  <rect x="405" y="96" width="350" height="14" fill="#E0E7FF"/>
+  <text x="419" y="100" class="sans sec" style="fill: #312E81;">ROLE 2 · REACTIVE CLIENT ↔ SERVER RPC</text>
+
+  <rect x="421" y="124" width="318" height="32" rx="6" fill="#EEF2FF" stroke="#A5B4FC"/>
+  <text x="433" y="144" class="sans small" style="fill: #312E81;"><tspan font-weight="700">Where used:</tspan> Server ↔ iPhone/Mac · Mac main ↔ UI</text>
+
+  <text x="421" y="176" class="sans box-title">Versioned Contracts (contract.ts)</text>
+  <text x="421" y="194" class="sans small">• <tspan class="mono">infinichat.remote</tspan> (v12; accepts v8–v11)</text>
+  <text x="421" y="210" class="sans small">• <tspan class="mono">infinichat.agent</tspan> (v1; per-agent chat screen)</text>
+  <text x="421" y="226" class="sans small">• <tspan class="mono">infinichat.mcp</tspan> (v1; <tspan class="mono">/mcp</tspan> status &amp; OAuth)</text>
+
+  <text x="421" y="256" class="sans box-title">Shared State, Multi-Client Diffs</text>
+  <text x="421" y="274" class="sans small">• Server mirrors <tspan class="mono">InfiniChatService</tspan> views into</text>
+  <text x="421" y="290" class="sans small">  <tspan class="mono">self.writable</tspan> + <tspan class="mono">self.derive</tspan> on <tspan class="mono">infinichat.machine</tspan>.</text>
+  <text x="421" y="306" class="sans small">• Clients hold refs once; Chord auto-rebinds across</text>
+  <text x="421" y="322" class="sans small">  reconnects and streams incremental state diffs.</text>
+  <text x="421" y="338" class="sans small">• Methods (<tspan class="mono">accept</tspan>, <tspan class="mono">abort</tspan>, <tspan class="mono">answerQuestions</tspan>)</text>
+  <text x="421" y="354" class="sans small">  route to the one open <tspan class="mono">InfiniChatService</tspan>.</text>
+  <text x="421" y="370" class="sans small">• Zero client state dies when the last app disconnects.</text>
+
+  <!-- COLUMN 3: ROLE C — PLUGIN & EXTENSION HOST -->
+  <rect x="778" y="80" width="350" height="310" rx="10" fill="#FFFFFF" stroke="#B45309" stroke-width="1.5"/>
+  <rect x="778" y="80" width="350" height="30" rx="10" fill="#FEF3C7"/>
+  <rect x="778" y="96" width="350" height="14" fill="#FEF3C7"/>
+  <text x="792" y="100" class="sans sec" style="fill: #92400E;">ROLE 3 · PLUGIN HOST &amp; EXTENSIONS</text>
+
+  <rect x="794" y="124" width="318" height="32" rx="6" fill="#FFFBEB" stroke="#FCD34D"/>
+  <text x="806" y="144" class="sans small" style="fill: #92400E;"><tspan font-weight="700">Where used:</tspan> Machine server only (main.ts)</text>
+
+  <text x="794" y="176" class="sans box-title">Hot-Reloadable Facets (plugins.ts)</text>
+  <text x="794" y="194" class="sans small">• Loads <tspan class="mono">@infinichat/core</tspan>, <tspan class="mono">@infinichat/tools</tspan>,</text>
+  <text x="794" y="210" class="sans small">  and user plugins from <tspan class="mono">~/.infinichat/plugins</tspan>.</text>
+  <text x="794" y="226" class="sans small">• <tspan class="mono">/reload-plugins</tspan> rebuilds changed user plugins</text>
+  <text x="794" y="242" class="sans small">  and rolls them out without restarting the Harness.</text>
+
+  <text x="794" y="272" class="sans box-title">Bridging Chord → pi-durable (registry.ts)</text>
+  <text x="794" y="290" class="sans small">• Each facet contributes <tspan class="mono">Extension[]</tspan> into Chord's</text>
+  <text x="794" y="306" class="sans small">  registry <tspan class="mono">infinichat.extensions</tspan> (v1).</text>
+  <text x="794" y="322" class="sans small">• <tspan class="mono">composeExtensions()</tspan> merges them cleanly into</text>
+  <text x="794" y="338" class="sans small">  a single <tspan class="mono">pi-durable RegistrySnapshot</tspan>.</text>
+  <text x="794" y="354" class="sans small">• <tspan class="mono">registryReader()</tspan> feeds live updates (like newly</text>
+  <text x="794" y="370" class="sans small">  connected MCP tools) directly into the open Harness!</text>
+
+  <!-- BOTTOM STRIP: HANDOVER PIPELINE -->
+  <rect x="32" y="410" width="1096" height="104" rx="10" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1.2"/>
+  <text x="48" y="432" class="sans sec" style="fill: #334155;">SEAMLESS HANDOVER: HOW A MOVE SWAPS HOLDERS WITHOUT DISRUPTING THE UI</text>
+
+  <rect x="48" y="446" width="186" height="52" rx="7" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="58" y="465" class="sans box-title">1. Freeze UI</text>
+  <text x="58" y="483" class="mono code">ShownInfiniChat.hold()</text>
+
+  <line x1="234" y1="472" x2="258" y2="472" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="260" y="446" width="204" height="52" rx="7" fill="#FFFFFF" stroke="#0D9488"/>
+  <text x="270" y="465" class="sans box-title">2. Relinquish &amp; Upload</text>
+  <text x="270" y="483" class="sans small">Close Harness · <tspan class="mono">give()</tspan> → <tspan class="mono">sync/</tspan></text>
+
+  <line x1="464" y1="472" x2="488" y2="472" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="490" y="446" width="204" height="52" rx="7" fill="#FFFFFF" stroke="#0D9488"/>
+  <text x="500" y="465" class="sans box-title">3. Pull &amp; Apply</text>
+  <text x="500" y="483" class="sans small"><tspan class="mono">take()</tspan> applies commits to copy</text>
+
+  <line x1="694" y1="472" x2="718" y2="472" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="720" y="446" width="194" height="52" rx="7" fill="#FFFFFF" stroke="#4338CA"/>
+  <text x="730" y="465" class="sans box-title">4. Adopt &amp; Resume</text>
+  <text x="730" y="483" class="sans small">Open Harness · resume tasks</text>
+
+  <line x1="914" y1="472" x2="938" y2="472" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="940" y="446" width="172" height="52" rx="7" fill="#DCFCE7" stroke="#16A34A"/>
+  <text x="950" y="465" class="sans box-title" style="fill: #166534;">5. Swap Live Host</text>
+  <text x="950" y="483" class="mono code" style="fill: #14532D;">ShownInfiniChat.show()</text>
+</svg>

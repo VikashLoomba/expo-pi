@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 790" width="1160" height="790">
+  <defs>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .title { font-size: 20px; font-weight: 700; fill: #0F172A; }
+      .subtitle { font-size: 13px; fill: #475569; }
+      .sec { font-size: 11.8px; font-weight: 700; letter-spacing: 0.04em; }
+      .box-title { font-size: 12.5px; font-weight: 700; fill: #0F172A; }
+      .small { font-size: 10.4px; fill: #475569; }
+      .code { font-size: 10px; fill: #0F172A; }
+      .badge { font-size: 9.6px; font-weight: 700; letter-spacing: 0.03em; }
+    </style>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#475569"/>
+    </marker>
+    <marker id="arr-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#0F766E"/>
+    </marker>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#4338CA"/>
+    </marker>
+    <marker id="arr-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#B45309"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas -->
+  <rect x="1" y="1" width="1158" height="788" rx="14" fill="#FAFAF8" stroke="#E2E0D8" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="32" y="38" class="sans title">Where the Harness Lives vs. Who Runs It</text>
+  <text x="32" y="58" class="sans subtitle">One portable harness module (packages/infinichat) runs either inside a machine's server or inside the iPhone app—never both at once.</text>
+
+  <!-- TOP BAND: SHARED PORTABLE MODULE -->
+  <rect x="32" y="76" width="1096" height="114" rx="10" fill="#EEF2FF" stroke="#4338CA" stroke-width="1.6"/>
+  <rect x="32" y="76" width="1096" height="28" rx="10" fill="#4338CA"/>
+  <rect x="32" y="92" width="1096" height="12" fill="#4338CA"/>
+  <text x="48" y="95" class="sans sec" style="fill: #FFFFFF;">SHARED MODULE: packages/infinichat  (NO NODE, EXPO, OR REACT NATIVE APIS)</text>
+  <text x="1112" y="95" text-anchor="end" class="sans small" style="fill: #E0E7FF;">Imported identically by server, iPhone &amp; Mac</text>
+
+  <!-- 4 blocks inside shared module -->
+  <rect x="48" y="114" width="268" height="64" rx="7" fill="#FFFFFF" stroke="#818CF8"/>
+  <text x="58" y="131" class="mono code" font-weight="700" style="fill: #312E81;">src/pi/infinichat/*</text>
+  <text x="58" y="148" class="sans small">Pure harness core on pi-durable:</text>
+  <text x="58" y="164" class="sans small">memory, BuildNode, coordinator, zoom, tree</text>
+
+  <rect x="330" y="114" width="252" height="64" rx="7" fill="#FFFFFF" stroke="#0D9488"/>
+  <text x="340" y="131" class="mono code" font-weight="700" style="fill: #115E59;">InfiniChatService</text>
+  <text x="340" y="148" class="sans small">Runs a local <tspan class="mono">pi-durable</tspan> Harness + views.</text>
+  <text x="340" y="164" class="sans small">Implements <tspan class="mono code" font-weight="700">InfiniChatHost</tspan></text>
+
+  <rect x="596" y="114" width="252" height="64" rx="7" fill="#FFFFFF" stroke="#6366F1"/>
+  <text x="606" y="131" class="mono code" font-weight="700" style="fill: #3730A3;">RemoteInfiniChat</text>
+  <text x="606" y="148" class="sans small">Thin Chord client over WS / SSH tunnel.</text>
+  <text x="606" y="164" class="sans small">Also implements <tspan class="mono code" font-weight="700">InfiniChatHost</tspan></text>
+
+  <rect x="862" y="114" width="250" height="64" rx="7" fill="#FFFFFF" stroke="#F59E0B"/>
+  <text x="872" y="131" class="mono code" font-weight="700" style="fill: #92400E;">ShownInfiniChat</text>
+  <text x="872" y="148" class="sans small">UI switchboard: swaps local ↔ remote</text>
+  <text x="872" y="164" class="sans small">across moves without remounting screens</text>
+
+  <!-- Import arrows down to Mode A and Mode B -->
+  <line x1="330" y1="190" x2="330" y2="220" stroke="#4338CA" stroke-width="1.6" marker-end="url(#arr-indigo)"/>
+  <text x="340" y="210" class="sans small" style="fill: #3730A3;">imports InfiniChatService (server) &amp; RemoteInfiniChat (clients)</text>
+
+  <line x1="860" y1="190" x2="860" y2="220" stroke="#0F766E" stroke-width="1.6" marker-end="url(#arr-teal)"/>
+  <text x="870" y="210" class="sans small" style="fill: #0F766E;">imports InfiniChatService directly</text>
+
+  <!-- LEFT PANEL: MODE A (HELD ON A MACHINE) -->
+  <rect x="32" y="222" width="600" height="538" rx="12" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.6"/>
+  <rect x="32" y="222" width="600" height="32" rx="12" fill="#0F766E"/>
+  <rect x="32" y="240" width="600" height="14" fill="#0F766E"/>
+  <text x="48" y="243" class="sans sec" style="fill: #FFFFFF;">MODE A: HELD ON A MACHINE (LINUX OR MAC SERVER)</text>
+
+  <!-- Server process box -->
+  <rect x="48" y="268" width="568" height="346" rx="10" fill="#F8FAFC" stroke="#0D9488" stroke-width="1.3"/>
+  <text x="62" y="288" class="sans box-title" style="fill: #115E59;">packages/infinichat-server  (Node · LaunchAgent / systemd · processLock)</text>
+  <text x="62" y="304" class="sans small">Chord Host (<tspan class="mono">main.ts</tspan>, address <tspan class="mono">ServerHost()</tspan>) loads 3 facet layers in one publication:</text>
+
+  <!-- 3 Facets row -->
+  <rect x="62" y="316" width="176" height="90" rx="7" fill="#EEF2FF" stroke="#818CF8"/>
+  <text x="72" y="333" class="mono code" font-weight="700" style="fill: #3730A3;">@infinichat/core</text>
+  <text x="72" y="348" class="sans small">(<tspan class="mono">src/facet.ts</tspan>)</text>
+  <text x="72" y="365" class="sans small">• Owns <tspan class="mono">ServerConversation</tspan></text>
+  <text x="72" y="380" class="sans small">• Contributes core exts,</text>
+  <text x="72" y="395" class="sans small">  <tspan class="mono">fit-images</tspan> &amp; <tspan class="mono">extending</tspan></text>
+
+  <rect x="248" y="316" width="176" height="90" rx="7" fill="#FFFBEB" stroke="#F59E0B"/>
+  <text x="258" y="333" class="mono code" font-weight="700" style="fill: #92400E;">@infinichat/tools</text>
+  <text x="258" y="348" class="sans small">(<tspan class="mono">src/tools-facet.ts</tspan>)</text>
+  <text x="258" y="365" class="sans small">• <tspan class="mono">CodemodeSandbox</tspan></text>
+  <text x="258" y="380" class="sans small">• <tspan class="mono">McpServers</tspan> (<tspan class="mono">mcp.json</tspan>)</text>
+  <text x="258" y="395" class="sans small">• Dynamic ext watchable</text>
+
+  <rect x="434" y="316" width="168" height="90" rx="7" fill="#F0FDF4" stroke="#4ADE80"/>
+  <text x="444" y="333" class="mono code" font-weight="700" style="fill: #166534;">User Plugins</text>
+  <text x="444" y="348" class="sans small">(<tspan class="mono">~/.infinichat/plugins</tspan>)</text>
+  <text x="444" y="365" class="sans small">• Built w/ esbuild-wasm</text>
+  <text x="444" y="380" class="sans small">• Hot-reloaded via</text>
+  <text x="444" y="395" class="sans small">  <tspan class="mono">/reload-plugins</tspan></text>
+
+  <!-- Convergence lines into Chord Extensions Registry -->
+  <line x1="150" y1="406" x2="290" y2="430" stroke="#0F766E" stroke-width="1.4" marker-end="url(#arr-teal)"/>
+  <line x1="336" y1="406" x2="336" y2="430" stroke="#0F766E" stroke-width="1.4" marker-end="url(#arr-teal)"/>
+  <line x1="518" y1="406" x2="382" y2="430" stroke="#0F766E" stroke-width="1.4" marker-end="url(#arr-teal)"/>
+
+  <!-- Chord Extensions Registry Bar -->
+  <rect x="62" y="432" width="540" height="32" rx="6" fill="#CCFBF1" stroke="#0D9488"/>
+  <text x="332" y="452" text-anchor="middle" class="sans small" style="fill: #115E59;"><tspan font-weight="700">Chord Registry</tspan> (<tspan class="mono">infinichat.extensions</tspan>) → <tspan class="mono">composeExtensions()</tspan> → <tspan class="mono">pi-durable registryReader()</tspan></text>
+
+  <line x1="332" y1="464" x2="332" y2="486" stroke="#0F766E" stroke-width="1.6" marker-end="url(#arr-teal)"/>
+
+  <!-- InfiniChatService + Harness inside Server -->
+  <rect x="62" y="488" width="332" height="112" rx="8" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.5"/>
+  <text x="74" y="506" class="mono code" font-weight="700" style="fill: #0F766E;">InfiniChatService → pi-durable Harness</text>
+  <text x="74" y="523" class="sans small">• Opens paused until all plugins load (<tspan class="mono">proc.loaded</tspan>)</text>
+  <text x="74" y="539" class="sans small">• Calls <tspan class="mono">offer('codemode')</tspan> + <tspan class="mono">harness.resume()</tspan></text>
+  <text x="74" y="555" class="sans small">• Runs turns, <tspan class="mono">BuildNode</tspan>, tools, <tspan class="mono">ask_user</tspan>, schedules</text>
+  <text x="74" y="571" class="sans small">• <tspan class="mono">StoreStorage</tspan> → <tspan font-weight="700">Chord Store</tspan> (Node SQLite)</text>
+  <text x="74" y="587" class="mono" style="font-size: 9.5px; fill: #475569;">~/.infinichat/data/infinichat-store.db</text>
+
+  <!-- Mirrored Chord RPC Objects on right side of server -->
+  <line x1="394" y1="544" x2="416" y2="544" stroke="#4338CA" stroke-width="1.6" marker-start="url(#arr-indigo)" marker-end="url(#arr-indigo)"/>
+
+  <rect x="418" y="488" width="184" height="112" rx="8" fill="#EEF2FF" stroke="#6366F1"/>
+  <text x="428" y="506" class="sans box-title" style="fill: #312E81;">Served Chord Types</text>
+  <text x="428" y="524" class="mono code">infinichat.remote</text>
+  <text x="428" y="540" class="mono code">infinichat.agent</text>
+  <text x="428" y="556" class="mono code">infinichat.mcp</text>
+  <text x="428" y="575" class="sans small">Mirrors live views &amp;</text>
+  <text x="428" y="590" class="sans small">forwards calls to core</text>
+
+  <!-- Chord RPC arrows down to Clients -->
+  <line x1="206" y1="614" x2="206" y2="652" stroke="#4338CA" stroke-width="1.8" marker-start="url(#arr-indigo)" marker-end="url(#arr-indigo)"/>
+  <text x="218" y="636" class="sans small" style="fill: #3730A3;">Chord RPC (WebSocket over SSH tunnel or loopback)</text>
+
+  <!-- Connected Clients Box -->
+  <rect x="48" y="654" width="568" height="90" rx="8" fill="#F1F5F9" stroke="#64748B" stroke-width="1.2"/>
+  <text x="62" y="673" class="sans box-title">Thin Clients (Many Apps Can Watch One Server Simultaneously)</text>
+
+  <rect x="62" y="684" width="264" height="48" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="72" y="701" class="sans small"><tspan font-weight="700" style="fill: #0F172A;">iPhone App</tspan> · <tspan class="mono">RemoteInfiniChat</tspan></text>
+  <text x="72" y="718" class="sans small">SSH tunnel → WS · wrapped in <tspan class="mono">ShownInfiniChat</tspan></text>
+
+  <rect x="338" y="684" width="264" height="48" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+  <text x="348" y="701" class="sans small"><tspan font-weight="700" style="fill: #0F172A;">Mac App (Electrobun)</tspan> · <tspan class="mono">RemoteInfiniChat</tspan></text>
+  <text x="348" y="718" class="sans small">Loopback WS (own Mac) or SSH tunnel (others)</text>
+
+  <!-- RIGHT PANEL: MODE B (HELD ON IPHONE) -->
+  <rect x="648" y="222" width="480" height="392" rx="12" fill="#FFFFFF" stroke="#4338CA" stroke-width="1.6"/>
+  <rect x="648" y="222" width="480" height="32" rx="12" fill="#4338CA"/>
+  <rect x="648" y="240" width="480" height="14" fill="#4338CA"/>
+  <text x="664" y="243" class="sans sec" style="fill: #FFFFFF;">MODE B: HELD ON IPHONE (NO SERVER PROCESS)</text>
+
+  <rect x="664" y="268" width="448" height="330" rx="10" fill="#F8FAFC" stroke="#818CF8" stroke-width="1.3"/>
+  <text x="678" y="288" class="sans box-title" style="fill: #312E81;">apps/mobile  (Expo / Hermes · infinichat-phone.ts)</text>
+  <text x="678" y="304" class="sans small">Runs the <tspan font-weight="700">exact same InfiniChatService</tspan> directly inside the iOS app:</text>
+
+  <!-- Static Registry -->
+  <rect x="678" y="316" width="420" height="48" rx="7" fill="#EEF2FF" stroke="#A5B4FC"/>
+  <text x="688" y="334" class="mono code" font-weight="700" style="fill: #3730A3;">createRegistry()  (Fixed Built-In Extensions Only)</text>
+  <text x="688" y="351" class="sans small"><tspan class="mono">optchat</tspan>, <tspan class="mono">master</tspan>, <tspan class="mono">toolPolicy</tspan>, web search (no codemode or MCP)</text>
+
+  <line x1="888" y1="364" x2="888" y2="386" stroke="#4338CA" stroke-width="1.5" marker-end="url(#arr-indigo)"/>
+
+  <!-- InfiniChatService inside Phone -->
+  <rect x="678" y="388" width="420" height="114" rx="8" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.5"/>
+  <text x="690" y="406" class="mono code" font-weight="700" style="fill: #0F766E;">InfiniChatService → pi-durable Harness</text>
+  <text x="690" y="423" class="sans small">• Calls <tspan class="mono">offer()</tspan> (all tools offered directly to model) + <tspan class="mono">resume()</tspan></text>
+  <text x="690" y="439" class="sans small">• Tools run on phone workspace (<tspan class="mono">just-bash</tspan>) or remote SSH machines</text>
+  <text x="690" y="455" class="sans small">• Observed by <tspan class="mono">KeepAliveController</tspan> &amp; <tspan class="mono">ScheduledTaskNotifications</tspan></text>
+  <text x="690" y="471" class="sans small">• <tspan class="mono">StoreStorage</tspan> → <tspan font-weight="700">Chord Store</tspan> (<tspan class="mono">expo-sqlite</tspan> + JS gzip sync)</text>
+  <text x="690" y="488" class="mono" style="font-size: 9.5px; fill: #475569;">infinichat-store.db  (in iOS app documents)</text>
+
+  <line x1="888" y1="502" x2="888" y2="526" stroke="#475569" stroke-width="1.5" marker-start="url(#arr-slate)" marker-end="url(#arr-slate)"/>
+
+  <!-- Phone UI directly reading ShownInfiniChat -->
+  <rect x="678" y="528" width="420" height="56" rx="7" fill="#FFFBEB" stroke="#F59E0B"/>
+  <text x="690" y="547" class="sans box-title" style="fill: #92400E;">React Native Screens → ShownInfiniChat</text>
+  <text x="690" y="564" class="sans small">Reads <tspan class="mono">InfiniChatService</tspan> directly in-process via <tspan class="mono">useSyncExternalStore</tspan>.</text>
+  <text x="690" y="578" class="sans small">No WebSocket, no Chord RPC host—only the Chord Store underneath.</text>
+
+  <!-- RIGHT BOTTOM: MAC APP + SYNC MOVE CALLOUT -->
+  <rect x="648" y="628" width="480" height="132" rx="12" fill="#FFFBEB" stroke="#D97706" stroke-width="1.4"/>
+  <text x="664" y="650" class="sans sec" style="fill: #92400E;">MOVING BETWEEN MODE A &amp; MODE B (CHORD SESSION SYNC)</text>
+  <text x="664" y="670" class="sans small">• Only <tspan font-weight="700">one device</tspan> holds InfiniChat open at a time (tracked by <tspan class="mono">home.ts</tspan> &amp; <tspan class="mono">state.json</tspan>).</text>
+  <text x="664" y="687" class="sans small">• Move: <tspan class="mono">ShownInfiniChat.hold()</tspan> freezes UI → giver closes &amp; uploads to</text>
+  <text x="664" y="702" class="sans small">  <tspan class="mono">~/.infinichat/sync</tspan> → taker pulls &amp; <tspan class="mono">adopt()</tspan> opens Harness → <tspan class="mono">show()</tspan>.</text>
+  <text x="664" y="720" class="sans small">• <tspan font-weight="700" style="fill: #78350F;">Mac app rule:</tspan> Always runs Mode A (its own LaunchAgent server) so InfiniChat stays</text>
+  <text x="664" y="736" class="sans small">  online and reachable from the iPhone even when the Mac app window is closed.</text>
+  <text x="664" y="751" class="sans small">• <tspan font-weight="700" style="fill: #78350F;">Mac internal UI link:</tspan> Bun main process mirrors state to WKWebView over a local Chord WS.</text>
+</svg>

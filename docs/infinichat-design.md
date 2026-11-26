@@ -12,8 +12,10 @@ Its design is in the header comments of `Server.ts`, `Memory.ts` and `Tools.ts`,
 and its requirements are listed in `spec/SPEC_CHECK.md`.
 
 The agent core is `packages/infinichat/src/pi/infinichat` (its tests in `packages/infinichat/test`), the
-conversation's service over it `infinichat-service.ts`, and what moves it between devices `infinichat-remote/`. A
-machine's server is described in `docs/server-plugins.md`.
+conversation's service over it `infinichat-service.ts`, and what moves it between devices `infinichat-remote/`. For a
+detailed walkthrough and architecture diagrams of context assembly, turns, summaries, zoom, and the agent tree, see
+[`docs/infinichat-harness/`](infinichat-harness/README.md). A machine's server is described in
+`docs/server-plugins.md`.
 
 ## What UniiChat has, and what carries it here
 

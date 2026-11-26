@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 720" width="1160" height="720">
+  <defs>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .title { font-size: 20px; font-weight: 700; fill: #0F172A; }
+      .subtitle { font-size: 13px; fill: #475569; }
+      .col-title { font-size: 13px; font-weight: 700; fill: #0F172A; }
+      .badge { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
+      .label { font-size: 11.5px; fill: #1E293B; }
+      .small { font-size: 10.5px; fill: #475569; }
+      .code { font-size: 10.2px; fill: #0F172A; }
+    </style>
+  </defs>
+
+  <!-- Canvas -->
+  <rect x="1" y="1" width="1158" height="718" rx="14" fill="#FAFAF8" stroke="#E2E0D8" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="32" y="38" class="sans title">Context Assembly &amp; Prompt Cache Prefix Alignment</text>
+  <text x="32" y="58" class="sans subtitle">Every fresh turn starts after a ResetEntry with one cached envelope; steers extend it; BuildNode reuses the exact same system prefix.</text>
+
+  <!-- Column headers -->
+  <text x="32" y="96" class="sans badge" style="fill: #475569;">CACHE LAYER</text>
+  <text x="206" y="96" class="sans col-title">A. Fresh Turn (after ResetEntry)</text>
+  <text x="534" y="96" class="sans col-title">B. Mid-Turn Tool Round &amp; Steer</text>
+  <text x="862" y="96" class="sans col-title">C. Summary Build (BuildNode)</text>
+
+  <!-- BAND 1: STATIC SYSTEM PROMPT + TOOLS -->
+  <rect x="32" y="110" width="154" height="122" rx="8" fill="#DCFCE7" stroke="#16A34A" stroke-width="1.3"/>
+  <text x="44" y="131" class="sans badge" style="fill: #166534;">TIER 1 · SHARED</text>
+  <text x="44" y="149" class="sans label" font-weight="700" style="fill: #14532D;">100% Static Prefix</text>
+  <text x="44" y="167" class="sans small" style="fill: #166534;">Identical across:</text>
+  <text x="44" y="182" class="sans small" style="fill: #166534;">• root &amp; all children</text>
+  <text x="44" y="197" class="sans small" style="fill: #166534;">• turns &amp; summaries</text>
+  <text x="44" y="216" class="mono" style="font-size: 9.6px; fill: #15803D; font-weight: 600;">cacheRetention: 'long'</text>
+
+  <rect x="200" y="110" width="312" height="122" rx="8" fill="#F0FDF4" stroke="#4ADE80" stroke-width="1.3"/>
+  <text x="214" y="130" class="mono code" font-weight="700" style="fill: #166534;">role: "system"</text>
+  <text x="214" y="148" class="sans small">• <tspan class="mono">optchat</tspan> section (<tspan class="mono">sharedPrompt</tspan>, <tspan class="mono">tag: false</tspan>)</text>
+  <text x="214" y="164" class="sans small">• User <tspan class="mono">instructions</tspan> (from <tspan class="mono">pi.agent</tspan>)</text>
+  <text x="214" y="180" class="sans small">• Server <tspan class="mono">extending</tspan> section (when on machine)</text>
+  <text x="214" y="196" class="sans small">• <tspan class="mono">toolsAdded</tspan>: offered tool schemas</text>
+  <text x="214" y="218" class="sans small" style="fill: #15803D;">No timestamps, devices, or tree status here!</text>
+
+  <rect x="528" y="110" width="312" height="122" rx="8" fill="#F0FDF4" stroke="#4ADE80" stroke-width="1.3"/>
+  <text x="542" y="130" class="mono code" font-weight="700" style="fill: #166534;">role: "system"  (BYTE-IDENTICAL)</text>
+  <text x="542" y="152" class="sans small">Exact same system sections &amp; tool schemas</text>
+  <text x="542" y="168" class="sans small">as Turn start (served from KV cache).</text>
+  <text x="542" y="192" class="sans small">Same <tspan class="mono">pi.provider</tspan> UUIDv7 <tspan class="mono">sessionId</tspan></text>
+  <text x="542" y="208" class="sans small">persists across resets &amp; restarts.</text>
+
+  <rect x="856" y="110" width="272" height="122" rx="8" fill="#F0FDF4" stroke="#4ADE80" stroke-width="1.3"/>
+  <text x="870" y="130" class="mono code" font-weight="700" style="fill: #166534;">role: "system"  (BYTE-IDENTICAL)</text>
+  <text x="870" y="150" class="sans small"><tspan class="mono">BuildNode</tspan> renders the exact same</text>
+  <text x="870" y="166" class="sans small"><tspan class="mono">agent.sections</tspan> &amp; <tspan class="mono">agent.tools</tspan> with</text>
+  <text x="870" y="182" class="mono code">toolChoice: "none"</text>
+  <text x="870" y="206" class="sans small" style="fill: #15803D;">Shares cache with turns when summary</text>
+  <text x="870" y="220" class="sans small" style="fill: #15803D;">model matches the main model.</text>
+
+  <!-- BAND 2: MEMORY VIEW (<chat>) -->
+  <rect x="32" y="246" width="154" height="156" rx="8" fill="#CCFBF1" stroke="#0D9488" stroke-width="1.3"/>
+  <text x="44" y="268" class="sans badge" style="fill: #115E59;">TIER 2 · MEMORY</text>
+  <text x="44" y="286" class="sans label" font-weight="700" style="fill: #134E4A;">Append-Only View</text>
+  <text x="44" y="305" class="sans small" style="fill: #115E59;">Only new lines append</text>
+  <text x="44" y="320" class="sans small" style="fill: #115E59;">at the tail until byte</text>
+  <text x="44" y="335" class="sans small" style="fill: #115E59;">budget trips hysteresis.</text>
+  <text x="44" y="358" class="sans small" style="fill: #0F766E;">main &amp; compact batch</text>
+  <text x="44" y="373" class="sans small" style="fill: #0F766E;">independently so neither</text>
+  <text x="44" y="388" class="sans small" style="fill: #0F766E;">busts the other's cache.</text>
+
+  <rect x="200" y="246" width="312" height="156" rx="8" fill="#F0FDFA" stroke="#2DD4BF" stroke-width="1.3"/>
+  <text x="214" y="266" class="mono code" font-weight="700" style="fill: #0F766E;">user part 1: renderMain()  [≤ 128 KB]</text>
+  <rect x="214" y="276" width="284" height="114" rx="5" fill="#FFFFFF" stroke="#99F6E4"/>
+  <text x="224" y="294" class="mono code" style="fill: #0F766E;">&lt;chat&gt;</text>
+  <text x="224" y="310" class="mono code">0+8|user: build auth; infinichat: ...</text>
+  <text x="224" y="326" class="mono code">8+4|tool: bash ...; echo: tests pass</text>
+  <text x="224" y="342" class="mono code">12+2|user: add OAuth; tool: write ...</text>
+  <text x="224" y="358" class="mono code">14+1|infinichat: Ready for review.</text>
+  <text x="224" y="374" class="mono code" style="fill: #0F766E;">&lt;/chat&gt;</text>
+
+  <rect x="528" y="246" width="312" height="156" rx="8" fill="#F0FDFA" stroke="#2DD4BF" stroke-width="1.3"/>
+  <text x="542" y="266" class="mono code" font-weight="700" style="fill: #0F766E;">user part 1: FROZEN VIEW (CACHE HIT)</text>
+  <text x="542" y="288" class="sans small">The <tspan class="mono">DeliveryEntry</tspan> placed at Turn start</text>
+  <text x="542" y="304" class="sans small">remains unchanged across every tool round</text>
+  <text x="542" y="320" class="sans small">and every mid-turn steer in this epoch.</text>
+  <rect x="542" y="336" width="284" height="52" rx="6" fill="#FFFFFF" stroke="#99F6E4"/>
+  <text x="552" y="355" class="sans small" style="fill: #115E59;"><tspan font-weight="700">Why?</tspan> Even as <tspan class="mono">RoundEnd</tspan> logs tool calls</text>
+  <text x="552" y="370" class="sans small" style="fill: #115E59;">and builds summaries in background, this</text>
+  <text x="552" y="384" class="sans small" style="fill: #115E59;">running turn never rewrites its own prefix.</text>
+
+  <rect x="856" y="246" width="272" height="156" rx="8" fill="#F0FDFA" stroke="#2DD4BF" stroke-width="1.3"/>
+  <text x="870" y="266" class="mono code" font-weight="700" style="fill: #0F766E;">user part 1: renderCompaction()</text>
+  <text x="870" y="284" class="sans small"><tspan class="mono">compact</tspan> view [32 KB → 16 KB], cutoff at:</text>
+  <text x="870" y="300" class="sans small">• Leaf <tspan class="mono">[0, i]</tspan>: messages <tspan class="mono">&lt; i</tspan></text>
+  <text x="870" y="316" class="sans small">• Merge <tspan class="mono">[l, k]</tspan>: messages <tspan class="mono">&lt; end(ref)</tspan></text>
+  <rect x="870" y="328" width="244" height="62" rx="5" fill="#FFFFFF" stroke="#99F6E4"/>
+  <text x="880" y="346" class="mono code" style="fill: #0F766E;">&lt;chat&gt;</text>
+  <text x="880" y="362" class="mono code">0+8|...  8+4|...  12+1|...</text>
+  <text x="880" y="378" class="mono code" style="fill: #0F766E;">&lt;/chat&gt;</text>
+
+  <!-- BAND 3: DYNAMIC TAIL -->
+  <rect x="32" y="416" width="154" height="184" rx="8" fill="#FEF3C7" stroke="#D97706" stroke-width="1.3"/>
+  <text x="44" y="438" class="sans badge" style="fill: #92400E;">TIER 3 · DYNAMIC</text>
+  <text x="44" y="456" class="sans label" font-weight="700" style="fill: #78350F;">Changes Each Call</text>
+  <text x="44" y="476" class="sans small" style="fill: #92400E;">Placed strictly AFTER</text>
+  <text x="44" y="491" class="sans small" style="fill: #92400E;">the cached view so</text>
+  <text x="44" y="506" class="sans small" style="fill: #92400E;">device changes, awake</text>
+  <text x="44" y="521" class="sans small" style="fill: #92400E;">children, tool outputs,</text>
+  <text x="44" y="536" class="sans small" style="fill: #92400E;">and new inputs never</text>
+  <text x="44" y="551" class="sans small" style="fill: #92400E;">invalidate Tiers 1–2.</text>
+
+  <rect x="200" y="416" width="312" height="184" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.3"/>
+  <text x="214" y="436" class="mono code" font-weight="700" style="fill: #92400E;">user part 2+3: envelope tail</text>
+  <rect x="214" y="446" width="284" height="44" rx="5" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="224" y="463" class="mono code">Devices: "mac" (default), "linux"</text>
+  <text x="224" y="480" class="mono code">You are root. Parent: user. Children:</text>
+  <rect x="214" y="498" width="284" height="32" rx="5" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="224" y="518" class="mono code">  - research: ... (awake)</text>
+  <rect x="214" y="538" width="284" height="50" rx="5" fill="#FFFFFF" stroke="#F59E0B"/>
+  <text x="224" y="556" class="mono code" font-weight="700">Turn: your new messages:</text>
+  <text x="224" y="575" class="sans small">&lt;original UserInput text + images&gt;</text>
+
+  <rect x="528" y="416" width="312" height="184" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.3"/>
+  <text x="542" y="436" class="mono code" font-weight="700" style="fill: #92400E;">appended native entries in this epoch</text>
+  <rect x="542" y="446" width="284" height="34" rx="5" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="552" y="467" class="sans small"><tspan class="mono code" font-weight="700">assistant</tspan>  thinking + text + toolCall</text>
+  <rect x="542" y="488" width="284" height="42" rx="5" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="552" y="505" class="sans small"><tspan class="mono code" font-weight="700">toolResult</tspan>  clipped ≤ 30k chars (head+tail)</text>
+  <text x="552" y="521" class="sans small">by <tspan class="mono">toolPolicy</tspan> + secret-redacted</text>
+  <rect x="542" y="538" width="284" height="50" rx="5" fill="#EEF2FF" stroke="#818CF8"/>
+  <text x="552" y="556" class="mono code" font-weight="700" style="fill: #3730A3;">user (steered DeliveryEntry)</text>
+  <text x="552" y="575" class="sans small">Raw content only — no Reset, no new view!</text>
+
+  <rect x="856" y="416" width="272" height="184" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.3"/>
+  <text x="870" y="436" class="mono code" font-weight="700" style="fill: #92400E;">user part 2 (+3 on retry)</text>
+  <rect x="870" y="446" width="244" height="72" rx="5" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="880" y="463" class="mono code" font-weight="700">Compaction: compress / merge...</text>
+  <text x="880" y="480" class="mono code">---- (512-byte ASCII ruler) ----</text>
+  <text x="880" y="497" class="mono code">&lt;input&gt;source text&lt;/input&gt;</text>
+  <rect x="870" y="528" width="244" height="60" rx="5" fill="#FFF1F2" stroke="#FDA4AF"/>
+  <text x="880" y="545" class="sans small" font-weight="700" style="fill: #9F1239;">Optional part 3 (if last try &gt; 512 B):</text>
+  <text x="880" y="562" class="mono code" style="fill: #881337;">Too long (N bytes)... cut at:</text>
+  <text x="880" y="578" class="mono code" style="fill: #881337;">&lt;512 B prefix&gt;| ← LIMIT</text>
+
+  <!-- Footer Strip -->
+  <rect x="32" y="616" width="1096" height="82" rx="10" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1.2"/>
+  <text x="48" y="638" class="sans badge" style="fill: #334155;">THREE VIEWS OF THE SAME CONVERSATION</text>
+  <text x="48" y="658" class="sans small"><tspan font-weight="700" style="fill: #0F172A;">1. Native pi-durable entries:</tspan> Keep every entry forever (including <tspan class="mono">ResetEntry</tspan>, thinking blocks, and full <tspan class="mono">DeliveryEntry</tspan> envelopes). Model reads only from newest <tspan class="mono">ResetEntry</tspan> onward.</text>
+  <text x="48" y="676" class="sans small"><tspan font-weight="700" style="fill: #0F172A;">2. Canonical memory (MessageDoc):</tspan> Stores original user/work inputs, trimmed replies, tool calls, clipped results &amp; notes. Thinking never enters memory.</text>
+  <text x="48" y="692" class="sans small"><tspan font-weight="700" style="fill: #0F172A;">3. User UI (InfiniChatView):</tspan> Hides <tspan class="mono">ResetEntry</tspan>, swaps <tspan class="mono">DeliveryEntry</tspan> envelope for raw <tspan class="mono">InputDoc</tspan>, shows <tspan class="mono">tell(parent)</tspan> as assistant replies, folds self-replies into steps.</text>
+</svg>
