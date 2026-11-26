@@ -9,7 +9,9 @@ import {
   machineEndpoint as endpoint, type Machine, type PendingHostKeys, type Reach,
 } from '../pi/infinichat-remote/contract';
 import type { MachinesState } from '../pi/infinichat-remote/machines';
-import { MACHINE_WORK, machineDescription, type Device } from '../pi/infinichat/device-tools';
+import {
+  MACHINE_WORK, machineDescription, resolveMachineDir, type Device,
+} from '../pi/infinichat/device-tools';
 import { connectTrusting, ConnectionPool, type HostKeyScan } from './machine-connections';
 
 const noop = () => {};
@@ -88,10 +90,10 @@ export class ServerMachines {
     return this.machines.filter((machine) => machine.name !== this.self).map((machine) => ({
       name: machine.name,
       description: machineDescription(machine),
-      environment: async (who: string) => {
+      environment: async (who, _read, _context, dir) => {
         const { connection, info } = await this.started(machine);
-        return new RemoteExecutionEnv({ connection, id: `pi-env:${endpoint(machine)}`,
-          cwd: `${info.home}/${MACHINE_WORK}/${who}` });
+        const cwd = dir === undefined ? `${info.home}/${MACHINE_WORK}/${who}` : resolveMachineDir(info.home, dir);
+        return new RemoteExecutionEnv({ connection, id: `pi-env:${endpoint(machine)}`, cwd });
       },
     }));
   }

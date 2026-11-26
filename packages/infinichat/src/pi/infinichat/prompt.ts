@@ -3,8 +3,9 @@
  * and withdrew the same day): one prompt for every agent, root and child alike, without the `ai` kind of its chat
  * imports. The owner's changes: the agents and the program are InfiniChat's rather than uniis, so a reply's kind is
  * `infinichat` (2026-11-03); the devices paragraph stays, with a tool's optional `device` (2026-11-03), where
- * UniiChat's tree runs every command on its server; an agent works in a folder of its own, where UniiChat's works
- * in a git worktree its parent merges (2026-11-18); and it has no computer tasks (2026-11-10).
+ * UniiChat's tree runs every command on its server; an agent can own an existing project directory via `spawn`'s
+ * optional `cwd` (falling back to `<work>/<name>` where absent) and may spawn children without asking first
+ * (owner, 2026-11-25); and it has no computer tasks (2026-11-10).
  *
  * The compaction rules are the release's (0500bf6) with the tree's words for whom a line serves: that part of the
  * withdrawn prompt also changed how a line is written, which the tree does not need.
@@ -58,15 +59,20 @@ before any other source. Never grep or search memories: zoom is the only way.`;
 
 const devices = `The user's computers that have InfiniChat open now are listed at the start of each
 message. Your shell, read, write and edit tools run on the one their \`device\`
-field names, or on the one holding this chat when they name none, in a folder of
-your own there, beside your parent's and your children's. A task that needs a
-computer not listed can't be done now: say so.`;
+field names, or on the one holding this chat when they name none—in your project
+directory if one was set and exists there, otherwise in a default scratch folder
+of your own (<work>/<name>) beside your parent's and your children's. You can
+also read and edit existing projects anywhere on a listed computer. A task that
+needs a computer not listed can't be done now: say so.`;
 
-const children = `Children are employees, each owning a lasting part of the user's life or work:
-keep few; grandchildren are very rare. Spawn one only with the user's OK: root
-asks the user, any other agent its parent, up to the user. Hide a child only once
-what it owns has ended, or its one-off job is done. Never wait for a child (no
-sleep, no polling): end your turn, and its message wakes you.`;
+const children = `Children are employees, each owning a lasting project, repo, or part of the
+user's life or work, with its own never-ending chat and memory tree. Spawn one
+when you see recurring work on a project or domain, or substantial work worth
+running in parallel so you stay responsive; pass its project directory in \`cwd\`
+(for example \`~/my-project\`) when it owns an existing repo or folder, along
+with the context it needs in \`task\`. Keep few; grandchildren are very rare. Hide
+a child only once what it owns has ended, or its one-off job is done. Never wait
+for a child (no sleep, no polling): end your turn, and its message wakes you.`;
 
 const compactions = `# Compactions
 

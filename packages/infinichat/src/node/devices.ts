@@ -6,7 +6,9 @@ import { createPhotonImages } from '@earendil-works/pi-durable/images';
 import type { ImageProcessor } from '@earendil-works/pi-durable/tools';
 import photon from '@silvia-odwyer/photon/photon_rs_bg.wasm';
 
-import { MACHINE_WORK, infiniChatDevices } from '../pi/infinichat/device-tools';
+import {
+  MACHINE_WORK, infiniChatDevices, resolveMachineDir, type Device,
+} from '../pi/infinichat/device-tools';
 import type { SecretVault } from '../pi/infinichat/secrets';
 import type { ServerMachines } from './machines';
 
@@ -24,7 +26,9 @@ export const serverImages = (): ImageProcessor => createPhotonImages(photon);
  */
 export function serverDevices(self: () => { name: string; description: string }, machines: () => ServerMachines,
   images: ImageProcessor, secrets?: SecretVault) {
-  const work = join(homedir(), MACHINE_WORK);
-  const environment = async (who: string) => new NodeExecutionEnv({ cwd: join(work, who) });
+  const home = homedir();
+  const work = join(home, MACHINE_WORK);
+  const environment: Device['environment'] = async (who, _read, _context, dir) =>
+    new NodeExecutionEnv({ cwd: dir === undefined ? join(work, who) : resolveMachineDir(home, dir) });
   return infiniChatDevices(async () => [{ ...self(), environment }, ...machines().devices()], images, secrets);
 }

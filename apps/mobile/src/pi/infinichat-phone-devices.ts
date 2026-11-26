@@ -1,5 +1,7 @@
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
-import { MACHINE_WORK, machineDescription, type Device } from '@pi-agent/infinichat/pi/infinichat/device-tools';
+import {
+  MACHINE_WORK, machineDescription, resolveMachineDir, type Device,
+} from '@pi-agent/infinichat/pi/infinichat/device-tools';
 import { WorkspaceDoc } from '@pi-agent/infinichat/pi/workspace/document';
 
 import type { MachinesState } from '@pi-agent/infinichat/pi/infinichat-remote/machines';
@@ -27,7 +29,8 @@ export function createDevices(workspaces: Workspaces, remote: RemoteExecution,
         description: `this phone${place ? `, in ${place}` : ''}, a sandboxed workspace at /workspace, `
           + `work dir ${PHONE_WORK}`,
         async environment(who, read, context) {
-          // Agents run in their own conversations, but the phone's workspace belongs to the root conversation.
+          // Agents run in their own conversations, but the phone's workspace belongs to the root conversation; host
+          // project directories (`dir`) do not exist in the phone's sandboxed workspace, so it always uses `/workspace`.
           const workspace = await read.snapshot(WorkspaceDoc, ROOT_CONVERSATION_ID, context);
           if (!workspace?.id) throw new Error('InfiniChat has no committed workspace identity.');
           return new WorkspaceExecutionEnv(workspaces.workspace(workspace.id), workspace.id, `${PHONE_WORK}/${who}`);
@@ -37,9 +40,10 @@ export function createDevices(workspaces: Workspaces, remote: RemoteExecution,
       ...Object.entries(machines()?.machines ?? {}).map(([endpoint, machine]): Device => ({
         name: machine.name,
         description: machineDescription(machine),
-        async environment(who) {
+        async environment(who, _read, _context, dir) {
           const home = (await remote.environment(endpoint, undefined)).cwd;
-          return remote.environment(endpoint, `${home}/${MACHINE_WORK}/${who}`);
+          const cwd = dir === undefined ? `${home}/${MACHINE_WORK}/${who}` : resolveMachineDir(home, dir);
+          return remote.environment(endpoint, cwd);
         },
       })),
     ];

@@ -21,6 +21,7 @@ type TreeAgent = {
   conversationId: ConversationId;
   parent: string | null;          // null for root (whose parent is "user")
   description: string;            // ≤ 128 chars
+  cwd?: string;                   // optional project dir ("~/..." or "/...")
   children: { name: string; hidden: boolean }[];
 };
 type Tree = {
@@ -40,13 +41,14 @@ And each agent owns independently:
 
 - Its own **pi-durable `Conversation`** and immutable transcript.
 - Its own **model and reasoning effort** (`pi.agent`), configurable per agent from the UI (`AgentChat.setModel`).
-- Its own **working directory** (`<work>/main` for root, `<work>/<name>` for every child, stored in
-  `pi.agent.cwd` and resolved across whichever device a tool targets in `device-tools.ts`).
+- Its own **working directory** (`<work>/main` for root; for a child, an optional project `cwd` such as
+  `~/expo-pi` when present on the target machine, falling back to its scratch folder `<work>/<name>` where absent
+  or on the phone—stored in `pi.agent.cwd` and `TreeAgent.cwd` and resolved in `device-tools.ts`).
 - Its own **binary memory tree**—a child's noisy research traces never pollute root's `<chat>` view.
 
 ## 2. Atomic `spawn` & Background `AgentAnchor` Ownership
 
-When an agent calls `spawn({ name, description, task })` (marked `callers: ['model']` so on a server with code mode
+When an agent calls `spawn({ name, description, task, cwd? })` (marked `callers: ['model']` so on a server with code mode
 it is always a first-class call visible in the transcript, never buried inside a script), everything happens in **one
 atomic pi-durable commit**—whole or not at all:
 
@@ -69,8 +71,9 @@ atomic pi-durable commit**—whole or not at all:
    - **Abort & idle isolation**: in `pi-durable`, a `{ background: true }` task forms an ownership boundary.
      Aborting the parent (`Stop`) never aborts the child, and a child working in the background never blocks the
      parent from finishing its turn and going to sleep!
-4. **Child configuration**: `configure(tx, child.id, { cwd: name, extensions: { remove: [setup.master()] } })` sets
-   the child's folder name and removes `optchat.master` (so only `root` can schedule clock tasks).
+4. **Child configuration**: `configure(tx, child.id, { cwd: projectDir ?? name, extensions: { remove:
+   [setup.master()] } })` sets the child's project directory (or default scratch folder name) and removes
+   `optchat.master` (so only `root` can schedule clock tasks).
 5. **Initialization, tree registration & first wake**: initializes the child's `MemoryDoc` and `AppDoc`, inserts
    the child into root's `TreeDoc`, admits `task` into the child's conversation with `requestId:
    "spawn:<taskId>"` and `kind: 'user'` (which immediately starts the child's `optchat.coordinator`), and saves

@@ -32,7 +32,7 @@ detailed walkthrough and architecture diagrams of context assembly, turns, summa
 | A tool call's entries are logged as they are made (`Unii.on`) | A tool round is logged as it ends, in a task its generation waits for, so its summaries start while the turn runs | `afterTools` and a hook task, `46-after-tools-terminate.ts` |
 | A stopped turn wakes again for the messages it never took | A stop ends the run; the messages it had not taken are submitted anew and start the next turn (`countRequeued`, `requeueAborted`) | Withdrawal of a queued submission |
 | An act that would change a chat twice is recorded first and answered from its record (`Memory.acted`) | A request ID admits its input once: the same ID with the same input is the same admission, also after a restart (`admitInput`) | A document written in the admitting commit |
-| `spawn`, `hide`, `show`, `list`; a spawn is whole or not at all; a child starts with only its task | The same tools, a spawn in one commit; spawning only with the user's OK is the prompt's rule, as it is UniiChat's (its D9) | One commit |
+| `spawn`, `hide`, `show`, `list`; a spawn is whole or not at all; a child starts with only its task | The same tools, a spawn in one commit, with optional `cwd` for an existing project directory and without UniiChat's "user's OK" gate (owner, 2026-11-25) | One commit |
 | Thoughts are for the views alone: no call gets them back | Thinking stays in pi-durable's own history, which the transcript shows; memory logs replies, tool calls and results | Native entries |
 | Every window is a view on the hub's chats | On a machine, the server's store object holds the conversation's state, and each app holds `infinichat.remote` and, per agent on screen, `infinichat.agent`. On the phone the app is the host | Chord contracts and references (`docs/server-plugins.md`) |
 
@@ -42,10 +42,11 @@ detailed walkthrough and architecture diagrams of context assembly, turns, summa
   it started. A pi-durable session has one writing process, and every agent of the tree is a conversation of that
   one session, so all agents run in the host's process: the app on the phone, the server on a machine. Chord's
   workers would give a process per address, each with its own store, which is not one session.
-- **Folders and devices, not worktrees.** A UniiChat agent works in a git worktree its parent reviews and merges,
-  and every command runs on the server. An agent here works in a folder of its own, `<work>/<name>`, on a device:
-  the device that holds the conversation, or a machine its tools name (`device-tools.ts`). Nothing commits or
-  merges for it.
+- **Project directories and devices, not worktrees.** A UniiChat agent works in a git worktree its parent reviews
+  and merges, and every command runs on the server. A child here may be spawned with an optional project `cwd`
+  (`~/…` or `/…`), which its tools start in on any machine where that directory exists, falling back to its default
+  scratch folder `<work>/<name>` elsewhere (and on the phone) without auto-creating missing project paths
+  (`device-tools.ts`). Nothing commits or merges for it.
 - **A message is logged when a call takes it.** UniiChat logs a message as it arrives. Here an admitted message
   waits in the agent's input documents and enters memory as the call that takes it starts, so memory holds it where
   the model read it.

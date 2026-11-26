@@ -1,4 +1,4 @@
-import { obj, str } from '@earendil-works/pi-schema';
+import { obj, opt, str } from '@earendil-works/pi-schema';
 import {
   ROOT_CONVERSATION_ID, configure, defineDoc, defineDocFamily, defineTask, defineTool,
   type ConversationId, type Extension, type TaskId, type Tx,
@@ -23,11 +23,28 @@ const RESERVED = [USER, 'main'];
 const NAME = /^[a-z0-9-]{1,16}$/;
 const DESCRIPTION = 128;
 
+/** Whether an agent's stored `cwd` names a project directory rather than a bare agent scratch folder name. */
+export const isProjectDir = (cwd: string): boolean => cwd === '~' || cwd.startsWith('~/') || cwd.startsWith('/');
+
+/** Validates and normalizes an optional `spawn` project directory (`~`, `~/…`, or `/…`, without `..`). */
+function normalizeProjectDir(raw: string): { ok: true; value: string | undefined } | { ok: false; error: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, value: undefined };
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) return { ok: false, error: 'cwd cannot contain control characters' };
+  if (!isProjectDir(trimmed)) return { ok: false, error: 'cwd must be an absolute path or start with ~/' };
+  const cleaned = trimmed.replace(/\/+$/, '') || '/';
+  const body = cleaned === '~' ? '' : cleaned.startsWith('~/') ? cleaned.slice(2) : cleaned.slice(1);
+  if (body.split('/').includes('..')) return { ok: false, error: 'cwd cannot contain ".."' };
+  return { ok: true, value: cleaned };
+}
+
 export type TreeAgent = {
   conversationId: ConversationId;
   /** `null` for root, whose parent is the user. */
   parent: string | null;
   description: string;
+  /** Optional project directory (`~`, `~/…`, or `/…`); tools fall back to `<work>/<name>` where absent. */
+  cwd?: string;
   /** Its children in spawn order. A hidden one leaves its place's list and the screens' tree; `tell` reaches it. */
   children: { name: string; hidden: boolean }[];
 };
@@ -66,14 +83,18 @@ export function place(tree: Tree, name: string, awake: ReadonlySet<string>): str
   const agent = tree.agents[name];
   const shown = agent.children.filter((child) => !child.hidden);
   const hidden = agent.children.length - shown.length;
-  const lines = shown.map((child) =>
-    `- ${child.name}: ${tree.agents[child.name].description}${awake.has(child.name) ? ' (awake)' : ''}`);
+  const lines = shown.map((child) => {
+    const info = tree.agents[child.name];
+    const dir = info.cwd ? ` [${info.cwd}]` : '';
+    return `- ${child.name}: ${info.description}${dir}${awake.has(child.name) ? ' (awake)' : ''}`;
+  });
   if (hidden > 0) lines.push(`(${hidden} hidden)`);
+  const selfDir = agent.cwd ? ` (dir: ${agent.cwd})` : '';
   const up = agent.parent ?? `the user (tell "${USER}")`;
   const old = agent.parent === null && tree.since
     ? ` Your replies before message ${tree.since.message} went to the user, from a chat older than the tree.` : '';
   const list = lines.length ? `\n${lines.join('\n')}` : ' none.';
-  return `You are ${name}. Your parent: ${up}.${old} Your children:${list}`;
+  return `You are ${name}${selfDir}. Your parent: ${up}.${old} Your children:${list}`;
 }
 
 /**
@@ -131,12 +152,22 @@ export function agentTools(setup: AgentSetup) {
   const tree = (tx: Tx) => tx.doc(TreeDoc, ROOT_CONVERSATION_ID);
   const spawn = defineTool({
     name: 'spawn',
-    description: 'Start a child, an agent with its own chat and folder: name (1 to 16 of a-z, 0-9 and -; unique), '
-      + 'description (at most 128 characters), task (your first message to it). Only with the user\'s OK.',
+    description: 'Start a child agent with its own lasting chat, memory tree, and default work folder: name '
+      + '(1 to 16 of a-z, 0-9 and -; unique), description (at most 128 characters), task (your first message to it, '
+      + 'including any project context it needs), and optional cwd (an existing project directory such as '
+      + '"~/my-project" or "/path/to/repo"; falls back to <work>/<name> on devices where it does not exist).',
     replay: 'safe',
     callers: ['model'],
-    parameters: obj({ name: str(), description: str(), task: str() }, { open: true }),
-    async execute({ name, description, task }, api, context) {
+    parameters: obj({
+      name: str(),
+      description: str(),
+      task: str(),
+      cwd: opt(str({
+        description: 'Optional existing project directory ("~/..." or absolute path) to start tools in on machines '
+          + 'where it exists.',
+      })),
+    }, { open: true }),
+    async execute({ name, description, task, cwd }, api, context) {
       return reply(await api.commit(async (tx) => {
         // A native tool task may replay after a lost result commit; its own ID makes it act once.
         const done = await tx.doc(AgentCallDoc, api.conversationId, String(api.taskId), null);
@@ -144,24 +175,32 @@ export function agentTools(setup: AgentSetup) {
         const { agents } = await tree(tx);
         const parent = agentNamed(agents, api.conversationId);
         if (parent === undefined) return 'No spawn: this chat is no agent of the tree.';
+        const parsedCwd = cwd === undefined ? { ok: true as const, value: undefined } : normalizeProjectDir(cwd);
         const why = !NAME.test(name) ? 'a name is 1 to 16 of a-z, 0-9 and -'
           : RESERVED.includes(name) || Object.hasOwn(agents, name) ? `${name} is taken`
-            : description.length > DESCRIPTION ? `a description is at most ${DESCRIPTION} characters` : null;
+            : description.length > DESCRIPTION ? `a description is at most ${DESCRIPTION} characters`
+              : !parsedCwd.ok ? parsedCwd.error : null;
         if (why !== null) return `No spawn: ${why}.`;
+        const projectDir = parsedCwd.ok ? parsedCwd.value : undefined;
         // One commit, so a spawn is whole or not at all. The anchor belongs to the parent's conversation and is
-        // background: its child starts as a copy of the parent's agent, in a folder of its own, without what only
-        // root has.
+        // background: its child starts as a copy of the parent's agent, without what only root has.
         const anchor = await tx.createTask(AgentAnchor, null,
           { ownership: { kind: 'conversation' }, background: true });
         const child = await tx.createConversation({ ownership: { kind: 'task', taskId: anchor } });
-        await configure(tx, child.id, { cwd: name, extensions: { remove: [setup.master()] } });
+        await configure(tx, child.id, { cwd: projectDir ?? name, extensions: { remove: [setup.master()] } });
         await setup.init(tx, child.id);
-        agents[name] = { conversationId: child.id, parent, description, children: [] };
+        agents[name] = {
+          conversationId: child.id,
+          parent,
+          description,
+          ...(projectDir === undefined ? {} : { cwd: projectDir }),
+          children: [],
+        };
         agents[parent].children.push({ name, hidden: false });
         await setup.admit(tx, child.id, {
           requestId: `spawn:${api.taskId}`, kind: 'user', content: task, date: new Date(api.now()).toISOString(),
         });
-        done.result = `Spawned ${name}. Its messages reach you as [${name}].`;
+        done.result = `Spawned ${name}${projectDir ? ` in ${projectDir}` : ''}. Its messages reach you as [${name}].`;
         return done.result;
       }, context));
     },

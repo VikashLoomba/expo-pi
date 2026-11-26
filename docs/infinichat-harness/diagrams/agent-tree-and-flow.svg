@@ -140,14 +140,14 @@
 
   <!-- Box 1: Atomic Spawn -->
   <rect x="756" y="120" width="356" height="196" rx="8" fill="#F0FDFA" stroke="#2DD4BF"/>
-  <text x="768" y="139" class="mono code" font-weight="700" style="fill: #115E59;">spawn({ name, description, task })</text>
+  <text x="768" y="139" class="mono code" font-weight="700" style="fill: #115E59;">spawn({ name, description, task, cwd? })</text>
   <text x="768" y="156" class="sans small" style="fill: #0F766E;">Single all-or-nothing commit (<tspan class="mono">callers: ['model']</tspan>):</text>
   <text x="768" y="175" class="sans small">1. Check <tspan class="mono">AgentCallDoc(api.taskId)</tspan> for replay safety</text>
   <text x="768" y="191" class="sans small">2. Validate <tspan class="mono">^[a-z0-9-]{1,16}$</tspan>, unique, ≠ user/main</text>
   <text x="768" y="207" class="sans small">3. Create bg <tspan class="mono">AgentAnchor</tspan> (ends immediately)</text>
   <text x="768" y="223" class="sans small">4. <tspan class="mono">tx.createConversation({ owner: anchor })</tspan></text>
   <text x="768" y="238" class="sans small">   → copies parent model &amp; extensions automatically</text>
-  <text x="768" y="254" class="sans small">5. <tspan class="mono">configure({ cwd: name, remove: [master] })</tspan></text>
+  <text x="768" y="254" class="sans small">5. <tspan class="mono">configure({ cwd: dir ?? name, remove:[master] })</tspan></text>
   <text x="768" y="270" class="sans small">6. Init child <tspan class="mono">MemoryDoc</tspan> &amp; <tspan class="mono">AppDoc</tspan>; update <tspan class="mono">TreeDoc</tspan></text>
   <text x="768" y="286" class="sans small">7. <tspan class="mono">admit()</tspan> initial task (<tspan class="mono">spawn:&lt;taskId&gt;</tspan>) &amp; wake child</text>
   <text x="768" y="304" class="sans small" style="fill: #115E59;">→ Result saved in <tspan class="mono">AgentCallDoc</tspan> so replays don't double-spawn.</text>

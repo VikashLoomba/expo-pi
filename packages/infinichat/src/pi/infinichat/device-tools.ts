@@ -9,6 +9,7 @@ import {
 } from '@earendil-works/pi-durable/tools';
 import { map, opt, str, type Schema } from '@earendil-works/pi-schema';
 
+import { TreeDoc, agentNamed, isProjectDir } from './agents';
 import type { OptChatExtensionOptions } from './app';
 import type { SecretVault } from './secrets';
 
@@ -21,12 +22,41 @@ export const MACHINE_WORK = '.infinichat/work';
 export const machineDescription = (host: { username: string; hostname: string }) =>
   `${host.username}@${host.hostname} over SSH, work dir ~/${MACHINE_WORK}`;
 
+/** Resolves an agent's project directory (`~`, `~/…`, or `/…`) against a machine's account home directory. */
+export function resolveMachineDir(home: string, dir: string): string {
+  if (dir === '~') return home;
+  if (dir.startsWith('~/')) return `${home.replace(/\/+$/, '')}/${dir.slice(2)}`;
+  return dir;
+}
+
+/** Checks whether `path` is an existing directory (following symlinks); propagates cancellation. */
+async function isDirectory(env: ExecutionEnv, path: string, context: Context): Promise<boolean> {
+  const info = await env.fileInfo(path, context);
+  if (!info.ok) {
+    if (info.error.code === 'aborted') throw info.error;
+    return false;
+  }
+  if (info.value.kind === 'directory') return true;
+  if (info.value.kind !== 'symlink') return false;
+  const resolved = await env.canonicalPath(path, context);
+  if (!resolved.ok) {
+    if (resolved.error.code === 'aborted') throw resolved.error;
+    return false;
+  }
+  const target = await env.fileInfo(resolved.value, context);
+  if (!target.ok) {
+    if (target.error.code === 'aborted') throw target.error;
+    return false;
+  }
+  return target.value.kind === 'directory';
+}
+
 /** One device InfiniChat's tools run on, as the devices list at the start of each message names it. */
 export type Device = {
   name: string;
   description: string;
-  /** The device's environment in <work>/<who>. */
-  environment(who: string, read: DocumentReader, context: Context): Promise<ExecutionEnv>;
+  /** The device's environment in <work>/<who>, or at project directory `dir` when provided and supported. */
+  environment(who: string, read: DocumentReader, context: Context, dir?: string): Promise<ExecutionEnv>;
 };
 
 /**
@@ -70,9 +100,9 @@ function withBashParameters<T>(
  */
 const kept = ({ name, description, replay, outputLimits, structuredOutputSchema, callers }: ToolRegistration) => ({
   name,
-  description: `${description} It runs on the device named, or the one holding this chat when none is, in `
-    + '<work>/<who>, <work> being the work dir the devices list gives for it and <who> main for root, or another '
-    + 'agent\'s own name.',
+  description: `${description} It runs on the device named, or the one holding this chat when none is, in the `
+    + 'agent\'s project directory if set and present there, otherwise in <work>/<who> (<work> being the work dir '
+    + 'the devices list gives for it and <who> main for root, or another agent\'s own name).',
   replay,
   outputLimits,
   structuredOutputSchema,
@@ -105,10 +135,24 @@ export function infiniChatDevices(
       const names = devices.map((candidate) => JSON.stringify(candidate.name)).join(', ');
       throw new Error(`Unknown device ${JSON.stringify(name)}. The devices are ${names}.`);
     }
-    // A child's conversation names its folder as its working directory (`spawn`); root's has none.
-    const who = conversationId === ROOT_CONVERSATION_ID
-      ? 'main'
-      : (await read.snapshot(AgentDoc, conversationId, context))?.cwd ?? 'main';
+    // A child's `AgentDoc.cwd` holds either its own name (scratch folder) or a project path (`~` / `/…`).
+    let who = 'main';
+    let dir: string | undefined;
+    if (conversationId !== ROOT_CONVERSATION_ID) {
+      const stored = (await read.snapshot(AgentDoc, conversationId, context))?.cwd;
+      if (stored !== undefined && isProjectDir(stored)) {
+        dir = stored;
+        const tree = await read.snapshot(TreeDoc, ROOT_CONVERSATION_ID, context);
+        who = (tree && agentNamed(tree.agents, conversationId)) ?? 'main';
+      } else {
+        who = stored ?? 'main';
+      }
+    }
+    if (dir !== undefined) {
+      // Never auto-create a missing project path on a device that doesn't hold that repo; fall back to scratch dir.
+      const candidate = await device.environment(who, read, context, dir);
+      if (await isDirectory(candidate, candidate.cwd, context)) return candidate;
+    }
     const env = await device.environment(who, read, context);
     getOrThrow(await env.createDir(env.cwd, { recursive: true }, context));
     return env;
